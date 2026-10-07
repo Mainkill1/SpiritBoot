@@ -24,7 +24,7 @@ foreach($line in $lines){
     elseif($line -match '^(\d{3}) - ([^:]+): SKIPPED - (.*)$'){$o=[int]$Matches[1];$results[$o]=[ordered]@{ordinal=$o;name=$Matches[2];result="skipped";reason=$Matches[3];duration_seconds=""}}
     elseif($line -match '^(\d{3}) - ([^:]+): Test completed in ([0-9]+\.[0-9]+) seconds$'){$o=[int]$Matches[1];if($results.ContainsKey($o)){$results[$o].duration_seconds=$Matches[3]}}
 }
-$sourceHash=(Get-FileHash -Algorithm SHA256 $LogPath).Hash.ToLowerInvariant()
+$sourceHash=(Get-FileHash -Path $LogPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $sourceName=[IO.Path]::GetFileName($LogPath)
 $stem=[IO.Path]::GetFileNameWithoutExtension($LogPath)-replace'[^A-Za-z0-9._-]','_'
 $stamp=(Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
