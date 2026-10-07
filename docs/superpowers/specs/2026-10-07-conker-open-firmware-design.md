@@ -24,8 +24,9 @@ compatibility.
   or overwriting that PR implicitly.
 - The `research/kernel-correlation` branch inventories exports and test gaps.
   Export resolution is not evidence of behavioral compatibility.
-- Roswell at `1569e2e89fb47cc72b9c704a8884f98200432bd4` documents a 1 MiB
-  `flash.bin`, direct boot without an MCPX ROM, and Halo gameplay in xemu.
+- Roswell at `1569e2e89fb47cc72b9c704a8884f98200432bd4` documents direct boot
+  without an MCPX ROM and Halo gameplay in xemu. Its README's 1 MiB image claim
+  is stale: the linker and generator specify 256 KiB release / 512 KiB checked.
   Its documentation does not establish Conker support. These are upstream
   reports, not results reproduced in this workspace.
 - Mainkill1/xemu `main` observed at
@@ -56,7 +57,8 @@ have its own validation.
 - Produce release and checked builds using Roswell's toolchain file. Checked
   builds use `DBG=1` for serial diagnostics. Default runtime memory is 128 MiB;
   64 MiB and physical hardware are not acceptance targets for this milestone.
-- Build Roswell's `flash` target and validate a fresh 1,048,576-byte output.
+- Build Roswell's `flash` target and validate a fresh 262,144-byte release or
+  524,288-byte checked output, as specified by the pinned loader linker script.
   Record the image SHA-256, upstream revisions, build options, tool versions,
   and local patch identity. Never accept an old output after a failed build.
 - Verify two clean builds with identical inputs produce identical flash hashes.
@@ -130,7 +132,6 @@ unverified.
 
 ## Approval boundary
 
-The user has approved the direction. This written specification is the next
-review artifact. After its approval, write the implementation plan and present
-that plan for review before implementation, as required by the brainstorming
-and writing-plans workflows.
+The user approved the direction and explicitly instructed continued execution
+without further approval requests. Review artifacts are maintained alongside
+implementation; that instruction overrides skill approval gates.

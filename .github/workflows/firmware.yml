@@ -1,0 +1,54 @@
+name: Open firmware
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests/host -v
+  firmware:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [release, debug]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned open kernel
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          lock = json.load(open('sources/firmware-lock.json'))['repositories']['roswell']
+          subprocess.run(['git', 'init', '.reference/roswell'], check=True)
+          subprocess.run(['git', '-C', '.reference/roswell', 'remote', 'add', 'origin', lock['url']], check=True)
+          subprocess.run(['git', '-C', '.reference/roswell', 'fetch', '--depth=1', 'origin', lock['revision']], check=True)
+          subprocess.run(['git', '-C', '.reference/roswell', 'checkout', '--detach', 'FETCH_HEAD'], check=True)
+          PY
+      - name: Build toolchain
+        run: docker build -f tools/Dockerfile.firmware -t spiritboot-toolchain .
+      - name: Build flash
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+            spiritboot-toolchain python3 scripts/build-firmware.py \
+            --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }} \
+            --variant ${{ matrix.variant }}
+      - name: Verify clean release rebuild
+        if: matrix.variant == 'release'
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+            spiritboot-toolchain python3 scripts/build-firmware.py \
+            --source .reference/roswell --output artifacts/firmware-repeat
+          cmp artifacts/firmware-release/flash.bin artifacts/firmware-repeat/flash.bin
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spiritboot-${{ matrix.variant }}
+          path: |
+            artifacts/firmware-${{ matrix.variant }}/flash.bin
+            artifacts/firmware-${{ matrix.variant }}/build.json
+            artifacts/firmware-${{ matrix.variant }}/build.log
