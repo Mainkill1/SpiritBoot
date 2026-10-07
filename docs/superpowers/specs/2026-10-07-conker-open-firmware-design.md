@@ -32,6 +32,9 @@ compatibility.
 - Mainkill1/xemu `main` observed at
   `e3798f995b9cbe1de3095b189a9370044a7db466` has existing Conker renderer work.
   Issue #285's game and performance evidence does not validate Roswell firmware.
+- Execution uses the pinned public release at
+  `458730bf5373f1f0d027450fef7443e3af7a3ae1`, after current-main Actions artifact
+  access failed. See baseline evidence for the exact runtime and results.
 - No Conker image, HDD image, or runnable xemu binary is present in the inspected
   workspace. The MinGW cross compiler, CMake, and Ninja are also absent.
 

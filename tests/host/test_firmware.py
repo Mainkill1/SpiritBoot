@@ -37,13 +37,18 @@ class BuildTests(unittest.TestCase):
 import os, pathlib, sys
 if '--version' in sys.argv:
     print('cmake fixture 1.0')
+elif '-B' in sys.argv:
+    p = pathlib.Path(sys.argv[sys.argv.index('-B') + 1]); p.mkdir(parents=True, exist_ok=True)
+    if not (p / 'CMakeCache.txt').exists():
+        (p / 'CMakeCache.txt').write_text('clean flags')
 elif '--build' in sys.argv:
     print('epoch=' + os.environ.get('SOURCE_DATE_EPOCH', 'unset'))
     if os.environ.get('FAIL_BUILD'):
         print('compile error', file=sys.stderr)
         sys.exit(3)
     p = pathlib.Path(sys.argv[2]); p.mkdir(parents=True, exist_ok=True)
-    (p / 'flash.bin').write_bytes(b'X' * int(os.environ.get('FLASH_SIZE', '262144')))
+    byte = b'E' if 'EVIL' in (p / 'CMakeCache.txt').read_text() else b'X'
+    (p / 'flash.bin').write_bytes(byte * int(os.environ.get('FLASH_SIZE', '262144')))
 ''')
         cmake.chmod(0o755)
         for name in ("ninja", "i686-w64-mingw32-gcc", "i686-w64-mingw32-g++"):
@@ -114,6 +119,29 @@ elif '--build' in sys.argv:
         self.assertEqual(result.returncode, 0, result.stderr)
         commands = json.loads((self.output / "build.json").read_text())["commands"]
         self.assertIn("--clean-first", commands[-1])
+
+    def test_output_inside_source_is_rejected_without_deleting_source(self):
+        self.output = self.source / "subdir"
+        self.output.mkdir()
+        flash = self.output / "flash.bin"
+        flash.write_bytes(b"tracked source file")
+        subprocess.run(["git", "-C", str(self.source), "add", "."], check=True)
+        result = self.build()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(flash.exists(), "a rejected build deleted source content")
+        self.assertEqual(flash.read_bytes(), b"tracked source file")
+
+    def test_rebuild_does_not_reuse_undeclared_cmake_cache(self):
+        first = self.build()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        command = manifest["commands"][0]
+        work = Path(command[command.index("-B") + 1])
+        (work / "CMakeCache.txt").write_text("CMAKE_C_FLAGS=EVIL")
+        second = self.build()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(json.loads((self.output / "build.json").read_text())["flash_sha256"],
+                         manifest["flash_sha256"])
 
 
 class LaunchTests(unittest.TestCase):
@@ -220,6 +248,18 @@ class TapTests(unittest.TestCase):
 
     def test_upstream_tap_version_14_passes(self):
         self.assertTrue(self.grade("TAP version 14\n1..1\nok 1 - entry\n")["passed"])
+
+    def test_bare_failure_record_cannot_be_ignored(self):
+        self.assertFalse(self.grade("TAP version 14\n1..1\nok 1\nnot ok\n")["passed"])
+
+    def test_tab_separated_failure_cannot_be_ignored(self):
+        self.assertFalse(self.grade("TAP version 14\n1..1\nok 1\nnot ok\t2\n")["passed"])
+
+    def test_plan_between_results_is_rejected(self):
+        self.assertFalse(self.grade("TAP version 14\nok 1\n1..2\nok 2\n")["passed"])
+
+    def test_version_after_results_is_rejected(self):
+        self.assertFalse(self.grade("ok 1\nTAP version 14\n1..1\n")["passed"])
 
     def test_multiple_boots_fail(self):
         self.assertFalse(self.grade("TAP version 13\n1..1\nok 1\nTAP version 13\n")["passed"])

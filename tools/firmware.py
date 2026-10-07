@@ -8,6 +8,7 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,8 +55,8 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK):
     source, output = Path(source).resolve(), Path(output).resolve()
     if variant not in ("release", "debug"):
         raise ValueError("variant must be release or debug")
-    if output == source or source.is_relative_to(output):
-        raise ValueError("output must not contain or replace the source tree")
+    if output == source or source.is_relative_to(output) or output.is_relative_to(source):
+        raise ValueError("source and output directories must not overlap")
     output.mkdir(parents=True, exist_ok=True)
     published = output / "flash.bin"
     published.unlink(missing_ok=True)
@@ -77,9 +78,11 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK):
         build_env = dict(os.environ, SOURCE_DATE_EPOCH=epoch)
         for tool in ("cmake", "ninja", "i686-w64-mingw32-gcc", "i686-w64-mingw32-g++", "gcc", "git", "python3"):
             manifest["tool_versions"][tool] = checked_output([tool, "--version"]).splitlines()[0]
-        work = output / "work"
-        work.mkdir(exist_ok=True)
-        (work / "flash.bin").unlink(missing_ok=True)
+        # A new configure tree prevents undeclared CMake cache options or
+        # compiler paths from contaminating the attributed build. Keep previous
+        # trees as evidence; never delete an arbitrary existing work directory.
+        work = Path(tempfile.mkdtemp(prefix="work-", dir=output))
+        manifest["build_directory"] = str(work)
         commands = [
             ["cmake", "-G", "Ninja", "-S", str(source), "-B", str(work),
              f"-DCMAKE_TOOLCHAIN_FILE={source / 'toolchain-gcc.cmake'}",
@@ -115,16 +118,18 @@ def grade_tap(text):
     versions = [line for line in lines if line.startswith("TAP version")]
     plans = [re.fullmatch(r"1\.\.(\d+)", line.strip()) for line in lines if line.startswith("1..")]
     results = []
+    result_positions = []
     errors = []
-    for line in lines:
+    for position, line in enumerate(lines):
         if line.startswith("Bail out!"):
             errors.append("TAP bailout")
-        if line.startswith(("ok ", "not ok ")):
-            match = re.fullmatch(r"(not ok|ok)\s+(\d+)(?:\s+.*)?", line)
+        if re.match(r"^(?:not[ \t]+ok|ok)\b", line):
+            match = re.fullmatch(r"(not[ \t]+ok|ok)[ \t]+(\d+)(?:[ \t]+.*)?", line)
             if not match:
                 errors.append("malformed test result")
                 continue
-            results.append((int(match[2]), match[1], line))
+            results.append((int(match[2]), " ".join(match[1].split()), line))
+            result_positions.append(position)
     if len(versions) != 1 or versions[0] not in ("TAP version 13", "TAP version 14"):
         errors.append("expected exactly one TAP version 13 or 14 stream")
     if len(plans) != 1 or plans[0] is None or int(plans[0][1]) <= 0:
@@ -132,8 +137,16 @@ def grade_tap(text):
         plan = 0
     else:
         plan = int(plans[0][1])
-    if [number for number, _, _ in results] != list(range(1, plan + 1)):
+    if len(results) != plan or any(number != i for i, (number, _, _) in enumerate(results, 1)):
         errors.append("test numbers do not match complete plan")
+    plan_positions = [i for i, line in enumerate(lines) if line.startswith("1..")]
+    version_positions = [i for i, line in enumerate(lines) if line.startswith("TAP version")]
+    if result_positions and len(plan_positions) == 1:
+        if result_positions[0] < plan_positions[0] < result_positions[-1]:
+            errors.append("test plan must precede or follow all results")
+    if len(version_positions) == 1 and result_positions + plan_positions:
+        if version_positions[0] > min(result_positions + plan_positions):
+            errors.append("TAP version must precede its plan and results")
     counts = {"ok": 0, "failed": 0, "todo": 0, "skipped": 0}
     for _, state, line in results:
         if re.search(r"#\s*TODO\b", line, re.IGNORECASE):

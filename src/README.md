@@ -1,5 +1,10 @@
 # Source Layout
 
+The first executable baseline uses the pinned Roswell loader and kernel under
+ignored `.reference/roswell/`. SpiritBoot's build and capture code lives in
+`tools/firmware.py` and `scripts/`; no kernel source is vendored here.
+See [build/run instructions](../docs/BUILD_AND_RUN.md) for that working path.
+
 Source code will be split by responsibility:
 
 - `boot/` — reset entry and earliest execution;

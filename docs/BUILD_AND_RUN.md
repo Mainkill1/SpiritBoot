@@ -38,11 +38,12 @@ If a managed network requires a CA bundle, add
 Keep the configured proxy and TLS verification enabled.
 
 Each output directory contains `flash.bin`, `build.json`, `build.log`, and
-`work/` (upstream kernel/loader build products). The manifest records revisions,
+`work-*/` (upstream kernel/loader build products). The manifest records revisions,
 compiler versions, command arguments, image size, SHA-256, and the source commit
 epoch. That epoch is exported as `SOURCE_DATE_EPOCH` to avoid wall-clock PE linker
-timestamps. Each build cleans cached linker products so a previous timestamp
-cannot leak into a newly attributed image. Failed builds invalidate the published
+timestamps. Each build uses a fresh configure tree so previous CMake cache flags,
+compiler selections, or timestamps cannot leak into a newly attributed image.
+Failed builds invalidate the published
 image and preserve diagnostics.
 Use new output directories for a clean reproducibility comparison.
 
@@ -58,6 +59,9 @@ printf '%s  %s\n' \
 chmod +x artifacts/xemu.AppImage
 curl -fL https://github.com/xemu-project/xemu-dashboard/releases/download/v20260516-0955/xbox_hdd.qcow2 \
   -o artifacts/xbox_hdd.qcow2
+printf '%s  %s\n' \
+  00d7df7a2bc235f8801764f00b7f40e194d1e392f7a9619d6b2396c89770f6dd \
+  artifacts/xbox_hdd.qcow2 | sha256sum --check
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
   -w /work/artifacts spiritboot-toolchain ./xemu.AppImage --appimage-extract
 ```
@@ -83,7 +87,7 @@ open test image. The short startup delay lets Xvfb bind its socket; the launch
 driver independently enforces the emulator deadline.
 
 ```sh
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+docker run --rm -v "$PWD:/work" \
   -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -c '
   Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
   python3 -c "import time; time.sleep(1)"
