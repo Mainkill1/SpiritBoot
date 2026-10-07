@@ -1,0 +1,32 @@
+wave,ordinal,name,subsystem,roswell_source,cxbx_source,current_test_state,focus
+A,159,KeWaitForSingleObject,Ke,ntoskrnl/ke/wait.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,alertability/APC delivery and waiter semantics
+A,145,KeSetEvent,Ke,ntoskrnl/ke/eventobj.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,event state and waiter wake ordering
+A,138,KeResetEvent,Ke,ntoskrnl/ke/eventobj.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,previous state and reset semantics
+A,123,KePulseEvent,Ke,ntoskrnl/ke/eventobj.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,pulse wake timing and Wait behavior
+A,99,KeDelayExecutionThread,Ke,ntoskrnl/ke/wait.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,timeouts alertability and APC delivery
+B,97,KeCancelTimer,Ke,ntoskrnl/ke/timerobj.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,inserted state and cancellation
+B,149,KeSetTimer,Ke,ntoskrnl/ke/timerobj.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,one-shot timer semantics
+B,150,KeSetTimerEx,Ke,ntoskrnl/ke/timerobj.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,periodic timing DPC ordering due-time rounding
+B,105,KeInitializeApc,Ke,ntoskrnl/ke/apc.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,Xbox KAPC layout and initialization
+B,118,KeInsertQueueApc,Ke,ntoskrnl/ke/apc.c,src/core/kernel/exports/EmuKrnlKe.cpp,stub,APC queueing delivery and wake interaction
+B,103,KeGetCurrentIrql,Ke,x86/HAL IRQL path,src/core/kernel/exports/EmuKrnlKe.cpp,stub,current IRQL state
+B,160,KfRaiseIrql,Kf,x86/HAL IRQL path,src/core/kernel/exports/EmuKrnlKe.cpp;EmuKrnlKi.cpp,stub,nested raise and dispatcher ordering
+B,161,KfLowerIrql,Kf,x86/HAL IRQL path,src/core/kernel/exports/EmuKrnlKe.cpp;EmuKrnlKi.cpp,stub,deferred APC/DPC delivery boundary
+C,166,MmAllocateContiguousMemoryEx,Mm,ntoskrnl/xb/mm/contig.c,src/core/kernel/exports/EmuKrnlMm.cpp,stub,range alignment cache/protection and NV2A boundary
+C,184,NtAllocateVirtualMemory,Nt,ntoskrnl/mm/ARM3/virtual.c,src/core/kernel/exports/EmuKrnlNt.cpp;EmuKrnlMm.cpp,stub,Xbox virtual address and parameter semantics
+C,177,MmMapIoSpace,Mm,ntoskrnl/xb/mm/iospace.c,src/core/kernel/exports/EmuKrnlMm.cpp,stub,static alias and cacheability selection
+C,183,MmUnmapIoSpace,Mm,ntoskrnl/xb/mm/iospace.c,src/core/kernel/exports/EmuKrnlMm.cpp,stub,no-op visibility and mapping lifetime
+D,66,IoCreateFile,Io,ntoskrnl/io/iomgr/file.c,src/core/kernel/exports/EmuKrnlIo.cpp,stub,Xbox parameter checking and file semantics
+D,59,IoAllocateIrp,Io,ntoskrnl/io/iomgr/irp.c,src/core/kernel/exports/EmuKrnlIo.cpp,stub,IRP size stack flags and allocation
+D,73,IoInitializeIrp,Io,ntoskrnl/io/iomgr/irp.c,src/core/kernel/exports/EmuKrnlIo.cpp,stub,initialized fields and stack location
+D,86,IofCallDriver,Iof,ntoskrnl/io/iomgr/irp.c,src/core/kernel/exports/EmuKrnlIo.cpp,stub,driver dispatch and exhausted stack behavior
+D,239,ObCreateObject,Ob,ntoskrnl/xb/obcreate.c,src/core/kernel/exports/EmuKrnlOb.cpp,stub,Xbox object header allocator callback and body layout
+D,241,ObInsertObject,Ob,ntoskrnl/xb/obcreate.c,src/core/kernel/exports/EmuKrnlOb.cpp,stub,handle namespace and reference lifetime
+Q,51,InterlockedCompareExchange,Interlocked,ntoskrnl/ex;ntoskrnl/xb,src/core/kernel/exports/EmuKrnl.cpp,stub,atomic compare exchange semantics
+Q,52,InterlockedDecrement,Interlocked,ntoskrnl/ex;ntoskrnl/xb,src/core/kernel/exports/EmuKrnl.cpp,stub,atomic decrement semantics
+Q,53,InterlockedIncrement,Interlocked,ntoskrnl/ex;ntoskrnl/xb,src/core/kernel/exports/EmuKrnl.cpp,stub,atomic increment semantics
+Q,54,InterlockedExchange,Interlocked,ntoskrnl/ex;ntoskrnl/xb,src/core/kernel/exports/EmuKrnl.cpp,stub,atomic exchange semantics
+Q,55,InterlockedExchangeAdd,Interlocked,ntoskrnl/ex;ntoskrnl/xb,src/core/kernel/exports/EmuKrnl.cpp,stub,atomic exchange-add semantics
+Q,56,InterlockedFlushSList,Interlocked,ntoskrnl/ex;ntoskrnl/xb,src/core/kernel/exports/EmuKrnl.cpp,stub,SList flush ABI and ordering
+Q,57,InterlockedPopEntrySList,Interlocked,ntoskrnl/ex;ntoskrnl/xb,src/core/kernel/exports/EmuKrnl.cpp,stub,SList pop ABI and ordering
+Q,58,InterlockedPushEntrySList,Interlocked,ntoskrnl/ex;ntoskrnl/xb,src/core/kernel/exports/EmuKrnl.cpp,stub,SList push ABI and ordering
