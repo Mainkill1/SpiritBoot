@@ -1,6 +1,6 @@
 # Reference Repository Map
 
-Reference repositories live under `.reference/` and are excluded from version control.
+Reference repositories live under `.reference/` and are excluded from version control. `sources/upstreams.json` records the canonical set and role of each checkout.
 
 Run:
 
@@ -13,6 +13,50 @@ or on PowerShell:
 ```powershell
 ./scripts/fetch-references.ps1
 ```
+
+## mborgerson/roswell
+
+Repository: https://github.com/mborgerson/roswell
+
+Primary starting point for:
+- open xboxkrnl implementation;
+- nxldr/open flash image;
+- Xbox/NT ABI adaptation;
+- direct xemu boot without a separate boot ROM;
+- identifying already-mapped versus still-stubbed kernel exports.
+
+## SnowyMouse/fancy-mouse-boot-rom
+
+Repository: https://github.com/SnowyMouse/fancy-mouse-boot-rom
+
+Use it for:
+- the open MCPX-compatible 512-byte boot-ROM path;
+- validating early protected-mode/32-bit setup;
+- open verification/handoff behavior;
+- hardware-faithful boot-chain testing.
+
+## Mainkill1/xemu
+
+Repository: https://github.com/Mainkill1/xemu
+
+Primary SpiritBoot emulator integration target for:
+- direct boot;
+- kernel/boot tracing;
+- compatibility automation;
+- guest-work/performance counters;
+- testing emulator-aware fast paths without making them mandatory on hardware.
+
+## Cxbx-Reloaded/xbox_kernel_test_suite
+
+Repository: https://github.com/Cxbx-Reloaded/xbox_kernel_test_suite
+
+Use it as the main hardware-backed kernel conformance harness. SpiritBoot should correlate every kernel ordinal against available tests before assuming a mapped implementation is correct.
+
+## Cxbx-Reloaded/XbSymbolDatabase
+
+Repository: https://github.com/Cxbx-Reloaded/XbSymbolDatabase
+
+Use it to identify statically linked XDK/runtime code in retail XBEs and to turn anonymous crash addresses into known software behavior.
 
 ## XboxDev/cromwell
 
