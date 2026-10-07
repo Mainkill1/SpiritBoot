@@ -2,38 +2,46 @@
 set -euo pipefail
 
 ROOT="${1:-.reference}"
+UPDATE="${2:-}"
 mkdir -p "$ROOT"
 
-clone_or_update() {
-    local name="$1"
-    local url="$2"
-    local recursive="${3:-0}"
-    local path="$ROOT/$name"
+REPOS=$(cat <<'EOF'
+roswell|main|0|https://github.com/mborgerson/roswell.git
+fancy-mouse|master|0|https://github.com/SnowyMouse/fancy-mouse-boot-rom.git
+xemu-fork|main|0|https://github.com/Mainkill1/xemu.git
+xemu|master|0|https://github.com/xemu-project/xemu.git
+kernel-tests|master|0|https://github.com/Cxbx-Reloaded/xbox_kernel_test_suite.git
+cxbx-reloaded|master|1|https://github.com/Cxbx-Reloaded/Cxbx-Reloaded.git
+xb-symbol-database|master|0|https://github.com/Cxbx-Reloaded/XbSymbolDatabase.git
+nxdk|master|1|https://github.com/XboxDev/nxdk.git
+cromwell|master|0|https://github.com/XboxDev/cromwell.git
+xboxpy|master|0|https://github.com/XboxDev/xboxpy.git
+xbox-linux|master|0|https://github.com/XboxDev/xbox-linux.git
+EOF
+)
 
-    if [[ -d "$path/.git" ]]; then
-        echo "[update] $name"
-        git -C "$path" pull --ff-only
-        if [[ "$recursive" == "1" ]]; then
-            git -C "$path" submodule update --init --recursive --depth 1
-        fi
-        return
-    fi
+printf 'id\tbranch\tcommit\tremote\n' > "$ROOT/.versions.tsv"
 
+while IFS='|' read -r name branch recursive url; do
+  path="$ROOT/$name"
+  if [[ ! -d "$path/.git" ]]; then
     echo "[clone]  $name"
-    if [[ "$recursive" == "1" ]]; then
-        git clone --depth 1 --recurse-submodules --shallow-submodules "$url" "$path"
-    else
-        git clone --depth 1 "$url" "$path"
-    fi
-}
+    args=(clone --branch "$branch")
+    [[ "$recursive" == "1" ]] && args+=(--recurse-submodules)
+    git "${args[@]}" "$url" "$path"
+  elif [[ "$UPDATE" == "--update" ]]; then
+    echo "[update] $name"
+    git -C "$path" fetch --all --prune
+    git -C "$path" checkout "$branch"
+    git -C "$path" pull --ff-only
+    [[ "$recursive" == "1" ]] && git -C "$path" submodule update --init --recursive
+  else
+    echo "[keep]   $name"
+  fi
 
-clone_or_update cromwell      https://github.com/XboxDev/cromwell.git
-clone_or_update xemu          https://github.com/xemu-project/xemu.git
-clone_or_update cxbx-reloaded https://github.com/Cxbx-Reloaded/Cxbx-Reloaded.git
-clone_or_update nxdk          https://github.com/XboxDev/nxdk.git 1
-clone_or_update xboxpy        https://github.com/XboxDev/xboxpy.git
-clone_or_update xbox-linux    https://github.com/XboxDev/xbox-linux.git
+  commit="$(git -C "$path" rev-parse HEAD)"
+  remote="$(git -C "$path" remote get-url origin)"
+  printf '%s\t%s\t%s\t%s\n' "$name" "$branch" "$commit" "$remote" >> "$ROOT/.versions.tsv"
+done <<< "$REPOS"
 
-echo
-echo "Reference repositories are available under: $ROOT"
-echo "They are research inputs, not automatically part of the SpiritBoot build."
+echo "Exact revisions written to $ROOT/.versions.tsv"
