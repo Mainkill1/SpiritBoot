@@ -3,6 +3,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -84,6 +85,54 @@ class AnalyzerTests(unittest.TestCase):
     def test_small_inconclusive_change(self):
         self.make_dataset(candidate=999)
         self.assertEqual(self.report()['workloads']['pin-1']['classification'],'timing inconclusive')
+
+    def set_workload_ticks(self, name, baseline, candidate):
+        """Replace only permitted PERF tick fields in all fourteen captures."""
+        for i in range(7):
+            for prefix, ticks in [('b', baseline), ('c', candidate)]:
+                path = self.root / f'{prefix}{i}' / 'serial.log'
+                pattern = rf'(# PERF workload={re.escape(name)} sample=(\d+) iterations=\d+ ticks=)\d+'
+                serial = re.sub(pattern, lambda m:m[1]+str(ticks[int(m[2])]), path.read_text())
+                path.write_text(serial)
+
+    def test_uint64_precision_noise_cannot_invent_improvement_or_regression(self):
+        baseline = [9223372036854776833]*3
+        candidate = [9223372036854775809,9223372036854776832,9223372036854776832]
+        for reverse in (False,True):
+            with self.subTest(reverse=reverse):
+                self.set_workload_ticks('sysva-4096', candidate if reverse else baseline, baseline if reverse else candidate)
+                row = self.report()['workloads']['sysva-4096']
+                self.assertEqual(row['classification'],'timing inconclusive')
+                self.assertEqual(row['median_difference'],-1 if reverse else 1)
+                self.assertEqual(row['maximum_observed_variant_range'],1023)
+                self.assertEqual(row['exact_decision']['median_difference'],
+                                 {'numerator':-1 if reverse else 1,'denominator':1})
+                self.assertEqual(row['exact_decision']['maximum_observed_variant_range'],
+                                 {'numerator':1023,'denominator':1})
+
+    def test_uint64_definite_improvement_and_regression_remain_supported(self):
+        baseline = [9223372036854776833]*3
+        candidate = [9223372036854775809]*3
+        for reverse in (False,True):
+            with self.subTest(reverse=reverse):
+                self.set_workload_ticks('sysva-4096', candidate if reverse else baseline, baseline if reverse else candidate)
+                row = self.report()['workloads']['sysva-4096']
+                self.assertEqual(row['classification'],'timing regression' if reverse else 'timing improvement')
+                self.assertEqual(row['median_difference'],-1024 if reverse else 1024)
+                self.assertEqual(row['maximum_observed_variant_range'],0)
+
+    def test_uint64_fractional_iteration_noise_remains_inconclusive(self):
+        self.set_workload_ticks('pin-1', [9223372036854776833]*3,
+                                [9223372036854775809,9223372036854776832,9223372036854776832])
+        row = self.report()['workloads']['pin-1']
+        self.assertEqual(row['classification'],'timing inconclusive')
+        self.assertEqual(row['median_difference'],0.001)
+        self.assertEqual(row['maximum_observed_variant_range'],1.023)
+        self.assertEqual(row['exact_decision']['median_difference'],
+                         {'numerator':1,'denominator':1000})
+        self.assertEqual(row['exact_decision']['maximum_observed_variant_range'],
+                         {'numerator':1023,'denominator':1000})
+        json.dumps(row,allow_nan=False)
 
     def test_five_improving_pairs_cannot_claim_speedup(self):
         for i in range(7):

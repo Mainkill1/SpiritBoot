@@ -2,6 +2,7 @@
 import json
 import math
 from datetime import datetime, timedelta
+from fractions import Fraction
 from pathlib import Path
 import re
 from statistics import median
@@ -123,6 +124,21 @@ def capture(path, mapping):
     return {'path': str(path), 'run_sha256': sha256(run_path), 'serial_sha256': sha256(serial_path), 'started_utc': run['started_utc'], 'elapsed_seconds': elapsed, 'clock': meta[1], 'frequency': frequency, 'workloads': workloads, 'assets': assets, 'asset_records':run['assets'], 'locally_verified_assets': verified}
 
 
+def display_numbers(value):
+    """Round exact rationals only after all timing decisions are complete."""
+    if isinstance(value, Fraction):
+        return float(value)
+    if isinstance(value, dict):
+        return {key: display_numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [display_numbers(item) for item in value]
+    return value
+
+
+def rational_record(value):
+    return {'numerator': value.numerator, 'denominator': value.denominator}
+
+
 def analyze(pairs_path, runtime_path, candidate_build_path=None, baseline_hash=BASELINE, candidate_hash=None):
     pairs_path = Path(pairs_path).resolve()
     dataset, runtime = read_json(pairs_path), read_json(runtime_path)
@@ -174,12 +190,16 @@ def analyze(pairs_path, runtime_path, candidate_build_path=None, baseline_hash=B
         require(c['elapsed_seconds'] <= (end-start).total_seconds() + 0.01, 'driver duration exceeds controller interval')
         previous_end = end
     results = {}
-    n = len(pairs); minimum_consistent = math.ceil(6*n/7)
+    n = len(pairs); minimum_consistent = (6*n + 6)//7
     for name in WORKLOADS:
         values, variations = {}, []
         for variant in ('baseline', 'candidate'):
-            trials = [median(s['ticks_per_iteration'] for s in p[variant]['workloads'][name]) for p in captures]
-            raw = [s['ticks_per_iteration'] for p in captures for s in p[variant]['workloads'][name]]
+            # The capture's ticks_per_iteration is presentation only. Rebuild
+            # exact normalized samples from retained uint64 ticks and iterations.
+            normalized = [[Fraction(s['ticks'], s['iterations'])
+                           for s in p[variant]['workloads'][name]] for p in captures]
+            trials = [median(samples) for samples in normalized]
+            raw = [sample for samples in normalized for sample in samples]
             values[variant] = {'trial_medians': trials, 'min': min(trials), 'max': max(trials), 'median': median(trials), 'raw_normalized_min':min(raw), 'raw_normalized_max':max(raw)}
             variations.extend([max(trials)-min(trials), max(raw)-min(raw)])
         b, c = values['baseline'], values['candidate']
@@ -188,8 +208,15 @@ def analyze(pairs_path, runtime_path, candidate_build_path=None, baseline_hash=B
         improvement = delta > 0 and delta > variation and sum(d>0 for d in differences) >= minimum_consistent
         regression = delta < 0 and -delta > variation and sum(d<0 for d in differences) >= minimum_consistent
         percentages = [100*(y-x)/x if x else None for x,y in zip(b['trial_medians'],c['trial_medians'])]
-        results[name] = {**values,'paired_differences':differences,'paired_percentage_changes':percentages,'median_percentage_change':median(percentages) if all(p is not None for p in percentages) else None,'median_difference':delta,'maximum_observed_variant_range':variation,'improving_pairs':sum(d>0 for d in differences),'classification':'timing improvement' if improvement else 'timing regression' if regression else 'timing inconclusive'}
-    return {'schema':1,'pair_count':n,'clock':reference['clock'],'frequency':reference['frequency'],'overhead_subtracted':False,'provenance':{'dataset':{'path':str(pairs_path),'sha256':sha256(pairs_path)},'runtime_inputs':{'path':str(runtime_path),'sha256':sha256(runtime_path),'records':runtime},'candidate_build':{'path':str(candidate_build_path),'sha256':sha256(candidate_build_path),'record':build} if candidate_build_path else None,'analyzer_sha256':sha256(__file__)},'asset_path_map':mapping,'execution_log':log,'captures':captures,'workloads':results}
+        exact_decision = {
+            'baseline_median': rational_record(b['median']),
+            'candidate_median': rational_record(c['median']),
+            'median_difference': rational_record(delta),
+            'maximum_observed_variant_range': rational_record(variation),
+            'paired_differences': [rational_record(d) for d in differences],
+        }
+        results[name] = display_numbers({**values,'paired_differences':differences,'paired_percentage_changes':percentages,'median_percentage_change':median(percentages) if all(p is not None for p in percentages) else None,'median_difference':delta,'maximum_observed_variant_range':variation,'improving_pairs':sum(d>0 for d in differences),'classification':'timing improvement' if improvement else 'timing regression' if regression else 'timing inconclusive', 'exact_decision': exact_decision})
+    return {'schema':1,'pair_count':n,'clock':reference['clock'],'frequency':reference['frequency'],'overhead_subtracted':False,'decision_arithmetic':'exact rational; numeric display fields rounded to float','provenance':{'dataset':{'path':str(pairs_path),'sha256':sha256(pairs_path)},'runtime_inputs':{'path':str(runtime_path),'sha256':sha256(runtime_path),'records':runtime},'candidate_build':{'path':str(candidate_build_path),'sha256':sha256(candidate_build_path),'record':build} if candidate_build_path else None,'analyzer_sha256':sha256(__file__)},'asset_path_map':mapping,'execution_log':log,'captures':captures,'workloads':results}
 
 
 def markdown(report):
