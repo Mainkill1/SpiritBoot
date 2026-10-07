@@ -38,6 +38,20 @@ jobs:
             spiritboot-toolchain python3 scripts/build-firmware.py \
             --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }} \
             --variant ${{ matrix.variant }}
+      - name: Check the built source identity and actual kernel work
+        run: |
+          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+            -e GUEST_SOURCE="$guest_source" -e VARIANT=${{ matrix.variant }} \
+            spiritboot-toolchain sh -ec '
+            output="artifacts/kernel-host-$VARIANT"
+            mkdir -p "$output"
+            actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
+            test "$actual_tree" = f7adb302a762ed1945cc07d9c2ff428c643ba959
+            "$GUEST_SOURCE/tests/host/clean-room/run.sh" "$output/clean-room" >"$output/clean-room.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/kernel-performance/check.py" "$GUEST_SOURCE" "$output/optimization" --optimized >"$output/optimization.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/kernel-performance/pins.py" "$GUEST_SOURCE" "$output/pins" --optimized >"$output/pins.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/kernel-performance/pins.py" "$GUEST_SOURCE" "$output/pins-diagnostics" --optimized --diagnostics >"$output/pins-diagnostics.log" 2>&1'
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
         run: |
@@ -65,13 +79,13 @@ jobs:
         run: |
           nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
-          for guest in api-regression clean-room-contracts clean-room-warm-reboot; do
+          for guest in api-regression clean-room-contracts clean-room-warm-reboot kernel-performance; do
             docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
               -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
               -w "$guest_source/tests/xbe/$guest" \
               "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
           done
-      - name: Run API, targeted contracts, and warm reboot guests
+      - name: Run API, contracts, warm reboot, and performance correctness guests
         run: |
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
           docker run --rm -v "$PWD:/work" \
@@ -79,7 +93,7 @@ jobs:
             -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -ec '
             Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
             python3 -c "import time; time.sleep(1)"
-            for guest in api-regression clean-room-contracts clean-room-warm-reboot; do
+            for guest in api-regression clean-room-contracts clean-room-warm-reboot kernel-performance; do
               case "$guest" in
                 api-regression) iso=nxkrnl-api-regression.iso; capture=open-xbe ;;
                 *) iso=$guest.iso; capture=$guest ;;
@@ -99,6 +113,12 @@ jobs:
               assert result['tap']['ok'] == plan, result
               assert result['tap']['todo'] == 0 and result['tap']['skipped'] == 0, result
           PY
+          python3 - <<'PY'
+          from pathlib import Path
+          from tools.kernel_performance import capture
+          result = capture(Path('artifacts/kernel-performance-${{ matrix.variant }}'), {})
+          assert len(result['workloads']) == 41, result
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -110,4 +130,6 @@ jobs:
             artifacts/open-xbe-${{ matrix.variant }}/
             artifacts/clean-room-contracts-${{ matrix.variant }}/
             artifacts/clean-room-warm-reboot-${{ matrix.variant }}/
+            artifacts/kernel-performance-${{ matrix.variant }}/
+            artifacts/kernel-host-${{ matrix.variant }}/
             LICENSE

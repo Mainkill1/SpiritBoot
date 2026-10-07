@@ -33,3 +33,5 @@ The scheduler audit identified a wait-block gap: NxkWaitForMultipleObjectsMode a
 ## Evidence and limits
 
 Before implementation, product host checks: 41 passes and one root-only skip; kernel clean-room host checks: 88/88. Validated starting BIOS passed direct API/contract/warm-reboot guests and both full XISO variants. Its GitHub firmware workflow 37689569960 also completed successfully. No optimization timing, new firmware qualification or Conker gameplay result is asserted by this audit. Per-export decisions are static source assessments; runtime frequency and speedups require actual measurements. Existing public Xbox test coverage was inspected, not rerun by audit workers. Clean-room agents received public source and behavior requirements only; shared filesystem separation is procedural.
+
+[Integration and measurement guide](integration-and-measurement.md) records the reviewed source tree, ordered patch hashes, actual-source work evidence and conservative paired-capture analyzer contract. Runtime qualification and new BIOS publication remain pending.
