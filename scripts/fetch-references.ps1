@@ -18,7 +18,7 @@ $Repos = @(
     @{ Name="nxdk"; Url="https://github.com/XboxDev/nxdk.git"; Branch="master"; Recursive=$true },
     @{ Name="cromwell"; Url="https://github.com/XboxDev/cromwell.git"; Branch="master"; Recursive=$false },
     @{ Name="xboxpy"; Url="https://github.com/XboxDev/xboxpy.git"; Branch="master"; Recursive=$false },
-    @{ Name="xbox-linux"; Url="https://github.com/XboxDev/xbox-linux.git"; Branch="master"; Recursive=$false }
+    @{ Name="xbox-linux"; Url="https://github.com/XboxDev/xbox-linux.git"; Branch="xbox-linux"; Recursive=$false }
 )
 
 $versions = @((@("id","branch","commit","remote") -join $Tab))
