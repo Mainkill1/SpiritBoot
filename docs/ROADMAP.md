@@ -8,7 +8,17 @@ Acceptance:
 - reference repos can be fetched with one command;
 - clean-room/provenance rules are documented;
 - architecture boundaries are agreed;
-- project license is selected before code reuse occurs.
+- GPL-2.0 is selected for SpiritBoot-owned code and upstream per-file licenses/provenance are preserved.
+
+## M0.5 — Open-stack baseline
+
+Acceptance:
+- Roswell builds a reproducible `flash.bin`;
+- Mainkill1/xemu direct-boots that image without a proprietary MCPX ROM;
+- Fancy Mouse builds as the open MCPX-compatible first stage;
+- xbox_kernel_test_suite builds and produces deterministic logs;
+- the 379-slot kernel inventory is regenerated from pinned Roswell/Cxbx revisions;
+- every experiment records exact upstream revisions.
 
 ## M1 — Deterministic build
 
@@ -46,7 +56,7 @@ Acceptance:
 ## M5 — Kernel minimum viable runtime
 
 Acceptance:
-- kernel export inventory exists;
+- the 379-slot kernel export inventory exists and distinguishes mapped, stubbed, data-scaffold and missing-export states;
 - minimal memory/thread/synchronization/timer/I/O services required by the first test payloads work;
 - each newly implemented behavior has a reproducer or regression case;
 - failure reports identify the missing export/behavior instead of only reporting a crash.
