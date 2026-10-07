@@ -31,7 +31,7 @@ That makes wait/APC behavior a better first target than filling low-value missin
 
 ### Tests to add
 
-For each wait/event primitive, test:
+For each wait/event primitive, follow the upstream test-suite guidance (variation, invalid/extreme inputs, all observable effects, cleanup) and test:
 
 - signaled vs non-signaled initial state;
 - synchronization vs notification event behavior;
@@ -150,3 +150,7 @@ An API moves from "gap" to "hardware-backed" only when:
 3. raw/normalized result provenance is retained;
 4. Roswell is run against the same semantic assertions;
 5. any discrepancy is reduced to a reproducible case rather than hidden behind a title-level workaround.
+
+## Upstream testing guidance
+
+The current plan intentionally follows the principles recorded in xbox_kernel_test_suite issue #4: exercise reasonable input variation, reject invalid input correctly, include extreme/magic values, verify all known effects, document unsafe/untestable cases, and clean up resources. See https://github.com/Cxbx-Reloaded/xbox_kernel_test_suite/issues/4.
