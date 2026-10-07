@@ -1,0 +1,9 @@
+FAIL 327708: NxpPinBatch[i]==0
+pin-work success n=0 alias=0 translations=0 cleared=0 bulk=0
+pin-work success n=0 alias=1 translations=0 cleared=0 bulk=0
+Traceback (most recent call last):
+  File "/workspace/SpiritBoot-optimization-kernel/tests/host/kernel-performance/pins.py", line 19, in <module>
+    subprocess.run([str(output / 'pins'), '1' if '--optimized' in sys.argv else '0'], check=True)
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/tmp/kernel-pin-baseline-red/pins', '1']' returned non-zero exit status 1.

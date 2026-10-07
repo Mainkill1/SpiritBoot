@@ -1,0 +1,1851 @@
+["git", "-c", "safe.directory=/work/.reference/roswell", "-C", "/work/.reference/roswell", "config", "--file", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/git-safe.config", "--add", "safe.directory", "/work/.reference/roswell"]
+["git", "-c", "safe.directory=/work/.reference/roswell", "-C", "/work/.reference/roswell", "config", "--file", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/git-safe.config", "--add", "safe.directory", "/work/.reference/roswell/.git"]
+["git", "clone", "--no-hardlinks", "--dissociate", "--no-checkout", "/work/.reference/roswell", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source"]
+Cloning into '/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source'...
+["git", "-c", "safe.directory=/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "-C", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "checkout", "--detach", "1569e2e89fb47cc72b9c704a8884f98200432bd4"]
+HEAD is now at 1569e2e8 nxcache: note the reserve recovery path
+["git", "-c", "safe.directory=/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "-C", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "apply", "--check", "--index", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/patches/0001.patch"]
+["git", "-c", "safe.directory=/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "-C", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "apply", "--index", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/patches/0001.patch"]
+["git", "-c", "safe.directory=/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "-C", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "apply", "--check", "--index", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/patches/0002.patch"]
+["git", "-c", "safe.directory=/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "-C", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "apply", "--index", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/patches/0002.patch"]
+["cmake", "-G", "Ninja", "-S", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source", "-B", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build", "-DCMAKE_TOOLCHAIN_FILE=/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/toolchain-gcc.cmake", "-DCMAKE_BUILD_TYPE=Release", "-DDBG=1", "-DKDBG=FALSE"]
+CMake Warning at CMakeLists.txt:5 (message):
+  Building with "/usr/bin/cmake", which is not the custom CMake included in
+  RosBE, might cause build issues...
+
+
+-- The C compiler identification is GNU 13.0.0
+-- The CXX compiler identification is GNU 13.0.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/i686-w64-mingw32-gcc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/i686-w64-mingw32-g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found Git: /usr/bin/git (found version "2.43.0") 
+-- Found BISON: /usr/bin/bison (found version "3.8.2") 
+-- Found FLEX: /usr/bin/flex (found version "2.6.4") 
+Cross-compiling on non-msvc, no special host-tools cmake command
+-- Build type: Release
+CMake Warning at CMakeLists.txt:255 (message):
+  -- Disabling precompiled headers on GCC by default CORE-17108.
+
+
+-- The ASM compiler identification is GNU
+-- Found assembler: /usr/bin/i686-w64-mingw32-gcc
+-- Selected localization: all
+-- Generating a dwarf-based build (no rsym)
+-- Using libwinpthread from /usr/lib/gcc/i686-w64-mingw32/13-win32/../../../../i686-w64-mingw32/lib/../lib/libwinpthread.a
+-- Configuring done (1.9s)
+-- Generating done (0.9s)
+-- Build files have been written to: /work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build
+["cmake", "--build", "/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build", "--clean-first", "--target", "flash", "--parallel", "4"]
+[1/1] Cleaning all built files...
+Cleaning... 0 files.
+[1/748] Creating directories for 'host-tools'
+[2/748] Generating mem.o
+[3/748] Generating loader.o
+[4/748] No download step for 'host-tools'
+[5/748] No update step for 'host-tools'
+[6/748] Generating pe.o
+[7/748] Generating paging.o
+[8/748] No patch step for 'host-tools'
+[9/748] Generating startup.o
+[10/748] Generating serial.o
+[11/748] Generating nanoprintf.o
+[12/748] Generating xz_xz_crc32.o
+[13/748] Generating xz_xz_dec_bcj.o
+[14/748] Building C object sdk/lib/wdmguid/CMakeFiles/wdmguid.dir/wdmguid.c.obj
+[15/748] Linking C static library sdk/lib/wdmguid/libwdmguid.a
+[16/748] Generating xz_xz_dec_stream.o
+[17/748] Generating xz_xz_dec_lzma2.o
+[18/748] Generating nxldr.elf
+ld: warning: /work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/boot/nxldr/startup.o: missing .note.GNU-stack section implies executable stack
+ld: NOTE: This behaviour is deprecated and will be removed in a future version of the linker
+ld: warning: /work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/boot/nxldr/nxldr.elf has a LOAD segment with RWX permissions
+[19/748] Generating nxldr.bin
+[20/748] Performing configure step for 'host-tools'
+CMake Warning at CMakeLists.txt:5 (message):
+  Building with "/usr/bin/cmake", which is not the custom CMake included in
+  RosBE, might cause build issues...
+
+
+-- The C compiler identification is GNU 13.3.0
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found Git: /usr/bin/git (found version "2.43.0") 
+-- Found BISON: /usr/bin/bison (found version "3.8.2") 
+-- Found FLEX: /usr/bin/flex (found version "2.6.4") 
+-- Configuring done (0.3s)
+-- Generating done (0.0s)
+-- Build files have been written to: /work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/host-tools/bin
+[21/748] Performing build step for 'host-tools'
+[1/41] Building C object sdk/tools/CMakeFiles/geninc.dir/geninc/geninc.c.o
+[2/41] Building C object sdk/tools/CMakeFiles/bin2c.dir/bin2c.c.o
+[3/41] Building C object sdk/tools/hpp/CMakeFiles/hpp.dir/hpp.c.o
+[4/41] Linking C executable geninc
+[5/41] Linking C executable hpp
+[6/41] Linking C executable bin2c
+[7/41] [FLEX][pp_scanner] Building scanner with flex 2.6.4
+[8/41] Building C object sdk/tools/CMakeFiles/pefixup.dir/pefixup.c.o
+[9/41] Building C object sdk/tools/CMakeFiles/spec2def.dir/spec2def/spec2def.c.o
+[10/41] [BISON][pp_parser] Building parser with bison 3.8.2
+[11/41] Linking C executable pefixup
+[12/41] Linking C executable spec2def
+[13/41] Building C object sdk/tools/wpp/CMakeFiles/wpphost.dir/wpp.c.o
+[14/41] Building C object sdk/tools/wpp/CMakeFiles/wpphost.dir/ppy.tab.c.o
+[15/41] Building CXX object sdk/tools/CMakeFiles/utf16le.dir/utf16le/utf16le.cpp.o
+[16/41] Building C object sdk/tools/wpp/CMakeFiles/wpphost.dir/ppl.yy.c.o
+[17/41] Linking C static library sdk/tools/wpp/libwpphost.a
+[18/41] Linking CXX executable utf16le
+[19/41] [FLEX][p_scanner] Building scanner with flex 2.6.4
+[20/41] [BISON][p_parser] Building parser with bison 3.8.2
+[21/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/attribute.c.o
+[22/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/client.c.o
+[23/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/hash.c.o
+[24/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/expr.c.o
+[25/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/register.c.o
+[26/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/proxy.c.o
+[27/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/typelib.c.o
+[28/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/server.c.o
+[29/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/typetree.c.o
+[30/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/utils.c.o
+[31/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/widl.c.o
+[32/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/write_sltg.c.o
+[33/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/__/port/getopt1.c.o
+[34/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/write_msft.c.o
+[35/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/parser.yy.c.o
+[36/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/header.c.o
+[37/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/__/port/getopt.c.o
+[38/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/__/port/mkstemps.c.o
+[39/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/typegen.c.o
+[40/41] Building C object sdk/tools/widl/CMakeFiles/widl.dir/parser.tab.c.o
+[41/41] Linking C executable widl
+[22/748] Performing install step for 'host-tools'
+[23/748] Completed 'host-tools'
+[24/748] Generating bugcodes.mc
+[25/748] Generating ntddk.h
+[26/748] Generating wdm.h
+[27/748] Generating ntifs.h
+[28/748] Generating bugcodes.h, bugcodes.rc
+[29/748] Generating ../ddk/ntddk.h
+[30/748] Generating ../ddk/ntifs.h
+[31/748] Generating ../ddk/wdm.h
+[32/748] Generating ntdef.h
+[33/748] Generating devioctl.h
+[34/748] Generating winnt.h
+[35/748] Generating ../psdk/ntdef.h
+[36/748] Generating ../psdk/devioctl.h
+[37/748] Generating ../psdk/winnt.h
+[38/748] Generating activation.h
+[39/748] Generating asptlb.h
+[40/748] Generating activaut.h
+[41/748] Generating audioclient.h
+[42/748] Generating activscp.h
+[43/748] Generating activdbg.h
+[44/748] Generating bits.h
+[45/748] Generating bits1_5.h
+[46/748] Generating atliface.h
+[47/748] Generating bdaiface.h
+[48/748] Generating bits2_0.h
+[49/748] Generating bits2_5.h
+[50/748] Generating audiopolicy.h
+[51/748] Generating bits3_0.h
+[52/748] Generating comcat.h
+[53/748] Generating cor.h
+[54/748] Generating control.h
+[55/748] Generating cordebug.h
+[56/748] Generating commoncontrols.h
+[57/748] Generating ctxtcall.h
+[58/748] Generating ctfutb.h
+[59/748] Generating ctffunc.h
+[60/748] Generating devenum.h
+[61/748] Generating dimm.h
+[62/748] Generating devicetopology.h
+[63/748] Generating dispex.h
+[64/748] Generating docobj.h
+[65/748] Generating dxgiformat.h
+[66/748] Generating emptyvc.h
+[67/748] Generating downloadmgr.h
+[68/748] Generating drmexternals.h
+[69/748] Generating endpointvolume.h
+[70/748] Generating fusion.h
+[71/748] Generating hstring.h
+[72/748] Generating hlink.h
+[73/748] Generating exdisp.h
+[74/748] Generating htiframe.h
+[75/748] Generating htiface.h
+[76/748] Generating icftypes.h
+[77/748] Generating iads.h
+[78/748] Generating httprequest.h
+[79/748] Generating imnact.h
+[80/748] Generating imnxport.h
+[81/748] Generating indexsrv.h
+[82/748] Generating inseng.h
+[83/748] Generating ieautomation.h
+[84/748] Generating inspectable.h
+[85/748] Generating inputscope.h
+[86/748] Generating mediaobj.h
+[87/748] Generating metahost.h
+[88/748] Generating mfidl.h
+[89/748] Generating mfobjects.h
+[90/748] Generating mimeinfo.h
+[91/748] Generating mlang.h
+[92/748] Generating mftransform.h
+[93/748] Generating mimeole.h
+[94/748] Generating mmdeviceapi.h
+[95/748] Generating mscoree.h
+[96/748] Generating msaatext.h
+[97/748] Generating msctf.h
+[98/748] Generating docobjectservice.h
+[99/748] Generating msdadc.h
+[100/748] Generating mshtmhst.h
+[101/748] Generating mstask.h
+[102/748] Generating msinkaut.h
+[103/748] Generating msxml.h
+[104/748] Generating natupnp.h
+[105/748] Generating msxml2.h
+[106/748] Generating netcon.h
+[107/748] Generating msxml6.h
+[108/748] Generating netfw.h
+[109/748] Generating oaidl.h
+[110/748] Generating objectarray.h
+[111/748] Generating objidl.h
+[112/748] Generating objidlbase.h
+[113/748] Generating objsafe.h
+[114/748] Generating oleacc.h
+[115/748] Generating ocmm.h
+[116/748] Generating oleidl.h
+[117/748] Generating ocidl.h
+[118/748] Generating optary.h
+[119/748] Generating perhist.h
+[120/748] Generating oledb.h
+[121/748] Generating propidl.h
+[122/748] Generating pstore.h
+[123/748] Generating restrictederrorinfo.h
+[124/748] Generating richole.h
+[125/748] Generating roparameterizediid.h
+[126/748] Generating propsys.h
+[127/748] Generating servprov.h
+[128/748] Generating sensevts.h
+[129/748] Generating shldisp.h
+[130/748] Generating shtypes.h
+[131/748] Generating shdeprecated.h
+[132/748] Generating shobjidl.h
+[133/748] Generating strmif.h
+[134/748] Generating structuredquerycondition.h
+[135/748] Generating textstor.h
+[136/748] Generating taskschd.h
+[137/748] Generating transact.h
+[138/748] Generating tlogstg.h
+[139/748] Generating mshtml.h
+[140/748] Generating txcoord.h
+[141/748] Generating txdtc.h
+[142/748] Generating tom.h
+[143/748] Generating unknwn.h
+[144/748] Generating tuner.h
+[145/748] Generating uiautomationcore.h
+[146/748] Generating vmr9.h
+[147/748] Generating urlhist.h
+[148/748] Generating uiautomationclient.h
+[149/748] Generating urlmon.h
+[150/748] Generating vsbackup.h
+[151/748] Generating vss.h
+[152/748] Generating wbemprov.h
+[153/748] Generating vswriter.h
+[154/748] Generating wia_lh.h
+[155/748] Generating wbemcli.h
+[156/748] Generating wia_xp.h
+[157/748] Generating wbemdisp.h
+[158/748] Generating winsxs.h
+[159/748] Generating wincodecsdk.h
+[160/748] Generating wincodec.h
+[161/748] Generating wmiutils.h
+[162/748] Generating wmsbuffer.h
+[163/748] Generating wtypes.h
+[164/748] Generating wmdrmsdk.h
+[165/748] Generating wuapi.h
+[166/748] Generating xmldso.h
+[167/748] Generating xmldom.h
+[168/748] Generating xmllite.h
+[169/748] Generating wmsdkidl.h
+[170/748] Building C object hal/halx86/CMakeFiles/lib_hal_up.dir/generic/buildtype.c.obj
+[171/748] Building C object hal/halx86/CMakeFiles/lib_hal_up.dir/generic/up.c.obj
+[172/748] Building C object sdk/include/asm/CMakeFiles/genincdata.dir/genincdata.c.obj
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/sdk/include/asm/genincdata.c:5: warning: "_NTSYSTEM_" redefined
+    5 | #define _NTSYSTEM_
+      | 
+<command-line>: note: this is the location of the previous definition
+[173/748] Linking C shared module sdk/include/asm/genincdata.dll
+[174/748] Generating ks386.inc
+[175/748] Building C object hal/halx86/CMakeFiles/lib_hal_up.dir/generic/spinlock.c.obj
+[176/748] Building C object drivers/base/bootvid/CMakeFiles/xboxbvid.dir/common.c.obj
+[177/748] Building C object drivers/base/bootvid/CMakeFiles/xboxbvid.dir/i386/xbox/bootvid.c.obj
+[178/748] Building C object drivers/base/bootvid/CMakeFiles/xboxbvid.dir/fontdata.c.obj
+[179/748] Building C object drivers/base/kdrosdbg/CMakeFiles/kdcom.dir/kdrosdbg.c.obj
+[180/748] Building C object drivers/base/bootvid/CMakeFiles/xboxbvid.dir/console.c.obj
+[181/748] Linking C static library drivers/base/bootvid/libxboxbvid.a
+[182/748] Building C object drivers/bus/pci/CMakeFiles/pci.dir/fdo.c.obj
+[183/748] Building C object drivers/bus/pci/CMakeFiles/pci.dir/pci.c.obj
+[184/748] Building C object drivers/bus/pci/CMakeFiles/pci.dir/pdo.c.obj
+[185/748] Linking C static library drivers/bus/pci/libpci.a
+[186/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/cleanup.c.obj
+[187/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/blockdev.c.obj
+[188/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/close.c.obj
+[189/748] Building C object drivers/filesystems/xdvdfs/CMakeFiles/xdvdfs.dir/xdvdfs.c.obj
+[190/748] Linking C static library drivers/filesystems/xdvdfs/libxdvdfs.a
+[191/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/direntry.c.obj
+[192/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/dir.c.obj
+[193/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/create.c.obj
+[194/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/dirwr.c.obj
+[195/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/ea.c.obj
+[196/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/fastio.c.obj
+[197/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/fat.c.obj
+[198/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/flush.c.obj
+[199/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/fcb.c.obj
+[200/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/finfo.c.obj
+[201/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/kdbg.c.obj
+[202/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/iface.c.obj
+[203/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/fsctl.c.obj
+[204/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/pnp.c.obj
+[205/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/misc.c.obj
+[206/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/shutdown.c.obj
+[207/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/string.c.obj
+[208/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/rw.c.obj
+[209/748] Building C object drivers/filesystems/vfatfs/CMakeFiles/vfatfs.dir/volume.c.obj
+[210/748] Building C object drivers/storage/class/nxcdrom/CMakeFiles/nxcdrom.dir/nxcdrom.c.obj
+[211/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/clntirp.c.obj
+[212/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/create.c.obj
+[213/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/autorun.c.obj
+[214/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/data.c.obj
+[215/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/dictlib.c.obj
+[216/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/debug.c.obj
+[217/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/guid.c.obj
+[218/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/dispatch.c.obj
+[219/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/history.c.obj
+[220/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/lock.c.obj
+[221/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/obsolete.c.obj
+[222/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/retry.c.obj
+[223/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/srblib.c.obj
+[224/748] Building C object drivers/storage/class/disk/CMakeFiles/disk.dir/data.c.obj
+[225/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/class.c.obj
+[226/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/xferpkt.c.obj
+[227/748] Building C object drivers/storage/class/disk/CMakeFiles/disk.dir/geometry.c.obj
+[228/748] Building C object drivers/storage/class/disk/CMakeFiles/disk.dir/pnp.c.obj
+[229/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/atapi.c.obj
+[230/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/dev_config.c.obj
+[231/748] Building C object drivers/storage/class/disk/CMakeFiles/disk.dir/disk.c.obj
+[232/748] Building C object drivers/storage/class/classpnp/CMakeFiles/classpnp.dir/utils.c.obj
+[233/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/dev_identify.c.obj
+[234/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/dev_error.c.obj
+[235/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/dev_power.c.obj
+[236/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/dev_timings.c.obj
+[237/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/fdo.c.obj
+[238/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/ioctl.c.obj
+[239/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/enum.c.obj
+[240/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/pdo.c.obj
+[241/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/portstate.c.obj
+[242/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/satl.c.obj
+[243/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/smart.c.obj
+[244/748] Building C object drivers/storage/ide/pciide/CMakeFiles/pciide.dir/pciide.c.obj
+[245/748] Linking C static library drivers/storage/ide/pciide/libpciide.a
+[246/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/chipset/amd.c.obj
+[247/748] Building C object drivers/storage/ide/atapi/CMakeFiles/atapi.dir/scsi.c.obj
+[248/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/chipset/pata_hw.c.obj
+[249/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/chipset/pata_generic.c.obj
+[250/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/acpi.c.obj
+[251/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/chipset/via.c.obj
+[252/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/chipset/pata_io.c.obj
+[253/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/fdo.c.obj
+[254/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/miniport.c.obj
+[255/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/pciidex.c.obj
+[256/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/power.c.obj
+[257/748] Building C object drivers/storage/ide/pciidex/CMakeFiles/pciidex.dir/pdo.c.obj
+[258/748] Linking C static library drivers/storage/ide/pciidex/libpciidex.a
+[259/748] Building C object drivers/storage/mountmgr/CMakeFiles/mountmgr.dir/database.c.obj
+[260/748] Building C object drivers/storage/mountmgr/CMakeFiles/mountmgr.dir/notify.c.obj
+[261/748] Building C object drivers/storage/mountmgr/CMakeFiles/mountmgr.dir/mountmgr.c.obj
+[262/748] Building C object drivers/storage/mountmgr/CMakeFiles/mountmgr.dir/uniqueid.c.obj
+[263/748] Building C object drivers/storage/mountmgr/CMakeFiles/mountmgr.dir/point.c.obj
+[264/748] Building C object drivers/storage/mountmgr/CMakeFiles/mountmgr.dir/device.c.obj
+[265/748] Building C object drivers/storage/mountmgr/CMakeFiles/mountmgr.dir/symlink.c.obj
+[266/748] Building C object drivers/storage/partmgr/CMakeFiles/partmgr.dir/guid.c.obj
+[267/748] Generating pci_classes.c, pci_classes.h
+[268/748] Building C object drivers/storage/partmgr/CMakeFiles/partmgr.dir/partition.c.obj
+[269/748] Building C object drivers/storage/partmgr/CMakeFiles/partmgr.dir/utils.c.obj
+[270/748] Building ASM object sdk/lib/crt/CMakeFiles/chkstk.dir/except/i386/chkstk_asm.s.obj
+[271/748] Linking C static library sdk/lib/crt/libchkstk.a
+[272/748] Generating pci_vendors.c, pci_vendors.h
+[273/748] Building C object sdk/lib/crt/CMakeFiles/memcmp.dir/mem/memcmp.c.obj
+[274/748] Building C object sdk/lib/cportlib/CMakeFiles/cportlib.dir/cport.c.obj
+[275/748] Building C object drivers/storage/partmgr/CMakeFiles/partmgr.dir/partmgr.c.obj
+[276/748] Linking C static library drivers/storage/partmgr/libpartmgr.a
+[277/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/beep.c.obj
+[278/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/display.c.obj
+[279/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/cmos.c.obj
+[280/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/drive.c.obj
+[281/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/halinit.c.obj
+[282/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/dma.c.obj
+[283/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/kdpci.c.obj
+[284/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/misc.c.obj
+[285/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/memory.c.obj
+[286/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/pic.c.obj
+[287/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/nmi.c.obj
+[288/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/sysinfo.c.obj
+[289/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/nxkrnl-x86bios-stub.c.obj
+[290/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/portio.c.obj
+[291/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/usage.c.obj
+[292/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/bus/bushndlr.c.obj
+[293/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/bus/cmosbus.c.obj
+[294/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/bus/isabus.c.obj
+[295/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/nxkrnl-pci-strings-stub.c.obj
+[296/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/bus/sysbus.c.obj
+[297/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/bus/pcibus.c.obj
+[298/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/bussupp.c.obj
+[299/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/halpnpdd.c.obj
+[300/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/legacy/halpcat.c.obj
+[301/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/profil.c.obj
+[302/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/timer.c.obj
+[303/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/halinit.c.obj
+[304/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/clock.c.obj
+[305/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/pci.c.obj
+[306/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/reboot.c.obj
+[307/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/av.c.obj
+[308/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/hal.c.obj
+[309/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/smbus.c.obj
+[310/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/phy.c.obj
+[311/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/video/xbox-video-support.c.obj
+[312/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/video/VideoInitialization.c.obj
+[313/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/video/BootVgaInitialization.c.obj
+[314/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/video/xcalibur.c.obj
+[315/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/video/focus.c.obj
+[316/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/video/conexant.c.obj
+[317/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/xbox/pci-bringup/cromwell-pci.c.obj
+[318/748] Building ASM object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/systimer.S.obj
+[319/748] Building ASM object hal/halx86/CMakeFiles/lib_hal_xbox.dir/generic/trap.S.obj
+[320/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/pic/irql.c.obj
+[321/748] Building ASM object hal/halx86/CMakeFiles/lib_hal_xbox.dir/pic/pic.S.obj
+[322/748] Linking C static library sdk/lib/cportlib/libcportlib.a
+[323/748] Linking C static library sdk/lib/crt/libmemcmp.a
+[324/748] Linking C static library drivers/base/kdrosdbg/libkdcom.a
+[325/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_chgsignf.c.obj
+[326/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_dclass.c.obj
+[327/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_dsign.c.obj
+[328/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_dtest.c.obj
+[329/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_fdsign.c.obj
+[330/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_fdclass.c.obj
+[331/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/pic/processor.c.obj
+[332/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_fdtest.c.obj
+[333/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_finite.c.obj
+[334/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_finitef.c.obj
+[335/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_isnan.c.obj
+[336/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_isnanf.c.obj
+[337/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/_invoke_matherr.c.obj
+[338/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/abs.c.obj
+[339/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/exp2f.c.obj
+[340/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/labs.c.obj
+[341/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/nextafter.c.obj
+[342/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/nextafterf.c.obj
+[343/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/round.c.obj
+[344/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/nexttowardf.c.obj
+[345/748] Building C object hal/halx86/CMakeFiles/lib_hal_xbox.dir/pic/pic.c.obj
+[346/748] Linking C static library hal/halx86/libhalxbox.a
+[347/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/roundf.c.obj
+[348/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/scalbn.c.obj
+[349/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/scalbnf.c.obj
+[350/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/fabs.c.obj
+[351/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/sincos.c.obj
+[352/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/div.c.obj
+[353/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/fabsf.c.obj
+[354/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/ci.c.obj
+[355/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/cilog.c.obj
+[356/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/cicos.c.obj
+[357/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/cipow.c.obj
+[358/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/cisin.c.obj
+[359/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/mem/memccpy.c.obj
+[360/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/cisqrt.c.obj
+[361/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/ldexp.c.obj
+[362/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/libm_sse2.c.obj
+[363/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/mem/memcmp.c.obj
+[364/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/misc/fltused.c.obj
+[365/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/_snprintf.c.obj
+[366/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/_snwprintf.c.obj
+[367/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/_swprintf.c.obj
+[368/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/_vscwprintf.c.obj
+[369/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/_vscprintf.c.obj
+[370/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/_vsnprintf.c.obj
+[371/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/_vsnwprintf.c.obj
+[372/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/_vswprintf.c.obj
+[373/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/sprintf.c.obj
+[374/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/vprintf.c.obj
+[375/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/vsprintf.c.obj
+[376/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/mem/memicmp.c.obj
+[377/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/search/lfind.c.obj
+[378/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/search/bsearch.c.obj
+[379/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/streamout.c.obj
+[380/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/stdlib/rand_nt.c.obj
+[381/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/printf/wstreamout.c.obj
+[382/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/_stricmp_nt.c.obj
+[383/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/stdlib/qsort.c.obj
+[384/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/_strlwr_nt.c.obj
+[385/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/_strnicmp_nt.c.obj
+[386/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/stdlib/_invalid_parameter_nt.c.obj
+[387/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/_splitpath.c.obj
+[388/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/_strupr_nt.c.obj
+[389/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/atoi.c.obj
+[390/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/_wsplitpath.c.obj
+[391/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/iswctype_nt.c.obj
+[392/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/atoi64.c.obj
+[393/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/ctype.c.obj
+[394/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/atol.c.obj
+[395/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/mbstowcs_nt.c.obj
+[396/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strcspn.c.obj
+[397/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strpbrk.c.obj
+[398/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/itow.c.obj
+[399/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/itoa.c.obj
+[400/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strset.c.obj
+[401/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strspn.c.obj
+[402/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strrev.c.obj
+[403/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strstr.c.obj
+[404/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strtoi64.c.obj
+[405/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strtoul.c.obj
+[406/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strtol.c.obj
+[407/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/tolower_nt.c.obj
+[408/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/strtoull.c.obj
+[409/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/toupper_nt_mb.c.obj
+[410/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/towupper_nt.c.obj
+[411/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/wcstombs_nt.c.obj
+[412/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/scanf.c.obj
+[413/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/wcstol.c.obj
+[414/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/wcs.c.obj
+[415/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/wctype.c.obj
+[416/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/wtol.c.obj
+[417/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/wcstoul.c.obj
+[418/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/wtoi.c.obj
+[419/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/wtoi64.c.obj
+[420/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/winesup.c.obj
+[421/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/wstring/wcscspn.c.obj
+[422/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/wstring/_wcsicmp_nt.c.obj
+[423/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/wstring/wcsspn.c.obj
+[424/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/wstring/_wcsupr_nt.c.obj
+[425/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/wstring/_wcsnicmp_nt.c.obj
+[426/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/misc/i386/readcr4.S.obj
+[427/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/except/i386/chkstk_asm.s.obj
+[428/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/alldiv_asm.s.obj
+[429/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/alldvrm_asm.s.obj
+[430/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/allrem_asm.s.obj
+[431/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/allmul_asm.s.obj
+[432/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/allshl_asm.s.obj
+[433/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/allshr_asm.s.obj
+[434/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/wstring/wcsstr.c.obj
+[435/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/atan_asm.s.obj
+[436/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/atan2_asm.s.obj
+[437/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/aullrem_asm.s.obj
+[438/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/aulldiv_asm.s.obj
+[439/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/aulldvrm_asm.s.obj
+[440/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/aullshr_asm.s.obj
+[441/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/cos_asm.s.obj
+[442/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/ceil_asm.s.obj
+[443/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/floor_asm.s.obj
+[444/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/ftol_asm.s.obj
+[445/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/ftol2_asm.s.obj
+[446/748] Building C object sdk/lib/crt/CMakeFiles/libcntpr.dir/wstring/_wcslwr_nt.c.obj
+[447/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/log_asm.s.obj
+[448/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/ftoul2_legacy_asm.s.obj
+[449/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/log10_asm.s.obj
+[450/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/pow_asm.s.obj
+[451/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/sin_asm.s.obj
+[452/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/sqrt_asm.s.obj
+[453/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/math/i386/tan_asm.s.obj
+[454/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/mem/i386/memmove_asm.s.obj
+[455/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/mem/i386/memset_asm.s.obj
+[456/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strcat_asm.s.obj
+[457/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/mem/i386/memchr_asm.s.obj
+[458/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strcmp_asm.s.obj
+[459/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strcpy_asm.s.obj
+[460/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strchr_asm.s.obj
+[461/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strlen_asm.s.obj
+[462/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strncat_asm.s.obj
+[463/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strncmp_asm.s.obj
+[464/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strncpy_asm.s.obj
+[465/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strnlen_asm.s.obj
+[466/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/strrchr_asm.s.obj
+[467/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcscat_asm.s.obj
+[468/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcschr_asm.s.obj
+[469/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcscmp_asm.s.obj
+[470/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcscpy_asm.s.obj
+[471/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcslen_asm.s.obj
+[472/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcsncat_asm.s.obj
+[473/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcsncpy_asm.s.obj
+[474/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcsncmp_asm.s.obj
+[475/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcsrchr_asm.s.obj
+[476/748] Building ASM object sdk/lib/crt/CMakeFiles/libcntpr.dir/string/i386/wcsnlen_asm.s.obj
+[477/748] Linking C static library sdk/lib/crt/liblibcntpr.a
+[478/748] Building C object sdk/lib/drivers/ntoskrnl_vista/CMakeFiles/ntoskrnl_vista.dir/etw.c.obj
+[479/748] Building C object sdk/lib/drivers/csq/CMakeFiles/csq.dir/csq.c.obj
+[480/748] Linking C static library sdk/lib/drivers/csq/libcsq.a
+[481/748] Building C object sdk/lib/drivers/ntoskrnl_vista/CMakeFiles/ntoskrnl_vista.dir/io.c.obj
+[482/748] Building C object sdk/lib/drivers/ntoskrnl_vista/CMakeFiles/ntoskrnl_vista.dir/fsrtl.c.obj
+[483/748] Building C object sdk/lib/drivers/ntoskrnl_vista/CMakeFiles/ntoskrnl_vista.dir/pofx.c.obj
+[484/748] Building C object sdk/lib/drivers/ntoskrnl_vista/CMakeFiles/ntoskrnl_vista.dir/po.c.obj
+[485/748] Building C object sdk/lib/drivers/ntoskrnl_vista/CMakeFiles/ntoskrnl_vista.dir/ke.c.obj
+[486/748] Building C object sdk/lib/ioevent/CMakeFiles/ioevent.dir/ioevent.c.obj
+[487/748] Linking C static library sdk/lib/ioevent/libioevent.a
+[488/748] Linking C static library drivers/storage/mountmgr/libmountmgr.a
+[489/748] Building ASM object sdk/lib/pseh/CMakeFiles/pseh.dir/i386/pseh3_i386.S.obj
+[490/748] Building ASM object sdk/lib/pseh/CMakeFiles/pseh.dir/i386/seh.s.obj
+[491/748] Building ASM object sdk/lib/pseh/CMakeFiles/pseh.dir/i386/seh_prolog.s.obj
+[492/748] Building C object sdk/lib/pseh/CMakeFiles/pseh.dir/i386/pseh3.c.obj
+[493/748] Linking C static library sdk/lib/pseh/libpseh.a
+[494/748] Linking C static library drivers/filesystems/vfatfs/libvfatfs.a
+[495/748] Building C object sdk/lib/drivers/sptilib/CMakeFiles/sptilib.dir/sptilib.c.obj
+[496/748] Linking C static library sdk/lib/drivers/sptilib/libsptilib.a
+[497/748] Linking C static library drivers/storage/ide/atapi/libatapi.a
+[498/748] Building C object sdk/lib/drivers/ntoskrnl_vista/CMakeFiles/ntoskrnl_vista.dir/__/__/rtl/utf8.c.obj
+[499/748] Linking C static library sdk/lib/drivers/ntoskrnl_vista/libntoskrnl_vista.a
+[500/748] Linking C static library drivers/storage/class/nxcdrom/libnxcdrom.a
+[501/748] Linking C static library drivers/storage/class/classpnp/libclasspnp.a
+[502/748] Linking C static library drivers/storage/class/disk/libdisk.a
+[503/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/access.c.obj
+[504/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/acl.c.obj
+[505/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/assert.c.obj
+[506/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/avltable.c.obj
+[507/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/crc32.c.obj
+[508/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/bitmap.c.obj
+[509/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/debug.c.obj
+[510/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/error.c.obj
+[511/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/exception.c.obj
+[512/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/generictable.c.obj
+[513/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/image.c.obj
+[514/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/random.c.obj
+[515/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/largeint.c.obj
+[516/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/res.c.obj
+[517/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/splaytree.c.obj
+[518/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/sd.c.obj
+[519/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/sid.c.obj
+[520/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/time.c.obj
+[521/748] Building ASM object sdk/lib/rtl/CMakeFiles/rtl.dir/i386/debug_asm.S.obj
+[522/748] Building ASM object sdk/lib/rtl/CMakeFiles/rtl.dir/i386/except_asm.s.obj
+[523/748] Building ASM object sdk/lib/rtl/CMakeFiles/rtl.dir/i386/interlck.S.obj
+[524/748] Building ASM object sdk/lib/rtl/CMakeFiles/rtl.dir/i386/rtlmem.s.obj
+[525/748] Building ASM object sdk/lib/rtl/CMakeFiles/rtl.dir/i386/rtlswap.S.obj
+[526/748] Building ASM object sdk/lib/rtl/CMakeFiles/rtl.dir/i386/res_asm.s.obj
+[527/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/timezone.c.obj
+[528/748] Building ASM object sdk/lib/vcruntime/CMakeFiles/setjmp.dir/i386/__longjmp_nounwind.s.obj
+[529/748] Building C object sdk/lib/vcruntime/CMakeFiles/setjmp.dir/i386/longjmp.c.obj
+[530/748] Building ASM object sdk/lib/vcruntime/CMakeFiles/setjmp.dir/i386/_seh_longjmp_unwind.s.obj
+[531/748] Building ASM object sdk/lib/vcruntime/CMakeFiles/setjmp.dir/i386/_setjmp.s.obj
+[532/748] Building ASM object sdk/lib/vcruntime/CMakeFiles/setjmp.dir/i386/_setjmp3.s.obj
+[533/748] Linking C static library sdk/lib/vcruntime/libsetjmp.a
+[534/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/i386/except.c.obj
+[535/748] Building C object sdk/lib/rtl/CMakeFiles/rtl.dir/unicode.c.obj
+[536/748] Linking C static library sdk/lib/rtl/librtl.a
+[537/748] Embedding the Unicode case table into the kernel
+[538/748] Generating the Xbox-ordinal export spec + scaffold
+gen-exports: 371 ordinals (337 function, 34 data); 361 mapped, 10 scaffold stub(s)
+[539/748] Generating xboxkrnl.def, xboxkrnl_stubs.c
+[540/748] Generating export-root anchors
+gen-export-roots: 371 exports rooted
+[541/748] Baking the nxkrnl version banner
+[542/748] Building ASM object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/i386/ioport.S.obj
+[543/748] Building ASM object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/ctxswitch.S.obj
+[544/748] Building ASM object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/i386/fastinterlck_asm.S.obj
+[545/748] Building ASM object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/trap.s.obj
+[546/748] Building ASM object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/zeropage.S.obj
+[547/748] Building ASM object ntoskrnl/CMakeFiles/ntoskrnl.dir/rtl/i386/prefetch.S.obj
+[548/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/cache/section/io.c.obj
+[549/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/event.c.obj
+[550/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/cache/section/sptab.c.obj
+[551/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/callback.c.obj
+[552/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/exintrin.c.obj
+[553/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/fmutex.c.obj
+[554/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/harderr.c.obj
+[555/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/handle.c.obj
+[556/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/interlocked.c.obj
+[557/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/locale.c.obj
+[558/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/init.c.obj
+[559/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/lookas.c.obj
+[560/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/mutant.c.obj
+[561/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/pushlock.c.obj
+[562/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/sem.c.obj
+[563/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/rundown.c.obj
+[564/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/resource.c.obj
+[565/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/uuid.c.obj
+[566/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/timer.c.obj
+[567/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/time.c.obj
+[568/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/sysinfo.c.obj
+[569/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ex/work.c.obj
+[570/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/filelock.c.obj
+[571/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/filter.c.obj
+[572/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/fastio.c.obj
+[573/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/fsrtlpc.c.obj
+[574/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/filtrctx.c.obj
+[575/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/name.c.obj
+[576/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/pnp.c.obj
+[577/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/notify.c.obj
+[578/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/largemcb.c.obj
+[579/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/stackovf.c.obj
+[580/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fstub/disksup.c.obj
+[581/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fsrtl/tunnel.c.obj
+[582/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fstub/fstubex.c.obj
+[583/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fstub/halstub.c.obj
+[584/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/fstub/translate.c.obj
+[585/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/inbv/bootanim.c.obj
+[586/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/inbv/inbv.c.obj
+[587/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/adapter.c.obj
+[588/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/arcname.c.obj
+[589/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/device.c.obj
+[590/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/driver.c.obj
+[591/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/error.c.obj
+[592/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/iocomp.c.obj
+[593/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/iomdl.c.obj
+[594/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/file.c.obj
+[595/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/iorsrce.c.obj
+[596/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/iomgr.c.obj
+[597/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/iotimer.c.obj
+[598/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/iofunc.c.obj
+[599/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/iowork.c.obj
+[600/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/irq.c.obj
+[601/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/rawfs.c.obj
+[602/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/irp.c.obj
+[603/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/remlock.c.obj
+[604/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/symlink.c.obj
+[605/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/util.c.obj
+[606/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/apc.c.obj
+[607/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/io/iomgr/volume.c.obj
+[608/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/bug.c.obj
+[609/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/clock.c.obj
+[610/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/devqueue.c.obj
+[611/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/eventobj.c.obj
+[612/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/dpc.c.obj
+[613/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/except.c.obj
+[614/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/freeze.c.obj
+[615/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/gate.c.obj
+[616/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/ipi.c.obj
+[617/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/gmutex.c.obj
+[618/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/krnlinit.c.obj
+[619/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/mutex.c.obj
+[620/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/processor.c.obj
+[621/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/procobj.c.obj
+[622/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/queue.c.obj
+[623/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/semphobj.c.obj
+[624/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/spinlock.c.obj
+[625/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/time.c.obj
+[626/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/thrdschd.c.obj
+[627/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/timerobj.c.obj
+[628/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/thrdobj.c.obj
+[629/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/drvmgmt.c.obj
+[630/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/hypermap.c.obj
+[631/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/wait.c.obj
+[632/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/contmem.c.obj
+[633/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/iosup.c.obj
+[634/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/mmdbg.c.obj
+[635/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/mdlsup.c.obj
+[636/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/mminit.c.obj
+[637/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/mmsup.c.obj
+[638/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/pfnlist.c.obj
+[639/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/special.c.obj
+[640/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/procsup.c.obj
+[641/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/session.c.obj
+[642/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/syspte.c.obj
+[643/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/zeropage.c.obj
+[644/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/sysldr.c.obj
+[645/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/freelist.c.obj
+[646/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/mminit.c.obj
+[647/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/devicemap.c.obj
+[648/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/obdir.c.obj
+[649/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/obinit.c.obj
+[650/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/oblink.c.obj
+[651/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/oblife.c.obj
+[652/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/obhandle.c.obj
+[653/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/obname.c.obj
+[654/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/obref.c.obj
+[655/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/obsecure.c.obj
+[656/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/obsdcach.c.obj
+[657/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ps/debug.c.obj
+[658/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ob/obwait.c.obj
+[659/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ps/kill.c.obj
+[660/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ps/process.c.obj
+[661/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ps/psmgr.c.obj
+[662/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ps/psnotify.c.obj
+[663/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ps/quota.c.obj
+[664/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ps/state.c.obj
+[665/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/rtl/misc.c.obj
+[666/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ps/thread.c.obj
+[667/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/rtl/libsupp.c.obj
+[668/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/kistacks.c.obj
+[669/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/devtree.c.obj
+[670/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/nls-stubs.c.obj
+[671/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/pci.c.obj
+[672/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/pnpstubs.c.obj
+[673/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/se/debug.c.obj
+[674/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/context.c.obj
+[675/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/exp.c.obj
+[676/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/cpu.c.obj
+[677/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/freeze.c.obj
+[678/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/irqobj.c.obj
+[679/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/ldt.c.obj
+[680/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/mtrr.c.obj
+[681/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/kiinit.c.obj
+[682/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/patpge.c.obj
+[683/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/thrdini.c.obj
+[684/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/i386/procsup.c.obj
+[685/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/ke/i386/traphdlr.c.obj
+[686/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/ARM3/i386/init.c.obj
+[687/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/mm/i386/page.c.obj
+[688/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd64/kdbreak.c.obj
+[689/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd64/kddata.c.obj
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/kd64/kddata.c:528:1: warning: missing braces around initializer [-Wmissing-braces]
+  528 | {
+      | ^
+......
+  544 |     0,
+      |     {}
+[690/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd64/kdapi.c.obj
+[691/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd64/kdinit.c.obj
+[692/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd64/kdlock.c.obj
+[693/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd64/kdprint.c.obj
+[694/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd64/kdtrap.c.obj
+[695/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd/i386/kdserial.c.obj
+[696/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd64/i386/kdx86.c.obj
+[697/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd/kdprompt.c.obj
+[698/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd/kdmain.c.obj
+[699/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd/kdio.c.obj
+[700/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/guid.c.obj
+[701/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb-nls.c.obj
+[702/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd/kdps2kbd.c.obj
+[703/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb-exports.c.obj
+[704/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd/kdserial.c.obj
+[705/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/kd/kdterminal.c.obj
+[706/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb-version.c.obj
+[707/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/init.c.obj
+[708/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/contig.c.obj
+[709/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/persistence.c.obj
+In file included from /work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/xb/mm/persistence.c:9:
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/mm/ARM3/miarm.h: In function ‘MI_WS_OWNER’:
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/mm/ARM3/miarm.h:1089:9: warning: implicit declaration of function ‘DPRINT’ [-Wimplicit-function-declaration]
+ 1089 |         DPRINT("Thread: %p is not an owner\n", PsGetCurrentThread());
+      |         ^~~~~~
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/mm/ARM3/miarm.h: In function ‘MiDropLockCount’:
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/mm/ARM3/miarm.h:1609:13: warning: implicit declaration of function ‘DPRINT1’ [-Wimplicit-function-declaration]
+ 1609 |             DPRINT1("Not returning commit for prototype PTE\n");
+      |             ^~~~~~~
+[710/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/sysva.c.obj
+[711/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/iospace.c.obj
+[712/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/api.c.obj
+[713/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/__/sdk/lib/cryptlib/sha1.c.obj
+[714/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/arm3stubs.c.obj
+[715/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/__/sdk/lib/cryptlib/rc4.c.obj
+[716/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/pagesupply.c.obj
+[717/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/strace.c.obj
+[718/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/eeprom.c.obj
+[719/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/crypto.c.obj
+[720/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/refurb.c.obj
+[721/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/rwlock.c.obj
+[722/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/titlekeys.c.obj
+[723/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/interrupt.c.obj
+[724/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/ide.c.obj
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/xb/ide.c:9:1: warning: ‘align’ attribute directive ignored [-Wattributes]
+    9 | __declspec(align(16)) NX_IDE_CHANNEL IdexChannelObject;
+      | ^~~~~~~~~~
+[725/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/procobj.c.obj
+[726/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/shutdown.c.obj
+[727/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/sizeddata.c.obj
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/xb/sizeddata.c:35:1: warning: ‘align’ attribute directive ignored [-Wattributes]
+   35 | __declspec(align(16)) UCHAR XePublicKeyData[XE_PUBLIC_KEY_SIZE];
+      | ^~~~~~~~~~
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/xb/sizeddata.c:49:1: warning: ‘align’ attribute directive ignored [-Wattributes]
+   49 | __declspec(align(16)) UCHAR XboxEEPROMKey[16];
+      | ^~~~~~~~~~
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/xb/sizeddata.c:55:1: warning: ‘align’ attribute directive ignored [-Wattributes]
+   55 | __declspec(align(16)) UCHAR MmGlobalData[32];
+      | ^~~~~~~~~~
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/xb/sizeddata.c:59:1: warning: ‘align’ attribute directive ignored [-Wattributes]
+   59 | __declspec(align(16)) UCHAR ObpObjectHandleTable[48];
+      | ^~~~~~~~~~
+[728/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/rtlprintf.c.obj
+[729/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/rtlbyteswap.c.obj
+[730/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/debugprompt.c.obj
+[731/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/exflist.c.obj
+[732/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/rtlassert.c.obj
+[733/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/object-types.c.obj
+[734/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/scattergather.c.obj
+In file included from /work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/xb/scattergather.c:7:
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/mm/ARM3/miarm.h: In function ‘MI_WS_OWNER’:
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/mm/ARM3/miarm.h:1089:9: warning: implicit declaration of function ‘DPRINT’ [-Wimplicit-function-declaration]
+ 1089 |         DPRINT("Thread: %p is not an owner\n", PsGetCurrentThread());
+      |         ^~~~~~
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/mm/ARM3/miarm.h: In function ‘MiDropLockCount’:
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/mm/ARM3/miarm.h:1609:13: warning: implicit declaration of function ‘DPRINT1’ [-Wimplicit-function-declaration]
+ 1609 |             DPRINT1("Not returning commit for prototype PTE\n");
+      |             ^~~~~~~
+[735/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/obcreate.c.obj
+[736/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/psstats.c.obj
+[737/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/devnode.c.obj
+[738/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/xbe.c.obj
+[739/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/nxldr-entry.c.obj
+[740/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/pool.c.obj
+[741/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/poolpages.c.obj
+[742/748] Building RC object ntoskrnl/CMakeFiles/ntoskrnl.dir/ntoskrnl.rc.res
+[743/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb-export-roots.c.obj
+[744/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/fault.c.obj
+[745/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/vm.c.obj
+[746/748] Building C object ntoskrnl/CMakeFiles/ntoskrnl.dir/xb/mm/cache.c.obj
+In file included from /work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/xb/mm/cache.c:32:
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/xb/mm/cache.c: In function ‘NxcPinCommon’:
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/source/ntoskrnl/include/xb-debug.h:15:20: warning: calling ‘__builtin_return_address’ with a nonzero argument is unsafe [-Wframe-address]
+   15 | #define XbDbg(...) DbgPrint(__VA_ARGS__)
+      |                    ^~~~~~~~~~~~~~~~~~~~~
+[747/748] Linking C executable ntoskrnl/xboxkrnl.exe
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/hal/halx86/pci_vendors.h:4:22: warning: type of ‘VendorTable’ does not match original declaration [-Wlto-type-mismatch]
+    4 | extern unsigned char VendorTable[1577983];
+      |                      ^
+/hal/halx86/legacy/nxkrnl-pci-strings-stub.c:23:36: note: array types have different bounds
+/hal/halx86/legacy/nxkrnl-pci-strings-stub.c:23:36: note: ‘VendorTable’ was previously declared here
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/hal/halx86/pci_classes.h:4:22: warning: type of ‘ClassTable’ does not match original declaration [-Wlto-type-mismatch]
+    4 | extern unsigned char ClassTable[6645];
+      |                      ^
+/hal/halx86/legacy/nxkrnl-pci-strings-stub.c:22:36: note: array types have different bounds
+/hal/halx86/legacy/nxkrnl-pci-strings-stub.c:22:36: note: ‘ClassTable’ was previously declared here
+/ntoskrnl/xb/shutdown.c: In function ‘NxDrainShutdownNotifications’:
+/ntoskrnl/xb/shutdown.c:88:15: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:88:15: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c:88:15: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:88:15: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c:93:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:93:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c:93:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:93:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/bug.c: In function ‘KiDoBugCheckCallbacks’:
+/ntoskrnl/ke/bug.c:478:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/bug.c:478:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/bug.c:478:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/bug.c:478:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/bug.c: In function ‘KeGetBugMessageText’:
+/ntoskrnl/ke/bug.c:425:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/bug.c:425:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/bug.c:425:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/bug.c:425:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/irp.c: In function ‘IoBuildAsynchronousFsdRequest’:
+/ntoskrnl/io/iomgr/irp.c:852:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/irp.c:852:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/irp.c:852:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/irp.c:852:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c: In function ‘NxkShutdownNotifications’:
+/ntoskrnl/xb/shutdown.c:107:7: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:107:7: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c:107:7: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:107:7: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/res.c: In function ‘LdrpAccessResource’:
+/sdk/lib/rtl/res.c:254:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/res.c:254:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/res.c:254:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/res.c:254:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/res.c: In function ‘LdrFindResource_U’:
+/sdk/lib/rtl/res.c:290:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/res.c:290:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/res.c:290:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/res.c:290:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/thrdobj.c: In function ‘KeInitThread’:
+/ntoskrnl/ke/thrdobj.c:876:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/thrdobj.c:876:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/thrdobj.c:876:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/thrdobj.c:876:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/i386/kdx86.c: In function ‘KdpSysReadMsr’:
+/ntoskrnl/kd64/i386/kdx86.c:103:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/i386/kdx86.c:103:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/i386/kdx86.c:103:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/i386/kdx86.c:103:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/i386/kdx86.c: In function ‘KdpSysWriteMsr’:
+/ntoskrnl/kd64/i386/kdx86.c:123:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/i386/kdx86.c:123:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/i386/kdx86.c:123:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/i386/kdx86.c:123:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/debug.c: In function ‘vDbgPrintExWithPrefixInternal’:
+/sdk/lib/rtl/debug.c:96:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/debug.c:96:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/debug.c:96:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/debug.c:96:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/rawfs.c: In function ‘RawMountVolume’:
+/ntoskrnl/io/iomgr/rawfs.c:438:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/rawfs.c:438:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/rawfs.c:438:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/rawfs.c:438:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/except.c: In function ‘KiContinue’:
+/ntoskrnl/ke/except.c:74:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/except.c:74:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/except.c:74:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/except.c:74:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/irp.c: In function ‘IoBuildDeviceIoControlRequest’:
+/ntoskrnl/io/iomgr/irp.c:1044:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/irp.c:1044:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/irp.c:1044:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/irp.c:1044:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/i386/traphdlr.c: In function ‘KiCheckForSListFault’:
+/ntoskrnl/ke/i386/traphdlr.c:1381:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/i386/traphdlr.c:1381:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/i386/traphdlr.c:1381:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/i386/traphdlr.c:1381:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/mm/cache.c: In function ‘CcCopyRead’:
+/ntoskrnl/xb/mm/cache.c:865:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/mm/cache.c:865:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/mm/cache.c:865:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/mm/cache.c:865:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/mm/cache.c: In function ‘CcCopyWrite’:
+/ntoskrnl/xb/mm/cache.c:921:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/mm/cache.c:921:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/mm/cache.c:921:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/mm/cache.c:921:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c: In function ‘KdpPrompt’:
+/ntoskrnl/kd64/kdprint.c:340:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:340:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c:340:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:340:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c:387:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:387:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c:387:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:387:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c: In function ‘KdpPrintFromUser’:
+/ntoskrnl/kd64/kdprint.c:425:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:425:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c:425:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:425:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT16WriteCluster’:
+/drivers/filesystems/vfatfs/fat.c:683:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:683:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:683:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:683:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT32WriteCluster’:
+/drivers/filesystems/vfatfs/fat.c:724:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:724:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:724:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:724:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT16CountAvailableClusters’:
+/drivers/filesystems/vfatfs/fat.c:483:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:483:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:483:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:483:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/misc.c: In function ‘VfatLockUserBuffer’:
+/drivers/filesystems/vfatfs/misc.c:495:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/misc.c:495:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/misc.c:495:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/misc.c:495:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘vfatFCBInitializeCacheFromVolume’:
+/drivers/filesystems/vfatfs/dirwr.c:84:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:84:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:84:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:84:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c: In function ‘FATXIsDirectoryEmpty’:
+/drivers/filesystems/vfatfs/direntry.c:153:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:153:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c:153:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:153:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c: In function ‘FATXGetNextDirEntry’:
+/drivers/filesystems/vfatfs/direntry.c:557:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:557:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c:557:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:557:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c:600:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:600:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c:600:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:600:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘vfatFindDirSpace’:
+/drivers/filesystems/vfatfs/dirwr.c:300:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:300:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:300:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:300:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:371:21: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:371:21: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:371:21: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:371:21: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:393:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:393:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:393:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:393:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT32GetNextCluster’:
+/drivers/filesystems/vfatfs/fat.c:60:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:60:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:60:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:60:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT16GetNextCluster’:
+/drivers/filesystems/vfatfs/fat.c:105:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:105:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:105:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:105:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c: In function ‘NtQueryEvent’:
+/ntoskrnl/ex/event.c:374:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:374:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c:374:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:374:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT16FindAndMarkAvailableCluster’:
+/drivers/filesystems/vfatfs/fat.c:219:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:219:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:219:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:219:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT32FindAndMarkAvailableCluster’:
+/drivers/filesystems/vfatfs/fat.c:365:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:365:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:365:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:365:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/mutant.c: In function ‘NtQueryMutant’:
+/ntoskrnl/ex/mutant.c:277:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/mutant.c:277:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/mutant.c:277:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/mutant.c:277:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT32CountAvailableClusters’:
+/drivers/filesystems/vfatfs/fat.c:538:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:538:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:538:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:538:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘FATXDelEntry’:
+/drivers/filesystems/vfatfs/dirwr.c:1108:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:1108:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:1108:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:1108:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c: In function ‘NtQueryTimer’:
+/ntoskrnl/ex/timer.c:566:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:566:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c:566:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:566:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c: In function ‘NtCreateEvent’:
+/ntoskrnl/ex/event.c:173:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:173:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c:173:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:173:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/sem.c: In function ‘NtQuerySemaphore’:
+/ntoskrnl/ex/sem.c:282:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/sem.c:282:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/sem.c:282:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/sem.c:282:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘VfatUpdateEntry’:
+/drivers/filesystems/vfatfs/dirwr.c:160:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:160:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:160:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:160:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c: In function ‘NtPulseEvent’:
+/ntoskrnl/ex/event.c:303:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:303:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c:303:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:303:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obdir.c: In function ‘NtOpenDirectoryObject’:
+/ntoskrnl/ob/obdir.c:433:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obdir.c:433:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obdir.c:433:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obdir.c:433:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obdir.c: In function ‘NtCreateDirectoryObject’:
+/ntoskrnl/ob/obdir.c:836:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obdir.c:836:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obdir.c:836:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obdir.c:836:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c: In function ‘NtSetEvent’:
+/ntoskrnl/ex/event.c:518:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:518:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c:518:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:518:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘vfatRenameEntry’:
+/drivers/filesystems/vfatfs/dirwr.c:211:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:211:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:211:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:211:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/rw.c: In function ‘VfatCommonRead’:
+/drivers/filesystems/vfatfs/rw.c:617:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/rw.c:617:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/rw.c:617:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/rw.c:617:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/rw.c: In function ‘VfatWrite’:
+/drivers/filesystems/vfatfs/rw.c:1133:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/rw.c:1133:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/rw.c:1133:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/rw.c:1133:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c: In function ‘ReadVolumeLabel’:
+/drivers/filesystems/vfatfs/fsctl.c:407:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:407:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c:407:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:407:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c:477:21: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:477:21: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c:477:21: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:477:21: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c: In function ‘VfatMount’:
+/drivers/filesystems/vfatfs/fsctl.c:764:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:764:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c:764:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:764:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘FATXAddEntry’:
+/drivers/filesystems/vfatfs/dirwr.c:951:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:951:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:951:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:951:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/rtl/libsupp.c: In function ‘RtlWalkFrameChain’:
+/ntoskrnl/rtl/libsupp.c:508:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/rtl/libsupp.c:508:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/rtl/libsupp.c:508:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/rtl/libsupp.c:508:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/rtl/libsupp.c: In function ‘RtlImageNtHeaderEx’:
+/ntoskrnl/rtl/libsupp.c:742:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/rtl/libsupp.c:742:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/rtl/libsupp.c:742:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/rtl/libsupp.c:742:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/storage/class/classpnp/utils.c: In function ‘ClasspBuildDeviceMdl’:
+/drivers/storage/class/classpnp/utils.c:622:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/storage/class/classpnp/utils.c:622:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/storage/class/classpnp/utils.c:622:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/storage/class/classpnp/utils.c:622:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c: In function ‘NtOpenSymbolicLinkObject’:
+/ntoskrnl/ob/oblink.c:880:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:880:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:880:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:880:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c: In function ‘ObQueryNameString’:
+/ntoskrnl/ob/obname.c:1265:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1265:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1265:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1265:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1296:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1296:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1296:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1296:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1432:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1432:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1432:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1432:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/sem.c: In function ‘NtReleaseSemaphore’:
+/ntoskrnl/ex/sem.c:358:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/sem.c:358:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/sem.c:358:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/sem.c:358:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c: In function ‘NtQueryIoCompletion’:
+/ntoskrnl/io/iomgr/iocomp.c:428:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:428:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c:428:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:428:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/time.c: In function ‘NtSetSystemTime’:
+/ntoskrnl/ex/time.c:535:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/time.c:535:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/time.c:535:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/time.c:535:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c: In function ‘NtCancelTimer’:
+/ntoskrnl/ex/timer.c:357:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:357:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c:357:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:357:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c: In function ‘NtSetTimer’:
+/ntoskrnl/ex/timer.c:749:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:749:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c:749:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:749:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c: In function ‘NtCreateTimer’:
+/ntoskrnl/ex/timer.c:448:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:448:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c:448:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:448:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+In function ‘KiSwitchToBootStack’,
+    inlined from ‘KiSystemStartup’ at /ntoskrnl/ke/i386/kiinit.c:933:5:
+/ntoskrnl/include/internal/i386/ke.h:927:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/include/internal/i386/ke.h:927:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c: In function ‘NtQuerySymbolicLinkObject’:
+/ntoskrnl/ob/oblink.c:1005:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:1005:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:1005:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:1005:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/state.c: In function ‘PsSuspendThread’:
+/ntoskrnl/ps/state.c:68:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/state.c:68:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/state.c:68:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/state.c:68:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/state.c:94:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/state.c:94:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/state.c:94:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/state.c:94:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/file.c: In function ‘IopCreateFile’:
+/ntoskrnl/io/iomgr/file.c:3036:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/file.c:3036:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/file.c:3036:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/file.c:3036:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c: In function ‘NtRemoveIoCompletion’:
+/ntoskrnl/io/iomgr/iocomp.c:551:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:551:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c:551:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:551:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘IopDeviceFsIoControl’:
+/ntoskrnl/io/iomgr/iofunc.c:571:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:571:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:571:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:571:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:627:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:627:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:627:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:627:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtQueryDirectoryFile’:
+/ntoskrnl/io/iomgr/iofunc.c:2260:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2260:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:2260:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2260:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:2286:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2286:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:2286:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2286:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtReadFile’:
+/ntoskrnl/io/iomgr/iofunc.c:3091:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3091:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:3091:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3091:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:3124:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3124:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:3124:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3124:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/thread.c: In function ‘PspSystemThreadStartup’:
+/ntoskrnl/ps/thread.c:176:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/thread.c:176:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/thread.c:176:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/thread.c:176:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtWriteFile’:
+/ntoskrnl/io/iomgr/iofunc.c:4198:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4198:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:4198:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4198:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:4228:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4228:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:4228:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4228:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/storage/class/classpnp/class.c: In function ‘ClassSendSrbSynchronous’:
+/drivers/storage/class/classpnp/class.c:4359:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/storage/class/classpnp/class.c:4359:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/storage/class/classpnp/class.c:4359:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/storage/class/classpnp/class.c:4359:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘IopFinalizeAsynchronousIo’:
+/ntoskrnl/io/iomgr/iofunc.c:105:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:105:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:105:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:105:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c: In function ‘NtCreateSymbolicLinkObject’:
+/ntoskrnl/ob/oblink.c:780:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:780:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:780:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:780:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:806:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:806:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:806:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:806:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtQueryVolumeInformationFile’:
+/ntoskrnl/io/iomgr/iofunc.c:4538:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4538:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:4538:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4538:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c: In function ‘NtWaitForSingleObject’:
+/ntoskrnl/ob/obwait.c:433:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:433:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c:433:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:433:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c: In function ‘NxkSignalAndWaitForSingleObjectMode’:
+/ntoskrnl/ob/obwait.c:623:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:623:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c:623:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:623:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c:639:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:639:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c:639:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:639:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtQueryInformationFile’:
+/ntoskrnl/io/iomgr/iofunc.c:2611:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2611:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:2611:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2611:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtSetInformationFile’:
+/ntoskrnl/io/iomgr/iofunc.c:3407:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3407:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:3407:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3407:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c: In function ‘NtCreateIoCompletion’:
+/ntoskrnl/io/iomgr/iocomp.c:311:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:311:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c:311:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:311:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/hal/halx86/pci_vendors.h:4:22: warning: type of ‘VendorTable’ does not match original declaration [-Wlto-type-mismatch]
+    4 | extern unsigned char VendorTable[1577983];
+      |                      ^
+/hal/halx86/legacy/nxkrnl-pci-strings-stub.c:23:36: note: array types have different bounds
+/hal/halx86/legacy/nxkrnl-pci-strings-stub.c:23:36: note: ‘VendorTable’ was previously declared here
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/hal/halx86/pci_classes.h:4:22: warning: type of ‘ClassTable’ does not match original declaration [-Wlto-type-mismatch]
+    4 | extern unsigned char ClassTable[6645];
+      |                      ^
+/hal/halx86/legacy/nxkrnl-pci-strings-stub.c:22:36: note: array types have different bounds
+/hal/halx86/legacy/nxkrnl-pci-strings-stub.c:22:36: note: ‘ClassTable’ was previously declared here
+/ntoskrnl/xb/shutdown.c: In function ‘NxDrainShutdownNotifications’:
+/ntoskrnl/xb/shutdown.c:88:15: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:88:15: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c:88:15: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:88:15: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c:93:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:93:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c:93:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:93:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/bug.c: In function ‘KiDoBugCheckCallbacks’:
+/ntoskrnl/ke/bug.c:478:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/bug.c:478:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/bug.c:478:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/bug.c:478:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/bug.c: In function ‘KeGetBugMessageText’:
+/ntoskrnl/ke/bug.c:425:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/bug.c:425:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/bug.c:425:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/bug.c:425:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c: In function ‘NxkShutdownNotifications’:
+/ntoskrnl/xb/shutdown.c:107:7: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:107:7: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/shutdown.c:107:7: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/shutdown.c:107:7: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/irp.c: In function ‘IoBuildAsynchronousFsdRequest’:
+/ntoskrnl/io/iomgr/irp.c:852:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/irp.c:852:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/irp.c:852:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/irp.c:852:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/res.c: In function ‘LdrpAccessResource’:
+/sdk/lib/rtl/res.c:254:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/res.c:254:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/res.c:254:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/res.c:254:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/res.c: In function ‘LdrFindResource_U’:
+/sdk/lib/rtl/res.c:290:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/res.c:290:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/res.c:290:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/res.c:290:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/thrdobj.c: In function ‘KeInitThread’:
+/ntoskrnl/ke/thrdobj.c:876:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/thrdobj.c:876:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/thrdobj.c:876:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/thrdobj.c:876:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/i386/kdx86.c: In function ‘KdpSysReadMsr’:
+/ntoskrnl/kd64/i386/kdx86.c:103:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/i386/kdx86.c:103:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/i386/kdx86.c:103:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/i386/kdx86.c:103:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/rawfs.c: In function ‘RawMountVolume’:
+/ntoskrnl/io/iomgr/rawfs.c:438:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/rawfs.c:438:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/rawfs.c:438:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/rawfs.c:438:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/i386/kdx86.c: In function ‘KdpSysWriteMsr’:
+/ntoskrnl/kd64/i386/kdx86.c:123:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/i386/kdx86.c:123:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/i386/kdx86.c:123:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/i386/kdx86.c:123:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/except.c: In function ‘KiContinue’:
+/ntoskrnl/ke/except.c:74:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/except.c:74:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/except.c:74:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/except.c:74:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/debug.c: In function ‘vDbgPrintExWithPrefixInternal’:
+/sdk/lib/rtl/debug.c:96:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/debug.c:96:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/sdk/lib/rtl/debug.c:96:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/sdk/lib/rtl/debug.c:96:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/irp.c: In function ‘IoBuildDeviceIoControlRequest’:
+/ntoskrnl/io/iomgr/irp.c:1044:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/irp.c:1044:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/irp.c:1044:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/irp.c:1044:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/i386/traphdlr.c: In function ‘KiCheckForSListFault’:
+/ntoskrnl/ke/i386/traphdlr.c:1381:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/i386/traphdlr.c:1381:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ke/i386/traphdlr.c:1381:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ke/i386/traphdlr.c:1381:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/mm/cache.c: In function ‘CcCopyRead’:
+/ntoskrnl/xb/mm/cache.c:865:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/mm/cache.c:865:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/mm/cache.c:865:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/mm/cache.c:865:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c: In function ‘KdpPrompt’:
+/ntoskrnl/kd64/kdprint.c:340:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:340:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c:340:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:340:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c:387:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:387:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c:387:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:387:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/mm/cache.c: In function ‘CcCopyWrite’:
+/ntoskrnl/xb/mm/cache.c:921:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/mm/cache.c:921:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/xb/mm/cache.c:921:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/xb/mm/cache.c:921:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c: In function ‘KdpPrintFromUser’:
+/ntoskrnl/kd64/kdprint.c:425:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:425:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/kd64/kdprint.c:425:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/kd64/kdprint.c:425:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT16WriteCluster’:
+/drivers/filesystems/vfatfs/fat.c:683:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:683:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:683:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:683:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT32WriteCluster’:
+/drivers/filesystems/vfatfs/fat.c:724:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:724:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:724:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:724:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT16CountAvailableClusters’:
+/drivers/filesystems/vfatfs/fat.c:483:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:483:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:483:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:483:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/misc.c: In function ‘VfatLockUserBuffer’:
+/drivers/filesystems/vfatfs/misc.c:495:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/misc.c:495:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/misc.c:495:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/misc.c:495:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘vfatFCBInitializeCacheFromVolume’:
+/drivers/filesystems/vfatfs/dirwr.c:84:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:84:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:84:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:84:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c: In function ‘FATXIsDirectoryEmpty’:
+/drivers/filesystems/vfatfs/direntry.c:153:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:153:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c:153:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:153:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c: In function ‘FATXGetNextDirEntry’:
+/drivers/filesystems/vfatfs/direntry.c:557:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:557:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c:557:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:557:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c:600:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:600:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/direntry.c:600:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/direntry.c:600:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c: In function ‘NtQueryEvent’:
+/ntoskrnl/ex/event.c:374:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:374:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c:374:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:374:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘vfatFindDirSpace’:
+/drivers/filesystems/vfatfs/dirwr.c:300:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:300:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:300:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:300:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:371:21: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:371:21: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:371:21: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:371:21: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:393:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:393:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:393:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:393:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT32GetNextCluster’:
+/drivers/filesystems/vfatfs/fat.c:60:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:60:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:60:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:60:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/mutant.c: In function ‘NtQueryMutant’:
+/ntoskrnl/ex/mutant.c:277:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/mutant.c:277:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/mutant.c:277:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/mutant.c:277:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT16GetNextCluster’:
+/drivers/filesystems/vfatfs/fat.c:105:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:105:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:105:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:105:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT16FindAndMarkAvailableCluster’:
+/drivers/filesystems/vfatfs/fat.c:219:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:219:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:219:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:219:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c: In function ‘NtQueryTimer’:
+/ntoskrnl/ex/timer.c:566:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:566:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c:566:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:566:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT32FindAndMarkAvailableCluster’:
+/drivers/filesystems/vfatfs/fat.c:365:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:365:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:365:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:365:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c: In function ‘NtCreateEvent’:
+/ntoskrnl/ex/event.c:173:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:173:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c:173:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:173:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/sem.c: In function ‘NtQuerySemaphore’:
+/ntoskrnl/ex/sem.c:282:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/sem.c:282:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/sem.c:282:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/sem.c:282:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c: In function ‘FAT32CountAvailableClusters’:
+/drivers/filesystems/vfatfs/fat.c:538:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:538:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fat.c:538:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fat.c:538:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c: In function ‘NtPulseEvent’:
+/ntoskrnl/ex/event.c:303:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:303:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c:303:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:303:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c: In function ‘NtSetEvent’:
+/ntoskrnl/ex/event.c:518:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:518:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/event.c:518:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/event.c:518:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘VfatUpdateEntry’:
+/drivers/filesystems/vfatfs/dirwr.c:160:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:160:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:160:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:160:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘FATXDelEntry’:
+/drivers/filesystems/vfatfs/dirwr.c:1108:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:1108:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:1108:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:1108:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘vfatRenameEntry’:
+/drivers/filesystems/vfatfs/dirwr.c:211:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:211:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:211:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:211:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/rw.c: In function ‘VfatCommonRead’:
+/drivers/filesystems/vfatfs/rw.c:617:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/rw.c:617:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/rw.c:617:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/rw.c:617:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obdir.c: In function ‘NtOpenDirectoryObject’:
+/ntoskrnl/ob/obdir.c:433:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obdir.c:433:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obdir.c:433:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obdir.c:433:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obdir.c: In function ‘NtCreateDirectoryObject’:
+/ntoskrnl/ob/obdir.c:836:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obdir.c:836:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obdir.c:836:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obdir.c:836:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/rw.c: In function ‘VfatWrite’:
+/drivers/filesystems/vfatfs/rw.c:1133:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/rw.c:1133:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/rw.c:1133:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/rw.c:1133:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c: In function ‘ReadVolumeLabel’:
+/drivers/filesystems/vfatfs/fsctl.c:407:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:407:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c:407:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:407:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c:477:21: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:477:21: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c:477:21: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:477:21: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c: In function ‘VfatMount’:
+/drivers/filesystems/vfatfs/fsctl.c:764:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:764:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/fsctl.c:764:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/fsctl.c:764:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c: In function ‘FATXAddEntry’:
+/drivers/filesystems/vfatfs/dirwr.c:951:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:951:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/filesystems/vfatfs/dirwr.c:951:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/filesystems/vfatfs/dirwr.c:951:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/storage/class/classpnp/utils.c: In function ‘ClasspBuildDeviceMdl’:
+/drivers/storage/class/classpnp/utils.c:622:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/storage/class/classpnp/utils.c:622:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/storage/class/classpnp/utils.c:622:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/storage/class/classpnp/utils.c:622:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/rtl/libsupp.c: In function ‘RtlWalkFrameChain’:
+/ntoskrnl/rtl/libsupp.c:508:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/rtl/libsupp.c:508:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/rtl/libsupp.c:508:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/rtl/libsupp.c:508:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/rtl/libsupp.c: In function ‘RtlImageNtHeaderEx’:
+/ntoskrnl/rtl/libsupp.c:742:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/rtl/libsupp.c:742:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/rtl/libsupp.c:742:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/rtl/libsupp.c:742:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/sem.c: In function ‘NtReleaseSemaphore’:
+/ntoskrnl/ex/sem.c:358:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/sem.c:358:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/sem.c:358:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/sem.c:358:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/time.c: In function ‘NtSetSystemTime’:
+/ntoskrnl/ex/time.c:535:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/time.c:535:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/time.c:535:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/time.c:535:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c: In function ‘NtCancelTimer’:
+/ntoskrnl/ex/timer.c:357:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:357:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c:357:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:357:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c: In function ‘NtCreateTimer’:
+/ntoskrnl/ex/timer.c:448:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:448:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c:448:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:448:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+In function ‘KiSwitchToBootStack’,
+    inlined from ‘KiSystemStartup’ at /ntoskrnl/ke/i386/kiinit.c:933:5:
+/ntoskrnl/include/internal/i386/ke.h:927:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/include/internal/i386/ke.h:927:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c: In function ‘NtOpenSymbolicLinkObject’:
+/ntoskrnl/ob/oblink.c:880:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:880:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:880:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:880:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c: In function ‘NtQueryIoCompletion’:
+/ntoskrnl/io/iomgr/iocomp.c:428:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:428:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c:428:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:428:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c: In function ‘ObQueryNameString’:
+/ntoskrnl/ob/obname.c:1265:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1265:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1265:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1265:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1296:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1296:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1296:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1296:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1432:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1432:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obname.c:1432:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obname.c:1432:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c: In function ‘NtSetTimer’:
+/ntoskrnl/ex/timer.c:749:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:749:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ex/timer.c:749:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ex/timer.c:749:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/state.c: In function ‘PsSuspendThread’:
+/ntoskrnl/ps/state.c:68:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/state.c:68:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/state.c:68:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/state.c:68:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/state.c:94:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/state.c:94:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/state.c:94:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/state.c:94:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c: In function ‘NtQuerySymbolicLinkObject’:
+/ntoskrnl/ob/oblink.c:1005:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:1005:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:1005:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:1005:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/storage/class/classpnp/class.c: In function ‘ClassSendSrbSynchronous’:
+/drivers/storage/class/classpnp/class.c:4359:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/storage/class/classpnp/class.c:4359:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/drivers/storage/class/classpnp/class.c:4359:11: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/drivers/storage/class/classpnp/class.c:4359:11: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/file.c: In function ‘IopCreateFile’:
+/ntoskrnl/io/iomgr/file.c:3036:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/file.c:3036:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/file.c:3036:17: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/file.c:3036:17: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/thread.c: In function ‘PspSystemThreadStartup’:
+/ntoskrnl/ps/thread.c:176:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/thread.c:176:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ps/thread.c:176:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ps/thread.c:176:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c: In function ‘NtRemoveIoCompletion’:
+/ntoskrnl/io/iomgr/iocomp.c:551:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:551:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c:551:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:551:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘IopDeviceFsIoControl’:
+/ntoskrnl/io/iomgr/iofunc.c:571:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:571:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:571:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:571:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:627:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:627:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:627:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:627:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtQueryDirectoryFile’:
+/ntoskrnl/io/iomgr/iofunc.c:2260:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2260:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:2260:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2260:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:2286:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2286:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:2286:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2286:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtReadFile’:
+/ntoskrnl/io/iomgr/iofunc.c:3091:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3091:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:3091:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3091:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:3124:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3124:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:3124:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3124:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtWriteFile’:
+/ntoskrnl/io/iomgr/iofunc.c:4198:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4198:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:4198:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4198:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:4228:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4228:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:4228:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4228:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘IopFinalizeAsynchronousIo’:
+/ntoskrnl/io/iomgr/iofunc.c:105:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:105:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:105:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:105:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c: In function ‘NtCreateSymbolicLinkObject’:
+/ntoskrnl/ob/oblink.c:780:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:780:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:780:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:780:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:806:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:806:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/oblink.c:806:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/oblink.c:806:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtQueryVolumeInformationFile’:
+/ntoskrnl/io/iomgr/iofunc.c:4538:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4538:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:4538:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:4538:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c: In function ‘NtWaitForSingleObject’:
+/ntoskrnl/ob/obwait.c:433:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:433:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c:433:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:433:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c: In function ‘NxkSignalAndWaitForSingleObjectMode’:
+/ntoskrnl/ob/obwait.c:623:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:623:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c:623:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:623:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c:639:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:639:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/ob/obwait.c:639:9: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/ob/obwait.c:639:9: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtQueryInformationFile’:
+/ntoskrnl/io/iomgr/iofunc.c:2611:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2611:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:2611:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:2611:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c: In function ‘NtSetInformationFile’:
+/ntoskrnl/io/iomgr/iofunc.c:3407:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3407:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iofunc.c:3407:5: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iofunc.c:3407:5: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c: In function ‘NtCreateIoCompletion’:
+/ntoskrnl/io/iomgr/iocomp.c:311:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:311:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+/ntoskrnl/io/iomgr/iocomp.c:311:13: warning: listing the stack pointer register ‘%esp’ in a clobber list is deprecated [-Wdeprecated]
+/ntoskrnl/io/iomgr/iocomp.c:311:13: note: the value of the stack pointer after an ‘asm’ statement must be the same as it was before the statement
+lto-init-relink.py: moved 45 init-only functions to INIT (11 lib, 41 lto)
+/usr/bin/i686-w64-mingw32-objcopy: /work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/ntoskrnl/xboxkrnl.exe: warning: ignoring section flag IMAGE_SCN_MEM_NOT_PAGED in section .text
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/ntoskrnl/xboxkrnl.exe: warning: ignoring section flag IMAGE_SCN_MEM_NOT_PAGED in section .data
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/ntoskrnl/xboxkrnl.exe: warning: ignoring section flag IMAGE_SCN_MEM_NOT_PAGED in section .rdata
+/work/artifacts/optimization/final-debug-v1/work-g9g5dcdr/build/ntoskrnl/xboxkrnl.exe: warning: ignoring section flag IMAGE_SCN_MEM_NOT_PAGED in section .bss
+fix-edata: directory built, 371/378 export RVAs patched
+2007 functions (incl. gap fills)
+init-ref-check: 2 allowlisted resident->discardable refs
+init-ref-check: OK (2 allowlisted refs, exports clean)
+[748/748] Assembling Xbox flash image (gen-flash-bin.py)
+../../flash.bin: kernel 645632 -> 257712 (xz 39.9%), 249872 free in 507584-byte slot (49%)

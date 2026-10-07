@@ -1,0 +1,32 @@
+ok 1 - !NxkMmPersistentPage(0x2001)
+ok 2 - PmBit(PmSelected, 0x2001) && !PmBit(PmSelected, 0x2000)
+ok 3 - slot->Magic == PM_MAGIC
+ok 4 - slot->Magic == 0 && NxkMmPersistentPage(0x2001)
+ok 5 - NxkMmQueryRestored(alias) == PAGE_SIZE
+ok 6 - NxkMmPersistentPage(0x2001) && !PmBit(PmSelected, 0x2001)
+ok 7 - NxkMmFreeRestored(alias) && returned == 0
+ok 8 - NxkMmQueryRestored(alias) == PAGE_SIZE
+ok 9 - NxkMmFreeRestored(alias) && returned == 1
+ok 10 - NxkMmQueryRestored(alias) == 0 && !PmBit(PmSelected, 0x2001)
+ok 11 - !NxkMmPersistentPage(0x2001)
+ok 12 - !NxkMmPersistentPage(0x2001)
+ok 13 - !NxkMmPersistentPage(0x2001)
+ok 14 - !NxkMmPersistentPage(0x2001)
+ok 15 - !NxkMmPersistentPage(0x2001)
+ok 16 - !NxkMmPersistentPage(0x2001)
+ok 17 - slot->Magic == 0
+ok 18 - !PmBit(PmSelected, 0x30)
+persistence host checks: 18/18 passed
+ok 1 - regs[0].ListEntry.Flink == &regs[1].ListEntry
+ok 2 - count == 3
+ok 3 - seen[0] == 0 && seen[1] == 1 && seen[2] == 2
+ok 4 - IsListEmpty(&NxRegistered) && IsListEmpty(&NxPending)
+ok 5 - regs[0].ListEntry.Flink == &regs[0].ListEntry
+ok 6 - HostCriticalDepth[1]==0&&NxCallbackThread==NULL
+ok 7 - count == 3
+ok 8 - HostCriticalDepth[1]==0&&NxCallbackThread==NULL
+ok 9 - caught&&HostCriticalDepth[1]==0&&NxCallbackThread==NULL
+shutdown host checks: 9/9 passed
+IDE lifecycle host checks: 24/24 passed
+HAL power action host checks: 24/24 passed
+physical pin host checks: 13/13 passed

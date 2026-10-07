@@ -1,0 +1,169 @@
+{
+  "base_source_tree": "6ba1a4d87efee5351972e22f4269a13e4f822571",
+  "build_directory": "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/build",
+  "commands": [
+    [
+      "git",
+      "-c",
+      "safe.directory=/work/.reference/roswell",
+      "-C",
+      "/work/.reference/roswell",
+      "config",
+      "--file",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/git-safe.config",
+      "--add",
+      "safe.directory",
+      "/work/.reference/roswell"
+    ],
+    [
+      "git",
+      "-c",
+      "safe.directory=/work/.reference/roswell",
+      "-C",
+      "/work/.reference/roswell",
+      "config",
+      "--file",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/git-safe.config",
+      "--add",
+      "safe.directory",
+      "/work/.reference/roswell/.git"
+    ],
+    [
+      "git",
+      "clone",
+      "--no-hardlinks",
+      "--dissociate",
+      "--no-checkout",
+      "/work/.reference/roswell",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source"
+    ],
+    [
+      "git",
+      "-c",
+      "safe.directory=/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "-C",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "checkout",
+      "--detach",
+      "1569e2e89fb47cc72b9c704a8884f98200432bd4"
+    ],
+    [
+      "git",
+      "-c",
+      "safe.directory=/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "-C",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "apply",
+      "--check",
+      "--index",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/patches/0001.patch"
+    ],
+    [
+      "git",
+      "-c",
+      "safe.directory=/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "-C",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "apply",
+      "--index",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/patches/0001.patch"
+    ],
+    [
+      "git",
+      "-c",
+      "safe.directory=/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "-C",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "apply",
+      "--check",
+      "--index",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/patches/0002.patch"
+    ],
+    [
+      "git",
+      "-c",
+      "safe.directory=/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "-C",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "apply",
+      "--index",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/patches/0002.patch"
+    ],
+    [
+      "cmake",
+      "-G",
+      "Ninja",
+      "-S",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+      "-B",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/build",
+      "-DCMAKE_TOOLCHAIN_FILE=/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source/toolchain-gcc.cmake",
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DDBG=0",
+      "-DKDBG=FALSE"
+    ],
+    [
+      "cmake",
+      "--build",
+      "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/build",
+      "--clean-first",
+      "--target",
+      "flash",
+      "--parallel",
+      "4"
+    ]
+  ],
+  "elapsed_seconds": 49.728,
+  "flash_sha256": "48c3ee940d55628a74e17333a1e76966ad6ade5e44a41915d2d53348a37fdc74",
+  "flash_size": 262144,
+  "lock_sha256": "405ec931c18667a5915e78fc5f6b7c58fb43981a260fc1f816f0b879a61fd20c",
+  "output_directory": "/work/artifacts/optimization/final-release-repeat-v1",
+  "patches": [
+    {
+      "path": "patches/roswell/0001-clean-room-kernel.patch",
+      "sha256": "747a5974ac714bcf76a6516fc1ed3ced148880907bd41a3f3f62fbd3d60b168f"
+    },
+    {
+      "path": "patches/roswell/0002-kernel-call-optimization.patch",
+      "sha256": "0e8147f370fc591c1f6b440344d1271aa5d040291e54a15fba650a88ad8ff1f7"
+    }
+  ],
+  "repositories": {
+    "roswell": {
+      "patches": [
+        {
+          "path": "patches/roswell/0001-clean-room-kernel.patch",
+          "sha256": "747a5974ac714bcf76a6516fc1ed3ced148880907bd41a3f3f62fbd3d60b168f"
+        },
+        {
+          "path": "patches/roswell/0002-kernel-call-optimization.patch",
+          "sha256": "0e8147f370fc591c1f6b440344d1271aa5d040291e54a15fba650a88ad8ff1f7"
+        }
+      ],
+      "revision": "1569e2e89fb47cc72b9c704a8884f98200432bd4",
+      "url": "https://github.com/mborgerson/roswell.git"
+    },
+    "xemu": {
+      "revision": "458730bf5373f1f0d027450fef7443e3af7a3ae1",
+      "url": "https://github.com/Mainkill1/xemu.git"
+    }
+  },
+  "schema": 1,
+  "source": "/work/.reference/roswell",
+  "source_date_epoch": "1788155396",
+  "source_directory": "/work/artifacts/optimization/final-release-repeat-v1/work-nswn8mtq/source",
+  "source_revision": "1569e2e89fb47cc72b9c704a8884f98200432bd4",
+  "source_tree": "f7adb302a762ed1945cc07d9c2ff428c643ba959",
+  "started_utc": "2026-10-07T23:11:35Z",
+  "status": "built",
+  "tool_versions": {
+    "cmake": "cmake version 3.28.3",
+    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "git": "git version 2.43.0",
+    "i686-w64-mingw32-g++": "i686-w64-mingw32-g++ (GCC) 13-win32",
+    "i686-w64-mingw32-gcc": "i686-w64-mingw32-gcc (GCC) 13-win32",
+    "ninja": "1.11.1",
+    "python3": "Python 3.12.3"
+  },
+  "variant": "release"
+}

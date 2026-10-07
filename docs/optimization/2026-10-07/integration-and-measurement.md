@@ -3,9 +3,11 @@
 This packages the independently reviewed public source at commit
 `87aba89a6ba9b2a58f2edd6e52d5e3aa1e8649d7`, tree
 `f7adb302a762ed1945cc07d9c2ff428c643ba959`. The frozen source passed Task 1
-specification and quality review. Runtime qualification and publication of new
-BIOS images remain pending controller acceptance. No guest timing or throughput
-improvement is asserted here.
+specification and quality review. The final qualification report below separates
+measured guest timing gains from reduced source work. The complete public
+[source snapshot](https://github.com/Mainkill1/SpiritBoot/tree/kernel-source-optimization-2026-10-07)
+and [source archive](https://github.com/Mainkill1/SpiritBoot/archive/refs/tags/kernel-source-optimization-2026-10-07.tar.gz)
+preserve this exact tree and its licensing notices.
 
 ## Reproducible source inputs
 
@@ -36,7 +38,7 @@ patched tree, tested source directory, tool versions and output hash.
    individually, retaining the bulk reset above that threshold. The existing
    PFN lock, translations, preflight, overflow and ownership checks remain.
    Rejected short prefixes can add up to 64 cleanup translations; the budget
-   requires controller timing qualification.
+   was retained after the paired guest qualification described below.
 2. Pool first-fit search advances beyond the actual conflicting page, preserving
    candidate ordering, hint wrapping and backing allocation behavior.
 3. System virtual allocation skips the remainder of an absent PDE span while
@@ -95,7 +97,7 @@ Implementer evidence reports 88 clean-room host assertions on each source,
 for most pin assertions; these counts do not describe independent scenarios.
 Controller source host logs are retained under
 `artifacts/optimization/source-host-evidence/`. Guest lifecycle/native ownership
-coverage is still required; host extraction does not model real page tables,
+coverage is supplied by the direct qualification guests; host extraction does not model real page tables,
 IRQL, backing rollback or native callbacks.
 
 ## CI correctness and direct runtime qualification
@@ -110,13 +112,13 @@ All run directly in xemu at 128 MiB with snapshots. The performance guest is a
 strict correctness smoke: clean exit, TAP 42/42, zero TODO/SKIP/errors, 41
 ordered workloads, valid samples and terminal PASS. CI does not compare its
 single runtime with another image. This workflow has been checked locally for
-YAML and shell syntax; a new CI pass has not yet been observed.
+YAML and shell syntax. CI identities and outcomes are recorded in the final qualification report.
 
 Controller qualification also retains the existing direct API, contracts,
 warm-reboot and matched XISO suites. No HTTP test runner is introduced. The
 corrected baseline smoke already passed 42/42; the earlier pool-query fixture
 failure remains retained as evidence. The guest now uses public
-`ExQueryPoolBlockSize`. Candidate runtime results belong to controller evidence.
+`ExQueryPoolBlockSize`. Candidate runtime results are retained in the linked final evidence.
 
 ## Paired dataset and analyzer
 
@@ -206,6 +208,35 @@ own contracts and proof; these optimizations do not certify all kernel behavior.
 Benchmark backing allocation/zeroing and crypto validation costs can hide scan
 savings. Cold registration is single-sample by design; short rejected pins may
 pay added translations. Seven matched trials and the conservative range rule
-constrain measurement claims but do not predict a game's frame rate. Final
-runtime qualification, budget retention decision, CI results and new BIOS
-publication are still controller-owned steps.
+constrain measurement claims but do not predict a game's frame rate. The final qualification report records the runtime acceptance, retained budget,
+CI status and BIOS identities. Conker gameplay, physical Xbox flashing and
+64-MiB operation remain unverified.
+
+
+## Measured results and qualification
+
+Seven alternating baseline/candidate pairs reused the same frozen guest ISO,
+xemu executable and HDD seed at 128 MiB. All fourteen runs passed TAP 42/42
+and all semantic checksums matched. Exact rational decisions classify six
+workloads as improvements, 35 as inconclusive and none as consistent regressions.
+These timings include the complete checked operations in each workload.
+
+| Pin workload | Median paired time reduction |
+|---|---:|
+| Successful 1 page |99.27%|
+| Successful 16 pages |93.90%|
+| Successful 64 pages |81.76%|
+| Rejected prefix 0 pages |99.52%|
+| Rejected prefix 32 pages |89.66%|
+| Rejected prefix 64 pages |83.76%|
+
+The 65-page crossover and larger pin batches remain timing inconclusive. Pool,
+system VA, registry, modular exponentiation, SHA and DES changes have verified
+source work reductions but no demonstrated wall-time gain under this dataset.
+SHA medians include slower observations; their inconsistent paired signs and
+observed variation leave them inconclusive. Those raw results are retained.
+No game FPS or gameplay improvement is asserted.
+
+See the [complete timing table](../../evidence/optimization-2026-10-07/performance-report-final.md),
+[raw samples and exact decisions](../../evidence/optimization-2026-10-07/performance-report-final.json),
+and [build and qualification evidence](../../evidence/optimization-2026-10-07/README.md).

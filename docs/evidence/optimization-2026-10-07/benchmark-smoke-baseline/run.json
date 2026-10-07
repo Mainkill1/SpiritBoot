@@ -1,0 +1,54 @@
+{
+  "assets": {
+    "dvd": {
+      "path": "/work/artifacts/optimization/guests/benchmark-smoke.iso",
+      "sha256": "4a744858658ac076e459740a8c6b39dcf47d03dfeaf37d812652d55818f663cd",
+      "size": 655360
+    },
+    "flash": {
+      "path": "/work/bios/clean-room-xemu/SpiritBoot-release.bin",
+      "sha256": "154276a142c7df727ea46f1a35ee9a896f7369221f10d07f21757a61bc8e6d60",
+      "size": 262144
+    },
+    "hdd": {
+      "path": "/seed.qcow2",
+      "sha256": "00d7df7a2bc235f8801764f00b7f40e194d1e392f7a9619d6b2396c89770f6dd",
+      "size": 1638400
+    },
+    "xemu": {
+      "path": "/xemu/usr/bin/xemu",
+      "sha256": "3790019a2ccab47df1f67982e05856b2a345ec8ce5393967d1ed2187528aada2",
+      "size": 25548144
+    }
+  },
+  "boot_mode": "open-direct",
+  "command": [
+    "/xemu/usr/bin/xemu",
+    "-config_path",
+    "/work/artifacts/optimization/benchmark-smoke-baseline/xemu.toml",
+    "-snapshot",
+    "-device",
+    "lpc47m157",
+    "-serial",
+    "file:/work/artifacts/optimization/benchmark-smoke-baseline/serial.log"
+  ],
+  "elapsed_seconds": 6.753,
+  "expect_tap": true,
+  "memory_mib": 128,
+  "returncode": 0,
+  "schema": 1,
+  "snapshot": true,
+  "started_utc": "2026-10-07T22:54:18Z",
+  "status": "test_failed",
+  "tap": {
+    "errors": [],
+    "failed": 4,
+    "ok": 38,
+    "passed": false,
+    "plan": 42,
+    "ran": 42,
+    "skipped": 0,
+    "todo": 0
+  },
+  "timeout_seconds": 120.0
+}
