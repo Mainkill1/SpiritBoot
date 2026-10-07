@@ -81,43 +81,17 @@ Key findings:
 
 ## First attack set
 
-This ranking is a heuristic, not a claim that a Roswell implementation is broken.
+The generic numeric score is retained in `correlation.csv` for sorting large groups, but it produced broad ties among unrelated core APIs. Engineering order is therefore dependency-first rather than ordinal-first.
 
-| Ord | API | Subsystem | Roswell | Test | Score | Dependencies |
-| ---: | --- | --- | --- | --- | ---: | --- |
-| 35 | `FscGetCacheSize` | Fsc | mapped | stub | 11 | filesystem cache;storage |
-| 37 | `FscSetCacheSize` | Fsc | mapped | stub | 11 | filesystem cache;storage |
-| 59 | `IoAllocateIrp` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 65 | `IoCreateDevice` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 66 | `IoCreateFile` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 68 | `IoDeleteDevice` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 72 | `IoFreeIrp` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 73 | `IoInitializeIrp` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 77 | `IoQueueThreadIrp` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 79 | `IoSetIoCompletion` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 80 | `IoSetShareAccess` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 83 | `IoStartPacket` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 86 | `IofCallDriver` | Iof | mapped | stub | 11 | I/O manager;IRP;drivers |
-| 90 | `IoDismountVolume` | Io | mapped | stub | 11 | I/O manager;IRP;device objects |
-| 92 | `KeAlertResumeThread` | Ke | mapped | stub | 11 | dispatcher;thread-state;object-layout |
-| 93 | `KeAlertThread` | Ke | mapped | stub | 11 | dispatcher;thread-state;object-layout |
-| 94 | `KeBoostPriorityThread` | Ke | mapped | stub | 11 | dispatcher;thread-state;object-layout |
-| 97 | `KeCancelTimer` | Ke | mapped | stub | 11 | dispatcher;clock;timers |
-| 99 | `KeDelayExecutionThread` | Ke | mapped | stub | 11 | dispatcher;clock;timers |
-| 102 | `MmGlobalData` | Mm | mapped | stub | 11 | PTE/PFN;physical allocator;TLB;GPU-visible memory |
-| 103 | `KeGetCurrentIrql` | Ke | mapped | stub | 11 | IRQL;interrupt-controller;dispatcher |
-| 104 | `KeGetCurrentThread` | Ke | mapped | stub | 11 | dispatcher;thread-state;object-layout |
-| 105 | `KeInitializeApc` | Ke | mapped | stub | 11 | dispatcher;thread-state;APC |
-| 116 | `KeInsertHeadQueue` | Ke | mapped | stub | 11 | dispatcher;thread-state;object-layout |
+See **`FIRST_WAVE.md`** and **`FIRST_WAVE.csv`** for the reviewed attack plan. The current order is:
 
-Recommended family order:
-1. Dispatcher/event/wait semantics.
-2. Timers/APC/DPC/IRQL.
-3. Memory allocation/mapping/protection.
-4. I/O/IRP lifetime.
-5. Object-manager create/insert/reference semantics.
-6. Interlocked primitives as a low-complexity coverage win.
-7. Debug/devkit/profiling only when a real title or hardware requirement justifies it.
+1. dispatcher/event/wait semantics;
+2. timers/APC/DPC/IRQL;
+3. memory allocation/mapping/protection;
+4. I/O/IRP and object lifetime;
+5. interlocked primitives as a parallel low-complexity coverage win.
+
+The source review behind that plan found concrete Roswell-specific questions in wait/APC delivery, contiguous-memory protection/cache handling, static I/O-space unmapping, Xbox file-parameter checks, and Xbox object-header/shim lifetime behavior.
 
 ## Hardware evidence
 
