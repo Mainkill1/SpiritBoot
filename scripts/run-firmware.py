@@ -16,10 +16,12 @@ def main():
     parser.add_argument("--dvd", type=Path)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument("--expect-tap", action="store_true")
+    parser.add_argument("--preserve-hdd", action="store_true",
+                        help="retain guest writes on a private HDD copy in the capture directory")
     args = parser.parse_args()
     try:
         result = run_firmware(args.xemu, args.flash, args.hdd, args.dvd,
-                              args.output, args.timeout, args.expect_tap)
+                              args.output, args.timeout, args.expect_tap, args.preserve_hdd)
     except (OSError, ValueError) as error:
         print(f"launch failed: {error}", file=sys.stderr)
         return 1

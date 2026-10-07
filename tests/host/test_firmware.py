@@ -158,11 +158,14 @@ class LaunchTests(unittest.TestCase):
         self.output = self.root / "capture"
         self.xemu = self.root / "fake xemu"
         self.xemu.write_text("#!" + sys.executable + "\n" + '''
-import os, pathlib, sys, time
+import os, pathlib, sys, time, tomllib
 if '--version' in sys.argv:
     print('fixture xemu')
     sys.exit(0)
 pathlib.Path(os.environ['ARGS_FILE']).write_text(__import__('json').dumps(sys.argv[1:]))
+if os.environ.get('WRITE_DISK'):
+    config = tomllib.loads(pathlib.Path(sys.argv[sys.argv.index('-config_path') + 1]).read_text())
+    pathlib.Path(config['sys']['files']['hdd_path']).write_bytes(b'guest result')
 if os.environ.get('SLEEP'):
     time.sleep(60)
 serial = sys.argv[sys.argv.index('-serial') + 1]
@@ -172,16 +175,28 @@ sys.exit(int(os.environ.get('EXIT', '0')))
 ''')
         self.xemu.chmod(0o755)
         self.args_file = self.root / "args.json"
+        self.converter = self.root / "qemu-img"
+        self.converter.write_text("#!" + sys.executable + "\n" + '''
+import os, pathlib, shutil, sys
+if os.environ.get('FAIL_CONVERT'):
+    print('broken disk chain', file=sys.stderr)
+    sys.exit(1)
+shutil.copyfile(sys.argv[-2], sys.argv[-1])
+''')
+        self.converter.chmod(0o755)
 
-    def launch(self, tap=False, **env):
+    def launch(self, tap=False, preserve_hdd=False, **env):
         args = [sys.executable, str(ROOT / "scripts/run-firmware.py"),
                 "--xemu", str(self.xemu), "--flash", str(self.flash),
                 "--hdd", str(self.hdd), "--dvd", str(self.dvd),
                 "--output", str(self.output), "--timeout", "0.2"]
         if tap:
             args.append("--expect-tap")
+        if preserve_hdd:
+            args.append("--preserve-hdd")
         return subprocess.run(args, capture_output=True, text=True,
-                              env=dict(os.environ, ARGS_FILE=str(self.args_file), **env))
+                              env=dict(os.environ, ARGS_FILE=str(self.args_file),
+                                       PATH=str(self.root) + os.pathsep + os.environ['PATH'], **env))
 
     def test_capture_preserves_arguments_disk_and_hashes(self):
         result = self.launch()
@@ -204,6 +219,28 @@ sys.exit(int(os.environ.get('EXIT', '0')))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing", result.stderr.lower())
         self.assertFalse(self.args_file.exists())
+
+    def test_preserved_guest_writes_use_private_copy(self):
+        result = self.launch(preserve_hdd=True, WRITE_DISK="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        import tomllib
+        config = tomllib.loads((self.output / "xemu.toml").read_text())
+        private = Path(config['sys']['files']['hdd_path'])
+        self.assertEqual(private.parent, self.output)
+        self.assertEqual(private.read_bytes(), b'guest result')
+        self.assertEqual(self.hdd.read_bytes(), b'disk fixture')
+        self.assertNotIn('-snapshot', json.loads(self.args_file.read_text()))
+        manifest = json.loads((self.output / 'run.json').read_text())
+        self.assertFalse(manifest['snapshot'])
+        self.assertEqual(manifest['runtime_hdd']['initial_sha256'], hashlib.sha256(b'disk fixture').hexdigest())
+        self.assertEqual(manifest['runtime_hdd']['sha256'], hashlib.sha256(b'guest result').hexdigest())
+
+    def test_failed_private_conversion_never_launches_or_modifies_seed(self):
+        result = self.launch(preserve_hdd=True, FAIL_CONVERT='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('private HDD conversion failed', result.stderr)
+        self.assertFalse(self.args_file.exists())
+        self.assertEqual(self.hdd.read_bytes(), b'disk fixture')
 
     def test_existing_capture_is_never_overwritten(self):
         self.output.mkdir()

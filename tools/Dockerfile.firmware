@@ -10,7 +10,7 @@ RUN --mount=type=secret,id=proxy_ca \
     DEBIAN_FRONTEND=noninteractive apt-get -c /tmp/apt-ca.conf install -y --no-install-recommends \
       binutils-mingw-w64-i686 gcc-mingw-w64-i686 g++-mingw-w64-i686 \
       gcc-multilib g++-multilib cmake ninja-build flex bison lz4 xz-utils \
-      git make python3 curl ca-certificates ccache \
+      git make python3 curl ca-certificates ccache qemu-utils \
       xvfb xauth libgl1 libegl1 libpulse0 libsamplerate0 libslirp0 && \
     rm -rf /var/lib/apt/lists/* /tmp/apt-ca.conf
 # xemu's AppImage intentionally leaves USB passthrough to the host runtime.

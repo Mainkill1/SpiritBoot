@@ -15,6 +15,9 @@ Conker: Live & Reloaded is the first retail target.
 
 See [build and launch instructions](docs/BUILD_AND_RUN.md) and
 [reproduced baseline evidence](docs/provenance/OPEN_FIRMWARE_BASELINE.md).
+The [direct XISO suite evidence](docs/provenance/XISO_SUITE_BASELINE.md) records
+Mainkill1's matched qualification suite, complete guest results, and the earlier
+intermittent GPU polling assertion.
 The build needs no Microsoft BIOS or MCPX ROM. Runtime/game progress is measured
 separately from a successful firmware build.
 

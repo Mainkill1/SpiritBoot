@@ -107,8 +107,20 @@ has passed. An ordinary capture without `--expect-tap` does not certify a boot.
 
 Each run retains `xemu.toml`, `serial.log`, `emulator.log`, and `run.json`, including
 SHA-256 identities for the emulator and input images. Output directories are
-exclusive: previous captures are never overwritten. The HDD is opened with
-`-snapshot`, so guest writes do not change the supplied image.
+exclusive: previous captures are never overwritten. By default the HDD is opened with
+`-snapshot`, so guest writes do not change the supplied image. With
+`--preserve-hdd`, `qemu-img` flattens the supplied disk into a standalone private
+QCOW2 inside the capture directory and retains guest writes there. The manifest
+records its initial and final hashes. The supplied disk is never opened writable.
+
+## Mainkill1 XISO test suite
+
+Run the suite directly in xemu. See the
+[XISO evidence and direct-run instructions](provenance/XISO_SUITE_BASELINE.md)
+for the matched local fixture, observed intermittent assertion, and direct-run
+instructions. `--preserve-hdd` retains guest writes on a private copy in the
+capture directory. Its default snapshot mode discards guest writes. Grade
+XISO guest results separately; a clean capture alone is not a suite pass.
 
 ## Run Conker on a desktop
 

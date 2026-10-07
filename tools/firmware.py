@@ -159,7 +159,7 @@ def grade_tap(text):
             "ran": len(results), "errors": errors, **counts}
 
 
-def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False):
+def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve_hdd=False):
     """Capture an open-firmware run. A deadline never becomes a passing test."""
     if not isinstance(timeout, (int, float)) or not 0 < timeout <= 86400:
         raise ValueError("timeout must be between 0 and 86400 seconds")
@@ -177,23 +177,39 @@ def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False):
     output = Path(output).resolve()
     # Exclusive directory creation preserves previous captures and input files.
     output.mkdir(parents=True, exist_ok=False)
+    runtime_hdd = paths["hdd"]
+    if preserve_hdd:
+        runtime_hdd = output / "private-hdd.qcow2"
+        # Flatten backing chains and external data files without modifying the
+        # supplied disk. A byte copy can relocate relative backing references
+        # or leave guest writes targeting a shared external data file.
+        try:
+            checked_output(["qemu-img", "convert", "-O", "qcow2",
+                            str(paths["hdd"]), str(runtime_hdd)])
+        except subprocess.CalledProcessError as error:
+            raise ValueError(f"private HDD conversion failed: {error.output}") from error
     config = output / "xemu.toml"
     config.write_text("[general]\nshow_welcome = false\nskip_boot_anim = true\n"
                       "[sys]\nmem_limit = '128'\n[sys.files]\n" + "\n".join(
                           f"{name}_path = {json.dumps(value, ensure_ascii=False)}" for name, value in
                           [("bootrom", ""), ("flashrom", str(paths["flash"])),
-                           ("eeprom", ""), ("hdd", str(paths["hdd"]))] +
+                           ("eeprom", ""), ("hdd", str(runtime_hdd))] +
                           ([("dvd", str(paths["dvd"]))] if dvd is not None else [])) + "\n")
     serial = output / "serial.log"
     serial.touch()
-    command = [str(paths["xemu"]), "-config_path", str(config), "-snapshot",
-               "-device", "lpc47m157", "-serial", f"file:{serial}"]
+    command = [str(paths["xemu"]), "-config_path", str(config)]
+    if not preserve_hdd:
+        command.append("-snapshot")
+    command.extend(["-device", "lpc47m157", "-serial", f"file:{serial}"])
     manifest = {"schema": 1, "status": "launch_failed", "command": command,
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "timeout_seconds": timeout, "memory_mib": 128,
-                "boot_mode": "open-direct", "snapshot": True, "expect_tap": tap,
+                "boot_mode": "open-direct", "snapshot": not preserve_hdd, "expect_tap": tap,
                 "assets": {name: {"path": str(path), "sha256": sha256(path),
                                   "size": path.stat().st_size} for name, path in paths.items()}}
+    if preserve_hdd:
+        manifest["runtime_hdd"] = {"path": str(runtime_hdd),
+                                   "initial_sha256": sha256(runtime_hdd)}
     started = time.monotonic()
     process = None
     try:
@@ -231,5 +247,8 @@ def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False):
         manifest["error"] = str(error)
     finally:
         manifest["elapsed_seconds"] = round(time.monotonic() - started, 3)
+        if preserve_hdd:
+            manifest["runtime_hdd"].update(sha256=sha256(runtime_hdd),
+                                           size=runtime_hdd.stat().st_size)
         write_json(output / "run.json", manifest)
     return manifest
