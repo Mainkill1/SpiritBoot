@@ -19,7 +19,7 @@ The important correction is that **a registered kernel test is not the same as a
 | Explicitly disabled/fatal test | **1** |
 | Reserved slot 0 | 1 |
 
-No hardware log has been imported into SpiritBoot yet. Accordingly, `hardware_status` is deliberately `not-ingested` for every API.
+No hardware log has been imported into SpiritBoot yet. Accordingly, `hardware_status` is deliberately `not-ingested` for every API. Upstream issue #6 requested a maintained hardware-result corpus, but its 2024 closing discussion notes that community result sharing had been inactive for years; no current checked-in reference corpus is available to treat as authoritative.
 
 ## Roswell x test coverage
 
@@ -96,3 +96,11 @@ The source review behind that plan found concrete Roswell-specific questions in 
 ## Hardware evidence
 
 Use `scripts/import-kernel-test-log.ps1` to normalize a real xbox_kernel_test_suite log. Then run `scripts/correlate-kernel.ps1`. Hardware PASS/FAIL is intentionally not inferred from source code alone.
+
+## Upstream evidence gaps
+
+- Hardware-result publication/history: https://github.com/Cxbx-Reloaded/xbox_kernel_test_suite/issues/6
+- Test-design guidelines: https://github.com/Cxbx-Reloaded/xbox_kernel_test_suite/issues/4
+- Automatic regression-testing request: https://github.com/Cxbx-Reloaded/xbox_kernel_test_suite/issues/5
+
+This is why the SpiritBoot matrix keeps three distinct concepts separate: **test registered**, **test substantive**, and **hardware result ingested**.
