@@ -53,3 +53,7 @@ Comparing SpiritBoot, Cxbx-Reloaded, Roswell, and an original kernel is encourag
 ## Contributor disclosure
 
 A contributor who has consulted leaked proprietary Xbox source for the same component should disclose that conflict before contributing implementation code to that component. Independently collected test results and high-level behavioral observations can still be useful when provenance is clear.
+
+## External test-suite licensing
+
+The current `Cxbx-Reloaded/xbox_kernel_test_suite` repository carries a GPL-3.0 `LICENSE`. SpiritBoot's correlation tooling therefore treats it as an external test/reference project: it may inspect paths, classify coverage, execute the suite, and import behavioral results/metadata. Do not directly copy its GPL-3.0 test implementations into GPL-2.0-only SpiritBoot source without first resolving license compatibility. Behavioral observations and independently written conformance tests should retain clear provenance.
