@@ -16,7 +16,7 @@ xb-symbol-database|master|0|https://github.com/Cxbx-Reloaded/XbSymbolDatabase.gi
 nxdk|master|1|https://github.com/XboxDev/nxdk.git
 cromwell|master|0|https://github.com/XboxDev/cromwell.git
 xboxpy|master|0|https://github.com/XboxDev/xboxpy.git
-xbox-linux|master|0|https://github.com/XboxDev/xbox-linux.git
+xbox-linux|xbox-linux|0|https://github.com/XboxDev/xbox-linux.git
 EOF
 )
 
