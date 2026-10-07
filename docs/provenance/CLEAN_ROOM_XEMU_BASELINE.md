@@ -127,8 +127,8 @@ external reproductions must supply matched fixtures using `--baseline-root`.
 
 The earlier intermittent GPU polling assertion remains unresolved. Both final
 captures completed on their first attempts; one complete run per variant does
-not establish repeated-run stability. GitHub host CI passes and independent
-firmware CI for the integration implementation is still running at this record:
+not establish repeated-run stability. GitHub host CI and the checked firmware job pass. The independent release
+firmware job for the integration implementation is still running at this record:
 [CI run](https://github.com/Mainkill1/SpiritBoot/actions/runs/37689569960).
 Local final-source verification is complete; remote completion is not claimed.
 
@@ -159,3 +159,16 @@ binary is distributed. The earlier v0.1.0 baseline and its images remain unchang
 manifests, build and raw emulator/TAP logs, guest identities, source separation,
 and host results. Large HDD snapshots and extracted raw disks remain ignored
 local artifacts. Paths in manifests refer to the original captures.
+
+## Publication verification
+
+The [release](https://github.com/Mainkill1/SpiritBoot/releases/tag/v0.2.0-xemu-clean-room-baseline)
+is published at commit `109ebf603cfe31b9bf9e58235c71c1c1e1e6e8ba`;
+[draft PR #9](https://github.com/Mainkill1/SpiritBoot/pull/9) targets the existing
+release baseline. Both BIOS files and the checksum file were downloaded from
+the public tag and compared byte-for-byte with the locally validated files.
+GitHub's attachment endpoint returned HTTP 401, so the release notes link to
+the exact binaries tracked in Git. The earlier baseline remains unchanged.
+Publication identity and download hashes are retained in the evidence directory.
+The publication/evidence-only commits skip redundant CI; source CI runs against
+`0894900`, which contains the exact validated implementation and build tooling.

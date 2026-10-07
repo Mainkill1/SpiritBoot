@@ -67,5 +67,5 @@ build-source copy. The manifest records applied patch paths/hashes.
 - [x] Build release and checked flashes in the established Docker toolchain.
 - [x] Run targeted guest probes and the pinned XISO suite directly in xemu;
       retain original logs, complete receipts and parsed results.
-- [ ] Review final branch/provenance and publish validated source/images with
+- [x] Review final branch/provenance and publish validated source/images with
       accurate feature coverage and remaining limitations.
