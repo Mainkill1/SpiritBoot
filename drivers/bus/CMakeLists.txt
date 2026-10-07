@@ -1,0 +1,12 @@
+if(SARCH STREQUAL "xbox")
+    add_subdirectory(pci)
+    return()
+endif()
+
+if(NOT ARCH STREQUAL "arm")
+add_subdirectory(acpi)
+endif()
+add_subdirectory(isapnp)
+add_subdirectory(pci)
+add_subdirectory(pcix)
+add_subdirectory(pcmcia)

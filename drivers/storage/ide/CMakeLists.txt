@@ -1,0 +1,10 @@
+
+add_subdirectory(atapi)
+if(ARCH STREQUAL "i386" AND NOT ENABLE_UNIATA AND NOT SARCH STREQUAL "xbox")
+    add_subdirectory(legide)
+endif()
+add_subdirectory(pciide)
+add_subdirectory(pciidex)
+if(NOT SARCH STREQUAL "xbox")
+    add_subdirectory(uniata)
+endif()

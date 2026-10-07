@@ -1,0 +1,175 @@
+name: build
+
+on:
+  # Branch pushes only -- tag pushes go through release.yml, which calls
+  # this workflow via workflow_call (so the build isn't run twice on a tag).
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+# Literal "build-" prefix, not ${{ github.workflow }}: when this workflow is
+# reused (release.yml calls it), github.workflow resolves to the *caller's*
+# name, which would collide with the caller's own concurrency group and
+# deadlock. A fixed prefix keeps this group distinct from the caller's.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # GHA runners have no host audio device; otherwise xemu's mcpx_apu
+  # init aborts trying to open ALSA.
+  SDL_AUDIO_DRIVER: dummy
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPRESS: "1"
+
+jobs:
+  build:
+    name: ${{ matrix.variant }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: debug
+            dbg: 1
+            coverage: 0
+          - variant: release
+            dbg: 0
+            coverage: 0
+          # Non-LTO + DWARF line info; the api-regression run is traced
+          # and mapped to source lines, see docs/coverage.md.
+          - variant: coverage
+            dbg: 0
+            coverage: 1
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils-mingw-w64-i686 \
+            gcc-mingw-w64-i686 \
+            g++-mingw-w64-i686 \
+            gcc-multilib \
+            lz4 \
+            ccache \
+            cmake \
+            ninja-build \
+            flex \
+            bison \
+            python3 \
+            curl ca-certificates \
+            xvfb \
+            libgl1 \
+            libegl1 \
+            libpulse0 \
+            libsamplerate0 \
+            libslirp0
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ matrix.variant }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ matrix.variant }}-
+
+      - name: Configure
+        run: |
+          cmake -G Ninja -B build \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/toolchain-gcc.cmake" \
+            -DENABLE_CCACHE=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDBG=${{ matrix.dbg }} \
+            -DCOVERAGE=${{ matrix.coverage == 1 && 'ON' || 'OFF' }} \
+            .
+
+      - name: Build flash image
+        run: cmake --build build
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s
+
+      - name: Download xemu AppImage
+        run: |
+          URL=$(curl -fsSL https://api.github.com/repos/xemu-project/xemu/releases/latest \
+                | jq -r '.assets[] | select(.name | endswith("x86_64.AppImage")) | .browser_download_url' \
+                | head -1)
+          test -n "$URL" || { echo "no xemu x86_64 AppImage in latest release" >&2; exit 1; }
+          echo "Downloading $URL"
+          curl -fsSL -o "$RUNNER_TEMP/xemu.AppImage" "$URL"
+          chmod +x "$RUNNER_TEMP/xemu.AppImage"
+          echo "NXKRNL_XEMU=$RUNNER_TEMP/xemu.AppImage" >> "$GITHUB_ENV"
+
+      - name: Prepare runtime fixtures
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xbox_hdd.qcow2" \
+            https://github.com/xemu-project/xemu-dashboard/releases/latest/download/xbox_hdd.qcow2
+          {
+            echo "NXKRNL_HDD=$RUNNER_TEMP/xbox_hdd.qcow2"
+            echo "NXDK_DOCKER_IMAGE=ghcr.io/xboxdev/nxdk:latest"
+          } >> "$GITHUB_ENV"
+
+      - name: Run api-regression
+        if: matrix.coverage != 1
+        timeout-minutes: 5
+        run: |
+          xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
+            tools/api-regression-run
+
+      # in_asm,nochain logging slows the run considerably; give the
+      # in-guest suite and the step generous deadlines.
+      - name: Run api-regression (traced)
+        if: matrix.coverage == 1
+        timeout-minutes: 12
+        env:
+          API_REGRESSION_TIMEOUT: "420"
+        run: |
+          xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' \
+            tools/api-regression-run --trace "$RUNNER_TEMP/cov-trace.log"
+
+      - name: Generate lcov tracefile
+        if: matrix.coverage == 1
+        run: |
+          python3 tools/trace2lcov.py -o coverage.info \
+            --exe build/ntoskrnl/xboxkrnl.unstripped.exe \
+            "$RUNNER_TEMP/cov-trace.log"
+
+      - name: Upload coverage to codecov
+        if: matrix.coverage == 1
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage.info
+          disable_search: true
+          # The tracefile's line set comes straight from DWARF; codecov's
+          # heuristic file fixes would only second-guess it, and reading
+          # the vendored ISO-8859 sources spams decode warnings.
+          disable_file_fixes: true
+          flags: api-regression
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Upload coverage artifact
+        if: always() && matrix.coverage == 1
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-info
+          path: coverage.info
+          if-no-files-found: warn
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nxkrnl-${{ matrix.variant }}
+          path: |
+            build/ntoskrnl/xboxkrnl.exe
+            build/flash.bin
+          if-no-files-found: error

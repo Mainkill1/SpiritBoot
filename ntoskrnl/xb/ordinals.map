@@ -1,0 +1,447 @@
+# Ordinal map -- Xbox kernel ordinal -> the symbol that implements it.
+#
+# xb/gen-exports.py reads this together with nxdk's xboxkrnl.exe.def.  A
+# mapped ordinal's export-directory entry points at the named symbol; an
+# unmapped ordinal resolves to a generated, arity-correct, self-naming
+# bugcheck stub.  The signature (calling convention + argument bytes) always
+# comes from xboxkrnl.exe.def, so the named symbol must match that ABI.
+#
+# Line syntax:
+#   <ord>  <symbol>                          mapped to <symbol>
+#   <ord>  <symbol>  <internal_name>         mapped, asm symbol differs
+#                                            (spec2def 'name() _internal' form)
+#   <ord>  =<value>                          unmapped DATA scaffold; override
+#                                            the default (zero) initializer
+#   <ord>                                    unmapped; reserves a slot just to
+#                                            carry the inline `# comment` into
+#                                            the spec (useful TODO markers)
+# Any line may carry a trailing `# free-form note`, which the generator
+# appends in parentheses to the spec's `; <xboxkrnl_name>` annotation.
+
+# --- Av display subsystem ------------------------------------------------- #
+1    AvGetSavedDataAddress            # no saved framebuffer on a cold boot
+2    AvSendTVEncoderOption            # TV-encoder query / control
+3    AvSetDisplayMode                 # point the NV2A CRTC at the framebuffer
+4    AvSetSavedDataAddress
+
+# --- Dbg* ----------------------------------------------------------------- #
+5    DbgBreakPoint                    # int3; only reachable through SEH here
+6    DbgBreakPointWithStatus          # the status reaches a debugger in EAX
+10   XeDbgPrompt                     # bounded existing KD transport
+8    DbgPrint
+
+# --- Fsc* file-system cache ------------------------------------------------ #
+35   FscGetCacheSize                  # pages; block-granular (64 KB)
+36   FscInvalidateIdleBlocks
+37   FscSetCacheSize                  # rounds up to a block; floor keeps pins safe
+
+# --- Hal* ----------------------------------------------------------------- #
+9    HalReadSMCTrayState              # tray state from SMC reg 0x03 + eject count
+38   HalClearSoftwareInterrupt        # the pending-request bit APC/DPC delivery runs on
+39   NxHalDisableSystemInterrupt      # the console masks by bus-relative level, with no IRQL
+43   NxHalEnableSystemInterrupt
+48   HalRequestSoftwareInterrupt
+
+# --- Ex* allocator (Xbox ABI: implicit NonPagedPool, no POOL_TYPE arg) ---- #
+12   ExAcquireReadWriteLockExclusive  # ERWLOCK writer acquire (xb/rwlock.c)
+13   ExAcquireReadWriteLockShared     # ERWLOCK reader acquire (xb/rwlock.c)
+14   XeExAllocatePool                # Xbox: implicit NonPagedPool
+15   XeExAllocatePoolWithTag
+16   ExEventObjectType  XeExEventObjectType  # 28-byte Xbox-shape struct (PoolTag at +0x18)
+17   ExFreePool                       # PVOID -> void; identical to NT
+18   ExInitializeReadWriteLock        # ERWLOCK init (xb/rwlock.c)
+19   ExInterlockedAddLargeInteger    # the three-argument form: the caller brings the spinlock
+20   ExInterlockedAddLargeStatistic  # FASTCALL 64-bit += ULONG (ex asm; matches Xbox @8)
+21   ExInterlockedCompareExchange64  ExfInterlockedCompareExchange64  # 3-pointer CAS64 (ex; Xbox @12, no spinlock)
+22   ExMutantObjectType  XeExMutantObjectType  # 28-byte Xbox-shape struct
+23   XeExQueryPoolBlockSize          # Xbox @4 -> NT @8 adapter
+24   ExQueryNonVolatileSetting     # a console setting, out of the EEPROM
+25   ExReadWriteRefurbInfo         # the refurbishment record, in the disk's fourth sector
+26   ExRaiseException  RtlRaiseException   # raise a caller-built EXCEPTION_RECORD
+27   ExRaiseStatus     RtlRaiseStatus      # raise a bare NTSTATUS as an exception
+28   ExReleaseReadWriteLock           # ERWLOCK release (xb/rwlock.c)
+29   ExSaveNonVolatileSetting         # write a user setting back to the EEPROM
+30   ExSemaphoreObjectType  XeExSemaphoreObjectType  # 28-byte Xbox-shape struct
+31   ExTimerObjectType  XeExTimerObjectType   # 28-byte Xbox-shape struct
+32   ExfInterlockedInsertHeadList  XbExfInterlockedInsertHeadList  # FASTCALL splice, interrupts off (xb/exflist.c)
+33   ExfInterlockedInsertTailList  XbExfInterlockedInsertTailList  # FASTCALL splice, interrupts off (xb/exflist.c)
+34   ExfInterlockedRemoveHeadList  XbExfInterlockedRemoveHeadList  # FASTCALL splice, interrupts off (xb/exflist.c)
+
+# --- DATA: HalDiskCachePartitionCount ------------------------------------- #
+# Count of HDD cache partitions (X:, Y:, Z: on retail).  Titles register
+# themselves with the cache-partition assignment array stored at
+# partition0:0x800.  A zero value computes count-1 = -1 and produces a
+# fatally large memcpy in some titles' registration code.
+40   =3
+
+# --- Hal* misc (struct-shaped DATA exports) ------------------------------- #
+# XboxHardwareInfo is an 8-byte struct, the Disk* strings are 8-byte STRINGs;
+# the default 4-byte scaffold leaks adjacent .data garbage to the title.
+41   HalDiskModelNumber            # STRING, not the 4-byte scaffold
+42   HalDiskSerialNumber           # STRING, not the 4-byte scaffold
+44   XeHalGetInterruptVector         # Xbox form: IRQ in, IDT vector out
+45   HalReadSMBusValue             # SMBus byte/word read via MCPX 0xC000 ports
+46   HalReadWritePCISpace
+47   HalRegisterShutdownNotification  # priority-ordered shutdown callbacks
+49   XeHalReturnToFirmware
+50   HalWriteSMBusValue            # SMBus byte/word write
+
+# --- Interlocked* (Xbox: __fastcall) -------------------------------------- #
+51   XeInterlockedCompareExchange
+52   XeInterlockedDecrement
+53   XeInterlockedIncrement
+54   XeInterlockedExchange
+55   XeInterlockedExchangeAdd
+56   ExInterlockedFlushSList          # fastcall ABI matches
+57   XeInterlockedPopEntrySList      # thunks to RtlInterlockedPopEntrySList
+58   XeInterlockedPushEntrySList
+59   IoAllocateIrp       XeIoAllocateIrp   # Xbox @4 -> NT @8 adapter
+
+# --- Io* (Xbox ANSI -> NT UNICODE adapters) ------------------------------ #
+60   IoBuildAsynchronousFsdRequest   # signature matches NT's exactly
+61   IoBuildDeviceIoControlRequest   # signature matches NT's exactly
+62   IoBuildSynchronousFsdRequest    # signature matches NT's exactly
+63   IoCheckShareAccess              # signature matches NT's exactly
+64   IoCompletionObjectType  XeIoCompletionObjectType  # 28-byte Xbox-shape struct
+65   XeIoCreateDevice                # Xbox @24 ANSI -> NT @28 UNICODE
+66   XeIoCreateFile                  # Xbox @40: no EA, no create-file type
+67   XeIoCreateSymbolicLink          # Xbox ANSI strings -> NT UNICODE
+68   IoDeleteDevice
+69   XeIoDeleteSymbolicLink
+70   IoDeviceObjectType  XeIoDeviceObjectType  # 28-byte Xbox-shape struct
+71   IoFileObjectType    XeIoFileObjectType    # 28-byte Xbox-shape struct
+72   IoFreeIrp
+73   IoInitializeIrp
+74   IoInvalidDeviceRequest
+75   XeIoQueryFileInformation         # three classes only; the class fixes the length
+76   XeIoQueryVolumeInformation       # four classes only
+77   IoQueueThreadIrp                 # signature matches NT's exactly
+78   IoRemoveShareAccess             # signature matches NT's exactly
+79   XeIoSetIoCompletion             # Xbox @20 -> NT @24: no quota charge
+80   IoSetShareAccess                # signature matches NT's exactly
+81   XeIoStartNextPacket             # Xbox @4 -> NT @8 adapter
+82   XeIoStartNextPacketByKey        # Xbox @8 -> NT @12 adapter
+83   XeIoStartPacket                 # Xbox @12 -> NT @16
+84   IoSynchronousDeviceIoControlRequest  XeIoSynchronousDeviceIoControlRequest
+85   IoSynchronousFsdRequest          XeIoSynchronousFsdRequest
+86   IofCallDriver                    # fastcall ABI matches
+87   IofCompleteRequest               # fastcall ABI matches
+90   XeIoDismountVolume               # dispatches to the owning driver
+91   XeIoDismountVolumeByName         # Xbox ANSI device path
+
+# --- DATA: Kd debugger-presence flags ------------------------------------ #
+# The retail kernel keeps debug output compiled in but runs no remote
+# debugger, so both read TRUE on a cold boot (verified on 1.0.4627).  The
+# default zeroed scaffold would read FALSE and flip titles' break-on-assert.
+88   =1                            # KdDebuggerEnabled -- debug output active
+89   =1                            # KdDebuggerNotPresent -- nothing attached
+
+# --- Ke* (direct ntoskrnl forwards + xbe adapters) ----------------------- #
+92   KeAlertResumeThread              # an alerting resume; signature matches NT
+93   KeAlertThread                    # signature matches NT
+94   KeBoostPriorityThread            # base-relative, capped below the real-time range
+95   KeBugCheck
+96   KeBugCheckEx                     # the five words land in KiBugCheckData verbatim
+97   KeCancelTimer                    # KTIMER layout matches; direct
+98   XeKeConnectInterrupt            # routes through the KINTERRUPT shadow
+99   KeDelayExecutionThread
+100  XeKeDisconnectInterrupt         # routes through the KINTERRUPT shadow
+101  KeEnterCriticalRegion
+102  MmGlobalData                    # 32 zeroed bytes: sized; ours are NT's internals
+103  KeGetCurrentIrql
+104  XeKeGetCurrentThread            # returns the Xbox-shaped thread shadow
+105  XeKeInitializeApc               # 40-byte console KAPC; pure structure write
+106  KeInitializeDeviceQueue          # 12-byte console KDEVICE_QUEUE; direct
+107  KeInitializeDpc                  # native 28-byte KDPC; direct
+108  KeInitializeEvent
+109  XeKeInitializeInterrupt         # Xbox form: no spin lock, no SMP args; shadow buffer
+110  KeInitializeMutant
+111  KeInitializeQueue                # KQUEUE layout matches; direct
+112  KeInitializeSemaphore
+113  KeInitializeTimerEx              # KTIMER layout matches; direct
+114  KeInsertByKeyDeviceQueue
+115  KeInsertDeviceQueue
+116  KeInsertHeadQueue
+117  KeInsertQueue
+118  XeKeInsertQueueApc               # console KAPC shadowed by an NT one
+119  KeInsertQueueDpc                 # native 28-byte KDPC; direct
+120  KeInterruptTime                  # live interrupt-time counter; clock advances it
+121  KeIsExecutingDpc
+122  KeLeaveCriticalRegion
+123  KePulseEvent                     # signature matches NT; reports the pre-pulse state
+124  KeQueryBasePriorityThread
+125  XeKeQueryInterruptTime          # ULONGLONG
+126  XeKeQueryPerformanceCounter     # ULONGLONG
+127  KeQueryPerformanceFrequency   # ULONGLONG
+128  KeQuerySystemTime
+129  KeRaiseIrqlToDpcLevel
+130  KeRaiseIrqlToSynchLevel
+131  KeReleaseMutant
+132  KeReleaseSemaphore
+133  KeRemoveByKeyDeviceQueue
+134  KeRemoveDeviceQueue
+135  KeRemoveEntryDeviceQueue
+136  KeRemoveQueue
+137  KeRemoveQueueDpc                 # native 28-byte KDPC; direct
+138  KeResetEvent
+139  KeRestoreFloatingPointState
+141  KeRundownQueue
+142  KeSaveFloatingPointState
+140  KeResumeThread                    # returns the pre-resume count
+143  KeSetBasePriorityThread
+144  KeSetDisableBoostThread           # ThreadFlags bit 1; returns the old setting
+145  KeSetEvent
+146  KeSetEventBoostPriority
+147  KeSetPriorityProcess            # sets the field + the calling thread; others stay put
+148  KeSetPriorityThread
+149  KeSetTimer                       # native KDPC/KTIMER; direct
+150  KeSetTimerEx                     # native KDPC/KTIMER; direct
+151  KeStallExecutionProcessor
+152  KeSuspendThread                   # returns the pre-suspend count
+153  XeKeSynchronizeExecution        # title's KINTERRUPT has NULL ActualLock; route through the shadow
+154  KeSystemTime                     # live system-time counter; mirrors KeQuerySystemTime
+155  KeTestAlertThread                # reports and consumes the caller's alert
+156  KeTickCount                      # ntoskrnl's tick counter (low dword aliases)
+157  KeTimeIncrement                  # nominal 100ns clock-tick period (retail 10000 = 1ms)
+158  KeWaitForMultipleObjects
+159  KeWaitForSingleObject
+160  KfRaiseIrql
+161  KfLowerIrql
+162  KiBugCheckData                   # the live five-word record, zero until a bugcheck
+163  KiUnlockDispatcherDatabase  KiExitDispatcher  # holding the lock is holding DISPATCH_LEVEL
+
+# --- LaunchDataPage / Mm contiguous-memory family ------------------------ #
+# Contiguous memory is handed back in the KSEG0 window (VA = PA |
+# 0x80000000).  Distinct Nx* names so they don't collide with ntoskrnl's
+# existing Mm*Contiguous* exports.
+164  LaunchDataPage                # PLAUNCH_DATA_PAGE (NULL -- no launch data)
+165  NxMmAllocateContiguousMemory
+166  NxMmAllocateContiguousMemoryEx
+167  MmAllocateSystemMemory
+168  NxMmClaimGpuInstanceMemory       # NV2A instance memory -- top 64 KB of RAM
+169  NxMmCreateKernelStack            # worker-thread kernel stack from NonPagedPool
+170  NxMmDeleteKernelStack            # release a stack from MmCreateKernelStack
+171  NxMmFreeContiguousMemory
+172  MmFreeSystemMemory
+173  NxMmGetPhysicalAddress           # VA -> 32-bit PA (KSEG0 / low-VA / MMIO / page-walk)
+174  NxMmIsAddressValid               # short-circuit the PSE-mapped windows; fall back to NT
+175  MmLockUnlockBufferPages
+176  MmLockUnlockPhysicalPage
+177  NxMmMapIoSpace                   # PA -> KSEG0 / WC / MMIO-window VA
+178  NxMmPersistContiguousMemory      # cross-reboot persistence -- no-op here
+179  MmQueryAddressProtect
+180  NxMmQueryAllocationSize
+181  MmQueryStatistics
+182  NxMmSetAddressProtect            # re-protect hint after texture upload -- no-op
+183  NxMmUnmapIoSpace                 # no-op: windows are static PSE entries
+
+# --- Nt* (Xbox OBJECT_ATTRIBUTES, ANSI names, dropped process handle) ---- #
+184  XeNtAllocateVirtualMemory       # Xbox drops the process handle
+185  NtCancelTimer
+186  NtClearEvent                     # direct; Zw thunks are gone (Zw==Nt)
+187  NtClose
+188  XeNtCreateDirectoryObject       # Xbox OBJECT_ATTRIBUTES; no desired-access argument
+189  XeNtCreateEvent                 # Xbox OBJECT_ATTRIBUTES (ANSI name)
+190  XeNtCreateFile                  # Xbox OBJECT_ATTRIBUTES; no EA params
+191  XeNtCreateIoCompletion          # Xbox object attributes
+192  XeNtCreateMutant
+193  XeNtCreateSemaphore             # Xbox: 4 args, no DesiredAccess
+222  NtReleaseSemaphore               # signature matches NT (HANDLE, LONG, PLONG)
+194  XeNtCreateTimer                  # no access mask; Xbox object attributes
+195  XeNtDeleteFile                  # Xbox OBJECT_ATTRIBUTES (ANSI name)
+196  NtDeviceIoControlFile
+197  XeNtDuplicateObject             # Xbox @12: current process, same access
+198  NtFlushBuffersFile
+199  XeNtFreeVirtualMemory
+200  XeNtFsControlFile               # trace wrapper -- visible IOCTL fail / success
+201  XeNtOpenDirectoryObject
+202  XeNtOpenFile
+203  XeNtOpenSymbolicLinkObject
+204  XeNtProtectVirtualMemory        # Xbox drops the process handle
+205  XeNtPulseEvent                  # DPC-safe (Xbox semantics, cached handles)
+206  NtQueueApcThread                 # signature matches NT's exactly
+207  XeNtQueryDirectoryFile          # Xbox: no ReturnSingleEntry; ANSI mask + name
+208  XeNtQueryDirectoryObject
+209  XeNtQueryEvent                  # basic information only
+210  XeNtQueryFullAttributesFile
+211  NtQueryInformationFile
+212  XeNtQueryIoCompletion           # basic information only
+213  XeNtQueryMutant                 # basic information only
+214  XeNtQuerySemaphore              # basic information only
+215  XeNtQuerySymbolicLinkObject     # folds the UNICODE target to ANSI
+216  XeNtQueryTimer                  # basic information only
+217  XeNtQueryVirtualMemory          # Xbox: base + Mbi only; class is implicit
+218  NtQueryVolumeInformationFile
+219  XeNtReadFile
+220  XeNtReadFileScatter              # per-page IO, unbuffered handles only
+221  XeNtReleaseMutant
+223  NtRemoveIoCompletion             # signature matches NT's exactly
+224  NtResumeThread
+225  NtSetEvent
+226  XeNtSetInformationFile          # rename target: Xbox ANSI -> NT WCHAR
+227  NtSetIoCompletion                # signature matches NT's exactly
+228  NtSetSystemTime
+229  XeNtSetTimerEx                  # NtSetTimer plus an explicit APC mode
+230  NtSignalAndWaitForSingleObjectEx
+231  NtSuspendThread
+232  NtUserIoApcDispatcher
+233  NtWaitForSingleObject
+234  NtWaitForSingleObjectEx       # the *Ex waits add a wait mode
+235  NtWaitForMultipleObjectsEx
+236  XeNtWriteFile
+237  XeNtWriteFileGather              # per-page IO, unbuffered handles only
+238  NtYieldExecution                 # direct; Zw thunks are gone (Zw==Nt)
+
+# --- Ob* (object manager) ------------------------------------------------ #
+# Remaining anonymous OBJECT_TYPE ords (240/245/249/256) follow the same
+# pattern as 259 when needed: bind to the corresponding ReactOS Ob/Io*Type
+# pointer.  Add them when a title imports them.
+239  XeObCreateObject                # title-owned storage: the type allocates
+240  ObDirectoryObjectType  XeObDirectoryObjectType  # 28-byte Xbox-shape struct
+241  XeObInsertObject                # handle + namespace, via the shim object
+242  XeObMakeTemporaryObject
+243  XeObOpenObjectByName            # Xbox @16: decoy type + ANSI oa -> NT
+244  XeObOpenObjectByPointer         # Xbox @12: decoy type, no access mask
+246  XeObReferenceObjectByHandle
+247  XeObReferenceObjectByName       # Xbox @20: ANSI path, no root handle
+248  XeObReferenceObjectByPointer    # Xbox @8: the type is the only guard
+245  ObpObjectHandleTable          # 48 zeroed bytes: sized; the layout behind it is ntoskrnl's
+249  ObSymbolicLinkObjectType  XeObSymbolicLinkObjectType  # 28-byte Xbox-shape struct
+250  XeObfDereferenceObject          # a title object counts its own references
+251  XeObfReferenceObject
+
+# --- Ethernet PHY -------------------------------------------------------- #
+# MII-bus access via the MCPX NIC at PA 0xFEF00000.
+252  NxPhyGetLinkState                # poll-or-cached link flags (XNET_*)
+253  NxPhyInitialize                  # PHY reset + auto-negotiate
+
+# --- Ps* (xbe thread spawn -- Xbox PsCreateSystemThreadEx takes a TLS size) #
+254  XePsCreateSystemThread          # Xbox @20 (no oa/process/ACCESS_MASK) -> NT @28
+255  XePsCreateSystemThreadEx
+256  XePsQueryStatistics             # thread and handle counts; exact Length
+257  PsSetCreateThreadNotifyRoutine  # Xbox callback takes the ETHREAD, not a process id
+258  PsTerminateSystemThread
+259  PsThreadType  XePsThreadObjectType  # 28-byte Xbox-shape struct; title reads .PoolTag at +0x18
+
+# --- Rtl* ---------------------------------------------------------------- #
+260  RtlAnsiStringToUnicodeString
+261  RtlAppendStringToString
+262  RtlAppendUnicodeStringToString
+263  RtlAppendUnicodeToString
+264  XeRtlAssert                     # prints and breaks; ntoskrnl's own prompts forever
+265  XeRtlCaptureContext             # fills the Xbox CONTEXT layout
+266  RtlCaptureStackBackTrace        # kernel frame walk (flat ring-0; no user gate)
+267  RtlCharToInteger
+268  RtlCompareMemory
+269  RtlCompareMemoryUlong
+270  RtlCompareString
+271  RtlCompareUnicodeString
+272  RtlCopyString
+273  RtlCopyUnicodeString
+274  RtlCreateUnicodeString
+275  RtlDowncaseUnicodeChar
+276  RtlDowncaseUnicodeString
+277  XeRtlEnterCriticalSection       # xbe's own minimal recursive lock
+278  XeRtlEnterCriticalSectionAndRegion  # enter CS + KeEnterCriticalRegion
+279  RtlEqualString
+281  RtlExtendedIntegerMultiply
+282  RtlExtendedLargeIntegerDivide
+283  RtlExtendedMagicDivide
+284  RtlFillMemory
+285  RtlFillMemoryUlong
+280  RtlEqualUnicodeString
+286  RtlFreeAnsiString
+287  RtlFreeUnicodeString
+288  RtlGetCallersAddress            # two-frame walk via RtlCaptureStackBackTrace
+289  RtlInitAnsiString
+290  RtlInitUnicodeString
+291  XeRtlInitializeCriticalSection
+292  RtlIntegerToChar
+293  RtlIntegerToUnicodeString
+294  XeRtlLeaveCriticalSection
+295  XeRtlLeaveCriticalSectionAndRegion  # leave CS + KeLeaveCriticalRegion
+296  RtlLowerChar
+297  RtlMapGenericMask
+298  RtlMoveMemory
+299  RtlMultiByteToUnicodeN
+300  RtlMultiByteToUnicodeSize
+301  RtlNtStatusToDosError
+302  RtlRaiseException
+303  RtlRaiseStatus
+304  RtlTimeFieldsToTime
+305  RtlTimeToTimeFields              # (PLARGE_INTEGER, PTIME_FIELDS); identical to NT
+306  XeRtlTryEnterCriticalSection
+307  RtlUlongByteSwap              # FASTCALL byteswap (xb/rtlbyteswap.c)
+308  RtlUnicodeStringToAnsiString
+310  RtlUnicodeToMultiByteN
+309  RtlUnicodeStringToInteger
+311  RtlUnicodeToMultiByteSize
+312  RtlUnwind
+313  RtlUpcaseUnicodeChar
+314  RtlUpcaseUnicodeString
+315  RtlUpcaseUnicodeToMultiByteN
+316  RtlUpperChar
+317  RtlUpperString
+318  RtlUshortByteSwap             # FASTCALL byteswap (xb/rtlbyteswap.c)
+319  RtlWalkFrameChain               # EBP-chain walk; user-mode gate off for Xbox
+320  RtlZeroMemory
+
+# --- DATA: XboxHardwareInfo / XeImageFileName ---------------------------- #
+321  XboxEEPROMKey                 # 16 zeroed bytes: sized, no key (see xb/sizeddata.c)
+322  XboxHardwareInfo              # 8-byte XBOX_HARDWARE_INFO; USB-hub flag + GPU/MCP revs (not the 4-byte scaffold)
+323  XboxHDKey                     # 16-byte console HDD key, out of the EEPROM's sealed section
+324  XboxKrnlVersion               # 8-byte XBOX_KRNL_VERSION; titles gate on Major=1
+325  XboxSignatureKey              # per-title: HMAC of the image's certificate field
+326  XeImageFileName               # ANSI_STRING -- the running image name
+
+# --- DATA: the title's own keys, derived from its certificate ------------ #
+353  XboxLANKey                    # per-title: HMAC of the image's certificate field
+354  XboxAlternateSignatureKeys    # per-title: sixteen of them, same derivation
+
+# --- Buffered port I/O (rep ins/outs; single-value accessors inline) ----- #
+329  READ_PORT_BUFFER_UCHAR
+330  READ_PORT_BUFFER_USHORT
+331  READ_PORT_BUFFER_ULONG
+332  WRITE_PORT_BUFFER_UCHAR
+333  WRITE_PORT_BUFFER_USHORT
+334  WRITE_PORT_BUFFER_ULONG
+
+# --- Xe* / Xc* (xbe-side image + crypto -- stubbed, correct ABI) --------- #
+327  XeLoadSection
+328  XeUnloadSection
+335  XcSHAInit
+336  XcSHAUpdate
+337  XcSHAFinal
+338  XcRC4Key
+339  XcRC4Crypt
+340  XcHMAC
+341  XcPKEncPublic                   # raw public-key operation, value eight bytes wider than the modulus
+342  XcPKDecPrivate                  # CRT private-key operation; the fields stride by the blob length
+343  XcPKGetKeyLen                   # the blob's own length field, verbatim
+344  XcVerifyPKCS1Signature          # RSASSA-PKCS1-v1_5 over SHA-1
+345  XcModExp
+346  XcDESKeyParity
+347  XcKeyTable
+348  XcBlockCrypt
+349  XcBlockCryptCBC
+350  XcCryptService                  # answers zero to every operation
+351  XcUpdateCrypto                  # replaces the vector every Xc entry dispatches through
+
+# --- Rtl failure reporting ------------------------------------------------ #
+352  XeRtlRip                        # prints and breaks, as RtlAssert does
+
+# --- HAL boot / shutdown ------------------------------------------------- #
+355  XePublicKeyData               # 284 zeroed bytes: sized, no key (see xb/sizeddata.c)
+356  HalBootSMCVideoMode           # = 1 (HDTV)
+357  IdexChannelObject             # 264 zeroed bytes: sized so a title's hook writes land inside it
+358  HalIsResetOrShutdownPending
+359  IoMarkIrpMustComplete
+360  HalInitiateShutdown
+365  HalEnableSecureTrayEject      # the title takes the eject button over from the dashboard
+366  HalWriteSMCScratchRegister    # the SMC's low byte only, over SMBus
+
+# --- Rtl printf family (xb/rtlprintf.c -> runtime _vsnprintf) ------------- #
+361  RtlSnprintf
+362  RtlSprintf
+363  RtlVsnprintf
+364  RtlVsprintf
