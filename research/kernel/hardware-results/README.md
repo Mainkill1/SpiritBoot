@@ -40,3 +40,15 @@ A normalized PASS means "this particular test passed in this recorded environmen
 ## Source-code licensing
 
 The current xbox_kernel_test_suite `LICENSE` file is GPL-3.0. SpiritBoot treats the suite as an **external test/reference tool** and imports metadata/results. Do not copy test implementation code into GPL-2.0-only SpiritBoot code without resolving the license implications first.
+
+## Upstream availability status
+
+The upstream project explicitly discussed maintaining public hardware reference outputs in issue #6:
+https://github.com/Cxbx-Reloaded/xbox_kernel_test_suite/issues/6
+
+That issue was closed in September 2024 after the required log metadata was implemented. The closing discussion states that community-supplied up-to-date hardware results had seen no activity for roughly four years, so SpiritBoot currently has no maintained upstream result corpus to import automatically.
+
+The upstream test-writing guidance in issue #4 is still useful for new first-wave tests:
+https://github.com/Cxbx-Reloaded/xbox_kernel_test_suite/issues/4
+
+It calls for input variation, invalid-input checking, extreme/magic values, verification of all known effects, explanation of untestable cases, and cleanup. SpiritBoot's first-wave test requirements follow the same principles.
