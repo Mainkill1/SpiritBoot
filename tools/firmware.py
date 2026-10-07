@@ -3,7 +3,7 @@
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import signal
@@ -38,10 +38,23 @@ def load_lock(path=DEFAULT_LOCK):
             raise ValueError("unsupported schema")
         for name in ("roswell", "xemu"):
             repository = value["repositories"][name]
-            if not re.fullmatch(r"[0-9a-f]{40}", repository["revision"]):
+            if not isinstance(repository["revision"], str) or not re.fullmatch(r"[0-9a-f]{40}", repository["revision"]):
                 raise ValueError("expected full lowercase Git revision")
-            if not repository["url"].startswith("https://github.com/"):
+            if not isinstance(repository["url"], str) or not repository["url"].startswith("https://github.com/"):
                 raise ValueError("expected public GitHub HTTPS URL")
+        patches = value["repositories"]["roswell"].get("patches", [])
+        if not isinstance(patches, list):
+            raise ValueError("patches must be an ordered array")
+        for patch in patches:
+            if not isinstance(patch, dict) or set(patch) != {"path", "sha256"}:
+                raise ValueError("each patch must contain path and sha256 only")
+            path = patch["path"]
+            if (not isinstance(path, str) or not path or "\\" in path or "\x00" in path
+                    or PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts
+                    or path == "." or PurePosixPath(path).as_posix() != path):
+                raise ValueError("patch path must be a repository-relative file path without traversal")
+            if not isinstance(patch["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", patch["sha256"]):
+                raise ValueError("patch sha256 must be 64 lowercase hexadecimal characters")
         return value
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise ValueError(f"invalid firmware lock: {error}") from error
@@ -49,6 +62,30 @@ def load_lock(path=DEFAULT_LOCK):
 
 def checked_output(command):
     return subprocess.check_output(command, text=True, stderr=subprocess.STDOUT).strip()
+
+
+def source_git(source):
+    # Trust only the explicit source for this invocation, including root CI
+    # containers reading a checkout owned by the runner. Never alter global Git
+    # configuration or allow every directory with safe.directory=*.
+    return ["git", "-c", f"safe.directory={source}", "-C", str(source)]
+
+
+def patch_inputs(patches):
+    """Validate all inputs before applying; snapshot the exact hashed bytes."""
+    root = ROOT.resolve()
+    inputs = []
+    for patch in patches:
+        path = (root / patch["path"]).resolve()
+        if not path.is_relative_to(root) or path == root:
+            raise ValueError(f"patch path escapes the repository: {patch['path']}")
+        if not path.is_file():
+            raise ValueError(f"missing patch file: {patch['path']}")
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != patch["sha256"]:
+            raise ValueError(f"patch checksum mismatch: {patch['path']}")
+        inputs.append(data)
+    return inputs
 
 
 def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK):
@@ -61,19 +98,23 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK):
     published = output / "flash.bin"
     published.unlink(missing_ok=True)
     manifest = {"schema": 1, "status": "failed", "variant": variant,
-                "source": str(source), "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "source": str(source), "source_directory": str(source), "output_directory": str(output),
+                "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "commands": []}
     started = time.monotonic()
     try:
         lock = load_lock(lock_path)
-        revision = checked_output(["git", "-C", str(source), "rev-parse", "HEAD"])
+        revision = checked_output(source_git(source) + ["rev-parse", "HEAD"])
         if revision != lock["repositories"]["roswell"]["revision"]:
             raise ValueError(f"source revision {revision} differs from firmware lock")
-        if checked_output(["git", "-C", str(source), "status", "--porcelain"]):
+        if checked_output(source_git(source) + ["status", "--porcelain"]):
             raise ValueError("dirty Roswell source: commit and pin patches before building")
         manifest.update(source_revision=revision, repositories=lock["repositories"],
-                        lock_sha256=sha256(lock_path), tool_versions={})
-        epoch = checked_output(["git", "-C", str(source), "show", "-s", "--format=%ct", "HEAD"])
+                        lock_sha256=sha256(lock_path), tool_versions={},
+                        patches=lock["repositories"]["roswell"].get("patches", []))
+        inputs = patch_inputs(manifest["patches"])
+        manifest["base_source_tree"] = checked_output(source_git(source) + ["rev-parse", "HEAD^{tree}"])
+        epoch = checked_output(source_git(source) + ["show", "-s", "--format=%ct", "HEAD"])
         manifest["source_date_epoch"] = epoch
         build_env = dict(os.environ, SOURCE_DATE_EPOCH=epoch)
         for tool in ("cmake", "ninja", "i686-w64-mingw32-gcc", "i686-w64-mingw32-g++", "gcc", "git", "python3"):
@@ -82,21 +123,44 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK):
         # compiler paths from contaminating the attributed build. Keep previous
         # trees as evidence; never delete an arbitrary existing work directory.
         work = Path(tempfile.mkdtemp(prefix="work-", dir=output))
-        manifest["build_directory"] = str(work)
-        commands = [
-            ["cmake", "-G", "Ninja", "-S", str(source), "-B", str(work),
-             f"-DCMAKE_TOOLCHAIN_FILE={source / 'toolchain-gcc.cmake'}",
-             "-DCMAKE_BUILD_TYPE=Release", f"-DDBG={int(variant == 'debug')}",
-             "-DKDBG=FALSE"],
-            ["cmake", "--build", str(work), "--clean-first", "--target", "flash", "--parallel", "4"],
-        ]
+        actual_source = work / "source" if inputs else source
+        build = work / "build" if inputs else work
+        manifest.update(source_directory=str(actual_source), build_directory=str(build))
         with (output / "build.log").open("w") as log:
-            for command in commands:
+            def run(command, env=build_env):
                 manifest["commands"].append(command)
                 log.write(json.dumps(command) + "\n")
                 log.flush()
-                subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True, env=build_env)
-        image = work / "flash.bin"
+                subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True, env=env)
+            if inputs:
+                # A real clone preserves Git metadata for guest Makefiles and
+                # isolates both worktree/index and objects from the pristine
+                # checkout. No shared alternates or linked worktree Git dir.
+                # Local clone's upload-pack drops command-line safe.directory
+                # configuration. Supply a private config only for this clone's
+                # process tree, without changing the user's global Git config.
+                safe_config = work / "git-safe.config"
+                for trusted in (source, source / ".git"):
+                    run(["git", "-C", str(work), "config", "--file", str(safe_config), "--add", "safe.directory", str(trusted)],
+                        env=dict(build_env, GIT_CEILING_DIRECTORIES=str(work)))
+                run(["git", "clone", "--no-hardlinks", "--dissociate", "--no-checkout",
+                     str(source), str(actual_source)], env=dict(build_env, GIT_CONFIG_GLOBAL=str(safe_config)))
+                if (actual_source / ".git/objects/info/alternates").exists():
+                    raise ValueError("isolated source must not share Git object alternates")
+                run(source_git(actual_source) + ["checkout", "--detach", revision])
+                patch_dir = work / "patches"
+                patch_dir.mkdir()
+                for number, data in enumerate(inputs, 1):
+                    snapshot = patch_dir / f"{number:04d}.patch"
+                    snapshot.write_bytes(data)
+                    run(source_git(actual_source) + ["apply", "--check", "--index", str(snapshot)])
+                    run(source_git(actual_source) + ["apply", "--index", str(snapshot)])
+            manifest["source_tree"] = checked_output(source_git(actual_source) + ["write-tree"])
+            run(["cmake", "-G", "Ninja", "-S", str(actual_source), "-B", str(build),
+                 f"-DCMAKE_TOOLCHAIN_FILE={actual_source / 'toolchain-gcc.cmake'}",
+                 "-DCMAKE_BUILD_TYPE=Release", f"-DDBG={int(variant == 'debug')}", "-DKDBG=FALSE"])
+            run(["cmake", "--build", str(build), "--clean-first", "--target", "flash", "--parallel", "4"])
+        image = build / "flash.bin"
         if image.stat().st_size != FLASH_SIZES[variant]:
             raise ValueError(f"invalid flash size: expected {FLASH_SIZES[variant]} bytes")
         shutil.copyfile(image, published)

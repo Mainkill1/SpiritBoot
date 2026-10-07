@@ -29,8 +29,15 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
 
 If the reference checkout already exists, use it and check out the pinned commit
 without overwriting local changes. The driver rejects dirty or unpinned sources.
-For intentional kernel changes, commit them in your own GPL-compatible Roswell
-fork and update the source URL and full revision in the lock file.
+The lock keeps the public baseline pinned and lists reviewed patches under
+`repositories.roswell.patches`. Each ordered entry contains a repository-relative
+`path` and lowercase SHA-256. The driver validates the schema, path containment,
+and every checksum before applying anything. It creates an isolated Git clone
+under the output directory, checks and applies each patch with `git apply
+--index`, and configures CMake against that clone. The supplied reference stays
+at its pinned clean revision. Without patches, CMake uses the original reference.
+For intentional changes, update the reviewed patch and its checksum or commit
+them in your own GPL-compatible Roswell fork and update the full revision.
 
 On an installed host toolchain, run the same Python command without Docker.
 If a managed network requires a CA bundle, add
@@ -38,9 +45,17 @@ If a managed network requires a CA bundle, add
 Keep the configured proxy and TLS verification enabled.
 
 Each output directory contains `flash.bin`, `build.json`, `build.log`, and
-`work-*/` (upstream kernel/loader build products). The manifest records revisions,
-compiler versions, command arguments, image size, SHA-256, and the source commit
-epoch. That epoch is exported as `SOURCE_DATE_EPOCH` to avoid wall-clock PE linker
+`work-*/` (isolated source and kernel/loader build products). Patched builds place
+the standalone Git clone at `work-*/source`, patch snapshots at `work-*/patches`,
+and CMake products at `work-*/build`. Each clone has its own `.git`, copied object
+storage, and no shared alternates. The manifest records revisions, ordered patch
+paths/hashes, compiler versions, commands, image size, SHA-256, and the base commit
+epoch. `source` identifies the supplied pristine checkout; `source_directory`
+is the actual source used by CMake and guest builds; `build_directory` and
+`output_directory` identify their outputs. `base_source_tree` is the pristine
+tree and `source_tree` is the patched Git index tree, including new guest tests.
+The current reviewed patched tree is `8ba32f2153b4716c8cac269bad06a78553f98ded`.
+The base epoch is exported as `SOURCE_DATE_EPOCH` to avoid wall-clock PE linker
 timestamps. Each build uses a fresh configure tree so previous CMake cache flags,
 compiler selections, or timestamps cannot leak into a newly attributed image.
 Failed builds invalidate the published
@@ -71,14 +86,27 @@ supplies its runtime dependencies, including host `libusb`. A native launch
 needs an X display, those runtime libraries, and the appropriate audio backend.
 For a desktop run, the AppImage can also run normally through FUSE.
 
-Build Roswell's open API-regression payload using the recorded nxdk container:
+Build the API regression, 23-check targeted contract guest, and 5-check warm
+reboot guest using the recorded nxdk container. Obtain their source path from
+the manifest of the flash being tested, so the payloads use its patched tests:
 
 ```sh
-docker run --rm -v "$PWD:/work" \
-  -w /work/.reference/roswell/tests/xbe/api-regression \
-  ghcr.io/xboxdev/nxdk@sha256:bab707b7ed2544e9956d51e7b411a4575ab66120bd608b3237698495203d15f7 \
-  make NXDK_DIR=/usr/src/nxdk
+guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-release/build.json"))["source_directory"])')
+nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
+for guest in api-regression clean-room-contracts clean-room-warm-reboot; do
+  docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+    -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    -w "$guest_source/tests/xbe/$guest" \
+    "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
+done
 ```
+
+These paths match the `/work` mount used for Docker firmware builds. For native
+builds, the manifest contains native absolute paths; use those paths directly or
+mount the checkout at the same absolute path when compiling guests in Docker.
+Guest compilation creates outputs in the isolated source after `source_tree`
+was recorded; it does not change the pristine reference or the attributed kernel
+index tree. Keep the same mount path when reading a manifest inside containers.
 
 ## Verify boot and kernel execution
 
@@ -88,18 +116,24 @@ driver independently enforces the emulator deadline.
 
 ```sh
 docker run --rm -v "$PWD:/work" \
-  -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -c '
+  -e GUEST_SOURCE="$guest_source" -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -c '
   Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
   python3 -c "import time; time.sleep(1)"
   DISPLAY=:99 exec python3 scripts/run-firmware.py \
     --xemu artifacts/squashfs-root/usr/bin/xemu \
     --flash artifacts/firmware-release/flash.bin \
     --hdd artifacts/xbox_hdd.qcow2 \
-    --dvd .reference/roswell/tests/xbe/api-regression/nxkrnl-api-regression.iso \
+    --dvd "$GUEST_SOURCE/tests/xbe/api-regression/nxkrnl-api-regression.iso" \
     --output artifacts/open-xbe-release --timeout 240 --expect-tap'
 ```
 
 Use `firmware-debug/flash.bin` and a new output directory for the checked build.
+Extract `guest_source` from that checked build's manifest and build its guests.
+Run `clean-room-contracts/clean-room-contracts.iso` and
+`clean-room-warm-reboot/clean-room-warm-reboot.iso` under the same
+`$GUEST_SOURCE/tests/xbe/` path with new capture directories. The warm guest
+performs its own two-stage reset within one emulator run. CI builds and runs all
+three guests for each variant and checks targeted plans of 23 and 5 respectively.
 `--expect-tap` requires one complete TAP v13/v14 stream, a matching numbered
 plan, no unexpected failures, and a clean emulator exit. TODO and SKIP cases are
 reported separately. A timeout or reset is a failure even if part of the suite
