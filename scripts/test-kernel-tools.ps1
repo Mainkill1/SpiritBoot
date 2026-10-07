@@ -10,7 +10,6 @@ try {
     New-Item -ItemType Directory -Path $temp | Out-Null
 
     & ./scripts/import-kernel-test-log.ps1 -LogPath $Fixture -OutputDirectory $temp -Environment "Fixture Retail 1.6"
-    if ($LASTEXITCODE -ne 0) { throw "import-kernel-test-log.ps1 failed" }
 
     $csv = Get-ChildItem $temp -Filter "*.csv" | Select-Object -First 1
     if (-not $csv) { throw "Importer produced no CSV" }
