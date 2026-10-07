@@ -24,6 +24,12 @@ live IDE callbacks and a bounded debugger prompt. See the
 [feature guide](docs/CLEAN_ROOM_FEATURES.md),
 [source review](docs/clean-room-kernel-review.md) and
 [final build and runtime evidence](docs/provenance/CLEAN_ROOM_XEMU_BASELINE.md).
+The [complete kernel-call audit and optimization report](docs/optimization/2026-10-07/README.md)
+assesses all 337 callable exports and 34 data exports. Seven shared paths now
+do less work; matched measurements show six small pin-workload gains, with
+other timings inconclusive. [Optimized BIOS images](bios/optimized-xemu/README.md)
+passed both complete XISO variants; [raw evidence](docs/evidence/optimization-2026-10-07/README.md)
+records builds, source identity, measurements and limits.
 The build needs no Microsoft BIOS or MCPX ROM. Runtime/game progress is measured
 separately from a successful firmware build.
 
