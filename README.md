@@ -31,6 +31,23 @@ SpiritBoot is **not** intended to:
 - duplicate an emulator inside the firmware;
 - claim retail compatibility before the required kernel behavior exists.
 
+## Recommended implementation route
+
+SpiritBoot will **not** begin by rewriting the entire Xbox software stack from zero. The initial implementation route is:
+
+```text
+FAST / DEVELOPMENT
+Mainkill1/xemu -> Roswell flash/nxldr -> open xboxkrnl -> XBE
+
+OPEN / ACCURATE
+CPU reset -> Fancy Mouse Boot ROM -> Roswell/SpiritBoot flash -> open xboxkrnl -> XBE
+
+REFERENCE
+xemu/hardware -> user-supplied original firmware -> test XBE
+```
+
+Roswell is the initial open kernel/loader foundation. Fancy Mouse provides the open MCPX-compatible boot-ROM path. Cxbx-Reloaded and the Xbox Kernel Test Suite are behavioral references/test partners. SpiritBoot should fork or replace components only after the compatibility gap is measured.
+
 ## What “working” means
 
 | Level | Target | Exit condition |
@@ -127,13 +144,13 @@ Trace hooks span every layer.
 
 ## Reference projects
 
-SpiritBoot is being built from scratch, but existing open projects contain years of useful Xbox hardware and software research. They are **references, test partners, and potential sources only where licenses and provenance permit**.
+SpiritBoot is a clean-room integration and implementation project. Existing open projects contain years of Xbox hardware and software research and may be referenced, forked, or reused where their licenses and provenance permit. We should not rewrite solved components merely to call the result clean-room.
 
 | Project | Why it matters |
 | --- | --- |
-| [XboxDev/cromwell](https://github.com/XboxDev/cromwell) | Existing free/legal Xbox BIOS replacement. Primary reference for low-level boot and hardware bring-up. It intentionally does not boot original Xbox games. |
-| [xemu-project/xemu](https://github.com/xemu-project/xemu) | Hardware model and primary emulator-side bring-up target. Useful for tracing device behavior and creating a BIOS/MCPX-independent development path. |
-| [Cxbx-Reloaded/Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) | Useful reference for XBE loading, Xbox kernel/API behavior and title compatibility research. Its host-side HLE architecture is not a drop-in firmware implementation. |
+| [mborgerson/roswell](https://github.com/mborgerson/roswell) | Primary open xboxkrnl/flash foundation. Already builds a flash image and can direct-boot in xemu without a separate boot ROM. |\n| [SnowyMouse/fancy-mouse-boot-rom](https://github.com/SnowyMouse/fancy-mouse-boot-rom) | Open MCPX boot-ROM replacement for the hardware-faithful boot path. |\n| [XboxDev/cromwell](https://github.com/XboxDev/cromwell) | Existing free/legal Xbox BIOS replacement and low-level hardware bring-up reference. It intentionally does not boot original Xbox games. |
+| [Mainkill1/xemu](https://github.com/Mainkill1/xemu) | Primary SpiritBoot emulator integration, instrumentation, compatibility and performance target. |\n| [xemu-project/xemu](https://github.com/xemu-project/xemu) | Upstream hardware model/reference used to keep SpiritBoot integration separable from fork-specific work. |
+| [Cxbx-Reloaded/Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) | Useful reference for XBE loading, Xbox kernel/API behavior and title compatibility research. Its host-side HLE architecture is not a drop-in firmware implementation. |\n| [Cxbx-Reloaded/xbox_kernel_test_suite](https://github.com/Cxbx-Reloaded/xbox_kernel_test_suite) | Hardware-backed kernel API conformance tests; primary path for turning unknown behavior into repeatable evidence. |\n| [Cxbx-Reloaded/XbSymbolDatabase](https://github.com/Cxbx-Reloaded/XbSymbolDatabase) | XDK/static-library symbol identification for understanding retail XBE behavior without treating opaque addresses as unknown code. |
 | [XboxDev/nxdk](https://github.com/XboxDev/nxdk) | Open Xbox SDK, startup code, drivers and a good source of small test payloads for validating SpiritBoot independently of retail software. |
 | [XboxDev/xboxpy](https://github.com/XboxDev/xboxpy) | Hardware/software interaction tooling useful for real-console probing and behavioral comparison. |
 | [XboxDev/xbox-linux](https://github.com/XboxDev/xbox-linux) | Additional historical hardware-driver and platform research. |
@@ -161,19 +178,17 @@ Use the helpers under `scripts/` to clone/update these into an ignored local `.r
 
 ## MCPX strategy
 
-The MCPX boot ROM is a separate problem from the flash BIOS.
+MCPX is a separate early-boot problem from the flash/kernel compatibility problem. SpiritBoot should support three explicit modes:
 
-Initial development should not block on replacing it. SpiritBoot should support an emulator research path that can enter the SpiritBoot reset/stage0 environment directly or through a small open handoff.
+1. **Fast/direct:** xemu supplies the documented entry/reset state needed to execute Roswell/SpiritBoot directly. No proprietary MCPX ROM is required.
+2. **Open/accurate:** Fancy Mouse Boot ROM performs the open MCPX-compatible first-stage path and hands off to the open flash/kernel stack.
+3. **Reference:** a user may supply original MCPX/flash images for black-box comparison. These are never distributed by SpiritBoot.
 
-Long term, the project should define and test:
-
-1. **Physical Xbox path:** work with the MCPX behavior already present in the console and reach SpiritBoot from a supported flash/modchip/TSOP configuration.
-2. **Emulator path:** allow xemu or another test harness to boot SpiritBoot without requiring users to provide a proprietary MCPX dump where technically possible.
-3. **Open stage0 research:** document exactly which MCPX-visible behaviors are actually required before deciding whether an open substitute is necessary or beneficial.
+Direct boot is the default development path; Fancy Mouse is the accuracy/hardware path. Neither should block kernel conformance work.
 
 ## Kernel compatibility is the critical path
 
-Cromwell demonstrates that an open Xbox BIOS can initialize the machine. Retail game compatibility requires substantially more.
+Cromwell demonstrates that an open Xbox BIOS can initialize the machine, and Roswell already provides an open Xbox kernel/flash foundation that boots some Xbox software. SpiritBoot should measure and extend that base rather than recreate solved NT/kernel plumbing. Retail game compatibility still requires substantial behavioral conformance work.
 
 SpiritBoot must determine and implement the observable Xbox kernel contract used by titles, including at minimum:
 
@@ -195,7 +210,7 @@ Implementation should be driven by **usage and tests**, not an attempt to rewrit
 
 ### Phase 0 — Bootstrap
 
-- [ ] Select project license.
+- [x] Use GPL-2.0 for SpiritBoot-owned code; preserve upstream per-file licensing and attribution.
 - [ ] Add freestanding x86 toolchain/build system.
 - [ ] Produce a deterministic binary artifact.
 - [ ] Add map/symbol outputs.
@@ -334,6 +349,6 @@ The exact binary/linker layout is intentionally not frozen until reset-vector an
 
 ## First target
 
-> **Build SpiritBoot, enter it in xemu without a Microsoft BIOS image, initialize enough hardware to emit deterministic trace output, and launch a tiny nxdk-built XBE through our own loader/runtime path.**
+> **Build the open Roswell-based flash path, direct-boot it in Mainkill1/xemu without a Microsoft MCPX/BIOS dependency, run deterministic kernel tests/nxdk payloads, then prove the same kernel through Fancy Mouse as the open accurate boot path.**
 
 That milestone validates the architecture without pretending the kernel compatibility problem is already solved.
