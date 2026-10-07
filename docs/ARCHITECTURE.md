@@ -11,6 +11,23 @@ This document defines the initial component boundaries. It is deliberately more 
 5. Research-only reference repositories never become implicit build dependencies.
 6. Every compatibility workaround should eventually have a reproducer or regression test.
 
+## Initial composition
+
+SpiritBoot starts by composing and measuring existing open work:
+
+```text
+Fast/direct:
+  Mainkill1/xemu -> Roswell nxldr/flash -> open xboxkrnl -> XBE
+
+Open/accurate:
+  CPU reset -> Fancy Mouse -> Roswell/SpiritBoot flash -> open xboxkrnl -> XBE
+
+Reference:
+  xemu/hardware -> user-supplied original firmware -> test XBE
+```
+
+The direct path optimizes iteration speed; the Fancy Mouse path validates the complete open boot chain. Both converge on the same kernel behavior and test suite.
+
 ## Components
 
 ### boot
@@ -49,7 +66,7 @@ Register definitions should be centralized and named by hardware function rather
 
 ### kernel
 
-Implements the guest-visible kernel/runtime contract expected by XBEs.
+Implements the guest-visible kernel/runtime contract expected by XBEs. Roswell is the initial implementation foundation; SpiritBoot work should be isolated as patches/forks or original modules with explicit provenance.
 
 Initial areas:
 - export table;
@@ -113,7 +130,7 @@ Three distinct categories are expected:
 xemu test entry -> SpiritBoot boot -> platform -> kernel -> loader -> test XBE
 ```
 
-The first xemu integration should minimize dependency on opaque proprietary boot state. If a direct research handoff is added to xemu, its contract must be documented and kept narrow enough that real-hardware assumptions are still testable later.
+The first xemu integration should use Roswell's direct-boot path or an equally narrow documented handoff. Emulator-provided state must be explicit so the same kernel can later be validated through Fancy Mouse and physical hardware.
 
 ### Physical-hardware path
 
