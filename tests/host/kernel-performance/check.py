@@ -366,7 +366,8 @@ def run(libs, optimized):
         for carry in [False, True]:
             for input_at in [0, 24, 44, 52, 68]:
                 for length in [0, 1, 16, 55, 64]:
-                    context = (B * 132)(*([0xCC] * 132))
+                    # Largest input alias reaches offset+68+64 (up to135).
+                    context = (B * 136)(*([0xCC] * 136))
                     ptr = C.byref(context, offset)
                     crypto.host_XcpSHAInit(ptr)
                     count = 0xfffffff0 if carry else 16
@@ -378,7 +379,7 @@ def run(libs, optimized):
                         check(int.from_bytes(bytes(context)[offset + 44:offset + 48], 'little') >= 1, 'SHA count carry')
                     sha_records.append(bytes(context))
                     for output_at in [0, 24, 44, 52, 96]:
-                        clone = (B * 132).from_buffer_copy(context)
+                        clone = (B * 136).from_buffer_copy(context)
                         crypto.host_XcpSHAFinal(C.byref(clone, offset), C.byref(clone, offset + output_at))
                         sha_records.append(bytes(clone))
 
