@@ -41,6 +41,11 @@ throughput or game-frame-rate improvement is claimed without measurements.
   that avoids callback and allocator locks. Ordinary title resets can run the
   notification sequence; emergency resets cannot safely promise normal I/O
   callbacks.
+- Ordinary shutdown suppresses normal kernel APCs until reset. Callbacks may
+  use synchronous I/O completed by special APCs, but must not wait for a normal
+  kernel APC. A nested firmware return unwinds its initiating callback without
+  returning to that callsite; the outer reset continues the remaining list.
+  Resources need cleanup before that call or through supported SEH cleanup.
 - Ordinary shutdown callbacks must not wait for a normal kernel APC: those
   APCs are suppressed through the reset sequence. Special I/O completion APCs
   remain available for synchronous I/O. A callback's nested firmware return
