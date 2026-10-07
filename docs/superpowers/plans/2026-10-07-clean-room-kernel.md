@@ -43,12 +43,12 @@ modules selected after reading public source, and `tests/xbe/` guest probes.
 **Interfaces:** Public nxdk exports retain their existing ordinals/signatures;
 internal interfaces are chosen by the implementer and documented in its report.
 
-- [ ] Read allowed source and public ABI, record references and technical design.
-- [ ] Add guest checks that expose missing behavior, retaining baseline failures.
-- [ ] Implement the six behavioral requirements in focused modules.
-- [ ] Compile kernel and guest checks; run attainable checks without test runner.
-- [ ] Commit independently authored changes and report commands/results/limits.
-- [ ] A fresh reviewer receives spec, report and a complete task diff; fix all
+- [x] Read allowed source and public ABI, record references and technical design.
+- [x] Add guest checks that expose missing behavior, retaining baseline failures.
+- [x] Implement the six behavioral requirements in focused modules.
+- [x] Compile kernel and guest checks; run attainable checks without test runner.
+- [x] Commit independently authored changes and report commands/results/limits.
+- [x] A fresh reviewer receives spec, report and a complete task diff; fix all
       material findings through the implementation agent before integration.
 
 ### Task 2: Reproducible source patches and firmware validation
@@ -60,12 +60,12 @@ internal interfaces are chosen by the implementer and documented in its report.
 and SHA-256. The base revision remains pinned; patches apply only in a separate
 build-source copy. The manifest records applied patch paths/hashes.
 
-- [ ] Export reviewed Task 1 commits as patches, without firmware-derived data.
-- [ ] Add failing host checks for checksum mismatch, failed application and
+- [x] Export reviewed Task 1 commits as patches, without firmware-derived data.
+- [x] Add failing host checks for checksum mismatch, failed application and
       baseline checkout preservation; implement optional patch application.
-- [ ] Review the integration diff and run the covering host checks.
-- [ ] Build release and checked flashes in the established Docker toolchain.
-- [ ] Run targeted guest probes and the pinned XISO suite directly in xemu;
+- [x] Review the integration diff and run the covering host checks.
+- [x] Build release and checked flashes in the established Docker toolchain.
+- [x] Run targeted guest probes and the pinned XISO suite directly in xemu;
       retain original logs, complete receipts and parsed results.
 - [ ] Review final branch/provenance and publish validated source/images with
       accurate feature coverage and remaining limitations.

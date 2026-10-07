@@ -1,0 +1,204 @@
+
+LoaderMain entered
+xz_dec_run csize=256824 dsize=643072...
+PeLoad...
+kernel_entry=0x840acf7e size=0xb7000 fail=0
+PagingInit...
+pi0
+pi1
+pi2
+pi3
+pi4
+PagingEnable...
+pe0
+pe1
+pe2
+pe3
+paging on; reading via VA
+VA base=0x905a4d entry=0x57e58955 pcr=0 kuser=0
+jumping to KiSystemStartup
+(/ntoskrnl/kd64/kdinit.c:94) -----------------------------------------------------
+(/ntoskrnl/kd64/kdinit.c:95) ReactOS 0.4.17-x86-dev (Build 20261007-unknown-revision) (Commit unknown-hash)
+(/ntoskrnl/kd64/kdinit.c:96) 1 System Processor [124 MB Memory]
+(/ntoskrnl/kd64/kdinit.c:100) Command Line: /MININT /INRAM /DEBUG /DEBUGPORT=COM1 /BAUDRATE=115200
+(/ntoskrnl/kd64/kdinit.c:101) ARC Paths: multi(0)disk(0)rdisk(0)partition(1) \ multi(0)disk(0)rdisk(0)partition(1) \nxkrnl\
+(/ntoskrnl/ke/i386/cpu.c:469) Supported CPU features: KF_RDTSC KF_CR4 KF_CMOV KF_GLOBAL_PAGE KF_LARGE_PAGE KF_MTRR KF_CMPXCHG8B KF_MMX KF_WORKING_PTE KF_PAT KF_FXSR KF_FAST_SYSCALL KF_XMMI X86_FEATURE_PAE
+(/ntoskrnl/ke/i386/cpu.c:761) Prefetch Cache: 32 bytes	L2 Cache: 131072 bytes	L2 Cache Line: 64 bytes	L2 Cache Associativity: 4
+nxkrnl 0.1.0
+(/hal/halx86/xbox/pci.c:247) PCI configuration programmed to the retail layout
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type=20 base=00000 pages=     1  PA 00000000-00001000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00001 pages=    12  PA 00001000-0000d000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type=20 base=0000d pages=     4  PA 0000d000-00011000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00011 pages=    31  PA 00011000-00030000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type=20 base=00030 pages=    16  PA 00030000-00040000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 7 base=00040 pages=     2  PA 00040000-00042000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00042 pages=   190  PA 00042000-00100000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00100 pages=   256  PA 00100000-00200000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00200 pages= 14848  PA 00200000-03c00000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 6 base=03c00 pages=  1024  PA 03c00000-04000000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 9 base=04000 pages=   183  PA 04000000-040b7000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=040b7 pages= 15945  PA 040b7000-07f00000 <Mx>
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type=20 base=07f00 pages=    22  PA 07f00000-07f16000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=07f16 pages=   234  PA 07f16000-08000000
+(/ntoskrnl/xb/mm/init.c:197) nv2a split: reclaim PA 03c00000-03ff0000 (4032 KB) for title heap; keep PA 03ff0000-04000000 (64 KB) reserved for GPU
+(/ntoskrnl/mm/ARM3/mminit.c:482) MxGetNextPage: 55 pages (220 KB) caller=840A8E05
+(/ntoskrnl/mm/ARM3/i386/init.c:564) FREEPAGES after PFN init: MmAvailablePages=32458 (129832 KB) MmNumberOfPhysicalPages=32768
+(/ntoskrnl/mm/ARM3/i386/init.c:570) VAMAP SysPte=84400000..86401000(+8192) PfnDb=B0000000 NpPool=B0121000..F0000000 exp=ED164000 SysCache=C1000000..00000000 PagedPool=E1000000..00000000 NpSize=200000 NpMax=309c000
+(/ntoskrnl/mm/ARM3/mminit.c:1899) MiBuildPagedPool ENTER (PagedPoolStart=E1000000)
+(/ntoskrnl/xb/mm/init.c:638) Xbox MMIO windows mapped (WC 0xF0000000-0xF8000000, UC MMIO 0xF8000000-0xFFC00000)
+(/ntoskrnl/xb/mm/init.c:747) Xbox KSEG0 painted (0x80000000-0x84000000 WB)
+(/ntoskrnl/xb/mm/sysva.c:51) system-VA aperture at 0xd0000000-0xd3ffffff (demand-mapped)
+(/hal/halx86/xbox/pci.c:288) PCI memory-size programmed (xbox_ram = 128 MiB)
+nxkrnl-video: BootVgaInitializationKernelNG enter
+nxkrnl-video: BootVgaInitializationKernelNG done (encoder=0 av_mode=1 w=720 h=480)
+(/ntoskrnl/ke/i386/patpge.c:107) IA32_PAT set to the Xbox configuration (WC at PA1/PA5)
+(/ntoskrnl/ke/i386/mtrr.c:110) MTRRs set to the Xbox retail configuration
+(/ntoskrnl/mm/mminit.c:135)           0x80000000 - 0x84400000	Boot Loaded Image
+(/ntoskrnl/mm/mminit.c:140)           0x84400000 - 0x86401000	System PTE Space
+(/ntoskrnl/mm/mminit.c:146)           0xB0000000 - 0xB0121000	PFN Database
+(/ntoskrnl/mm/mminit.c:150)           0xB0121000 - 0xB0321000	ARM3 Non Paged Pool
+(/ntoskrnl/mm/mminit.c:154)           0xB9400000 - 0xBB400000	System View Space
+(/ntoskrnl/mm/mminit.c:158)           0xBB400000 - 0xC0000000	Session Space
+(/ntoskrnl/mm/mminit.c:162)           0xC0000000 - 0xC03FFFFF	Page Tables
+(/ntoskrnl/mm/mminit.c:165)           0xC0300000 - 0xC0300FFF	Page Directories
+(/ntoskrnl/mm/mminit.c:168)           0xC0400000 - 0xC07FFFFF	Hyperspace
+(/ntoskrnl/mm/mminit.c:171)           0xC1000000 - 0xE0FFFFFF	System Cache
+(/ntoskrnl/mm/mminit.c:174)           0xE1000000 - 0xE7400000	ARM3 Paged Pool
+(/ntoskrnl/mm/mminit.c:185)           0xED164000 - 0xF0000000	Non Paged Pool Expansion PTE Space
+(/ntoskrnl/xb/mm/cache.c:1809) 4 x 16 KB blocks
+Xbox HAL detected
+registered (XDVDFS read-only)
+BOOT DRIVERS LOADED
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: 1f0!
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: 3f6!
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: 170!
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: 376!
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: ff60!
+XBE loader starting
+mounted CdRom volume rootSec=264 rootSize=28 serial=2e244a00
+opened \Device\CdRom0\default.xbe
+XBE base=00010000 image=00014114 headers=000005b9 sections=4
+section 0  va=00011000 vsize=0000c000 raw=00001000 rsize=0000b600
+section 1  va=0001d000 vsize=00005000 raw=0000d000 rsize=000042e4
+section 2  va=00022000 vsize=00002000 raw=00012000 rsize=00000844
+section 3  va=00024000 vsize=00000114 raw=00013000 rsize=00000004
+entry=00014c70 kernel-thunks=000211a8 tls-dir=0001e228
+resolved 75 kernel thunk(s)
+entry-thread TLS block=C103A80C size=114 (raw=110 zero=0)
+spawning XBE entry 00014c70 on a dedicated thread (PeStackCommit=10000)
+title thread up (tls=C103A80C, start=84067F44, fs:[0x28]=0xc10335d4)
+title thread up (tls=C103A60C, start=00014F20, fs:[0x28]=0xc10461d4)
+== clean-room-warm-reboot stage 1 ==
+== clean-room-warm-reboot resetting ==
+HalReturnToFirmware(2) backtrace: 00011704 00014d28 00000000 00000000 00000000 00000000
+HalReturnToFirmware(2) -- title exited
+chainload requested -> \Device\CdRom0\default.xbe
+XBE entry thread returned
+title thread returned
+HalReturnToFirmware(2) backtrace: 000117c9 84046477 84021592 8406839b 00011704 00014d28
+HalReturnToFirmware(2) -- title exited
+chainload requested -> \Device\CdRom0\default.xbe
+
+LoaderMain entered
+xz_dec_run csize=256824 dsize=643072...
+PeLoad...
+kernel_entry=0x840acf7e size=0xb7000 fail=0
+PagingInit...
+pi0
+pi1
+pi2
+pi3
+pi4
+PagingEnable...
+pe0
+pe1
+pe2
+pe3
+paging on; reading via VA
+VA base=0x905a4d entry=0x57e58955 pcr=0 kuser=0
+jumping to KiSystemStartup
+(/ntoskrnl/kd64/kdinit.c:94) -----------------------------------------------------
+(/ntoskrnl/kd64/kdinit.c:95) ReactOS 0.4.17-x86-dev (Build 20261007-unknown-revision) (Commit unknown-hash)
+(/ntoskrnl/kd64/kdinit.c:96) 1 System Processor [124 MB Memory]
+(/ntoskrnl/kd64/kdinit.c:100) Command Line: /MININT /INRAM /DEBUG /DEBUGPORT=COM1 /BAUDRATE=115200
+(/ntoskrnl/kd64/kdinit.c:101) ARC Paths: multi(0)disk(0)rdisk(0)partition(1) \ multi(0)disk(0)rdisk(0)partition(1) \nxkrnl\
+(/ntoskrnl/ke/i386/cpu.c:469) Supported CPU features: KF_RDTSC KF_CR4 KF_CMOV KF_GLOBAL_PAGE KF_LARGE_PAGE KF_MTRR KF_CMPXCHG8B KF_MMX KF_WORKING_PTE KF_PAT KF_FXSR KF_FAST_SYSCALL KF_XMMI X86_FEATURE_PAE
+(/ntoskrnl/ke/i386/cpu.c:761) Prefetch Cache: 32 bytes	L2 Cache: 131072 bytes	L2 Cache Line: 64 bytes	L2 Cache Associativity: 4
+nxkrnl 0.1.0
+(/hal/halx86/xbox/pci.c:247) PCI configuration programmed to the retail layout
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type=20 base=00000 pages=     1  PA 00000000-00001000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00001 pages=    12  PA 00001000-0000d000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type=20 base=0000d pages=     4  PA 0000d000-00011000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00011 pages=    31  PA 00011000-00030000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type=20 base=00030 pages=    16  PA 00030000-00040000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 7 base=00040 pages=     2  PA 00040000-00042000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00042 pages=   190  PA 00042000-00100000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00100 pages=   256  PA 00100000-00200000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=00200 pages= 14848  PA 00200000-03c00000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 6 base=03c00 pages=  1024  PA 03c00000-04000000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 9 base=04000 pages=   183  PA 04000000-040b7000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=040b7 pages= 15945  PA 040b7000-07f00000 <Mx>
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type=20 base=07f00 pages=    22  PA 07f00000-07f16000
+(/ntoskrnl/xb/mm/init.c:241) MAPDUMP type= 2 base=07f16 pages=   234  PA 07f16000-08000000
+(/ntoskrnl/xb/mm/init.c:197) nv2a split: reclaim PA 03c00000-03ff0000 (4032 KB) for title heap; keep PA 03ff0000-04000000 (64 KB) reserved for GPU
+(/ntoskrnl/mm/ARM3/mminit.c:482) MxGetNextPage: 55 pages (220 KB) caller=840A8E05
+(/ntoskrnl/mm/ARM3/i386/init.c:564) FREEPAGES after PFN init: MmAvailablePages=32456 (129824 KB) MmNumberOfPhysicalPages=32768
+(/ntoskrnl/mm/ARM3/i386/init.c:570) VAMAP SysPte=84400000..86401000(+8192) PfnDb=B0000000 NpPool=B0121000..F0000000 exp=ED164000 SysCache=C1000000..00000000 PagedPool=E1000000..00000000 NpSize=200000 NpMax=309c000
+(/ntoskrnl/mm/ARM3/mminit.c:1899) MiBuildPagedPool ENTER (PagedPoolStart=E1000000)
+(/ntoskrnl/xb/mm/init.c:638) Xbox MMIO windows mapped (WC 0xF0000000-0xF8000000, UC MMIO 0xF8000000-0xFFC00000)
+(/ntoskrnl/xb/mm/init.c:747) Xbox KSEG0 painted (0x80000000-0x84000000 WB)
+(/ntoskrnl/xb/mm/sysva.c:51) system-VA aperture at 0xd0000000-0xd3ffffff (demand-mapped)
+(/hal/halx86/xbox/pci.c:288) PCI memory-size programmed (xbox_ram = 128 MiB)
+nxkrnl-video: BootVgaInitializationKernelNG enter
+nxkrnl-video: BootVgaInitializationKernelNG done (encoder=0 av_mode=1 w=720 h=480)
+(/ntoskrnl/ke/i386/patpge.c:107) IA32_PAT set to the Xbox configuration (WC at PA1/PA5)
+(/ntoskrnl/ke/i386/mtrr.c:110) MTRRs set to the Xbox retail configuration
+(/ntoskrnl/mm/mminit.c:135)           0x80000000 - 0x84400000	Boot Loaded Image
+(/ntoskrnl/mm/mminit.c:140)           0x84400000 - 0x86401000	System PTE Space
+(/ntoskrnl/mm/mminit.c:146)           0xB0000000 - 0xB0121000	PFN Database
+(/ntoskrnl/mm/mminit.c:150)           0xB0121000 - 0xB0321000	ARM3 Non Paged Pool
+(/ntoskrnl/mm/mminit.c:154)           0xB9400000 - 0xBB400000	System View Space
+(/ntoskrnl/mm/mminit.c:158)           0xBB400000 - 0xC0000000	Session Space
+(/ntoskrnl/mm/mminit.c:162)           0xC0000000 - 0xC03FFFFF	Page Tables
+(/ntoskrnl/mm/mminit.c:165)           0xC0300000 - 0xC0300FFF	Page Directories
+(/ntoskrnl/mm/mminit.c:168)           0xC0400000 - 0xC07FFFFF	Hyperspace
+(/ntoskrnl/mm/mminit.c:171)           0xC1000000 - 0xE0FFFFFF	System Cache
+(/ntoskrnl/mm/mminit.c:174)           0xE1000000 - 0xE7400000	ARM3 Paged Pool
+(/ntoskrnl/mm/mminit.c:185)           0xED164000 - 0xF0000000	Non Paged Pool Expansion PTE Space
+(/ntoskrnl/xb/mm/cache.c:1809) 4 x 16 KB blocks
+Xbox HAL detected
+registered (XDVDFS read-only)
+BOOT DRIVERS LOADED
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: 1f0!
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: 3f6!
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: 170!
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: 376!
+(/hal/halx86/legacy/bussupp.c:1490) No translator Interface: 5, Bus: 0, Handler: 00000000, BusAddress: ff60!
+warm reset -- chainloading \Device\CdRom0\default.xbe
+XBE loader starting
+mounted CdRom volume rootSec=264 rootSize=28 serial=2e244a00
+opened \Device\CdRom0\default.xbe
+XBE base=00010000 image=00014114 headers=000005b9 sections=4
+section 0  va=00011000 vsize=0000c000 raw=00001000 rsize=0000b600
+section 1  va=0001d000 vsize=00005000 raw=0000d000 rsize=000042e4
+section 2  va=00022000 vsize=00002000 raw=00012000 rsize=00000844
+section 3  va=00024000 vsize=00000114 raw=00013000 rsize=00000004
+entry=00014c70 kernel-thunks=000211a8 tls-dir=0001e228
+resolved 75 kernel thunk(s)
+entry-thread TLS block=C103A80C size=114 (raw=110 zero=0)
+spawning XBE entry 00014c70 on a dedicated thread (PeStackCommit=10000)
+title thread up (tls=C103A80C, start=84067F44, fs:[0x28]=0xc10335d4)
+XBE entry thread returned
+title thread returned
+title thread up (tls=C103A60C, start=00014F20, fs:[0x28]=0xc10451d4)
+== clean-room-warm-reboot stage 2 ==
+TAP version 14
+1..5
+ok 1 - same physical address and contents
+not ok 2 - shutdown stable priority, duplicate and pending removal
+ok 3 - restored selected range owns one page
+(/ntoskrnl/xb/mm/pagesupply.c:601) no candidate for 1 pages in [02001,02001] (avail=32314)
+MmAllocateContiguousMemoryEx(4096) -- no memory (low=02001000 high=02001fff align=1000 avail=32314)
+ok 4 - persistent content survives and competing allocation is refused
+not ok 5 - nested noreturn reset unwinds and remaining callbacks run before outer reset
+== clean-room-warm-reboot end FAIL ==

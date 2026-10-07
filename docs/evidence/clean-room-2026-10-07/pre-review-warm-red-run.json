@@ -1,0 +1,54 @@
+{
+  "assets": {
+    "dvd": {
+      "path": "/work/artifacts/clean-room/guests/warm-unwind.iso",
+      "sha256": "a328fb65a3895e555664396116bc7740e8a248a4d6966aac9a466a23937789b6",
+      "size": 655360
+    },
+    "flash": {
+      "path": "/work/artifacts/clean-room/experimental-r2-checked.bin",
+      "sha256": "d3fa1aac64db9d5e44c195f8354b13f38b456e837081346d94b3ea72ae5dde14",
+      "size": 524288
+    },
+    "hdd": {
+      "path": "/seed.qcow2",
+      "sha256": "00d7df7a2bc235f8801764f00b7f40e194d1e392f7a9619d6b2396c89770f6dd",
+      "size": 1638400
+    },
+    "xemu": {
+      "path": "/xemu/usr/bin/xemu",
+      "sha256": "3790019a2ccab47df1f67982e05856b2a345ec8ce5393967d1ed2187528aada2",
+      "size": 25548144
+    }
+  },
+  "boot_mode": "open-direct",
+  "command": [
+    "/xemu/usr/bin/xemu",
+    "-config_path",
+    "/work/artifacts/clean-room/pre-review-warm-red/xemu.toml",
+    "-snapshot",
+    "-device",
+    "lpc47m157",
+    "-serial",
+    "file:/work/artifacts/clean-room/pre-review-warm-red/serial.log"
+  ],
+  "elapsed_seconds": 2.903,
+  "expect_tap": true,
+  "memory_mib": 128,
+  "returncode": 0,
+  "schema": 1,
+  "snapshot": true,
+  "started_utc": "2026-10-07T20:42:19Z",
+  "status": "test_failed",
+  "tap": {
+    "errors": [],
+    "failed": 2,
+    "ok": 3,
+    "passed": false,
+    "plan": 5,
+    "ran": 5,
+    "skipped": 0,
+    "todo": 0
+  },
+  "timeout_seconds": 60.0
+}

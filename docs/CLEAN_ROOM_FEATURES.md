@@ -41,16 +41,12 @@ throughput or game-frame-rate improvement is claimed without measurements.
   that avoids callback and allocator locks. Ordinary title resets can run the
   notification sequence; emergency resets cannot safely promise normal I/O
   callbacks.
-- Ordinary shutdown suppresses normal kernel APCs until reset. Callbacks may
-  use synchronous I/O completed by special APCs, but must not wait for a normal
-  kernel APC. A nested firmware return unwinds its initiating callback without
-  returning to that callsite; the outer reset continues the remaining list.
-  Resources need cleanup before that call or through supported SEH cleanup.
 - Ordinary shutdown callbacks must not wait for a normal kernel APC: those
   APCs are suppressed through the reset sequence. Special I/O completion APCs
   remain available for synchronous I/O. A callback's nested firmware return
   unwinds that callback and lets the outer action drain the remaining list;
-  code after the non-returning call is unreachable.
+  code after the non-returning call is unreachable. Resources need cleanup
+  before that call or through supported SEH cleanup.
 - Conker: Live & Reloaded gameplay remains untested because no game image was
   supplied. Guest regression success does not establish retail compatibility.
 
