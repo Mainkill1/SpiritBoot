@@ -111,11 +111,16 @@ static BOOLEAN NxppLockInit;
 /* HELPERS ******************************************************************/
 
 static BOOLEAN
-NxppTestRange(ULONG Start, ULONG Count)
+NxppTestRange(ULONG Start, ULONG Count, PULONG Next)
 {
     for (ULONG i = Start; i < Start + Count; i++)
     {
-        if (NxppUsedMap[i >> 5] & (1UL << (i & 31))) return FALSE;
+        if (NxppUsedMap[i >> 5] & (1UL << (i & 31)))
+        {
+            /* Every intervening candidate still covers this occupied bit. */
+            *Next = i + 1;
+            return FALSE;
+        }
     }
     return TRUE;
 }
@@ -165,9 +170,9 @@ NxPoolPagesAlloc(
 
     /* First fit from the rotating hint, then wrap once. */
     Start = (ULONG)-1;
-    for (ULONG Probe = NxppScanHint; Probe + Count <= NXPP_PAGES; Probe++)
+    for (ULONG Probe = NxppScanHint, Next; Probe + Count <= NXPP_PAGES; Probe = Next)
     {
-        if (NxppTestRange(Probe, Count))
+        if (NxppTestRange(Probe, Count, &Next))
         {
             Start = Probe;
             break;
@@ -175,10 +180,10 @@ NxPoolPagesAlloc(
     }
     if (Start == (ULONG)-1)
     {
-        for (ULONG Probe = 0;
-             Probe < NxppScanHint && Probe + Count <= NXPP_PAGES; Probe++)
+        for (ULONG Probe = 0, Next;
+             Probe < NxppScanHint && Probe + Count <= NXPP_PAGES; Probe = Next)
         {
-            if (NxppTestRange(Probe, Count))
+            if (NxppTestRange(Probe, Count, &Next))
             {
                 Start = Probe;
                 break;

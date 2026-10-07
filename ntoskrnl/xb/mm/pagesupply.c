@@ -286,12 +286,31 @@ VOID NxkPageSupplyPin(PFN_NUMBER Page, BOOLEAN Unlock)
 }
 
 /* Buffer preflight counts aliases of the same PFN before any mutation.
- * Overflowed PFNs remain pinned regardless of subsequent locks/unlocks. */
+ * Initialization zeroes scratch. The sole caller clears it at every exit,
+ * under the same PFN lock, so no entry reset is necessary. Small successful
+ * batches clear in the apply pass after all multiplicities were checked;
+ * large batches use this single bulk reset at exit. */
 VOID NxkPageSupplyBeginPinBatch(VOID)
 {
     MI_ASSERT_PFN_LOCK_HELD();
     RtlZeroMemory(NxpPinBatch, (NxpHighestPfn + 1) * sizeof(USHORT));
 }
+VOID NxkPageSupplyClearPinBatchPage(PFN_NUMBER Page)
+{
+    MI_ASSERT_PFN_LOCK_HELD();
+    /* A translated invalid PFN also reaches rejected-prefix cleanup. */
+    if (Page > 0 && Page <= NxpHighestPfn)
+        NxpPinBatch[Page] = 0;
+}
+#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
+VOID NxkPageSupplyAssertPinBatchEmpty(VOID)
+{
+    PFN_NUMBER Page;
+    MI_ASSERT_PFN_LOCK_HELD();
+    for (Page = 0; Page <= NxpHighestPfn; ++Page)
+        ASSERT(NxpPinBatch[Page] == 0);
+}
+#endif
 BOOLEAN NxkPageSupplyRecordPin(PFN_NUMBER Page, BOOLEAN Unlock)
 {
     MI_ASSERT_PFN_LOCK_HELD();

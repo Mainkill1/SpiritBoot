@@ -42,7 +42,10 @@ XcpShaLoad(SHA_CTX *Ctx, const XC_SHA_CONTEXT *Xc)
 {
     RtlCopyMemory(Ctx->State, Xc->State, sizeof(Ctx->State));
     RtlCopyMemory(Ctx->Count, Xc->Count, sizeof(Ctx->Count));
-    RtlCopyMemory(Ctx->Buffer, Xc->Buffer, sizeof(Ctx->Buffer));
+    /* Update fills the remainder before each transform. Final fills padding
+     * and length, then clears the whole buffer before its full-context store.
+     * Inactive caller bytes remain untouched by the partial Update store. */
+    RtlCopyMemory(Ctx->Buffer, Xc->Buffer, Ctx->Count[1] & 63);
 }
 
 /*
@@ -416,11 +419,16 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
                 BnMulMod(Tmp, Acc, Val, Modulus, Scratch, Words);
             RtlCopyMemory(Acc, Tmp, Words * sizeof(ULONG));
         }
-        if (Odd)
-            BnMontMul(Tmp, Val, Val, Modulus, MInv, Words);
-        else
-            BnMulMod(Tmp, Val, Val, Modulus, Scratch, Words);
-        RtlCopyMemory(Val, Tmp, Words * sizeof(ULONG));
+        /* Val is only consumed by a later exponent bit. Conversion below
+         * overwrites it on the odd path; the even result consumes Acc only. */
+        if (i + 1 < ExpBits)
+        {
+            if (Odd)
+                BnMontMul(Tmp, Val, Val, Modulus, MInv, Words);
+            else
+                BnMulMod(Tmp, Val, Val, Modulus, Scratch, Words);
+            RtlCopyMemory(Val, Tmp, Words * sizeof(ULONG));
+        }
     }
 
     if (Odd)
@@ -906,7 +914,7 @@ DesStoreRound(PUCHAR Table, const UCHAR *Subkey)
 static VOID
 DesLoadKey(DES_KEY *Key, const UCHAR *Table)
 {
-    ULONG r, k, b, Shift, Six;
+    ULONG r, k, Shift, Six;
     ULONG Word[2];
 
     for (r = 0; r < 16; r++)
@@ -924,8 +932,11 @@ DesLoadKey(DES_KEY *Key, const UCHAR *Table)
             Shift = DES_KEY_SHIFT(k);
             Six = (Word[k & 1] >> Shift) |
                   (Shift > 26 ? (Word[k & 1] << (32 - Shift)) : 0);
-            for (b = 0; b < 6; b++)
-                Value |= (UCHAR)(((Six >> b) & 1) << (5 - b));
+            /* Reverse exactly the low six bits with fixed masks/shifts.
+             * Each input bit b contributes only output bit 5-b. */
+            Value = (UCHAR)(((Six & 0x01) << 5) | ((Six & 0x02) << 3) |
+                            ((Six & 0x04) << 1) | ((Six & 0x08) >> 1) |
+                            ((Six & 0x10) >> 3) | ((Six & 0x20) >> 5));
             Key->Round[r][k] = Value;
         }
     }

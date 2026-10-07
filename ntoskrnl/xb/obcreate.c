@@ -139,6 +139,25 @@ XobRememberType(PVOID Type)
     PXB_TITLE_TYPE Known;
     PLIST_ENTRY Entry;
     KIRQL OldIrql;
+    ULONG ObservedCount;
+
+    /* Types are never removed. Check under the registry lock before paying
+     * for a duplicate node; do not initialize the lazy list on OOM. */
+    KeAcquireSpinLock(&XobTitleTypeLock, &OldIrql);
+    ObservedCount = XobTitleTypeCount;
+    if (XobTitleTypeCount != 0)
+    {
+        for (Entry = XobTitleTypes.Flink; Entry != &XobTitleTypes;
+             Entry = Entry->Flink)
+        {
+            if (CONTAINING_RECORD(Entry, XB_TITLE_TYPE, Link)->Type == Type)
+            {
+                KeReleaseSpinLock(&XobTitleTypeLock, OldIrql);
+                return;
+            }
+        }
+    }
+    KeReleaseSpinLock(&XobTitleTypeLock, OldIrql);
 
     Known = ExAllocatePoolWithTag(NonPagedPool, sizeof(*Known), 'TObX');
     if (Known == NULL)
@@ -148,14 +167,21 @@ XobRememberType(PVOID Type)
     KeAcquireSpinLock(&XobTitleTypeLock, &OldIrql);
     if (XobTitleTypeCount == 0)
         InitializeListHead(&XobTitleTypes);
-    for (Entry = XobTitleTypes.Flink; Entry != &XobTitleTypes;
-         Entry = Entry->Flink)
+    /* Each registration retains a distinct pool node forever. The 32-bit
+     * address space cannot hold 2^32 such nodes, so the count cannot wrap.
+     * An unchanged count therefore proves the first unknown lookup remains
+     * unknown; concurrent/reentrant insertion still requires a full recheck. */
+    if (XobTitleTypeCount != ObservedCount)
     {
-        if (CONTAINING_RECORD(Entry, XB_TITLE_TYPE, Link)->Type == Type)
+        for (Entry = XobTitleTypes.Flink; Entry != &XobTitleTypes;
+             Entry = Entry->Flink)
         {
-            KeReleaseSpinLock(&XobTitleTypeLock, OldIrql);
-            ExFreePool(Known);
-            return;
+            if (CONTAINING_RECORD(Entry, XB_TITLE_TYPE, Link)->Type == Type)
+            {
+                KeReleaseSpinLock(&XobTitleTypeLock, OldIrql);
+                ExFreePool(Known);
+                return;
+            }
         }
     }
     InsertTailList(&XobTitleTypes, &Known->Link);

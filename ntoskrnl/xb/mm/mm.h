@@ -216,4 +216,10 @@ VOID NxkMmDetachRestored(ULONG_PTR Pa, SIZE_T Size);
 BOOLEAN NxkMmAdoptRestored(PVOID Alias, SIZE_T Size);
 
 VOID NxkPageSupplyBeginPinBatch(VOID);
+/* Initial tuning candidate, not a measured optimal crossover. */
+#define NXK_PIN_BATCH_SMALL_PAGES 64
+VOID NxkPageSupplyClearPinBatchPage(PFN_NUMBER Page);
+#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
+VOID NxkPageSupplyAssertPinBatchEmpty(VOID);
+#endif
 BOOLEAN NxkPageSupplyRecordPin(PFN_NUMBER Page, BOOLEAN Unlock);

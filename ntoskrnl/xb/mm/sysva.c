@@ -73,7 +73,18 @@ NxpSysVaFindHoleLocked(ULONG Pages)
         BOOLEAN Free;
 
         if (!(Pde[Va >> 22] & 1))
-            Free = TRUE;                       /* whole 4 MB unbacked */
+        {
+            ULONG Span = 1024 - ((Va >> PAGE_SHIFT) & 1023);
+            ULONG Remaining = (NXK_SYSMEM_LIMIT - Va) >> PAGE_SHIFT;
+            if (Span > Remaining) Span = Remaining;
+            if (Run == 0) RunStart = Va;
+            /* Pages==0 historically finds no hole, including empty PTs. */
+            if (Pages != 0 && Pages > Run && Pages - Run <= Span)
+                return RunStart;
+            Run += Span;
+            Va += (ULONG_PTR)Span << PAGE_SHIFT;
+            continue;
+        }
         else
             Free = (Pte[Va >> PAGE_SHIFT] == 0);
 

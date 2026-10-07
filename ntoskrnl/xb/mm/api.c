@@ -77,23 +77,46 @@ MmLockUnlockBufferPages(PVOID Base, SIZE_T Size, BOOLEAN Unlock)
 {
 #ifdef NXK_MM_PHYS
     ULONG_PTR first = (ULONG_PTR)Base & ~(PAGE_SIZE - 1), last, va;
+    ULONG_PTR translated = 0;
+    BOOLEAN applied = FALSE, sparse;
     KIRQL irql;
     if (Size == 0 || Size - 1 > MAXULONG_PTR - (ULONG_PTR)Base) return;
     last = ((ULONG_PTR)Base + Size - 1) & ~(PAGE_SIZE - 1);
     irql = MiAcquirePfnLock();
-    NxkPageSupplyBeginPinBatch();
+#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
+    NxkPageSupplyAssertPinBatchEmpty();
+#endif
     for (va = first;; va += PAGE_SIZE) {
         ULONG_PTR pa;
         if (!NxMmIsAddressValid((PVOID)va)) goto out;
         pa = NxMmGetPhysicalAddress((PVOID)va);
+        /* Include the RecordPin that increments scratch and then rejects. */
+        ++translated;
         if (!NxkPageSupplyRecordPin(pa >> PAGE_SHIFT, Unlock)) goto out;
         if (va == last) break;
     }
+    sparse = translated <= NXK_PIN_BATCH_SMALL_PAGES;
     for (va = first;; va += PAGE_SIZE) {
-        NxkPageSupplyPin(NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT, Unlock);
+        PFN_NUMBER page = NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT;
+        NxkPageSupplyPin(page, Unlock);
+        if (sparse) NxkPageSupplyClearPinBatchPage(page);
         if (va == last) break;
     }
+    applied = TRUE;
 out:
+    if (translated > NXK_PIN_BATCH_SMALL_PAGES)
+        NxkPageSupplyBeginPinBatch(); /* One bulk reset, only at exit. */
+    else if (!applied)
+    {
+        /* Rejected small prefixes cost at most the bounded page budget of
+         * extra translations. The PFN lock still stabilizes the mappings. */
+        for (va = first; translated != 0; va += PAGE_SIZE, --translated)
+            NxkPageSupplyClearPinBatchPage(
+                NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT);
+    }
+#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
+    NxkPageSupplyAssertPinBatchEmpty();
+#endif
     MiReleasePfnLock(irql);
 #endif
 }
