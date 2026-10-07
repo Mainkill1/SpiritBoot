@@ -6,9 +6,17 @@ The baseline names come from Cxbx-Reloaded's public kernel thunk table. Roswell'
 
 This is an inventory, not a correctness claim. In particular, `roswell_state=mapped` means only that the ordinal resolves to a symbol.
 
-See `STATUS.md` for the current summary and `provenance.json` for exact source revisions.
+See `STATUS.md` for export-table status, `CORRELATION.md` for behavioral-test coverage, `FIRST_WAVE.md` for the dependency-first work order, and `provenance.json` for exact source revisions.
 
-Target columns:
+Current research artifacts:
+
+- `exports.csv` — ABI/export baseline.
+- `correlation.csv` — test state, subsystem, source hints, evidence level, complexity/relevance and dependency metadata.
+- `correlation-summary.json` — machine-readable aggregate counts and heuristic queue.
+- `FIRST_WAVE.csv` / `FIRST_WAVE.md` — curated dependency-first attack plan.
+- `hardware-results/` — normalized hardware evidence imported from kernel-test logs.
+
+Correlation columns include:
 
 - `ordinal`
 - `name`
@@ -24,4 +32,4 @@ Target columns:
 - `complexity`
 - `notes`
 
-Next pass: correlate every row with xbox_kernel_test_suite and Cxbx-Reloaded implementation locations, then assign behavioral confidence and subsystem priority.
+Run `scripts/correlate-kernel.ps1` after fetching references to replace source hints with local `git grep` candidates and fold in any imported hardware results. The next evidence task is to implement/run the first-wave behavioral tests, not to fill low-value export slots by count.
