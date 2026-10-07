@@ -9,7 +9,8 @@ Tests that run without an Xbox or emulator. First candidates:
 - export table generation/lookups;
 - image/layout tooling;
 - FATX parsing once added;
-- trace/event serialization.
+- trace/event serialization;
+- kernel-test log normalization (`scripts/test-kernel-tools.ps1`).
 
 ## xbe
 
@@ -29,3 +30,7 @@ Examples:
 Full SpiritBoot runs in xemu and later physical hardware.
 
 Integration tests should assert trace milestones rather than relying only on screenshots or timeouts.
+
+### Current host fixture
+
+`tests/host/kernel-test-log-sample.txt` exercises PASS, FAIL, SKIPPED, duration, environment, build metadata and source-hash handling in the hardware-log importer. Run `./scripts/test-kernel-tools.ps1` from the repository root on a system with PowerShell.
