@@ -295,6 +295,21 @@ elif '--build' in sys.argv:
                                           text=True, stderr=subprocess.STDOUT)
         self.assertNotIn("missing", objects)
 
+    def test_patched_build_under_broken_ancestor_worktree_git_link(self):
+        # Docker may mount a host worktree without the external Git metadata
+        # named by its .git file. The explicit Roswell source has its own .git.
+        (self.root / ".git").write_text("gitdir: /absent-spiritboot-worktree/git/worktrees/fixture\n")
+        config = (self.source / ".git/config").read_bytes()
+        self.set_patches([self.fixture_patch(new_guest=True)])
+        manifest = self.build_direct()
+        self.assertEqual(manifest["status"], "built")
+        self.assertEqual((self.source / ".git/config").read_bytes(), config)
+        self.assertEqual((self.source / "fixture.txt").read_text(), "base\n")
+        self.assertEqual((Path(manifest["source_directory"]) / "fixture.txt").read_text(), "patched\n")
+        self.assertTrue((Path(manifest["source_directory"]) / "tests/xbe/probe.c").is_file())
+        self.assertEqual(subprocess.check_output(
+            ["git", "-C", str(self.source), "status", "--porcelain"], text=True), "")
+
     @unittest.skipUnless(hasattr(os, "geteuid") and os.geteuid() == 0, "requires root CI ownership fixture")
     def test_root_build_accepts_foreign_owned_pristine_checkout(self):
         for path in self.source.rglob("*"):

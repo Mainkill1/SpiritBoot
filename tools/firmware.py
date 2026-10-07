@@ -141,8 +141,12 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK):
                 # process tree, without changing the user's global Git config.
                 safe_config = work / "git-safe.config"
                 for trusted in (source, source / ".git"):
-                    run(["git", "-C", str(work), "config", "--file", str(safe_config), "--add", "safe.directory", str(trusted)],
-                        env=dict(build_env, GIT_CEILING_DIRECTORIES=str(work)))
+                    # --file still discovers a repository. The output may live
+                    # beneath a host worktree .git link whose target is absent
+                    # in Docker, so run from the verified pristine checkout.
+                    # Only this explicit private config file is changed.
+                    run(source_git(source) + ["config", "--file", str(safe_config),
+                                              "--add", "safe.directory", str(trusted)])
                 run(["git", "clone", "--no-hardlinks", "--dissociate", "--no-checkout",
                      str(source), str(actual_source)], env=dict(build_env, GIT_CONFIG_GLOBAL=str(safe_config)))
                 if (actual_source / ".git/objects/info/alternates").exists():

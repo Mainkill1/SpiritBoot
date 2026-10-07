@@ -48,8 +48,8 @@ stale `flash.bin` and leaves a failed manifest and available diagnostics.
 Git trusts only the supplied source for each source inspection. Local clone's
 upload-pack does not inherit command-line `safe.directory` values, so the clone
 process receives a private `work-*/git-safe.config` containing only the source
-and its `.git` path. Git configuration creation runs outside parent repository
-discovery with a ceiling at that fresh work directory. No user global Git
+and its `.git` path. Git configuration creation runs from the verified pristine
+repository and writes only the explicit private config path. No user global Git
 configuration is changed and no wildcard trust is added. This is exercised in
 the actual pinned root container against a foreign-owned checkout.
 
@@ -122,3 +122,28 @@ as a passing status and matching plan. Legacy API regression retains its generic
 TAP grading, including acceptance of its six existing TODOs. All workflow Python
 heredocs were parsed successfully and `git diff --check` passed. This small CI
 assertion update changes no frozen build code, lock, patch, or kernel source.
+
+## Container namespace correction
+
+Controller-owned real debug/repeat builds subsequently exposed a blocking Git
+namespace bug before clone/configure. Their output directories sit beneath the
+mounted SpiritBoot worktree, whose `.git` file references host Git metadata
+outside the `/work` mount. `git config --file` still performs repository
+discovery; the attempted work-directory ceiling did not prevent discovery of
+that unavailable ancestor. The failed build manifests/logs were retained by
+the controller. The separate release ENOSPC failure is controller-diagnosed.
+
+Private config commands now use `source_git(pristine_source)` to run inside the
+already verified standalone Roswell Git repository. The absolute `--file` path
+still names only `work-*/git-safe.config`; the pristine checkout's Git config
+and source are untouched. No original SpiritBoot metadata mount is required.
+
+The new host regression creates a fixture ancestor `.git` file pointing to
+absent metadata, then builds a patched source beneath it and asserts the
+pristine Git config bytes/content/status remain unchanged. It fails the prior
+implementation with the exact missing-metadata error and passes the correction.
+The full native suite now has 42 tests: 41 passed and one root-only skip. The
+same pinned root-container suite passed 42/42. `git diff --check` passed. This
+correction changes only integration tooling, its host fixture, and this report;
+the kernel patch, lock, and reviewed kernel source remain unchanged. Fresh real
+build/runtime validation and re-review remain controller-owned.
