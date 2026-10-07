@@ -96,7 +96,7 @@ static void one(const WORK *w) {
         }
         require(p!=NULL);
         if(p) {
-            require(MmQueryAllocationSize(p)==bytes);
+            require(ExQueryPoolBlockSize(p)==bytes);
             p[0]=0x37;p[bytes-1]=0x62;
             mix(p[0]+p[bytes-1]);ExFreePool(p);
         }
