@@ -76,6 +76,24 @@ int main(int argc,char **argv) {
             }
         }
     }
+    /* Explicit rejection crossovers, independent of first/middle/last. */
+    unsigned prefixes[]={32,64,65,128};
+    for(unsigned alias=0;alias<2;++alias) {
+        for(unsigned i=0;i<4;++i) {
+            unsigned prefix=prefixes[i];init(4096,alias);invalid_at=prefix;
+            MmLockUnlockBufferPages((PVOID)0x1000,4096*PAGE_SIZE,FALSE);clean();
+            CHECK(NxpPins[16]==0);
+            printf("pin-work crossover prefix=%u alias=%u translations=%u cleared=%u bulk=%u\n",prefix,alias,translations,cleared,clears);
+            if(optimized) {
+                CHECK(translations==prefix*(prefix<=64?2:1));
+                CHECK(cleared==(prefix<=64?2*prefix:65536));
+            }
+        }
+    }
+    init(2,0);MmLockUnlockBufferPages((PVOID)0x1001,PAGE_SIZE,FALSE);clean();
+    CHECK(NxpPins[16]==1&&NxpPins[17]==1);
+    MmLockUnlockBufferPages((PVOID)0x1001,PAGE_SIZE,TRUE);clean();
+    CHECK(NxpPins[16]==0&&NxpPins[17]==0);
     init(2,1);MmLockUnlockPhysicalPage(16*PAGE_SIZE,FALSE);
     MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,TRUE);
     CHECK(NxpPins[16]==1);clean();
