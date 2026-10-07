@@ -96,6 +96,8 @@ jobs:
           for guest, plan in (('clean-room-contracts', 23), ('clean-room-warm-reboot', 5)):
               result = json.load(open(f'artifacts/{guest}-${{ matrix.variant }}/run.json'))
               assert result['status'] == 'passed' and result['tap']['plan'] == plan, result
+              assert result['tap']['ok'] == plan, result
+              assert result['tap']['todo'] == 0 and result['tap']['skipped'] == 0, result
           PY
       - uses: actions/upload-artifact@v4
         if: always()

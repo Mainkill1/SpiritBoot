@@ -112,3 +112,13 @@ repeated builds consume additional disk space. Manifests contain absolute paths,
 so consumers must preserve the mount layout or translate paths explicitly.
 Guest compilation adds worktree outputs after kernel attribution; use the
 recorded index `source_tree` to verify the reviewed source identity.
+
+## Independent integration review follow-up
+
+The controller's fresh integration review found no blocking bug. Its suggested
+CI hardening was accepted: the targeted 23- and 5-check guests must report
+`tap.ok` equal to their expected plans, with zero TODOs and zero skips, as well
+as a passing status and matching plan. Legacy API regression retains its generic
+TAP grading, including acceptance of its six existing TODOs. All workflow Python
+heredocs were parsed successfully and `git diff --check` passed. This small CI
+assertion update changes no frozen build code, lock, patch, or kernel source.
