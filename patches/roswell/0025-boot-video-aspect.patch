@@ -1,0 +1,61 @@
+diff --git a/hal/halx86/xbox/video/BootVgaInitialization.c b/hal/halx86/xbox/video/BootVgaInitialization.c
+--- a/hal/halx86/xbox/video/BootVgaInitialization.c
++++ b/hal/halx86/xbox/video/BootVgaInitialization.c
+@@ -406,7 +406,8 @@
+ 	writeCrtNv (&riva, 0, 0x44, 0x00);
+ 	NVInitAttr(&riva,0);
+ 	IoOutputByte(0x80d8, 4);  // ACPI IO thing seen in kernel, set to 4
+-	IoOutputByte(0x80d6, 5);  // ACPI IO thing seen in kernel, set to 4 or 5
++	/* Report the selected mode, including the encoder widescreen restriction. */
++	IoOutputByte(0x80d6, pvmode->m_nVideoModeIndex == VIDEO_MODE_1024x576 ? 5 : 4);
+ 	NVVertIntrEnabled (&riva,0);
+ 	NVSetFBStart (&riva, 0, pvmode->m_dwFrameBufferStart);
+ 	IoOutputByte(0x80d3, 4);  // ACPI IO video enable REQUIRED <-- particularly crucial to get composite out
+diff --git a/tests/host/video-aspect/check.py b/tests/host/video-aspect/check.py
+new file mode 100755
+--- /dev/null
++++ b/tests/host/video-aspect/check.py
+@@ -0,0 +1,43 @@
++#!/usr/bin/env python3
++"""Exercise the production boot mode selection and aspect GPIO statement."""
++import re
++import subprocess
++import sys
++from pathlib import Path
++
++root, out = map(Path, sys.argv[1:3])
++out.mkdir(parents=True, exist_ok=True)
++video = root / 'hal/halx86/xbox/video'
++s = (video / 'BootVgaInitialization.c').read_text()
++selection = re.search(r'\tif\(\(\(u8 \*\)&eeprom\).*?else.*?\n\t\}', s, re.S).group()
++write = re.search(r'IoOutputByte\(0x80d6,.*?\);', s, re.S).group()
++enums = re.search(r'enum \{.*?\};', (video / 'BootVideo.h').read_text(), re.S).group()
++# Only hardware boundaries are stubbed; selection and write are production C.
++shim = '#include <stdio.h>\ntypedef unsigned char u8;\n' + enums + '\n'
++shim += '#define VIDEO_PREFERRED_MODE VIDEO_MODE_640x480\n'
++shim += 'enum { ENCODER_CONEXANT, ENCODER_FOCUS, ENCODER_XCALIBUR };\n'
++shim += 'typedef struct { int m_nVideoModeIndex; } CURRENT_VIDEO_MODE_DETAILS;\n'
++shim += 'static unsigned char eeprom[256]; static int video_encoder;\n'
++shim += 'static unsigned port, gpio, writes;\n'
++shim += 'static void IoOutputByte(unsigned p,unsigned v){port=p;gpio=v;writes++;}\n'
++shim += 'static unsigned select_and_signal(unsigned flags,int encoder){\n'
++shim += 'CURRENT_VIDEO_MODE_DETAILS mode,*pvmode=&mode; eeprom[0x96]=flags;\n'
++shim += 'video_encoder=encoder; writes=0;\n' + selection + '\n' + write
++shim += '\nreturn mode.m_nVideoModeIndex; }\n'
++shim += r'''int main(void){unsigned failed=0,cases=0;
++for(int encoder=0;encoder<3;encoder++)for(unsigned flags=0;flags<4;flags++){
++ unsigned expected_wide=(flags&1) && encoder==ENCODER_CONEXANT;
++ unsigned expected_mode=expected_wide?VIDEO_MODE_1024x576:VIDEO_PREFERRED_MODE;
++ unsigned mode=select_and_signal(flags,encoder);cases++;
++ if(mode!=expected_mode || port!=0x80d6 || writes!=1 || gpio!=(expected_wide?5u:4u)){
++  fprintf(stderr,"FAIL encoder=%d flags=%u mode=%u GPIO=%u expected GPIO=%u\n",
++          encoder,flags,mode,gpio,expected_wide?5u:4u);failed++;
++ }
++}
++printf("%u production video-selection/GPIO cases, %u failures\n",cases,failed);
++return !!failed;}
++'''
++(out / 'check.c').write_text(shim)
++subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
++                str(out / 'check.c'), '-o', str(out / 'check')], check=True)
++subprocess.run([str(out / 'check')], check=True)
