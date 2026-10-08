@@ -134,12 +134,12 @@ new file mode 100755
 diff --git a/tests/xbe/api-regression/io/finfo.c b/tests/xbe/api-regression/io/finfo.c
 --- a/tests/xbe/api-regression/io/finfo.c
 +++ b/tests/xbe/api-regression/io/finfo.c
-@@ -230,6 +230,50 @@
+@@ -230,6 +230,73 @@
      return true;
  }
  
 +
-+static bool t_rename_dos_root(void)
++static bool rename_dos_root_content(void)
 +{
 +    ASSERT_TRUE(ensure_dir());
 +    HANDLE h;
@@ -153,7 +153,7 @@ diff --git a/tests/xbe/api-regression/io/finfo.c b/tests/xbe/api-regression/io/f
 +        NtClose(h);
 +        FAIL_AND_RETURN("write rename source -> 0x%08x", (unsigned)s);
 +    }
-+    char target[] = "E:\\nxkrnl-api-finfo\\dos-ren-new.bin";
++    char target[] = "Q:\\nxkrnl-api-finfo\\dos-ren-new.bin";
 +    FILE_RENAME_INFORMATION ri = {0};
 +    ri.ReplaceIfExists = TRUE;
 +    ri.RootDirectory = (HANDLE)-3;
@@ -182,10 +182,33 @@ diff --git a/tests/xbe/api-regression/io/finfo.c b/tests/xbe/api-regression/io/f
 +    return true;
 +}
 +
++static bool t_rename_dos_root(void)
++{
++    /* DVD guests do not inherit dashboard drive mappings. Own a test link. */
++    char link_name[] = "\\??\\Q:";
++    char partition[] = "\\Device\\Harddisk0\\Partition1";
++    OBJECT_STRING link = {
++        .Buffer = link_name,
++        .Length = sizeof(link_name) - 1,
++        .MaximumLength = sizeof(link_name),
++    };
++    OBJECT_STRING destination = {
++        .Buffer = partition,
++        .Length = sizeof(partition) - 1,
++        .MaximumLength = sizeof(partition),
++    };
++    NTSTATUS s = IoCreateSymbolicLink(&link, &destination);
++    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
++    bool result = rename_dos_root_content();
++    s = IoDeleteSymbolicLink(&link);
++    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
++    return result;
++}
++
  static bool t_disposition_deletes(void)
  {
      ASSERT_TRUE(ensure_dir());
-@@ -347,6 +391,7 @@
+@@ -347,6 +414,7 @@
      {"basic_info_query_set",    t_basic_info_query_set},
      {"allocation_info_extend",  t_allocation_info_extend},
      {"rename_same_directory",   t_rename_same_directory},
