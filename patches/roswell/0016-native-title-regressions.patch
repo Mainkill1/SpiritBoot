@@ -1,0 +1,653 @@
+diff --git a/tests/host/thread-stack/check.py b/tests/host/thread-stack/check.py
+index ec994443ed8400ce3457cbbcc38c6b2fe8ef6735..88ef5abe4614287e048a352bd94aa73e186459e4 100644
+--- a/tests/host/thread-stack/check.py
++++ b/tests/host/thread-stack/check.py
+@@ -3,7 +3,8 @@
+ """Exercise the actual Xbox thread creation adapter with a recording allocator.
+ 
+ This checks size propagation and rejection before allocation; native guest
+-checks separately establish execution, guard-page and teardown behavior.
++checks separately establish execution and create/join/close cycles; they do
++not establish guard-page or allocator-reclamation behavior.
+ """
+ from pathlib import Path
+ import subprocess
+@@ -49,13 +50,15 @@ static NTSTATUS PspCreateThread(PHANDLE h, ACCESS_MASK a, POBJECT_ATTRIBUTES o,
+ tests = r'''
+ int main(void) {
+  const uint32_t inputs[]={1,0,4095,4096,4097,49152,49153,65536,262144};
+- const uint32_t expected[]={12288,12288,12288,12288,12288,49152,53248,65536,262144};
++
+  for (unsigned i=0;i<sizeof(inputs)/sizeof(inputs[0]);i++) {
++  uint32_t expected = inputs[i] < KERNEL_STACK_SIZE ? KERNEL_STACK_SIZE : inputs[i];
++  expected = (expected + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+   calls=0;
+   assert(NxkPsCreateSystemThread(NULL,0,NULL,NULL,NULL,NULL,NULL,inputs[i],0)==0);
+-  if (calls!=1 || allocated!=expected[i]) {
++  if (calls!=1 || allocated!=expected) {
+    fprintf(stderr,"request=%u allocated=%u expected=%u calls=%u\n",
+-           inputs[i],allocated,expected[i],calls); return 1;
++           inputs[i],allocated,expected,calls); return 1;
+   }
+  }
+  calls=0;
+diff --git a/tests/xbe/critical-section-contention/Makefile b/tests/xbe/critical-section-contention/Makefile
+index 77d0d9313645d5fef598f840c4e8ee26fe83e175..6f403d11acfe3254848c97af949b1396e2e7aa03 100644
+--- a/tests/xbe/critical-section-contention/Makefile
++++ b/tests/xbe/critical-section-contention/Makefile
+@@ -1,5 +1,6 @@
+ NXDK_DIR ?= ../../../nxdk
+ XBE_TITLE = critical-section-contention
+ GEN_XISO = $(XBE_TITLE).iso
+-SRCS = main.c
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/critical-section-contention/main.c b/tests/xbe/critical-section-contention/main.c
+index fbd0dae53b5262dcac93e6123f66a83e85fddc6c..f44ab4ee293594a340e9ef5309a1806885b9963b 100644
+--- a/tests/xbe/critical-section-contention/main.c
++++ b/tests/xbe/critical-section-contention/main.c
+@@ -1,43 +1,68 @@
+-#include <stdio.h>
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <stdint.h>
+ #include <windows.h>
+-#include <xboxkrnl/xboxkrnl.h>
+-#include <hal/debug.h>
+-#include <hal/video.h>
+-#include <nxdk/mount.h>
++#include "../regression.h"
++
+ static RTL_CRITICAL_SECTION cs;
+-static HANDLE ready, done;
+-static volatile LONG entries;
+-static DWORD WINAPI contender(void *unused) {
+- (void)unused;
+- SetEvent(ready);
+- RtlEnterCriticalSection(&cs);
+- InterlockedIncrement(&entries);
+- RtlLeaveCriticalSection(&cs);
+- SetEvent(done);
+- return 0;
++static HANDLE ready[4];
++static volatile LONG entries, inside, collisions, unexpected_try;
++
++static DWORD WINAPI contender(void *argument)
++{
++    unsigned index = (unsigned)(uintptr_t)argument;
++    if (RtlTryEnterCriticalSection(&cs)) {
++        InterlockedIncrement(&unexpected_try);
++        RtlLeaveCriticalSection(&cs);
++    }
++    SetEvent(ready[index]);
++    for (unsigned round = 0; round < 32; ++round) {
++        RtlEnterCriticalSection(&cs);
++        if (InterlockedIncrement(&inside) != 1)
++            InterlockedIncrement(&collisions);
++        InterlockedIncrement(&entries);
++        InterlockedDecrement(&inside);
++        RtlLeaveCriticalSection(&cs);
++        Sleep(0);
++    }
++    return 0;
+ }
+-int main(void) {
+- XVideoSetMode(640,480,32,REFRESH_DEFAULT);
+- if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
+- FILE *out=fopen("E:\\critical-result.txt","wb");
+- if(!out){debugPrint("FAIL output\n");for(;;)Sleep(1000);}
+- ready=CreateEvent(NULL,FALSE,FALSE,NULL);done=CreateEvent(NULL,FALSE,FALSE,NULL);
+- fprintf(out,"BEGIN higher-priority contention\n");fflush(out);
+- RtlInitializeCriticalSection(&cs);
+- RtlEnterCriticalSection(&cs);RtlEnterCriticalSection(&cs);
+- HANDLE thread=CreateThread(NULL,0,contender,NULL,CREATE_SUSPENDED,NULL);
+- SetThreadPriority(thread,THREAD_PRIORITY_ABOVE_NORMAL);
+- ResumeThread(thread);
+- /* Worker announces entry, then must block so the owner can resume. */
+- WaitForSingleObject(ready,INFINITE);
+- RtlLeaveCriticalSection(&cs);
+- unsigned failures=cs.RecursionCount!=1||entries!=0;
+- RtlLeaveCriticalSection(&cs);
+- failures+=WaitForSingleObject(done,2000)!=WAIT_OBJECT_0;
+- failures+=WaitForSingleObject(thread,2000)!=WAIT_OBJECT_0;
+- failures+=entries!=1||cs.RecursionCount!=0||cs.OwningThread!=NULL||cs.LockCount!=-1;
+- CloseHandle(thread);
+- fprintf(out,"COMPLETE entries=%ld failures=%u\n",entries,failures);fclose(out);
+- debugPrint("CRITICAL COMPLETE entries=%ld failures=%u\n",entries,failures);
+- for(;;)Sleep(1000);
++
++int main(void)
++{
++    HANDLE threads[4];
++    regression_begin();
++    RtlInitializeCriticalSection(&cs);
++    RtlEnterCriticalSection(&cs);
++    RtlEnterCriticalSection(&cs);
++    regression_require(RtlTryEnterCriticalSection(&cs), "recursive owner try-enter");
++    RtlLeaveCriticalSection(&cs);
++    for (unsigned i = 0; i < 4; ++i) {
++        ready[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
++        regression_require(ready[i] != NULL, "create contender handshake");
++        threads[i] = CreateThread(NULL, 0, contender, (void *)(uintptr_t)i,
++                                   CREATE_SUSPENDED, NULL);
++        regression_require(threads[i] != NULL, "create contender");
++        regression_require(SetThreadPriority(threads[i], THREAD_PRIORITY_ABOVE_NORMAL),
++                            "set higher-priority contender");
++        ResumeThread(threads[i]);
++        /* At higher priority, the worker enters the held lock and must block
++         * before this owner can run again. No scheduling delay is guessed. */
++        regression_require(WaitForSingleObject(ready[i], 2000) == WAIT_OBJECT_0,
++                            "contender blocks without starving owner");
++    }
++    RtlLeaveCriticalSection(&cs);
++    regression_check(cs.RecursionCount == 1 && entries == 0 && unexpected_try == 0,
++                     "recursive partial release retains ownership");
++    RtlLeaveCriticalSection(&cs);
++    for (unsigned i = 0; i < 4; ++i) {
++        regression_require(WaitForSingleObject(threads[i], 5000) == WAIT_OBJECT_0,
++                            "contender completes repeated handoffs");
++        CloseHandle(threads[i]);
++        CloseHandle(ready[i]);
++    }
++    regression_check(entries == 128 && inside == 0 && collisions == 0,
++                     "four contenders execute once per round with one owner");
++    regression_check(cs.RecursionCount == 0 && cs.OwningThread == NULL &&
++                     cs.LockCount == -1, "final critical-section state is neutral");
++    regression_finish();
+ }
+diff --git a/tests/xbe/io-apc-order/Makefile b/tests/xbe/io-apc-order/Makefile
+index 6ec14af77a5ce602c0b33066382af8b1712b66d6..88729affebb629b6e098d4d215044f8df498a597 100644
+--- a/tests/xbe/io-apc-order/Makefile
++++ b/tests/xbe/io-apc-order/Makefile
+@@ -1,6 +1,6 @@
+ XBE_TITLE = IO-APC-ORDER
+ GEN_XISO = io-apc.iso
+-SRCS = $(CURDIR)/main.c
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/io-apc-order/main.c b/tests/xbe/io-apc-order/main.c
+index 580de1206882d44654b6f6ed0603145f600d22e7..ed4b1a8baff1bd3c8a6232c4c293729335682800 100644
+--- a/tests/xbe/io-apc-order/main.c
++++ b/tests/xbe/io-apc-order/main.c
+@@ -1,8 +1,7 @@
+ #include <stdio.h>
+ #include <windows.h>
+ #include <xboxkrnl/xboxkrnl.h>
+-#include <hal/debug.h>
+-#include <hal/video.h>
++#include "../regression.h"
+ #include <nxdk/mount.h>
+ 
+ static unsigned char source[8192], target[8192];
+@@ -28,32 +27,21 @@ static void NTAPI nt_completed(PVOID context, PIO_STATUS_BLOCK status,
+ 
+ int main(void)
+ {
+-    XVideoSetMode(640, 480, 32, REFRESH_DEFAULT);
++    regression_begin();
+     if (!nxIsDriveMounted('E'))
+         nxMountDrive('E', "\\Device\\Harddisk0\\Partition1");
+-    FILE *out = fopen("E:\\io-apc-result.txt", "wb");
+-    if (!out) for (;;) Sleep(1000);
+     for (unsigned i = 0; i < sizeof(source); i++) source[i] = i ^ (i >> 8);
+     HANDLE writer = CreateFile("E:\\io-apc-data.bin", GENERIC_WRITE, 0, NULL,
+                                CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+     DWORD written = 0;
+-    if (writer == INVALID_HANDLE_VALUE ||
+-        !WriteFile(writer, source, sizeof(source), &written, NULL) ||
+-        written != sizeof(source)) {
+-        fprintf(out, "FAIL setup error=%lu\n", GetLastError());
+-        fclose(out);
+-        for (;;) Sleep(1000);
+-    }
++    regression_require(writer != INVALID_HANDLE_VALUE, "open APC data writer");
++    regression_require(WriteFile(writer, source, sizeof(source), &written, NULL) &&
++                       written == sizeof(source), "write exact APC data");
+     CloseHandle(writer);
+     HANDLE reader = CreateFile("E:\\io-apc-data.bin", GENERIC_READ,
+                                FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                                FILE_FLAG_OVERLAPPED, NULL);
+-    if (reader == INVALID_HANDLE_VALUE) {
+-        fprintf(out, "FAIL open error=%lu\n", GetLastError());
+-        fclose(out);
+-        for (;;) Sleep(1000);
+-    }
+-    unsigned checks = 0, failures = 0;
++    regression_require(reader != INVALID_HANDLE_VALUE, "open asynchronous reader");
+     for (unsigned mode = 0; mode < 2; mode++) {
+         for (unsigned iteration = 0; iteration < 4; iteration++) {
+             callbacks = pending = bad_completion = 0;
+@@ -71,28 +59,26 @@ int main(void)
+             if (mode || iteration != 0) Sleep(100);
+             LONG early = callbacks;
+             /* Original BIOS: dispatcher is deferred, raw kernel APC is not. */
+-            checks++; failures += early != (mode ? 1 : 0);
++            regression_check(early == (mode ? 1 : 0),
++                             "dispatcher deferral and raw kernel callback timing");
+             DWORD wait = SleepEx(1000, TRUE);
+-            checks++; failures += wait != (mode ? 0 : WAIT_IO_COMPLETION);
+-            checks++; failures += callbacks != 1 || (!mode && pending) ||
+-                                  bad_completion;
+-            checks++; failures += !NT_SUCCESS(status) ||
+-                !NT_SUCCESS(iosb.Status) || iosb.Information != sizeof(target);
++            regression_check(wait == (mode ? 0 : WAIT_IO_COMPLETION),
++                             "alertable wait result");
++            regression_check(callbacks == 1 && (mode || !pending) &&
++                             !bad_completion, "exactly one valid completion");
++            regression_check(NT_SUCCESS(status) && NT_SUCCESS(iosb.Status) &&
++                iosb.Information == sizeof(target), "completed status and byte count");
+             unsigned mismatch = 0;
+             for (unsigned i = 0; i < sizeof(target); i++)
+                 mismatch += source[i] != target[i];
+-            checks++; failures += mismatch != 0;
+-            fprintf(out, "mode=%u iteration=%u early=%ld calls=%ld pending=%ld "
+-                         "wait=%lu status=%08lx bytes=%lu mismatch=%u\n",
++            regression_check(mismatch == 0, "every payload byte matches");
++            tap_comment("mode=%u iteration=%u early=%ld calls=%ld pending=%ld "
++                         "wait=%lu status=%08lx bytes=%lu mismatch=%u",
+                     mode, iteration, early, callbacks, pending, wait,
+                     (unsigned long)status, (unsigned long)iosb.Information,
+                     mismatch);
+-            fflush(out);
+         }
+     }
+     CloseHandle(reader);
+-    fprintf(out, "COMPLETE checks=%u failures=%u\n", checks, failures);
+-    fclose(out);
+-    debugPrint("IO APC COMPLETE checks=%u failures=%u\n", checks, failures);
+-    for (;;) Sleep(1000);
++    regression_finish();
+ }
+diff --git a/tests/xbe/pool-size-limit/Makefile b/tests/xbe/pool-size-limit/Makefile
+index 26c984df9e9e5a950321449d7f23293e1bd0160e..22d96904c3a7b98d6b5d9e6cdec4f65c3b8820dc 100644
+--- a/tests/xbe/pool-size-limit/Makefile
++++ b/tests/xbe/pool-size-limit/Makefile
+@@ -1,6 +1,6 @@
+ XBE_TITLE = POOL-SIZE-LIMIT
+ GEN_XISO = pool.iso
+-SRCS = $(CURDIR)/main.c
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/pool-size-limit/main.c b/tests/xbe/pool-size-limit/main.c
+index 8d03b17405fbe7cae8839dda94ade5e5ffdf8623..9500cb850183ccad5c7a6e8b78d920c404dcbfc7 100644
+--- a/tests/xbe/pool-size-limit/main.c
++++ b/tests/xbe/pool-size-limit/main.c
+@@ -1,30 +1,37 @@
+-#include <stdio.h>
++/* SPDX-License-Identifier: GPL-2.0-or-later */
+ #include <stdint.h>
+-#include <windows.h>
+-#include <xboxkrnl/xboxkrnl.h>
+-#include <hal/video.h>
+-#include <nxdk/mount.h>
++#include "../regression.h"
++
+ static PVOID blocks[160];
+-int main(void){
+- XVideoSetMode(640,480,32,REFRESH_DEFAULT);
+- if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
+- FILE *out=fopen("E:\\pool-result.txt","wb");if(!out)for(;;)Sleep(1000);
+- unsigned bad=0;const unsigned sizes[]={2041,4096,4097};
+- for(unsigned i=0;i<160;i++){
+-  unsigned n=sizes[i%3];blocks[i]=ExAllocatePool(n);
+-  if(!blocks[i]){bad++;fprintf(out,"FAIL allocation %u\n",i);continue;}
+-  ((volatile uint8_t*)blocks[i])[0]=(uint8_t)i;
+-  ((volatile uint8_t*)blocks[i])[n-1]=(uint8_t)(i^0x5a);
+- }
+- for(unsigned i=0;i<160;i++)if(blocks[i]){
+-  unsigned n=sizes[i%3],expected=(n+4095)&~4095u,actual=ExQueryPoolBlockSize(blocks[i]);
+-  unsigned failed=actual!=expected||((volatile uint8_t*)blocks[i])[0]!=(uint8_t)i||((volatile uint8_t*)blocks[i])[n-1]!=(uint8_t)(i^0x5a);
+-  bad+=failed;if(failed)fprintf(out,"FAIL size i=%u actual=%u expected=%u\n",i,actual,expected);
+- }
+- for(unsigned i=0;i<160;i++)if(blocks[i])ExFreePool(blocks[i]);
+- PVOID small=ExAllocatePool(2040);if(!small||ExQueryPoolBlockSize(small)!=2040)bad++;if(small)ExFreePool(small);
+- for(unsigned i=0;i<160;i++){
+-  PVOID p=ExAllocatePool(4097);if(!p){bad++;continue;}if(ExQueryPoolBlockSize(p)!=8192)bad++;ExFreePool(p);
+- }
+- fprintf(out,"COMPLETE checks=321 failures=%u\n",bad);fclose(out);for(;;)Sleep(1000);
++
++int main(void)
++{
++    const unsigned sizes[] = {2041, 4096, 4097};
++    regression_begin();
++    for (unsigned i = 0; i < 160; ++i) {
++        unsigned n = sizes[i % 3];
++        blocks[i] = ExAllocatePool(n);
++        regression_require(blocks[i] != NULL, "allocate simultaneous pool run");
++        ((volatile uint8_t *)blocks[i])[0] = (uint8_t)i;
++        ((volatile uint8_t *)blocks[i])[n - 1] = (uint8_t)(i ^ 0x5a);
++    }
++    for (unsigned i = 0; i < 160; ++i) {
++        unsigned n = sizes[i % 3], expected = (n + 4095) & ~4095u;
++        regression_check(ExQueryPoolBlockSize(blocks[i]) == expected &&
++            ((volatile uint8_t *)blocks[i])[0] == (uint8_t)i &&
++            ((volatile uint8_t *)blocks[i])[n - 1] == (uint8_t)(i ^ 0x5a),
++            "live size and boundary bytes beyond 128 allocations");
++    }
++    for (unsigned i = 0; i < 160; ++i) ExFreePool(blocks[i]);
++    PVOID small = ExAllocatePool(2040);
++    regression_check(small && ExQueryPoolBlockSize(small) == 2040,
++                     "2040-byte bucket boundary");
++    if (small) ExFreePool(small);
++    for (unsigned i = 0; i < 160; ++i) {
++        PVOID p = ExAllocatePool(4097);
++        regression_check(p && ExQueryPoolBlockSize(p) == 8192,
++                         "free and reuse two-page run");
++        if (p) ExFreePool(p);
++    }
++    regression_finish();
+ }
+diff --git a/tests/xbe/regression.h b/tests/xbe/regression.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5c619a3802b16cc6509d3ea384780368c216f7a
+--- /dev/null
++++ b/tests/xbe/regression.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include "api-regression/tap.h"
++#include <xboxkrnl/xboxkrnl.h>
++
++static unsigned regression_checks, regression_failures;
++
++static void regression_begin(void)
++{
++    tap_version(14);
++}
++
++static void regression_check(int passed, const char *description)
++{
++    ++regression_checks;
++    if (passed) {
++        tap_ok(regression_checks, description);
++    } else {
++        ++regression_failures;
++        tap_not_ok(regression_checks, description);
++    }
++}
++
++static void regression_finish(void) __attribute__((noreturn));
++static void regression_finish(void)
++{
++    LARGE_INTEGER delay = { .QuadPart = -5000000 };
++    tap_comment("checks=%u failures=%u", regression_checks, regression_failures);
++    tap_plan(regression_checks);
++    tap_drain();
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    /* A failed shutdown remains a timeout, never a passing capture. */
++    for (;;) __asm__ __volatile__("hlt");
++}
++
++static inline void regression_require(int passed, const char *description)
++{
++    regression_check(passed, description);
++    if (!passed) regression_finish();
++}
+diff --git a/tests/xbe/thread-stack/Makefile b/tests/xbe/thread-stack/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..6e97de5b66272c1bd28a17bc1ab95c4fc67498f8
+--- /dev/null
++++ b/tests/xbe/thread-stack/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = thread-stack
++GEN_XISO = $(XBE_TITLE).iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= /usr/src/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/thread-stack/main.c b/tests/xbe/thread-stack/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..4eb6eea529ae9b90626954ef210d6ecac56e000e
+--- /dev/null
++++ b/tests/xbe/thread-stack/main.c
+@@ -0,0 +1,49 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <stdint.h>
++#include "../regression.h"
++
++static volatile uint32_t checksum, scratch_physical;
++
++static void NTAPI worker(PVOID argument)
++{
++    volatile unsigned char scratch[6144];
++    (void)argument;
++    scratch_physical = MmGetPhysicalAddress((PVOID)scratch);
++    for (unsigned i = 0; i < sizeof(scratch); ++i) scratch[i] = (unsigned char)i;
++    LARGE_INTEGER delay = {.QuadPart = -100000};
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    uint32_t sum = 0;
++    for (unsigned i = 0; i < sizeof(scratch); ++i) sum += scratch[i];
++    checksum = sum;
++}
++
++static void NTAPI system_routine(PKSTART_ROUTINE start, PVOID context)
++{
++    start(context);
++    PsTerminateSystemThread(STATUS_SUCCESS);
++}
++
++int main(void)
++{
++    const unsigned sizes[] = {0, 65536, 1, 4095, 4096, 4097, 49153};
++    regression_begin();
++    for (unsigned round = 0; round < 4; ++round) {
++        for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
++            HANDLE thread = NULL;
++            checksum = scratch_physical = 0;
++            tap_comment("round=%u requested=%u", round, sizes[i]);
++            regression_require(NT_SUCCESS(PsCreateSystemThreadEx(&thread, 0,
++                sizes[i], 0, NULL, worker, NULL, FALSE, FALSE, system_routine)),
++                "create thread with explicit stack request");
++            LARGE_INTEGER timeout = {.QuadPart = -20000000};
++            regression_require(NtWaitForSingleObject(thread, FALSE, &timeout) ==
++                               STATUS_SUCCESS, "thread completes");
++            regression_check(checksum == 783360, "six KiB scratch survives scheduling");
++            regression_check(scratch_physical != 0, "scratch has physical backing");
++            NtClose(thread);
++        }
++    }
++    /* Actual allocated extent/guard-page teardown are not asserted here.
++     * Size normalization is covered by the production allocator fixture. */
++    regression_finish();
++}
+diff --git a/tests/xbe/thread-wait/Makefile b/tests/xbe/thread-wait/Makefile
+index e6f02f7b45b01017e5da375a17d41194d729aa85..e93b8219df45f848bf8f3bc0233585b84fa35568 100644
+--- a/tests/xbe/thread-wait/Makefile
++++ b/tests/xbe/thread-wait/Makefile
+@@ -1,6 +1,6 @@
+ XBE_TITLE = WAIT-PROBE
+ GEN_XISO = wait.iso
+-SRCS = $(CURDIR)/main.c
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/thread-wait/main.c b/tests/xbe/thread-wait/main.c
+index b367d8feec0e6d9ff910dd46e6ed68fc2b87bfae..c06c19e91b30d7334ac0a90933373a60e705062e 100644
+--- a/tests/xbe/thread-wait/main.c
++++ b/tests/xbe/thread-wait/main.c
+@@ -1,39 +1,68 @@
+-#include <stdio.h>
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <stdint.h>
+ #include <windows.h>
+-#include <xboxkrnl/xboxkrnl.h>
+-#include <hal/debug.h>
+-#include <hal/video.h>
+-#include <nxdk/mount.h>
++#include "../regression.h"
++
+ static HANDLE handles[64];
+-int main(void) {
+- XVideoSetMode(640,480,32,REFRESH_DEFAULT);
+- if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
+- FILE *out=fopen("E:\\wait-result.txt","wb");
+- if(!out){debugPrint("FAIL result\n");for(;;)Sleep(1000);}
+- const unsigned counts[]={3,4,5,64};unsigned checks=0,failures=0;
+- for(unsigned c=0;c<4;c++) {
+-  unsigned n=counts[c],created=0;NTSTATUS status=0;
+-  fprintf(out,"BEGIN count=%u\n",n);fflush(out);
+-  for(unsigned i=0;i<n;i++) {
+-   status=NtCreateEvent(&handles[i],NULL,NotificationEvent,i==n-1);
+-   if(!NT_SUCCESS(status))break;created++;
+-  }
+-  if(created!=n){fprintf(out,"FAIL create=%u status=%08lx\n",created,(unsigned long)status);failures++;break;}
+-  LARGE_INTEGER zero={.QuadPart=0};
+-  status=NtWaitForMultipleObjectsEx(n,handles,WaitAny,KernelMode,FALSE,&zero);
+-  checks++;failures+=status!=(NTSTATUS)(STATUS_WAIT_0+n-1);
+-  fprintf(out,"ANY count=%u status=%08lx\n",n,(unsigned long)status);fflush(out);
+-  for(unsigned i=0;i<n;i++)NtSetEvent(handles[i],NULL);
+-  status=NtWaitForMultipleObjectsEx(n,handles,WaitAll,KernelMode,FALSE,&zero);
+-  checks++;failures+=status!=STATUS_SUCCESS;
+-  fprintf(out,"ALL count=%u status=%08lx\n",n,(unsigned long)status);fflush(out);
+-  for(unsigned i=0;i<n;i++)NtClearEvent(handles[i]);
+-  status=NtWaitForMultipleObjectsEx(n,handles,WaitAny,KernelMode,FALSE,&zero);
+-  checks++;failures+=status!=STATUS_TIMEOUT;
+-  fprintf(out,"TIMEOUT count=%u status=%08lx\n",n,(unsigned long)status);fflush(out);
+-  for(unsigned i=0;i<n;i++)NtClose(handles[i]);
+- }
+- fprintf(out,"COMPLETE checks=%u failures=%u\n",checks,failures);fclose(out);
+- debugPrint("WAIT COMPLETE checks=%u failures=%u\n",checks,failures);
+- for(;;)Sleep(1000);
++static KEVENT gate;
++static volatile LONG signal_count;
++
++static DWORD WINAPI signaler(void *argument)
++{
++    unsigned count = (unsigned)(uintptr_t)argument;
++    /* Main has higher priority: after releasing this gate it enters the
++     * object wait before this lower-priority signaler can run. */
++    KeWaitForSingleObject(&gate, Executive, KernelMode, FALSE, NULL);
++    InterlockedIncrement(&signal_count);
++    for (unsigned i = 0; i < count; ++i) NtSetEvent(handles[i], NULL);
++    return 0;
++}
++
++int main(void)
++{
++    const unsigned counts[] = {3, 4, 5, 64};
++    regression_begin();
++    for (unsigned c = 0; c < 4; ++c) {
++        unsigned n = counts[c];
++        for (unsigned i = 0; i < n; ++i)
++            regression_require(NT_SUCCESS(NtCreateEvent(&handles[i], NULL,
++                NotificationEvent, i == n - 1)), "create wait object");
++        LARGE_INTEGER zero = {.QuadPart = 0};
++        NTSTATUS status = NtWaitForMultipleObjectsEx(n, handles, WaitAny,
++                                                   KernelMode, FALSE, &zero);
++        regression_check(status == (NTSTATUS)(STATUS_WAIT_0 + n - 1),
++                         "signaled WaitAny returns final index");
++        for (unsigned i = 0; i < n; ++i) NtSetEvent(handles[i], NULL);
++        status = NtWaitForMultipleObjectsEx(n, handles, WaitAll, KernelMode,
++                                          FALSE, &zero);
++        regression_check(status == STATUS_SUCCESS, "signaled WaitAll");
++        for (unsigned kind = 0; kind < 2; ++kind) {
++            for (unsigned i = 0; i < n; ++i) NtClearEvent(handles[i]);
++            KeInitializeEvent(&gate, NotificationEvent, FALSE);
++            HANDLE thread = CreateThread(NULL, 0, signaler,
++                (void *)(uintptr_t)(kind ? n : 1), CREATE_SUSPENDED, NULL);
++            regression_require(thread != NULL, "create delayed signaler");
++            regression_require(SetThreadPriority(thread, THREAD_PRIORITY_LOWEST),
++                               "set delayed signaler below waiting thread");
++            ResumeThread(thread);
++            LONG before = signal_count;
++            KeSetEvent(&gate, 0, FALSE);
++            LARGE_INTEGER timeout = {.QuadPart = -20000000};
++            status = NtWaitForMultipleObjectsEx(n, handles, kind ? WaitAll : WaitAny,
++                                               KernelMode, FALSE, &timeout);
++            regression_check(status == STATUS_SUCCESS && signal_count == before + 1,
++                             kind ? "blocking WaitAll completes" :
++                                    "blocking WaitAny completes");
++            regression_require(WaitForSingleObject(thread, 2000) == WAIT_OBJECT_0,
++                               "join delayed signaler");
++            CloseHandle(thread);
++        }
++        for (unsigned i = 0; i < n; ++i) NtClearEvent(handles[i]);
++        LARGE_INTEGER timeout = {.QuadPart = -100000};
++        status = NtWaitForMultipleObjectsEx(n, handles, WaitAny, KernelMode,
++                                          FALSE, &timeout);
++        regression_check(status == STATUS_TIMEOUT, "nonzero unsignaled timeout");
++        for (unsigned i = 0; i < n; ++i) NtClose(handles[i]);
++    }
++    regression_finish();
+ }
+diff --git a/tests/xbe/xdvdfs-directory/Makefile b/tests/xbe/xdvdfs-directory/Makefile
+index cdca8befa3f24e787777c027103ba96167e53e29..ffccd1803fadea440279c8f7a2602664b3032751 100644
+--- a/tests/xbe/xdvdfs-directory/Makefile
++++ b/tests/xbe/xdvdfs-directory/Makefile
+@@ -1,6 +1,6 @@
+ XBE_TITLE = XDVDFS-DIRECTORY
+ GEN_XISO = directory.iso
+-SRCS = $(CURDIR)/main.c
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/xdvdfs-directory/main.c b/tests/xbe/xdvdfs-directory/main.c
+index 4abdb2bc4d0c6f0c8aede13eef5faf5b5787cc80..c9ff7d0a16bace629bc81ff8f1575a2d358fe443 100644
+--- a/tests/xbe/xdvdfs-directory/main.c
++++ b/tests/xbe/xdvdfs-directory/main.c
+@@ -1,22 +1,38 @@
+-#include <stdio.h>
++/* SPDX-License-Identifier: GPL-2.0-or-later */
+ #include <string.h>
+-#include <windows.h>
+-#include <xboxkrnl/xboxkrnl.h>
+-#include <hal/video.h>
+-#include <nxdk/mount.h>
+-int main(void) {
+- XVideoSetMode(640,480,32,REFRESH_DEFAULT);
+- if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
+- FILE *out=fopen("E:\\directory-result.txt","wb");if(!out)for(;;)Sleep(1000);
+- const char *paths[]={"\\??\\D:\\", "\\??\\D:\\Cache", "\\??\\D:\\Cache\\", "\\??\\D:\\Cache\\Resource", "\\??\\D:\\Cache\\Resource\\", "\\??\\D:\\Cache\\Missing\\", "\\??\\D:\\Cache\\Resource\\probe.bin\\"};
+- unsigned failures=0;
+- for(unsigned i=0;i<sizeof(paths)/sizeof(paths[0]);i++){
+-  OBJECT_STRING name={(USHORT)strlen(paths[i]),(USHORT)(strlen(paths[i])+1),(PCHAR)paths[i]};
+-  OBJECT_ATTRIBUTES oa={NULL,&name,OBJ_CASE_INSENSITIVE};IO_STATUS_BLOCK iosb={0};HANDLE h=NULL;
+-  NTSTATUS s=NtOpenFile(&h,FILE_LIST_DIRECTORY|SYNCHRONIZE,&oa,&iosb,FILE_SHARE_READ,FILE_DIRECTORY_FILE|FILE_SYNCHRONOUS_IO_NONALERT);
+-  unsigned bad=i<5?!NT_SUCCESS(s):NT_SUCCESS(s);failures+=bad;
+-  fprintf(out,"%s path=%s status=%08lx\n",bad?"FAIL":"PASS",paths[i],s);fflush(out);
+-  if(NT_SUCCESS(s))NtClose(h);
+- }
+- fprintf(out,"COMPLETE checks=7 failures=%u\n",failures);fclose(out);for(;;)Sleep(1000);
++#include "../regression.h"
++
++
++int main(void)
++{
++    const char *paths[] = {
++        "\\??\\D:\\", "\\??\\D:\\Cache", "\\??\\D:\\Cache\\",
++        "\\??\\D:\\Cache\\Resource", "\\??\\D:\\Cache\\Resource\\",
++        "\\??\\D:\\Cache\\Missing\\", "\\??\\D:\\Cache\\Resource\\probe.bin\\"
++    };
++    regression_begin();
++    for (unsigned i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) {
++        OBJECT_STRING name = {(USHORT)strlen(paths[i]), (USHORT)strlen(paths[i]),
++                              (PCHAR)paths[i]};
++        OBJECT_ATTRIBUTES oa = {NULL, &name, OBJ_CASE_INSENSITIVE};
++        IO_STATUS_BLOCK iosb = {0};
++        HANDLE h = NULL;
++        NTSTATUS status = NtOpenFile(&h, FILE_LIST_DIRECTORY | SYNCHRONIZE,
++            &oa, &iosb, FILE_SHARE_READ,
++            FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT);
++        tap_comment("path=%s status=%08lx", paths[i], (unsigned long)status);
++        /* This guest covers the directory separator repair. Exact negative
++         * status and related-file opens have separate differential failures. */
++        regression_check(i < 5 ? status == STATUS_SUCCESS : !NT_SUCCESS(status),
++                         "supported directory opens and rejected negative paths");
++        if (!NT_SUCCESS(status)) continue;
++        FILE_BASIC_INFORMATION info;
++        status = NtQueryInformationFile(h, &iosb, &info, sizeof(info),
++                                         FileBasicInformation);
++        regression_check(status == STATUS_SUCCESS &&
++                         (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY),
++                         "opened object has directory attributes");
++        NtClose(h);
++    }
++    regression_finish();
+ }
