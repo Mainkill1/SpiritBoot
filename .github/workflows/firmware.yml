@@ -47,11 +47,12 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 6f1b951c32c872056a470d184956b62907081072
+            test "$actual_tree" = b1b7d8a2a7ad03d094cd3b80180f5f19d12557a6
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-unwind.py" "$output/cache-pin-unwind" >"$output/cache-pin-unwind.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-writeback.py" "$output/cache-writeback" >"$output/cache-writeback.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/xdvdfs-directory/check.py" "$output/xdvdfs-directory" >"$output/xdvdfs-directory.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-wait/check.py" "$output/thread-wait" >"$output/thread-wait.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-stack/check.py" "$output/thread-stack" >"$output/thread-stack.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/zero-alias/check.py" "$output/zero-alias" >"$output/zero-alias.log" 2>&1
@@ -156,5 +157,6 @@ jobs:
             artifacts/zero-reuse-${{ matrix.variant }}/
             artifacts/thread-stack-${{ matrix.variant }}/
             artifacts/thread-wait-${{ matrix.variant }}/
+            artifacts/xdvdfs-directory-${{ matrix.variant }}/
             artifacts/kernel-host-${{ matrix.variant }}/
             LICENSE

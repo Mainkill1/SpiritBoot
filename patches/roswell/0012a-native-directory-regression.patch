@@ -1,0 +1,288 @@
+diff --git a/tests/host/xdvdfs-directory/check.py b/tests/host/xdvdfs-directory/check.py
+new file mode 100644
+index 00000000..c30725ee
+--- /dev/null
++++ b/tests/host/xdvdfs-directory/check.py
+@@ -0,0 +1,123 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production resolver's fields, bounded names and table ownership.
++
++Directory I/O is injected here; the maintained guest exercises actual XDVDFS.
++The inherited negative-status differences remain tracked by issue #36.
++"""
++from pathlib import Path
++import subprocess
++import sys
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++source = (root / 'drivers/filesystems/xdvdfs/xdvdfs.c').read_text()
++start = source.index('static NTSTATUS\nXdvdResolvePath(')
++end = source.index('\n}\n', start) + 3
++preamble = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdio.h>
++#include <strings.h>
++#define _In_
++#define _Out_writes_(n)
++#define _Out_
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(s) ((s)>=0)
++#define STATUS_SUCCESS 0
++#define STATUS_OBJECT_NAME_INVALID ((int32_t)0xc0000033)
++#define STATUS_OBJECT_NAME_NOT_FOUND ((int32_t)0xc0000034)
++#define STATUS_OBJECT_PATH_NOT_FOUND ((int32_t)0xc000003a)
++#define XDVD_ATTR_DIRECTORY 0x10
++#define XDVD_TAG 0x58445644
++#define RtlZeroMemory(p,n) memset(p,0,n)
++typedef int32_t NTSTATUS;
++typedef unsigned char BOOLEAN,UCHAR,*PUCHAR;
++typedef char CHAR;
++typedef uint16_t WCHAR,*PWCHAR,USHORT;
++typedef uint32_t ULONG;
++typedef ULONG *PULONG;
++typedef void *PVOID;
++typedef struct {USHORT Length,MaximumLength;PWCHAR Buffer;} UNICODE_STRING,*PUNICODE_STRING;
++typedef struct {ULONG RootSector,RootSize;} XDVD_VCB,*PXDVD_VCB;
++typedef struct {PXDVD_VCB Vcb;BOOLEAN IsRoot,IsDirectory;UCHAR Attributes;
++ ULONG DataSector,DataSize;UNICODE_STRING Name;} XDVD_FCB,*PXDVD_FCB;
++typedef struct {ULONG DataSector,DataSize;UCHAR Attributes,NameLength;CHAR Name[64];}
++ XDVD_DIR_ENTRY,*PXDVD_DIR_ENTRY,*PXDVD_DIRENT;
++static unsigned allocations,frees,reads,live;
++static NTSTATUS XdvdReadDirentTable(PXDVD_VCB vcb,ULONG sector,ULONG size,
++ PVOID *out,PULONG bytes)
++{
++ (void)vcb;assert(size==2048);reads++;
++ XDVD_DIR_ENTRY *table=calloc(1,sizeof(*table));assert(table);allocations++;live++;
++ if(sector==1){table->DataSector=10;table->DataSize=2048;
++  table->Attributes=XDVD_ATTR_DIRECTORY;strcpy(table->Name,"Cache");}
++ else if(sector==10){table->DataSector=20;table->DataSize=2048;
++  table->Attributes=XDVD_ATTR_DIRECTORY;strcpy(table->Name,"Resource");}
++ else {assert(sector==20);table->DataSector=21;table->DataSize=18;
++  strcpy(table->Name,"probe.bin");}
++ table->NameLength=strlen(table->Name);*out=table;*bytes=sizeof(*table);return 0;
++}
++static PXDVD_DIR_ENTRY XdvdFindInTable(PVOID table,ULONG bytes,CHAR *name,ULONG len)
++{
++ PXDVD_DIR_ENTRY d=table;assert(bytes==sizeof(*d));
++ return len==d->NameLength&&!strncasecmp(name,d->Name,len)?d:NULL;
++}
++static void ExFreePoolWithTag(PVOID p,ULONG tag)
++{
++ assert(p&&tag==XDVD_TAG&&live==1);free(p);frees++;live--;
++}
++'''
++tests = r'''
++static unsigned cases;
++static void run(const char *text,unsigned length,NTSTATUS expected,unsigned sector,
++ const char *basename,unsigned expected_reads)
++{
++ WCHAR input[256],name[256];memset(name,0xcc,sizeof(name));
++ unsigned available=strlen(text);assert(available<256&&length<=available);
++ /* Deliberately omit a NUL. Bytes after Length may name a missing child. */
++ for(unsigned i=0;i<available;i++)input[i]=(unsigned char)text[i];
++ for(unsigned i=available;i<256;i++)input[i]=0x7777;
++ UNICODE_STRING path={(USHORT)(length*2),(USHORT)(length*2),input};
++ XDVD_VCB vcb={1,2048};XDVD_FCB fcb;
++ allocations=frees=reads=live=0;
++ NTSTATUS got=XdvdResolvePath(&vcb,&path,&fcb,name);
++ assert(got==expected&&reads==expected_reads&&allocations==frees&&live==0);
++ if(got==0){
++  assert(fcb.Vcb==&vcb&&fcb.DataSector==sector);
++  assert(fcb.Name.Buffer==name&&fcb.Name.Length==strlen(basename)*2);
++  for(unsigned i=0;i<strlen(basename);i++)assert(name[i]==(unsigned char)basename[i]);
++  assert(fcb.IsRoot==(sector==1));assert(fcb.IsDirectory==(sector!=21));
++  assert(fcb.DataSize==(sector==21?18:2048));
++  assert(fcb.Attributes==(sector==21?0:XDVD_ATTR_DIRECTORY));
++ }
++ cases++;
++}
++#define TEST(path,status,sector,name,reads) run(path,strlen(path),status,sector,name,reads)
++int main(void)
++{
++ for(unsigned repeat=0;repeat<32;repeat++){
++  TEST("",0,1,"",0);TEST("\\",0,1,"",0);
++  TEST("\\Cache",0,10,"Cache",1);TEST("\\Cache\\",0,10,"Cache",1);
++  TEST("\\Cache\\Resource",0,20,"Resource",2);
++  TEST("\\Cache\\Resource\\",0,20,"Resource",2);
++  TEST("\\Cache\\Resource\\probe.bin",0,21,"probe.bin",3);
++  run("\\Cache\\Missing",7,0,10,"Cache",1);
++  run("\\Cache\\Resource\\Missing",16,0,20,"Resource",2);
++  TEST("\\Cache\\Missing",STATUS_OBJECT_NAME_NOT_FOUND,0,"",2);
++  TEST("\\Cache\\Missing\\",STATUS_OBJECT_PATH_NOT_FOUND,0,"",2);
++  TEST("\\Cache\\Missing\\Child",STATUS_OBJECT_PATH_NOT_FOUND,0,"",2);
++  TEST("\\Cache\\Resource\\probe.bin\\",STATUS_OBJECT_PATH_NOT_FOUND,0,"",3);
++  TEST("\\Cache\\\\Resource",STATUS_OBJECT_NAME_INVALID,0,"",1);
++ }
++ printf("PASS: %u production resolver cases; exact fields, bounds, reads and balanced tables\n",cases);
++}
++'''
++(out / 'actual-directory.c').write_text(preamble + source[start:end] + tests)
++subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
++ '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
++ str(out / 'actual-directory.c'), '-o', str(out / 'directory-check')], check=True)
++subprocess.run([str(out / 'directory-check')], check=True)
+diff --git a/tests/xbe/xdvdfs-directory/Makefile b/tests/xbe/xdvdfs-directory/Makefile
+index cdca8bef..ffccd180 100644
+--- a/tests/xbe/xdvdfs-directory/Makefile
++++ b/tests/xbe/xdvdfs-directory/Makefile
+@@ -1,6 +1,6 @@
+ XBE_TITLE = XDVDFS-DIRECTORY
+ GEN_XISO = directory.iso
+-SRCS = $(CURDIR)/main.c
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/xdvdfs-directory/main.c b/tests/xbe/xdvdfs-directory/main.c
+index 4abdb2bc..d09a62cc 100644
+--- a/tests/xbe/xdvdfs-directory/main.c
++++ b/tests/xbe/xdvdfs-directory/main.c
+@@ -1,22 +1,122 @@
+-#include <stdio.h>
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../regression.h"
++#include <stdint.h>
+ #include <string.h>
+-#include <windows.h>
+-#include <xboxkrnl/xboxkrnl.h>
+-#include <hal/video.h>
+-#include <nxdk/mount.h>
+-int main(void) {
+- XVideoSetMode(640,480,32,REFRESH_DEFAULT);
+- if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
+- FILE *out=fopen("E:\\directory-result.txt","wb");if(!out)for(;;)Sleep(1000);
+- const char *paths[]={"\\??\\D:\\", "\\??\\D:\\Cache", "\\??\\D:\\Cache\\", "\\??\\D:\\Cache\\Resource", "\\??\\D:\\Cache\\Resource\\", "\\??\\D:\\Cache\\Missing\\", "\\??\\D:\\Cache\\Resource\\probe.bin\\"};
+- unsigned failures=0;
+- for(unsigned i=0;i<sizeof(paths)/sizeof(paths[0]);i++){
+-  OBJECT_STRING name={(USHORT)strlen(paths[i]),(USHORT)(strlen(paths[i])+1),(PCHAR)paths[i]};
+-  OBJECT_ATTRIBUTES oa={NULL,&name,OBJ_CASE_INSENSITIVE};IO_STATUS_BLOCK iosb={0};HANDLE h=NULL;
+-  NTSTATUS s=NtOpenFile(&h,FILE_LIST_DIRECTORY|SYNCHRONIZE,&oa,&iosb,FILE_SHARE_READ,FILE_DIRECTORY_FILE|FILE_SYNCHRONOUS_IO_NONALERT);
+-  unsigned bad=i<5?!NT_SUCCESS(s):NT_SUCCESS(s);failures+=bad;
+-  fprintf(out,"%s path=%s status=%08lx\n",bad?"FAIL":"PASS",paths[i],s);fflush(out);
+-  if(NT_SUCCESS(s))NtClose(h);
+- }
+- fprintf(out,"COMPLETE checks=7 failures=%u\n",failures);fclose(out);for(;;)Sleep(1000);
++
++struct summary {
++    ULONG attributes;
++    LONGLONG size;
++    ULONG name_bytes;
++    unsigned char name[256];
++};
++
++static HANDLE open_path(char *buffer, unsigned length, int directory, NTSTATUS *status)
++{
++    OBJECT_STRING name = {(USHORT)length, (USHORT)length, buffer};
++    OBJECT_ATTRIBUTES oa = {NULL, &name, OBJ_CASE_INSENSITIVE};
++    IO_STATUS_BLOCK iosb = {0};
++    HANDLE handle = NULL;
++    *status = NtOpenFile(&handle, SYNCHRONIZE | (directory ? FILE_LIST_DIRECTORY : GENERIC_READ),
++        &oa, &iosb, FILE_SHARE_READ,
++        FILE_SYNCHRONOUS_IO_NONALERT | (directory ? FILE_DIRECTORY_FILE : FILE_NON_DIRECTORY_FILE));
++    return handle;
++}
++
++static void directory(char *path, unsigned length, struct summary *result)
++{
++    NTSTATUS status;
++    HANDLE handle = open_path(path, length, 1, &status);
++    tap_comment("DIRECTORY length=%u status=%08x", length, (unsigned)status);
++    regression_require(status == STATUS_SUCCESS && handle, "open specified directory");
++    IO_STATUS_BLOCK iosb = {0};
++    FILE_BASIC_INFORMATION basic;
++    regression_require(NtQueryInformationFile(handle, &iosb, &basic, sizeof(basic),
++        FileBasicInformation) == STATUS_SUCCESS && (basic.FileAttributes & FILE_ATTRIBUTE_DIRECTORY),
++        "opened object has directory attributes");
++    FILE_STANDARD_INFORMATION standard;
++    regression_require(NtQueryInformationFile(handle, &iosb, &standard, sizeof(standard),
++        FileStandardInformation) == STATUS_SUCCESS && standard.Directory,
++        "standard information identifies a directory");
++    union { ULONG alignment; unsigned char bytes[512]; } name_buffer;
++    memset(&name_buffer, 0, sizeof(name_buffer));
++    FILE_NAME_INFORMATION *name = (FILE_NAME_INFORMATION *)&name_buffer;
++    regression_require(NtQueryInformationFile(handle, &iosb, name, sizeof(name_buffer),
++        FileNameInformation) == STATUS_SUCCESS && name->FileNameLength <= sizeof(result->name),
++        "query bounded resolved-name payload");
++    result->attributes = basic.FileAttributes;
++    result->size = standard.EndOfFile.QuadPart;
++    result->name_bytes = name->FileNameLength;
++    memset(result->name, 0, sizeof(result->name));
++    memcpy(result->name, name->FileName, name->FileNameLength);
++    regression_require(NtClose(handle) == STATUS_SUCCESS, "close directory handle");
++}
++
++static int same(const struct summary *a, const struct summary *b)
++{
++    return a->attributes == b->attributes && a->size == b->size &&
++        a->name_bytes == b->name_bytes && !memcmp(a->name, b->name, a->name_bytes);
++}
++
++static void negative(char *path, NTSTATUS expected)
++{
++    NTSTATUS status;
++    HANDLE handle = open_path(path, strlen(path), 1, &status);
++    tap_comment("NEGATIVE path=%s status=%08x expected_current=%08x", path,
++        (unsigned)status, (unsigned)expected);
++    if (NT_SUCCESS(status)) NtClose(handle);
++    regression_require(status == expected, "exact inherited negative status (compatibility issue #36 remains open)");
++}
++
++static void read_fixture(void)
++{
++    char path[] = "\\??\\D:\\Cache\\Resource\\probe.bin";
++    NTSTATUS status;
++    HANDLE handle = open_path(path, strlen(path), 0, &status);
++    regression_require(status == STATUS_SUCCESS && handle, "open exact disc fixture file");
++    FILE_BASIC_INFORMATION info; IO_STATUS_BLOCK iosb = {0};
++    regression_require(NtQueryInformationFile(handle, &iosb, &info, sizeof(info),
++        FileBasicInformation) == STATUS_SUCCESS && !(info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY),
++        "fixture remains a file");
++    char bytes[18]; LARGE_INTEGER offset = {.QuadPart = 0};
++    status = NtReadFile(handle, NULL, NULL, NULL, &iosb, bytes, sizeof(bytes), &offset);
++    regression_require(status == STATUS_SUCCESS && iosb.Information == sizeof(bytes) &&
++        !memcmp(bytes, "directory-fixture\n", sizeof(bytes)), "disc file returns all 18 expected bytes");
++    regression_require(NtClose(handle) == STATUS_SUCCESS, "close fixture handle");
++}
++
++int main(void)
++{
++    char *paths[] = {"\\??\\D:\\", "\\??\\D:\\Cache", "\\??\\D:\\Cache\\",
++        "\\??\\D:\\Cache\\Resource", "\\??\\D:\\Cache\\Resource\\"};
++    struct summary results[5], bounded;
++    regression_begin();
++    for (unsigned i = 0; i < 5; ++i) directory(paths[i], strlen(paths[i]), &results[i]);
++    /* Raw paired name equality does not claim ANSI/UTF-16 ABI equivalence.
++     * The production resolver fixture separately checks the exact basename,
++     * sector and size. The native test checks both real opens agree.
++     */
++    regression_require(results[1].name_bytes > 0 && same(&results[1], &results[2]),
++                       "Cache with/without terminal separator has identical attributes, size and name");
++    regression_require(results[3].name_bytes > 0 && same(&results[3], &results[4]),
++                       "Resource with/without terminal separator has identical attributes, size and name");
++    char bounded_name[] = "\\??\\D:\\Cache\\Missing";
++    unsigned length = strlen(paths[2]);
++    /* No NUL within Length or at Buffer[Length]; an overread names Missing. */
++    directory(bounded_name, length, &bounded);
++    regression_require(same(&results[2], &bounded), "non-NUL length-bounded name resolves only the specified directory");
++    /* These exact current statuses intentionally expose inherited differences
++     * from original BIOS: Missing\\ = NAME_NOT_FOUND, file\\ = NOT_A_DIRECTORY.
++     * Issue #36 owns that repair; #27 must not hide it as compatible.
++     */
++    negative("\\??\\D:\\Cache\\Missing\\", STATUS_OBJECT_PATH_NOT_FOUND);
++    negative("\\??\\D:\\Cache\\Resource\\probe.bin\\", STATUS_OBJECT_PATH_NOT_FOUND);
++    negative("\\??\\D:\\Cache\\Missing\\Child", STATUS_OBJECT_PATH_NOT_FOUND);
++    negative("\\??\\D:\\Cache\\\\Resource", STATUS_OBJECT_NAME_INVALID);
++    read_fixture();
++    /* Repeated bounded open/query/close through the repaired terminal path. */
++    for (unsigned i = 0; i < 16; ++i) {
++        directory(paths[i & 1 ? 2 : 4], strlen(paths[i & 1 ? 2 : 4]), &bounded);
++        regression_require(same(&bounded, &results[i & 1 ? 2 : 4]), "repeated terminal open preserves resolved identity");
++    }
++    regression_finish();
+ }
