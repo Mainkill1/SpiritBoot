@@ -1,0 +1,352 @@
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index c321f43affcd517d45d37d3bb0b731c3288f4ed7..3c9a6a83bfec787a018d3e311b73f2b13cd69df4 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -159,6 +159,9 @@ NxcPagingIo(
+ 
+     Mdl = IoAllocateMdl(Buffer, Length, FALSE, FALSE, NULL);
+     if (Mdl == NULL) return STATUS_INSUFFICIENT_RESOURCES;
++    /* Protect physical frames before the MDL snapshots them, not merely
++     * before dispatch: relocation between those steps also invalidates DMA. */
++    NxPoolPagesSetMovable(Buffer, Length, FALSE);
+     MmBuildMdlForNonPagedPool(Mdl);
+ 
+     Off.QuadPart = Offset;
+@@ -166,11 +169,6 @@ NxcPagingIo(
+     Iosb.Status = STATUS_SUCCESS;
+     Iosb.Information = 0;
+ 
+-    /* The device DMAs to these frames: hold them immovable across the
+-     * IO so a concurrent contiguous-allocation relocation can't pull
+-     * them out from under the transfer. */
+-    NxPoolPagesSetMovable(Buffer, Length, FALSE);
+-
+     if (Write)
+         Status = IoSynchronousPageWrite(FileObject, Mdl, &Off, &Event, &Iosb);
+     else
+diff --git a/ntoskrnl/xb/scattergather.c b/ntoskrnl/xb/scattergather.c
+index 6a1535e8960a99eb1eb6a9580ea4671418c8f417..4c29d19f0aaea2ba529c9c9658653569e9a4c8d6 100644
+--- a/ntoskrnl/xb/scattergather.c
++++ b/ntoskrnl/xb/scattergather.c
+@@ -19,7 +19,7 @@ typedef struct _XB_SG_REQUEST {
+     PVOID Allocation;
+     PUCHAR Bounce;
+     ULONG Count, Length;
+-    BOOLEAN Write;
++    BOOLEAN Write, BounceProtected;
+     XB_SG_PAGE Pages[1];
+ } XB_SG_REQUEST;
+ extern NTSTATUS NTAPI IopPerformSynchronousRequest(PDEVICE_OBJECT, PIRP,
+@@ -34,6 +34,8 @@ static VOID XbSgRelease(XB_SG_REQUEST *Request)
+         NxkPageSupplyPin(Request->Pages[i].Pfn, TRUE);
+     MiReleasePfnLock(irql);
+ #endif
++    if (Request->BounceProtected)
++        NxPoolPagesSetMovable(Request->Bounce, Request->Length, TRUE);
+     if (Request->Allocation) ExFreePoolWithTag(Request->Allocation, SG_TAG);
+     ExFreePoolWithTag(Request, SG_TAG);
+ }
+@@ -134,6 +136,12 @@ static NTSTATUS XbScatterGather(BOOLEAN Write, HANDLE FileHandle, HANDLE Event,
+     r->Allocation = ExAllocatePoolWithTag(NonPagedPool, Length + PAGE_SIZE, SG_TAG);
+     if (!r->Allocation) { status = STATUS_INSUFFICIENT_RESOURCES; goto fail; }
+     r->Bounce = (PUCHAR)(((ULONG_PTR)r->Allocation + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
++    /* The MDL records physical frames, not a relocatable virtual buffer.
++     * Establish ownership before its snapshot and retain it through DMA. */
++    if (Length) {
++        NxPoolPagesSetMovable(r->Bounce, Length, FALSE);
++        r->BounceProtected = TRUE;
++    }
+     if (Write)
+         for (i = 0, copied = 0; copied < Length; ++i) {
+             ULONG chunk = min(PAGE_SIZE, Length - copied);
+diff --git a/tests/host/dma-lifetime/check.py b/tests/host/dma-lifetime/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..06e935c24d6270b37aebc8a8b69321ac3e50676c
+--- /dev/null
++++ b/tests/host/dma-lifetime/check.py
+@@ -0,0 +1,31 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Run production scatter/gather and paging I/O with relocation fault injection.
++
++Only the external NT object/device/allocator boundary is modeled. The actual
++request/MDL lifetime and pool-movability adapter are compiled without edits.
++"""
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++sys.dont_write_bytecode = True
++spec = importlib.util.spec_from_file_location('extract', root / 'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++scatter = (root / 'ntoskrnl/xb/scattergather.c').read_text()
++scatter = '\n'.join(line for line in scatter.splitlines() if not line.startswith('#include'))
++movable = extract.function((root / 'ntoskrnl/xb/mm/poolpages.c').read_text(), 'NxPoolPagesSetMovable')
++paging = extract.function((root / 'ntoskrnl/xb/mm/cache.c').read_text(), 'NxcPagingIo')
++source = (Path(__file__).with_name('fixture.c').read_text()
++          .replace('/* PRODUCTION_MOVABLE */', movable)
++          .replace('/* PRODUCTION_SCATTER */', scatter)
++          .replace('/* PRODUCTION_PAGING */', paging))
++(out / 'dma.c').write_text(source)
++subprocess.run(['cc', '-D_GNU_SOURCE', '-std=c11', '-O2', '-Wall', '-Wextra',
++                '-Werror', '-Wno-multichar', str(out / 'dma.c'), '-o', str(out / 'dma')], check=True)
++subprocess.run([str(out / 'dma')], check=True)
+diff --git a/tests/host/dma-lifetime/fixture.c b/tests/host/dma-lifetime/fixture.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..beb220b4a3477fca4a73b008d73c58cc24ccde0d
+--- /dev/null
++++ b/tests/host/dma-lifetime/fixture.c
+@@ -0,0 +1,248 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <assert.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <limits.h>
++typedef uint32_t ULONG, PFN_NUMBER;
++typedef uintptr_t ULONG_PTR;
++typedef size_t SIZE_T, *PSIZE_T;
++typedef uint8_t UCHAR, *PUCHAR, BOOLEAN, KIRQL;
++typedef int32_t NTSTATUS;
++typedef long long LONGLONG;
++typedef void VOID, *PVOID, *HANDLE;
++typedef struct { LONGLONG QuadPart; } LARGE_INTEGER, *PLARGE_INTEGER;
++typedef struct { NTSTATUS Status; SIZE_T Information; } IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
++typedef struct { int signaled; } KEVENT, *PKEVENT;
++typedef struct { int StackSize; } DEVICE_OBJECT, *PDEVICE_OBJECT;
++typedef struct { ULONG Flags; LARGE_INTEGER CurrentByteOffset; KEVENT Event; } FILE_OBJECT, *PFILE_OBJECT;
++typedef void (*PIO_APC_ROUTINE)(void);
++typedef int IOP_TRANSFER_TYPE, KPROCESSOR_MODE;
++typedef struct { ULONG MajorFunction; PFILE_OBJECT FileObject;
++    struct { struct { ULONG Length; LARGE_INTEGER ByteOffset; } Read; } Parameters;
++} IO_STACK_LOCATION, *PIO_STACK_LOCATION;
++typedef struct { PVOID Buffer, MappedSystemVa; ULONG Length, MdlFlags, Count; PFN_NUMBER Pfns[8]; } MDL, *PMDL;
++typedef struct _IRP {
++    struct { struct { PFILE_OBJECT OriginalFileObject; PVOID Thread; } Overlay; } Tail;
++    int RequestorMode; PIO_STATUS_BLOCK UserIosb; PKEVENT UserEvent; PVOID UserBuffer;
++    struct { struct { PIO_APC_ROUTINE UserApcRoutine; PVOID UserApcContext; } AsynchronousParameters; } Overlay;
++    ULONG Flags; PMDL MdlAddress; IO_STACK_LOCATION Stack; IO_STATUS_BLOCK IoStatus;
++    BOOLEAN PendingReturned; NTSTATUS (*Complete)(PDEVICE_OBJECT, struct _IRP *, PVOID); PVOID Context;
++} IRP, *PIRP;
++#define IN
++#define OUT
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define NTAPI
++#define NXK_MM_PHYS 1
++#define TRUE 1
++#define FALSE 0
++#define PAGE_SIZE 4096UL
++#define PAGE_SHIFT 12
++#define C_ASSERT(c) _Static_assert(sizeof(void *) != 4 || (c), #c)
++#define FIELD_OFFSET(t,f) offsetof(t,f)
++#define NonPagedPool 0
++#define RtlCopyMemory memcpy
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define min(a,b) ((a)<(b)?(a):(b))
++#define MAXULONG UINT32_MAX
++#define MAXLONGLONG LLONG_MAX
++#define STATUS_SUCCESS 0
++#define STATUS_PENDING 0x103
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000d)
++#define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xc000009a)
++#define STATUS_ACCESS_VIOLATION ((NTSTATUS)0xc0000005)
++#define STATUS_IO_DEVICE_ERROR ((NTSTATUS)0xc0000185)
++#define STATUS_CANCELLED ((NTSTATUS)0xc0000120)
++#define NT_SUCCESS(s) ((s)>=0)
++#define NT_ERROR(s) ((s)<0)
++#define FILE_WRITE_DATA 2
++#define FILE_READ_DATA 1
++#define EVENT_MODIFY_STATE 2
++#define KernelMode 0
++#define Executive 0
++#define NotificationEvent 0
++#define FO_SYNCHRONOUS_IO 1
++#define FO_NO_INTERMEDIATE_BUFFERING 2
++#define BooleanFlagOn(v,f) (!!((v)&(f)))
++#define IRP_NOCACHE 1
++#define IRP_DEFER_IO_COMPLETION 2
++#define IRP_XB_SG_COMPLETION 4
++#define IRP_WRITE_OPERATION 8
++#define IRP_READ_OPERATION 16
++#define IRP_MJ_WRITE 4
++#define IRP_MJ_READ 3
++#define IopWriteTransfer 1
++#define IopReadTransfer 0
++#define MDL_MAPPED_TO_SYSTEM_VA 1
++#define NXPP_BASE PAGE_SIZE
++#define NXPP_END UINTPTR_MAX
++static DEVICE_OBJECT device = {1};
++static FILE_OBJECT file;
++static int IoFileObjectType, ExEventObjectType;
++static ULONG next_pfn, bad, cases, irps, mdls, refs, locks, allocations;
++static int pfn_locked, fail_irp, fail_mdl, fail_pool, pool_calls;
++static int delayed, writing;
++static NTSTATUS completion_status;
++static PIRP pending;
++static PMDL paging_mdl;
++static PIO_STATUS_BLOCK paging_iosb;
++static ULONG pages;
++static struct { uintptr_t va; ULONG pte; uintptr_t owner; unsigned pins;
++    unsigned char *bytes; void *orphan; } frames[256];
++static struct { void *pointer; size_t length; } blocks[32];
++static KIRQL MiAcquirePfnLock(void) { assert(!pfn_locked); pfn_locked=1; return 0; }
++static void MiReleasePfnLock(KIRQL k) { (void)k; assert(pfn_locked); pfn_locked=0; }
++static ULONG *pte_for(uintptr_t va) {
++    for (ULONG i=1;i<=pages;i++) if(frames[i].va==va) return &frames[i].pte;
++    abort();
++}
++#define NXPP_PTE(va) (*pte_for(va))
++static void NxkPageSupplySetOwner(PFN_NUMBER p, uintptr_t owner) {
++    assert(pfn_locked); frames[p].owner=owner;
++}
++static uintptr_t NxMmGetPhysicalAddress(void *p) {
++    uintptr_t va=(uintptr_t)p; return ((*pte_for(va&~(PAGE_SIZE-1))>>12)*PAGE_SIZE)+(va&(PAGE_SIZE-1));
++}
++static int NxMmIsAddressValid(void *p) { return p!=NULL; }
++static int NxkPageSupplyCanPin(PFN_NUMBER p, int unpin) { (void)unpin; return p>0&&p<256; }
++static void NxkPageSupplyPin(PFN_NUMBER p, int unpin) {
++    assert(pfn_locked); if(unpin){assert(frames[p].pins);--frames[p].pins;} else ++frames[p].pins;
++}
++static void *ExAllocatePoolWithTag(int kind, size_t n, int tag) {
++    (void)kind;(void)tag; if(++pool_calls==fail_pool)return NULL;
++    size_t rounded=(n+PAGE_SIZE-1)&~(PAGE_SIZE-1); if(!rounded)rounded=PAGE_SIZE;
++    void *p=NULL;assert(!posix_memalign(&p,PAGE_SIZE,rounded));memset(p,0xcc,rounded);
++    unsigned slot;for(slot=0;slot<32;slot++)if(!blocks[slot].pointer)break;
++    assert(slot<32);blocks[slot].pointer=p;blocks[slot].length=rounded;++allocations;
++    for(size_t off=0;off<rounded;off+=PAGE_SIZE){
++        unsigned f=++next_pfn;assert(f<256);pages=f;frames[f].va=(uintptr_t)p+off;
++        frames[f].pte=(f<<12)|3;frames[f].owner=(uintptr_t)&frames[f].pte;
++        frames[f].bytes=(unsigned char*)p+off;
++    }return p;
++}
++static void ExFreePoolWithTag(void *p,int tag) {
++    (void)tag;unsigned slot;for(slot=0;slot<32;slot++)if(blocks[slot].pointer==p)break;
++    assert(slot<32);
++    for(unsigned i=1;i<=pages;i++)if(frames[i].va>=(uintptr_t)p&&frames[i].va<(uintptr_t)p+blocks[slot].length){
++        PFN_NUMBER current=frames[i].pte>>12;
++        assert(!frames[current].pins);assert(frames[current].owner);
++        frames[i].va=0;
++    }
++    blocks[slot].pointer=NULL;--allocations;free(p);
++}
++/* Mirrors the page-supply relocation admission contract: owned/unpinned only.
++ * Detach old physical storage so a saved MDL reproduces stale DMA behavior. */
++static void attempt_relocation(PMDL m) {
++    for(unsigned i=0;i<m->Count;i++){
++        PFN_NUMBER old=m->Pfns[i];
++        if(frames[old].owner&&!frames[old].pins&&!frames[old].orphan){
++            ++bad;unsigned fresh=++next_pfn;assert(fresh<256);pages=fresh;
++            frames[fresh]=frames[old];frames[fresh].va=0;
++            frames[old].pte=(fresh<<12)|3;
++            frames[old].orphan=malloc(PAGE_SIZE);assert(frames[old].orphan);
++            memcpy(frames[old].orphan,frames[old].bytes,PAGE_SIZE);
++            frames[old].bytes=frames[old].orphan;
++        }
++    }
++}
++/* PRODUCTION_MOVABLE */
++static PMDL IoAllocateMdl(void *p,ULONG n,int a,int b,void *c) {
++    (void)a;(void)b;(void)c;if(fail_mdl)return NULL;
++    PMDL m=calloc(1,sizeof(*m));assert(m);m->Buffer=p;m->Length=n;++mdls;return m;
++}
++static void MmBuildMdlForNonPagedPool(PMDL m) {
++    m->Count=(m->Length+PAGE_SIZE-1)/PAGE_SIZE;
++    for(unsigned i=0;i<m->Count;i++)m->Pfns[i]=NxMmGetPhysicalAddress((char*)m->Buffer+i*PAGE_SIZE)>>12;
++    attempt_relocation(m); /* concurrent allocation at physical snapshot */
++}
++static void IoFreeMdl(PMDL m){assert(mdls);--mdls;free(m);}
++static PIRP IoAllocateIrp(int depth,int quota){(void)depth;(void)quota;if(fail_irp)return NULL;PIRP r=calloc(1,sizeof(*r));assert(r);++irps;return r;}
++static void IoFreeIrp(PIRP r){assert(irps);--irps;free(r);}
++static PIO_STACK_LOCATION IoGetNextIrpStackLocation(PIRP r){return &r->Stack;}
++static void IoSetCompletionRoutine(PIRP r,NTSTATUS (*fn)(PDEVICE_OBJECT,PIRP,PVOID),PVOID c,int a,int b,int d){(void)a;(void)b;(void)d;r->Complete=fn;r->Context=c;}
++static NTSTATUS ObReferenceObjectByHandle(HANDLE h,int access,int type,int mode,PVOID *out,void *info){(void)h;(void)access;(void)type;(void)mode;(void)info;*out=&file;++refs;return 0;}
++static void ObDereferenceObject(PVOID p){(void)p;assert(refs);--refs;}
++static NTSTATUS IopLockFileObject(PFILE_OBJECT f,int mode){(void)f;(void)mode;++locks;return 0;}
++static void IopUnlockFileObject(PFILE_OBJECT f){(void)f;assert(locks);--locks;}
++static PDEVICE_OBJECT IoGetRelatedDeviceObject(PFILE_OBJECT f){(void)f;return &device;}
++static PVOID PsGetCurrentThread(void){return (void*)1;}
++static void KeClearEvent(PKEVENT e){e->signaled=0;}
++static void IoMarkIrpPending(PIRP r){r->PendingReturned=TRUE;}
++static void KeInitializeEvent(PKEVENT e,int type,int value){(void)type;e->signaled=value;}
++static unsigned char expected_byte(unsigned offset){return (unsigned char)(offset*13+7);}
++static void transfer(PMDL m,int write){
++    for(unsigned i=0;i<m->Length;i++){
++        unsigned char *b=frames[m->Pfns[i/PAGE_SIZE]].bytes+i%PAGE_SIZE;
++        if(write){if(*b!=expected_byte(i))++bad;}else *b=expected_byte(i);
++    }
++}
++static void finish_irp(PIRP r){
++    attempt_relocation(r->MdlAddress);transfer(r->MdlAddress,writing);
++    r->IoStatus.Status=completion_status;r->IoStatus.Information=NT_SUCCESS(completion_status)?r->MdlAddress->Length:0;
++    IO_STATUS_BLOCK result=r->IoStatus;PIO_STATUS_BLOCK iosb=r->UserIosb;
++    r->Complete(&device,r,r->Context);*iosb=result;
++    if(locks)IopUnlockFileObject(&file);
++    ObDereferenceObject(&file);IoFreeIrp(r);
++}
++NTSTATUS IopPerformSynchronousRequest(PDEVICE_OBJECT d,PIRP r,PFILE_OBJECT f,BOOLEAN a,int mode,BOOLEAN sync,IOP_TRANSFER_TYPE t){
++    (void)d;(void)f;(void)a;(void)mode;(void)sync;(void)t;
++    if(delayed){r->PendingReturned=TRUE;pending=r;return STATUS_PENDING;}
++    finish_irp(r);return completion_status;
++}
++/* PRODUCTION_SCATTER */
++static NTSTATUS page_io(PMDL m,PIO_STATUS_BLOCK iosb,int write){
++    paging_mdl=m;paging_iosb=iosb;writing=write;
++    if(delayed)return STATUS_PENDING;
++    attempt_relocation(m);transfer(m,write);iosb->Status=completion_status;iosb->Information=NT_SUCCESS(completion_status)?m->Length:0;return completion_status;
++}
++static NTSTATUS IoSynchronousPageWrite(PFILE_OBJECT f,PMDL m,PLARGE_INTEGER o,PKEVENT e,PIO_STATUS_BLOCK i){(void)f;(void)o;(void)e;return page_io(m,i,1);}
++static NTSTATUS IoPageRead(PFILE_OBJECT f,PMDL m,PLARGE_INTEGER o,PKEVENT e,PIO_STATUS_BLOCK i){(void)f;(void)o;(void)e;return page_io(m,i,0);}
++static NTSTATUS KeWaitForSingleObject(PKEVENT e,int reason,int mode,int alert,void *timeout){(void)e;(void)reason;(void)mode;(void)alert;(void)timeout;attempt_relocation(paging_mdl);transfer(paging_mdl,writing);paging_iosb->Status=completion_status;paging_iosb->Information=NT_SUCCESS(completion_status)?paging_mdl->Length:0;return 0;}
++static void MmUnmapLockedPages(PVOID p,PMDL m){(void)p;(void)m;}
++/* PRODUCTION_PAGING */
++static void reset(void){
++    assert(!allocations&&!irps&&!mdls&&!refs&&!locks&&!pfn_locked);
++    for(unsigned i=1;i<=pages;i++){assert(!frames[i].pins);free(frames[i].orphan);}
++    memset(frames,0,sizeof(frames));pages=next_pfn=0;pool_calls=0;fail_pool=fail_mdl=fail_irp=delayed=0;pending=NULL;completion_status=0;
++    file.Flags=FO_NO_INTERMEDIATE_BUFFERING;
++}
++static void check_scatter(int write,int delay,NTSTATUS outcome,int failure,ULONG length){
++    reset();writing=write;delayed=delay;completion_status=outcome;
++    UCHAR *caller=ExAllocatePoolWithTag(0,3*PAGE_SIZE,0);memset(caller,0x5a,3*PAGE_SIZE);
++    if(write)for(unsigned i=0;i<length;i++)caller[i]=expected_byte(i);
++    XB_FILE_SEGMENT_ELEMENT segments[3]={{.Buffer=caller},{.Buffer=caller+PAGE_SIZE},{.Buffer=caller+2*PAGE_SIZE}};
++    IO_STATUS_BLOCK iosb={0};LARGE_INTEGER offset={0};
++    if(failure==1)fail_irp=1;
++    if(failure==2)fail_mdl=1;
++    if(failure==3)fail_pool=pool_calls+2;
++    NTSTATUS s=XbScatterGather(write,(void*)1,NULL,NULL,NULL,&iosb,segments,length,&offset);
++    if(failure)assert(s==STATUS_INSUFFICIENT_RESOURCES);
++    else{
++        if(delay){assert(s==STATUS_PENDING&&pending);attempt_relocation(pending->MdlAddress);finish_irp(pending);pending=NULL;}
++        assert(iosb.Status==outcome);
++        if(!write)for(unsigned i=0;i<length;i++)if(caller[i]!=(NT_SUCCESS(outcome)?expected_byte(i):0x5a))++bad;
++    }
++    assert(allocations==1&&!irps&&!mdls&&!refs&&!locks);
++    for(unsigned i=1;i<=pages;i++)assert(!frames[i].pins);
++    ExFreePoolWithTag(caller,0);++cases;
++}
++static void check_paging(int write,int delay,NTSTATUS outcome,int failure){
++    reset();writing=write;delayed=delay;completion_status=outcome;
++    UCHAR *buffer=ExAllocatePoolWithTag(0,8192,0);for(unsigned i=0;i<8192;i++)buffer[i]=expected_byte(i);
++    fail_mdl=failure;SIZE_T transferred=99;NTSTATUS s=NxcPagingIo(&file,buffer,0,8192,write,&transferred);
++    assert(s==(failure?STATUS_INSUFFICIENT_RESOURCES:outcome));
++    assert(transferred==(failure||!NT_SUCCESS(outcome)?0:8192));assert(!mdls);
++    for(unsigned i=0;i<2;i++)assert(frames[NxMmGetPhysicalAddress(buffer+i*PAGE_SIZE)>>12].owner);
++    ExFreePoolWithTag(buffer,0);++cases;
++}
++int main(void){
++    ULONG lengths[]={512,4096,4608,8192};NTSTATUS outcomes[]={STATUS_SUCCESS,STATUS_IO_DEVICE_ERROR,STATUS_CANCELLED};
++    for(unsigned w=0;w<2;w++)for(unsigned d=0;d<2;d++)for(unsigned o=0;o<3;o++)for(unsigned n=0;n<4;n++)check_scatter(w,d,outcomes[o],0,lengths[n]);
++    for(unsigned f=1;f<=3;f++)check_scatter(0,0,0,f,4608);
++    for(unsigned w=0;w<2;w++)for(unsigned d=0;d<2;d++)for(unsigned o=0;o<3;o++)check_paging(w,d,outcomes[o],0);
++    check_paging(0,0,0,1);reset();
++    if(bad){fprintf(stderr,"FAIL: %u relocation/payload violations across %u cases\n",bad,cases);return 1;}
++    printf("PASS: %u production scatter/paging DMA lifetime cases; protections restored, payload exact\n",cases);return 0;
++}
