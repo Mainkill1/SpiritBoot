@@ -1,0 +1,322 @@
+diff --git a/tests/xbe/relocation-active-stack/Makefile b/tests/xbe/relocation-active-stack/Makefile
+new file mode 100644
+index 00000000..953572f6
+--- /dev/null
++++ b/tests/xbe/relocation-active-stack/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = RELOCATION-ACTIVE-STACK
++GEN_XISO = relocation-active-stack.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/relocation-active-stack/main.c b/tests/xbe/relocation-active-stack/main.c
+new file mode 100644
+index 00000000..9438be84
+--- /dev/null
++++ b/tests/xbe/relocation-active-stack/main.c
+@@ -0,0 +1,68 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../relocation-checks.h"
++
++static __attribute__((noinline)) void exercise_stack(void)
++{
++    volatile uint32_t marker[256];
++    uintptr_t esp;
++    for (unsigned i = 0; i < 256; ++i) marker[i] = 0x88990000u + i;
++    __asm__ __volatile__("movl %%esp, %0" : "=r"(esp));
++    PVOID page = (PVOID)(esp & ~(uintptr_t)0xfffu);
++    ULONG before = MmGetPhysicalAddress(page);
++    regression_require(before && before < RELOCATION_UPPER_RAM,
++                       "caller stack source inside title contiguous range");
++    relocation_restore_upper_spill();
++    tap_comment("caller esp=%08lx source=%08lx", (ULONG)esp, before);
++    PVOID pin = relocation_claim(before);
++    regression_require(pin && MmGetPhysicalAddress(pin) == before,
++                       "claim exact frame of a still-active caller stack page");
++    ULONG after = MmGetPhysicalAddress(page);
++    tap_comment("caller stack destination=%08lx", after);
++    regression_check(after && after != before, "active caller stack mapping moved");
++    int intact = 1;
++    for (unsigned i = 0; i < 256; ++i)
++        if (marker[i] != 0x88990000u + i) intact = 0;
++    regression_check(intact, "stack markers and call returns survive relocation");
++    /* Overwrite the original frame only after the allocator has returned.
++     * A stale stack translation would corrupt this function's live frame. */
++    relocation_fill(pin, 0x99aa0000u);
++    intact = 1;
++    for (unsigned i = 0; i < 256; ++i)
++        if (marker[i] != 0x88990000u + i) intact = 0;
++    regression_check(intact, "old stack frame overwrite leaves active markers intact");
++    MmFreeContiguousMemory(pin);
++}
++
++static void NTAPI worker(PVOID context)
++{
++    (void)context;
++    exercise_stack();
++    regression_check(1, "return to parent caller after stack relocation and cleanup");
++}
++
++static void NTAPI system_routine(PKSTART_ROUTINE start, PVOID context)
++{
++    start(context);
++    PsTerminateSystemThread(STATUS_SUCCESS);
++}
++
++int main(void)
++{
++    regression_begin();
++    relocation_prepare_low_source();
++    HANDLE thread = NULL;
++    regression_require(NT_SUCCESS(PsCreateSystemThreadEx(&thread, 0,
++        65536, 0, NULL, worker, NULL, TRUE, FALSE, system_routine)),
++        "create low-backed worker stack");
++    /* The creator finishes its TAP emission before allowing the worker
++     * to write the shared finite-test counters. It emits again only
++     * after the worker has terminated. */
++    if (!NT_SUCCESS(NtResumeThread(thread, NULL)))
++        regression_require(0, "resume worker");
++    LARGE_INTEGER timeout = {.QuadPart = -50000000};
++    regression_require(NtWaitForSingleObject(thread, FALSE, &timeout) == STATUS_SUCCESS,
++                       "worker returns and terminates after stack relocation");
++    regression_check(NT_SUCCESS(NtClose(thread)), "close worker handle");
++    relocation_release_pressure();
++    regression_finish();
++}
+diff --git a/tests/xbe/relocation-checks.h b/tests/xbe/relocation-checks.h
+new file mode 100644
+index 00000000..fa2b0c5d
+--- /dev/null
++++ b/tests/xbe/relocation-checks.h
+@@ -0,0 +1,78 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include <stdint.h>
++#include "regression.h"
++
++#define RELOCATION_PAGE_BYTES 4096u
++#define RELOCATION_UPPER_RAM 0x04000000u
++
++static inline void relocation_fill(PVOID page, uint32_t seed)
++{
++    volatile uint32_t *words = page;
++    for (unsigned i = 0; i < RELOCATION_PAGE_BYTES / sizeof(*words); ++i)
++        words[i] = seed + i;
++}
++
++static inline int relocation_matches(PVOID page, uint32_t seed)
++{
++    volatile uint32_t *words = page;
++    for (unsigned i = 0; i < RELOCATION_PAGE_BYTES / sizeof(*words); ++i)
++        if (words[i] != seed + i) return 0;
++    return 1;
++}
++
++static inline PVOID relocation_claim(ULONG physical)
++{
++    return MmAllocateContiguousMemoryEx(RELOCATION_PAGE_BYTES, physical,
++        physical + RELOCATION_PAGE_BYTES - 1, RELOCATION_PAGE_BYTES,
++        PAGE_READWRITE);
++}
++
++#define RELOCATION_MAX_REGIONS 112u
++static PVOID relocation_regions[RELOCATION_MAX_REGIONS];
++static unsigned relocation_region_count;
++static PVOID relocation_upper_spill;
++
++/* New VM/page-table/thread allocations normally start in upper devkit
++ * RAM. Exhaust that domain to make a low source reachable through the
++ * title contiguous API. Restore the upper spill only after the source
++ * is allocated, otherwise a page table may consume that frame itself. */
++static inline void relocation_prepare_low_source(void)
++{
++    PVOID high = NULL;
++    int reached_low = 0;
++    while (relocation_region_count < RELOCATION_MAX_REGIONS && !reached_low) {
++        SIZE_T size = 1024u * 1024u;
++        PVOID *region = &relocation_regions[relocation_region_count];
++        if (!NT_SUCCESS(NtAllocateVirtualMemory(region, 0, &size,
++            MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE))) break;
++        ++relocation_region_count;
++        for (unsigned off = 0; off < size; off += RELOCATION_PAGE_BYTES) {
++            PVOID page = (PUCHAR)*region + off;
++            ULONG physical = MmGetPhysicalAddress(page);
++            if (!high && physical >= RELOCATION_UPPER_RAM) high = page;
++            if (physical && physical < RELOCATION_UPPER_RAM) reached_low = 1;
++        }
++    }
++    regression_require(reached_low && high, "both low source and upper spill domains available");
++    tap_comment("pressure regions=%u", relocation_region_count);
++    relocation_upper_spill = high;
++}
++
++static inline void relocation_restore_upper_spill(void)
++{
++    SIZE_T size = RELOCATION_PAGE_BYTES;
++    regression_require(NT_SUCCESS(NtFreeVirtualMemory(&relocation_upper_spill, &size, MEM_DECOMMIT)),
++                       "restore upper relocation destination");
++}
++
++static inline void relocation_release_pressure(void)
++{
++    int released = 1;
++    for (unsigned i = 0; i < relocation_region_count; ++i) {
++        SIZE_T size = 0;
++        PVOID base = relocation_regions[i];
++        if (!NT_SUCCESS(NtFreeVirtualMemory(&base, &size, MEM_RELEASE))) released = 0;
++    }
++    regression_check(released, "release all pressure allocations");
++}
+diff --git a/tests/xbe/relocation-page-table/Makefile b/tests/xbe/relocation-page-table/Makefile
+new file mode 100644
+index 00000000..1f4c784b
+--- /dev/null
++++ b/tests/xbe/relocation-page-table/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = RELOCATION-PAGE-TABLE
++GEN_XISO = relocation-page-table.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/relocation-page-table/main.c b/tests/xbe/relocation-page-table/main.c
+new file mode 100644
+index 00000000..3db66bf7
+--- /dev/null
++++ b/tests/xbe/relocation-page-table/main.c
+@@ -0,0 +1,79 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../relocation-checks.h"
++
++static ULONG entries[1024];
++
++int main(void)
++{
++    /* This guest intentionally inspects the kernel's x86 self-map. It is
++     * a privileged relocation regression, not a portable title workload. */
++    PVOID base = (PVOID)0x18000000u;
++    SIZE_T size = 4 * RELOCATION_PAGE_BYTES;
++    regression_begin();
++    relocation_prepare_low_source();
++    regression_require(NT_SUCCESS(NtAllocateVirtualMemory(&base, 0, &size,
++        MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)), "allocate isolated page-table extent");
++    volatile ULONG *pde = (volatile ULONG *)0xc0300000u + ((uintptr_t)base >> 22);
++    ULONG before_entry = *pde;
++    regression_require((before_entry & 0x81u) == 1,
++                       "extent uses a present non-large page table");
++    ULONG before = before_entry & ~0xfffu;
++    volatile ULONG *table = (volatile ULONG *)(0xc0000000u +
++                                             (((uintptr_t)base >> 22) << 12));
++    regression_require(before && before < RELOCATION_UPPER_RAM,
++                       "page-table source inside title contiguous range");
++    relocation_restore_upper_spill();
++    ULONG physical[3];
++    for (unsigned i = 0; i < 3; ++i) {
++        PVOID page = (PUCHAR)base + i * RELOCATION_PAGE_BYTES;
++        physical[i] = MmGetPhysicalAddress(page);
++        relocation_fill(page, 0x55660000u + i * 0x10000u);
++    }
++    for (unsigned i = 0; i < 1024; ++i) entries[i] = table[i];
++    tap_comment("page table source=%08lx pde=%08lx", before, before_entry);
++    PVOID pin = relocation_claim(before);
++    regression_require(pin && MmGetPhysicalAddress(pin) == before,
++                       "claim exact physical frame backing live page table");
++    ULONG after_entry = *pde;
++    tap_comment("page table destination=%08lx", after_entry & ~0xfffu);
++    regression_check((after_entry & ~0xfffu) != before && (after_entry & 1),
++                     "owning PDE points to relocated page table");
++    int bytes_match = 1, mappings_match = 1;
++    for (unsigned i = 0; i < 3; ++i) {
++        PVOID page = (PUCHAR)base + i * RELOCATION_PAGE_BYTES;
++        bytes_match &= relocation_matches(page, 0x55660000u + i * 0x10000u);
++        mappings_match &= MmGetPhysicalAddress(page) == physical[i];
++    }
++    regression_check(bytes_match, "all mapped data bytes survive page-table relocation");
++    regression_check(mappings_match, "all mapped physical data frames unchanged");
++    int table_match = 1;
++    for (unsigned i = 0; i < 1024; ++i)
++        if ((table[i] & ~0x60u) != (entries[i] & ~0x60u)) table_match = 0;
++    regression_check(table_match, "all 1024 PTEs preserved except hardware accessed/dirty bits");
++    relocation_fill(pin, 0x77880000u);
++    bytes_match = 1;
++    for (unsigned i = 0; i < 3; ++i)
++        bytes_match &= relocation_matches((PUCHAR)base + i * RELOCATION_PAGE_BYTES,
++                                         0x55660000u + i * 0x10000u);
++    regression_check(bytes_match, "old page-table frame overwrite leaves translations intact");
++    mappings_match = 1;
++    for (unsigned i = 0; i < 3; ++i)
++        mappings_match &= MmGetPhysicalAddress((PUCHAR)base + i * RELOCATION_PAGE_BYTES) == physical[i];
++    regression_check(mappings_match, "fresh PTE reads remain valid after old table overwrite");
++    /* No guest load/store has touched this fourth VA. Its first access
++     * after poisoning the old page-table frame requires a cold walk. */
++    PVOID cold = (PUCHAR)base + 3 * RELOCATION_PAGE_BYTES;
++    int zero = 1;
++    volatile uint32_t *cold_words = cold;
++    for (unsigned i = 0; i < RELOCATION_PAGE_BYTES / sizeof(*cold_words); ++i)
++        if (cold_words[i] != 0) zero = 0;
++    relocation_fill(cold, 0xaabb0000u);
++    regression_check(zero && relocation_matches(cold, 0xaabb0000u),
++                     "cold virtual page walk remains zeroed and writable after overwrite");
++    MmFreeContiguousMemory(pin);
++    size = 0;
++    regression_check(NT_SUCCESS(NtFreeVirtualMemory(&base, &size, MEM_RELEASE)),
++                     "release extent through relocated page table");
++    relocation_release_pressure();
++    regression_finish();
++}
+diff --git a/tests/xbe/relocation-upper-source/Makefile b/tests/xbe/relocation-upper-source/Makefile
+new file mode 100644
+index 00000000..7c1fed4d
+--- /dev/null
++++ b/tests/xbe/relocation-upper-source/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = RELOCATION-UPPER-SOURCE
++GEN_XISO = relocation-upper-source.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/relocation-upper-source/main.c b/tests/xbe/relocation-upper-source/main.c
+new file mode 100644
+index 00000000..e322eea3
+--- /dev/null
++++ b/tests/xbe/relocation-upper-source/main.c
+@@ -0,0 +1,37 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../relocation-checks.h"
++
++int main(void)
++{
++    PVOID base = NULL;
++    SIZE_T size = 3 * RELOCATION_PAGE_BYTES;
++    regression_begin();
++    regression_require(NT_SUCCESS(NtAllocateVirtualMemory(&base, 0, &size,
++        MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)), "allocate upper-source extent");
++    PVOID victim = (PUCHAR)base + RELOCATION_PAGE_BYTES;
++    PVOID right = (PUCHAR)victim + RELOCATION_PAGE_BYTES;
++    ULONG before = MmGetPhysicalAddress(victim);
++    ULONG left_pa = MmGetPhysicalAddress(base), right_pa = MmGetPhysicalAddress(right);
++    regression_require(before >= RELOCATION_UPPER_RAM,
++                       "source is beyond the 64 MiB direct-map window");
++    relocation_fill(base, 0x11220000u);
++    relocation_fill(victim, 0x22330000u);
++    relocation_fill(right, 0x33440000u);
++    tap_comment("upper source=%08lx", before);
++    PVOID pin = relocation_claim(before);
++    regression_require(pin == NULL,
++                       "upper-source window rejected by title API's 64 MiB bound");
++    ULONG after = MmGetPhysicalAddress(victim);
++    tap_comment("upper source after rejection=%08lx", after);
++    regression_check(after == before, "rejected source mapping unchanged");
++    regression_check(relocation_matches(victim, 0x22330000u),
++                     "all 4096 bytes preserved after rejection");
++    regression_check(relocation_matches(base, 0x11220000u) &&
++                     relocation_matches(right, 0x33440000u), "both neighbors preserved");
++    regression_check(MmGetPhysicalAddress(base) == left_pa &&
++                     MmGetPhysicalAddress(right) == right_pa, "neighbor mappings unchanged");
++    size = 0;
++    regression_check(NT_SUCCESS(NtFreeVirtualMemory(&base, &size, MEM_RELEASE)),
++                     "release unchanged extent");
++    regression_finish();
++}
