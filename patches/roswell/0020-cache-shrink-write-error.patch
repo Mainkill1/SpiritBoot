@@ -1,0 +1,208 @@
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index 3c9a6a83..8f3304fa 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -1750,8 +1750,16 @@ shrink_restart:
+                 SIZE_T Written;
+                 Block->RefCount++;
+                 Block->Busy = TRUE;
+-                (void)NxcFlushBlock(Block, &Written);   /* unlocks */
++                Status = NxcFlushBlock(Block, &Written);   /* unlocks */
+                 Block->RefCount--;
++                if (!NT_SUCCESS(Status))
++                {
++                    /* Keep dirty bytes and report the failed resize. Clean
++                     * blocks already retired need not be restored. A later
++                     * call can retry after the paging device recovers. */
++                    ExReleaseFastMutex(&NxcMutex);
++                    return Status;
++                }
+                 goto shrink_restart;    /* table changed while unlocked */
+             }
+             RemoveEntryList(&Block->LruLink);
+diff --git a/tests/host/cache/check-shrink.py b/tests/host/cache/check-shrink.py
+new file mode 100644
+index 00000000..1d06dc5f
+--- /dev/null
++++ b/tests/host/cache/check-shrink.py
+@@ -0,0 +1,180 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Run the production cache-resize body with deterministic paging errors.
++
++Only the allocator and device completion are modeled. A second write to the
++failed block terminates the fixture, distinguishing a retry loop from return.
++Optional SOURCE_ROOT permits the identical fixture to test the parent.
++"""
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = (Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else
++        Path(__file__).resolve().parents[3])
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    'extract', root / 'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++body = extract.function((root / 'ntoskrnl/xb/mm/cache.c').read_text(),
++                        'FscSetCacheSize')
++shim = r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <setjmp.h>
++#include <assert.h>
++#include <string.h>
++#include <stdlib.h>
++typedef unsigned ULONG, PFN_COUNT;
++typedef size_t SIZE_T;
++typedef int32_t NTSTATUS;
++#define IN
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(s) ((s) >= 0)
++#define STATUS_SUCCESS 0
++#define STATUS_INSUFFICIENT_RESOURCES ((int32_t)0xc000009a)
++#define NXC_MAX_BLOCKS 4
++#define NXC_MIN_BLOCKS 1
++#define NXC_PAGES_PER_BLOCK 4
++#define NXC_BLOCK_SIZE 64
++#define NXC_TAG 0
++#define NonPagedPool 0
++typedef struct LIST_ENTRY { struct LIST_ENTRY *Flink, *Blink; } LIST_ENTRY;
++typedef struct {
++    void *Data, *Map;
++    unsigned RefCount;
++    int Busy, Dirty, Valid;
++    LIST_ENTRY LruLink;
++} NXC_BLOCK;
++static NXC_BLOCK NxcBlocks[NXC_MAX_BLOCKS];
++static unsigned NxcActiveBlocks, calls, freed, allocations, checks;
++static unsigned attempts[NXC_MAX_BLOCKS];
++static int NxcMutex, held, failed_slot, allocation_limit;
++static NTSTATUS completion_status;
++static unsigned char disk[NXC_MAX_BLOCKS][NXC_BLOCK_SIZE];
++static jmp_buf repeated;
++static void check(int condition) { ++checks; assert(condition); }
++static void RemoveEntryList(LIST_ENTRY *entry) {
++    entry->Flink->Blink = entry->Blink;
++    entry->Blink->Flink = entry->Flink;
++}
++static void ExReleaseFastMutex(int *mutex) {
++    (void)mutex; assert(held); held = 0;
++}
++static void ExAcquireFastMutex(int *mutex) {
++    (void)mutex; assert(!held); held = 1;
++}
++static void *ExAllocatePoolWithTag(int pool, size_t bytes, int tag) {
++    (void)pool; (void)tag; assert(held);
++    if (allocation_limit >= 0 && allocations >= (unsigned)allocation_limit)
++        return NULL;
++    ++allocations;
++    return malloc(bytes);
++}
++static void ExFreePoolWithTag(void *data, int tag) {
++    (void)tag; assert(held); ++freed; free(data);
++}
++static NTSTATUS NxcFlushBlock(NXC_BLOCK *block, SIZE_T *written) {
++    unsigned slot = block - NxcBlocks;
++    assert(held && block->Busy && block->RefCount == 1);
++    assert(block->Dirty && block->Valid && block->Map);
++    ++calls;
++    if (++attempts[slot] > 1 && (int)slot == failed_slot && completion_status != 0)
++        longjmp(repeated, 1);
++    ExReleaseFastMutex(&NxcMutex);
++    NTSTATUS status = (int)slot == failed_slot ? completion_status : 0;
++    if (NT_SUCCESS(status)) memcpy(disk[slot], block->Data, NXC_BLOCK_SIZE);
++    ExAcquireFastMutex(&NxcMutex);
++    *written = NT_SUCCESS(status) ? NXC_BLOCK_SIZE : 0;
++    if (NT_SUCCESS(status)) block->Dirty = FALSE;
++    block->Busy = FALSE;
++    return status;
++}
++'''
++main = r'''
++static void setup(unsigned count, unsigned dirty_mask) {
++    for (unsigned i = 0; i < NXC_MAX_BLOCKS; ++i) free(NxcBlocks[i].Data);
++    memset(NxcBlocks, 0, sizeof(NxcBlocks)); memset(disk, 0, sizeof(disk));
++    NxcActiveBlocks = count; calls = freed = allocations = 0;
++    memset(attempts, 0, sizeof(attempts));
++    held = 0; failed_slot = -1; completion_status = 0; allocation_limit = -1;
++    for (unsigned i = 0; i < count; ++i) {
++        NXC_BLOCK *b = &NxcBlocks[i];
++        b->Data = malloc(NXC_BLOCK_SIZE); assert(b->Data);
++        memset(b->Data, 0x31 + i, NXC_BLOCK_SIZE);
++        b->Map = (void *)(uintptr_t)(i + 1); b->Valid = TRUE;
++        b->Dirty = (dirty_mask >> i) & 1;
++        b->LruLink.Flink = b->LruLink.Blink = &b->LruLink;
++    }
++}
++static void retained(unsigned slot) {
++    NXC_BLOCK *b = &NxcBlocks[slot];
++    check(b->Data && b->Map && b->Dirty && b->Valid);
++    check(!b->Busy && !b->RefCount && !held);
++    for (unsigned i = 0; i < NXC_BLOCK_SIZE; ++i)
++        check(((unsigned char *)b->Data)[i] == 0x31 + slot);
++}
++int main(void) {
++    static const int32_t errors[] = {
++        (int32_t)0xc0000185, (int32_t)0xc0000010,
++        (int32_t)0xc0000001, (int32_t)0xc0000120
++    };
++    for (unsigned e = 0; e < sizeof(errors) / sizeof(errors[0]); ++e) {
++        setup(4, 15); failed_slot = 0; completion_status = errors[e];
++        if (setjmp(repeated)) {
++            fprintf(stderr, "FAIL cache shrink retried failed write instead of returning\n");
++            return 1;
++        }
++        check(FscSetCacheSize(4) == errors[e]);
++        check(calls == 1 && freed == 0 && NxcActiveBlocks == 4); retained(0);
++        /* Recovery is a distinct call, not an implicit infinite retry. */
++        completion_status = 0;
++        check(FscSetCacheSize(4) == STATUS_SUCCESS);
++        check(!held && NxcActiveBlocks == 1 && freed == 3 && calls == 4);
++        for (unsigned slot = 0; slot < 3; ++slot)
++            for (unsigned i = 0; i < NXC_BLOCK_SIZE; ++i)
++                check(disk[slot][i] == 0x31 + slot);
++    }
++    setup(4, 14); failed_slot = 1; completion_status = errors[0];
++    check(FscSetCacheSize(4) == errors[0]);
++    check(calls == 1 && freed == 1 && NxcActiveBlocks == 3); retained(1);
++    setup(4, 15); failed_slot = 1; completion_status = errors[0];
++    check(FscSetCacheSize(4) == errors[0]);
++    check(calls == 2 && freed == 1 && NxcActiveBlocks == 3); retained(1);
++    for (unsigned i = 0; i < NXC_BLOCK_SIZE; ++i) check(disk[0][i] == 0x31);
++    setup(4, 15); NxcBlocks[0].RefCount = 1;
++    failed_slot = 1; completion_status = errors[0];
++    check(FscSetCacheSize(4) == errors[0]);
++    check(NxcBlocks[0].RefCount == 1 && NxcActiveBlocks == 4); retained(1);
++    setup(4, 15); NxcBlocks[0].Busy = TRUE;
++    failed_slot = 1; completion_status = errors[0];
++    check(FscSetCacheSize(4) == errors[0]);
++    check(NxcBlocks[0].Busy && NxcActiveBlocks == 4); retained(1);
++    setup(4, 0); check(FscSetCacheSize(0) == STATUS_SUCCESS);
++    check(NxcActiveBlocks == 1 && freed == 3 && calls == 0 && !held);
++    setup(4, 15);
++    for (unsigned i = 0; i < 4; ++i) NxcBlocks[i].RefCount = 1;
++    check(FscSetCacheSize(4) == STATUS_SUCCESS);
++    check(NxcActiveBlocks == 4 && calls == 0 && !held);
++    setup(1, 0); allocation_limit = 1;
++    check(FscSetCacheSize(16) == STATUS_INSUFFICIENT_RESOURCES);
++    check(NxcActiveBlocks == 2 && allocations == 1 && !held);
++    setup(1, 0); check(FscSetCacheSize(16) == STATUS_SUCCESS);
++    check(NxcActiveBlocks == 4 && allocations == 3 && !held);
++    setup(0, 0);
++    printf("cache shrink: %u checks PASS; errors, bytes, cleanup, recovery and partial resize\n", checks);
++    return 0;
++}
++'''
++source = out / 'shrink.c'
++source.write_text(shim + body + main)
++subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
++                str(source), '-o', str(out / 'shrink')], check=True)
++subprocess.run([str(out / 'shrink')], check=True)
