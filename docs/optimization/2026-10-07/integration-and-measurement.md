@@ -67,7 +67,7 @@ slots on every exit in both ordinary and diagnostic modes.
 
 ## Host work evidence
 
-[host-work.json](host-work.json) is copied byte-for-byte from controller-retained
+[host-work.json](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/optimization/2026-10-07/host-work.json) is copied byte-for-byte from controller-retained
 `artifacts/optimization/host-work.json`, produced by the actual-source fixtures
 on the frozen source and public baseline. It contains operation counts and
 complete caller-state differential hashes. These establish reduced work in
@@ -237,6 +237,6 @@ SHA medians include slower observations; their inconsistent paired signs and
 observed variation leave them inconclusive. Those raw results are retained.
 No game FPS or gameplay improvement is asserted.
 
-See the [complete timing table](../../evidence/optimization-2026-10-07/performance-report-final.md),
-[raw samples and exact decisions](../../evidence/optimization-2026-10-07/performance-report-final.json),
-and [build and qualification evidence](../../evidence/optimization-2026-10-07/README.md).
+See the [complete timing table](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/evidence/optimization-2026-10-07/performance-report-final.md),
+[raw samples and exact decisions](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/evidence/optimization-2026-10-07/performance-report-final.json),
+and [build and qualification evidence](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/evidence/optimization-2026-10-07/README.md).

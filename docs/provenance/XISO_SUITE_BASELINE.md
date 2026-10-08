@@ -123,9 +123,11 @@ stopped. Do not apply those operations to a user HDD or a running guest.
 
 To prepare a fresh seed on a host with `qemu-img` and `pyfatx==0.0.8` installed
 (the firmware container supplies `qemu-img`), first convert the pinned open HDD
-to a **new** raw path, then write the tracked configuration:
+to a **new** raw path, then write the immutable archived configuration:
 
 ```sh
+curl -fL https://raw.githubusercontent.com/Mainkill1/SpiritBoot/f3f2e2d60122a4f3c3b3256c0c52c0770561ab3c/docs/evidence/xiso-2026-10-07/guest-config.json \
+  -o artifacts/xiso-suite/guest-config.json
 qemu-img convert -O raw artifacts/xbox_hdd.qcow2 artifacts/xiso-suite/new-seed.img
 python3 - <<'PY'
 from pathlib import Path
@@ -133,7 +135,7 @@ from pyfatx import Fatx
 fs = Fatx('artifacts/xiso-suite/new-seed.img', drive='e')
 assert not any(x.filename.lower() == 'xemu_perf_tests' for x in fs.listdir('/'))
 fs.mkdir('/xemu_perf_tests')
-data = Path('docs/evidence/xiso-2026-10-07/guest-config.json').read_bytes()
+data = Path('artifacts/xiso-suite/guest-config.json').read_bytes()
 fs.write('/xemu_perf_tests/xemu_perf_tests_config.json', data)
 assert fs.read('/xemu_perf_tests/xemu_perf_tests_config.json') == data
 PY
@@ -179,8 +181,9 @@ passes. No performance comparison is claimed here.
 - `artifacts/xiso-suite/`: matched downloaded release artifacts.
 
 Byte-exact guest results, configuration, capture identity, receipt, and the
-verification summary are tracked in
-[`docs/evidence/xiso-2026-10-07`](../evidence/xiso-2026-10-07/checked-verification.json).
+verification summary remain in the
+[immutable XISO archive](https://github.com/Mainkill1/SpiritBoot/tree/f3f2e2d60122a4f3c3b3256c0c52c0770561ab3c/docs/evidence/xiso-2026-10-07).
+Main retains the reproduction instructions rather than raw result records.
 Large disks and raw capture directories remain ignored build outputs. The PR records these limits
 and the fixture pin. The earlier assertion remains unresolved; one complete
 run per firmware variant does not establish repeated-run stability.

@@ -7,10 +7,10 @@ patch in `sources/firmware-lock.json`. The resulting source tree is
 
 | File | Bytes | Purpose |
 | --- | ---: | --- |
-| SpiritBoot-release.bin | 262144 | Reproducible release flash |
-| SpiritBoot-checked.bin | 524288 | DBG=1 diagnostic flash; KDBG=FALSE |
+| [SpiritBoot-release.bin](https://github.com/Mainkill1/SpiritBoot/raw/refs/tags/v0.2.0-xemu-clean-room-baseline/bios/clean-room-xemu/SpiritBoot-release.bin) | 262144 | Reproducible release flash |
+| [SpiritBoot-checked.bin](https://github.com/Mainkill1/SpiritBoot/raw/refs/tags/v0.2.0-xemu-clean-room-baseline/bios/clean-room-xemu/SpiritBoot-checked.bin) | 524288 | DBG=1 diagnostic flash; KDBG=FALSE |
 
-Verify with `sha256sum --check SHA256SUMS.txt` from this directory. Both images
+Download both images from the immutable tag links above into a separate local folder, copy `SHA256SUMS.txt` there, then run `sha256sum --check SHA256SUMS.txt`. Generated BIOS images stay in releases and CI artifacts rather than main. Both images
 pass 626 API checks with six known TODOs, 23 targeted checks, five warm-reboot
 checks and the complete XISO suite: 149 PASS records, COMPLETE 144/144 leaves,
 zero applicable oracle failures and 253 matching eligible hashes. See
