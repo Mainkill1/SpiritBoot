@@ -1,0 +1,76 @@
+diff --git a/tests/xbe/zero-reuse/Makefile b/tests/xbe/zero-reuse/Makefile
+new file mode 100644
+index 00000000..d718eead
+--- /dev/null
++++ b/tests/xbe/zero-reuse/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = ZERO-REUSE
++GEN_XISO = zero-reuse.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/zero-reuse/main.c b/tests/xbe/zero-reuse/main.c
+new file mode 100644
+index 00000000..ae8d292d
+--- /dev/null
++++ b/tests/xbe/zero-reuse/main.c
+@@ -0,0 +1,58 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../regression.h"
++#include <stdint.h>
++#include <string.h>
++
++#define PAGE 4096
++
++/* Optional debugger boundaries. Ordinary CI uses unmodified allocation. */
++__attribute__((noinline)) void zero_begin(unsigned scenario, unsigned phase)
++{ __asm__ __volatile__("" :: "r"(scenario), "r"(phase) : "memory"); }
++__attribute__((noinline)) void zero_owned(unsigned scenario, unsigned pfn)
++{ __asm__ __volatile__("" :: "r"(scenario), "r"(pfn) : "memory"); }
++__attribute__((noinline)) void zero_done(unsigned scenario)
++{ __asm__ __volatile__("" :: "r"(scenario) : "memory"); }
++
++static int filled(const unsigned char *data, unsigned char expected)
++{
++    for(unsigned i=0;i<PAGE;++i)if(data[i]!=expected)return 0;
++    return 1;
++}
++
++int main(void)
++{
++    regression_begin();
++    /* Materialize the system-VA page table before controlled data allocations. */
++    void *warm=MmAllocateSystemMemory(3*PAGE,PAGE_READWRITE);
++    regression_require(warm!=NULL,"prepare system allocation page table");
++    regression_require(MmFreeSystemMemory(warm,3*PAGE)==3,
++                       "release page-table preparation allocation");
++    for(unsigned scenario=0;scenario<4;++scenario) {
++        zero_begin(scenario,0);
++        unsigned char *pages=MmAllocateSystemMemory(3*PAGE,PAGE_READWRITE);
++        regression_require(pages!=NULL,"allocate three writable pages");
++        regression_check(filled(pages,0),"new left page contains 4096 zero bytes");
++        regression_check(filled(pages+PAGE,0),"new middle page contains 4096 zero bytes");
++        regression_check(filled(pages+2*PAGE,0),"new right page contains 4096 zero bytes");
++        unsigned physical=MmGetPhysicalAddress(pages+PAGE);
++        zero_owned(scenario,physical/PAGE);
++        memset(pages,0x31,PAGE);
++        memset(pages+PAGE,0xa7,PAGE);
++        memset(pages+2*PAGE,0x73,PAGE);
++        regression_require(MmFreeSystemMemory(pages+PAGE,PAGE)==1,
++                           "release only dirty middle page");
++        zero_begin(scenario,1);
++        unsigned char *reused=MmAllocateSystemMemory(PAGE,PAGE_READWRITE);
++        regression_require(reused!=NULL,"allocate recycled middle page");
++        regression_check(MmGetPhysicalAddress(reused)==physical,
++                         "actual physical middle page is reused");
++        regression_check(filled(reused,0),"dirty recycled page contains 4096 zero bytes");
++        regression_check(filled(pages,0x31),"all left neighbor sentinel bytes survive");
++        regression_check(filled(pages+2*PAGE,0x73),"all right neighbor sentinel bytes survive");
++        regression_check(MmFreeSystemMemory(pages,PAGE)==1,"release left page");
++        regression_check(MmFreeSystemMemory(reused,PAGE)==1,"release recycled page");
++        regression_check(MmFreeSystemMemory(pages+2*PAGE,PAGE)==1,"release right page");
++        zero_done(scenario);
++    }
++    regression_finish();
++}
