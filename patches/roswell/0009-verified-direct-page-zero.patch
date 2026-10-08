@@ -1,0 +1,184 @@
+diff --git a/ntoskrnl/xb/mm/init.c b/ntoskrnl/xb/mm/init.c
+index 1e6832e715e49270222901a1b1b7a107aee2d261..506e89a5a789fba8fe4908e81127ade380ec72a2 100644
+--- a/ntoskrnl/xb/mm/init.c
++++ b/ntoskrnl/xb/mm/init.c
+@@ -38,6 +38,7 @@ NxpMapLargePage(ULONG VirtualAddress, ULONG PhysicalAddress, ULONG Flags)
+ /* WINDOW SETUP STATE *******************************************************/
+ 
+ static LONG NxWindowsReady = 0;
++static ULONG_PTR NxWbDirectMapLimit;
+ static volatile LONG NxMmioWindowReady;
+ 
+ /* Set by Phase1Initialization (ex/init.c) right after it runs the
+@@ -662,10 +663,34 @@ NxkMmEnsureMmioWindow(VOID)
+  * the end of Phase 1 init, just before XeRunInitialTitle spawns the
+  * title.
+  */
++PVOID
++NxkTryGetVerifiedWbDirectAlias(PFN_NUMBER Page)
++{
++    ULONG_PTR Va;
++    ULONG Entry;
++
++    if (Page == 0 || Page >= (NXK_KSEG0_RAM_SIZE >> PAGE_SHIFT))
++        return NULL;
++    Va = NXK_KSEG0_BASE + ((ULONG_PTR)Page << PAGE_SHIFT);
++    if (Va >= NxWbDirectMapLimit)
++        return NULL;
++
++    /* Require the live writable, WB identity large page. Reject PAT,
++     * PWT/PCD and extended physical-address bits as well as remappings. */
++    Entry = ((volatile ULONG *)NXK_PDE_BASE)[Va >> 22];
++    if ((Entry & NXK_PDE_LARGE) != NXK_PDE_LARGE ||
++        (Entry & 0x003FF018UL) != 0 ||
++        (Entry & 0xFFC00000UL) + (Va & 0x003FFFFFUL) !=
++            ((ULONG_PTR)Page << PAGE_SHIFT))
++        return NULL;
++    return (PVOID)Va;
++}
++
+ VOID
+ NxkMmEnsureXboxWindows(VOID)
+ {
+     ULONG Va;
++    ULONG_PTR DirectMapLimit;
+ 
+     /* WC + UC MMIO -- idempotent, may already have run early for bootvid. */
+     NxkMmEnsureMmioWindow();
+@@ -695,12 +720,14 @@ NxkMmEnsureXboxWindows(VOID)
+         if (Cap == 0 || Cap > NXK_KSEG0_BASE + NXK_KSEG0_RAM_SIZE)
+             Cap = NXK_KSEG0_BASE + NXK_KSEG0_RAM_SIZE;
+         Cap &= ~(NXK_4MB - 1);  /* round down to PSE boundary */
++        DirectMapLimit = Cap;
+         for (Va = NXK_KSEG0_BASE; Va < Cap; Va += NXK_4MB)
+             NxpMapLargePage(Va, Va & NXK_PHYS_MASK, NXK_PDE_LARGE);
+     }
+ 
+     /* Flush the TLB so the new entries take effect. */
+     __writecr3(__readcr3());
++    NxWbDirectMapLimit = DirectMapLimit;
+ 
+ #ifdef NXK_MM_PHYS
+     NxkPageSupplyInitializeRelocation();
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index 75afdccd37f6bbd6d686597e31f4c8f31d7432c8..33c950231c19adbae29ffc872aeffa854b55d307 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -153,6 +153,7 @@ ULONG NxkSysVaFree(PVOID Va, SIZE_T Size);
+ VOID NTAPI NxkMmReserveXboxWindows(VOID);
+ VOID NxkMmEnsureMmioWindow(VOID);
+ VOID NxkMmEnsureXboxWindows(VOID);
++PVOID NxkTryGetVerifiedWbDirectAlias(PFN_NUMBER Page);
+ 
+ /* xb/mm/iospace.c -- VA->PA for sysva.c's PTE painting. */
+ ULONG_PTR NTAPI NxMmGetPhysicalAddress(IN PVOID Va);
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index 8728f8ce59c0ba51c0ceb4a5b13de6310c2c9329..c8af6fd52a4e4d55bb0b861c1f4ec62b108acb46 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -216,7 +216,14 @@ NTAPI
+ NxkPageSupplyTakeZero(ULONG Color)
+ {
+     PFN_NUMBER Pfn = NxkPageSupplyTakeAny(Color);
+-    if (Pfn != 0) MiZeroPhysicalPage(Pfn);
++    if (Pfn != 0)
++    {
++        PVOID Alias = NxkTryGetVerifiedWbDirectAlias(Pfn);
++        if (Alias != NULL)
++            KeZeroPages(Alias, PAGE_SIZE);
++        else
++            MiZeroPhysicalPage(Pfn);
++    }
+     return Pfn;
+ }
+ 
+diff --git a/tests/host/clean-room/pins.c b/tests/host/clean-room/pins.c
+index c48ec8174757804840c580cc45f33c6de1f9f69c..0fd5aaee2c6b23d3caedb78d46f5d9060e84e461 100644
+--- a/tests/host/clean-room/pins.c
++++ b/tests/host/clean-room/pins.c
+@@ -12,6 +12,8 @@ typedef USHORT *PUSHORT;
+ #define NXK_MM_PHYS
+ static ULONG MmAvailablePages;
+ static BOOLEAN NxkMmRetailShapedMap(void) { return FALSE; }
++static PVOID NxkTryGetVerifiedWbDirectAlias(PFN_NUMBER p) { (void)p;return NULL; }
++static VOID KeZeroPages(PVOID p, ULONG n) { (void)p;(void)n;assert(0); }
+ static VOID MiZeroPhysicalPage(PFN_NUMBER p) { (void)p; }
+ static BOOLEAN NxkMmPersistentPage(PFN_NUMBER p) { (void)p;return FALSE; }
+ static BOOLEAN NxMmIsAddressValid(PVOID p) { return (ULONG_PTR)p>=0x1000&&(ULONG_PTR)p<0x5000; }
+diff --git a/tests/host/kernel-performance/pins.c b/tests/host/kernel-performance/pins.c
+index c5324bebfa381e117765edcfc09c0796c9e1a199..60f042fdea616a7a823b3e8a831f59e56a7acc68 100644
+--- a/tests/host/kernel-performance/pins.c
++++ b/tests/host/kernel-performance/pins.c
+@@ -14,6 +14,8 @@ static ULONG MmAvailablePages;
+ static unsigned translations, cleared, clears, valid_pages, invalid_at, aliases;
+ static unsigned checks, optimized, vector;
+ static BOOLEAN NxkMmRetailShapedMap(void) { return FALSE; }
++static PVOID NxkTryGetVerifiedWbDirectAlias(PFN_NUMBER p) { (void)p;return NULL; }
++static VOID KeZeroPages(PVOID p, ULONG n) { (void)p;(void)n;assert(0); }
+ static VOID MiZeroPhysicalPage(PFN_NUMBER p) { (void)p; }
+ static BOOLEAN NxkMmPersistentPage(PFN_NUMBER p) { (void)p;return FALSE; }
+ static BOOLEAN NxMmIsAddressValid(PVOID p) {
+diff --git a/tests/host/zero-alias/check.py b/tests/host/zero-alias/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..953488177bac38380be5cb35b2255b77136d739b
+--- /dev/null
++++ b/tests/host/zero-alias/check.py
+@@ -0,0 +1,58 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Test the live-PDE alias guard and production zero-path dispatch."""
++from pathlib import Path
++import subprocess,importlib.util,sys
++sys.dont_write_bytecode=True
++root=Path(__file__).resolve().parents[3];out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
++init=(root/'ntoskrnl/xb/mm/init.c').read_text();supply=(root/'ntoskrnl/xb/mm/pagesupply.c').read_text()
++try: guard=m.function(init,'NxkTryGetVerifiedWbDirectAlias')
++except AssertionError:
++ guard='PVOID NxkTryGetVerifiedWbDirectAlias(PFN_NUMBER p) {(void)p;return NULL;}\n'
++body=guard+m.function(supply,'NxkPageSupplyTakeZero')
++shim=r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <assert.h>
++#include <stdio.h>
++typedef uint32_t ULONG,PFN_NUMBER;
++typedef uintptr_t ULONG_PTR;
++typedef void *PVOID;
++#define NTAPI
++#define NXK_KSEG0_BASE 0x80000000u
++#define NXK_KSEG0_RAM_SIZE 0x04000000u
++#define PAGE_SHIFT 12
++#define PAGE_SIZE 4096u
++#define NXK_PDE_LARGE 0x83u
++static uint32_t pdes[1024];
++#define NXK_PDE_BASE ((uintptr_t)pdes)
++static uintptr_t NxWbDirectMapLimit;
++static unsigned frame,direct,fallback;
++static PFN_NUMBER NxkPageSupplyTakeAny(ULONG color){(void)color;return frame;}
++static void KeZeroPages(void *p,unsigned n){assert((uintptr_t)p==0x80001000&&n==4096);direct++;}
++static void MiZeroPhysicalPage(PFN_NUMBER p){assert(p==frame);fallback++;}
++'''
++main=r'''
++int main(void){
++ frame=1;pdes[512]=0x83;NxWbDirectMapLimit=0;
++ assert(NxkPageSupplyTakeZero(0)==1&&fallback==1&&!direct);
++ NxWbDirectMapLimit=0x82c00000;
++ if(NxkTryGetVerifiedWbDirectAlias(1)!=(void*)0x80001000){fprintf(stderr,"FAIL verified low WB frame has no direct alias\n");return 1;}
++ NxkPageSupplyTakeZero(0);assert(direct==1&&fallback==1);
++ unsigned bad[]={0,0x81,0x3,0x8b,0x93,0x1083,0x2083,0x200083,0x400083};
++ for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);i++){pdes[512]=bad[i];assert(!NxkTryGetVerifiedWbDirectAlias(1));}
++ pdes[512]=0x183;assert(NxkTryGetVerifiedWbDirectAlias(1)==(void*)0x80001000); /* global WB */
++ pdes[522]=0x02800083;assert(NxkTryGetVerifiedWbDirectAlias(0x2bff)==(void*)0x82bff000);
++ assert(!NxkTryGetVerifiedWbDirectAlias(0x2c00));
++ assert(!NxkTryGetVerifiedWbDirectAlias(0x4000));
++ assert(!NxkTryGetVerifiedWbDirectAlias(0x7fff));
++ assert(!NxkTryGetVerifiedWbDirectAlias(0xffffffff));
++ frame=0x7fff;NxkPageSupplyTakeZero(0);assert(fallback==2);
++ frame=0;NxkPageSupplyTakeZero(0);assert(fallback==2&&direct==1);
++ puts("zero alias: live mapping, initialization, writable/WB flags, physical identity, cap and upper RAM PASS");
++}
++'''
++(out/'zero.c').write_text(shim+body+main)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function',str(out/'zero.c'),'-o',str(out/'zero')],check=True)
++subprocess.run([str(out/'zero')],check=True)
