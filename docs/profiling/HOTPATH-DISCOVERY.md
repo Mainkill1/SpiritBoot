@@ -89,6 +89,7 @@ perf record -e cycles:u -F 97 --clockid mono -p PID -o perf.data
 perf script -G --ns -F comm,pid,tid,time,period,ip,sym,dso -i perf.data > samples.txt
 python3 tools/kernel_cpu_samples.py --samples samples.txt --pid PID \
   --kernel /path/to/exact-build/ntoskrnl/xboxkrnl.unstripped.exe \
+  --host-executable /recorded/absolute/path/to/xemu \
   --output /path/to/new/cpu-report.json
 ```
 
@@ -99,6 +100,11 @@ export, at most one million rows, and rejects malformed records, foreign PIDs,
 foreign guest-map PIDs, zero periods, and empty windows. Existing reports are
 never overwritten. `--start-ns` and `--end-ns` select an inclusive window in the
 recorded monotonic clock; they do not take wall-clock UTC or guest time.
+
+`--host-executable` matches the exact absolute DSO path from the recorder.
+Without it, the compatibility default recognizes basename `xemu` only. Supply
+the recorded path for `qemu-system-i386` or a renamed binary; a different module
+with the same basename must not be charged to the selected executable.
 
 Shares use each sample's event **period**, not equal weighting of sampled
 rows. Categories separate mapped kernel instruction PCs, other guest code,

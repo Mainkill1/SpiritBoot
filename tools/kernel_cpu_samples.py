@@ -56,7 +56,10 @@ def parse_samples(lines, expected_pid, max_samples=1000000):
     return rows
 
 
-def rank_samples(rows, symbols, start_ns=None, end_ns=None):
+def rank_samples(rows, symbols, start_ns=None, end_ns=None, host_executable=None):
+    if host_executable is not None and (not isinstance(host_executable, str) or
+                                       not Path(host_executable).is_absolute()):
+        raise ValueError('host executable must be the recorded absolute DSO path')
     if any(x is not None and (type(x) is not int or x < 0) for x in (start_ns, end_ns)):
         raise ValueError('invalid monotonic window')
     if start_ns is not None and end_ns is not None and end_ns < start_ns:
@@ -82,7 +85,8 @@ def rank_samples(rows, symbols, start_ns=None, end_ns=None):
             category = 'unresolved_guest_jit'
         elif row['dso'] == '[unknown]':
             category = 'unresolved'
-        elif Path(row['dso']).name == 'xemu':
+        elif (row['dso'] == host_executable if host_executable is not None else
+              Path(row['dso']).name == 'xemu'):
             category = 'xemu_host'
             host[row['symbol']] += period
         else:
@@ -102,6 +106,7 @@ def rank_samples(rows, symbols, start_ns=None, end_ns=None):
                              'Sampling does not measure blocking, exclusive kernel time or frame-critical cost',
                              'Outside the pinned image remains other guest code, without inferred title identity',
                              'Counter frequency and event/clock/lost-sample qualification require recorder evidence'],
+                host_executable=host_executable, default_host_basename='xemu',
                 samples=len(selected), excluded_samples=len(rows) - len(selected),
                 weighted_period=total, window=dict(start_ns=start_ns, end_ns=end_ns),
                 categories={k: dict(period=p, samples=counts[k], share_pct=p * 100 / total)
@@ -119,6 +124,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--start-ns', type=int)
     parser.add_argument('--end-ns', type=int)
+    parser.add_argument('--host-executable', help='Exact recorded executable DSO path; default basename xemu')
     args = parser.parse_args()
     try:
         with args.samples.open() as stream:
@@ -128,7 +134,7 @@ def main():
                                                        text=True), sections)
         if not symbols:
             raise ValueError('no named executable kernel symbols')
-        result = rank_samples(rows, symbols, args.start_ns, args.end_ns)
+        result = rank_samples(rows, symbols, args.start_ns, args.end_ns, args.host_executable)
         result['inputs'] = {name: dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
                             for name, path in (('samples', args.samples), ('kernel', args.kernel))}
         result['expected_pid'] = args.pid

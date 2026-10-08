@@ -56,6 +56,15 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual(result['categories']['host_library']['share_pct'], 100)
         self.assertEqual(result['modules'][0]['name'], '/usr/lib/libsamplerate.so')
 
+    def test_recorded_executable_path_supports_renames_without_matching_another_dso(self):
+        rows = self.rows(self.sample(symbol='helper', dso='/build/qemu-system-i386') + '\n' +
+                         self.sample(symbol='helper', dso='/other/qemu-system-i386'))
+        result = self.cpu.rank_samples(rows, self.symbols(),
+                                       host_executable='/build/qemu-system-i386')
+        self.assertEqual(result['categories']['xemu_host']['share_pct'], 50)
+        self.assertEqual(result['categories']['host_library']['share_pct'], 50)
+        self.assertEqual(result['host_executable'], '/build/qemu-system-i386')
+
     def test_host_symbol_offset_cannot_change_guest_instruction_identity(self):
         rows = self.rows(self.sample() + '\n' + self.sample(symbol='guest-0x84001000+0x11'))
         result = self.cpu.rank_samples(rows, self.symbols())
