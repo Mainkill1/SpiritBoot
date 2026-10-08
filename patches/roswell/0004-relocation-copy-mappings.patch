@@ -1,0 +1,220 @@
+diff --git a/ntoskrnl/xb/mm/init.c b/ntoskrnl/xb/mm/init.c
+index 3fd0c4d1394ea7a0d7200b5f84af4843281a2dc5..1e6832e715e49270222901a1b1b7a107aee2d261 100644
+--- a/ntoskrnl/xb/mm/init.c
++++ b/ntoskrnl/xb/mm/init.c
+@@ -703,6 +703,8 @@ NxkMmEnsureXboxWindows(VOID)
+     __writecr3(__readcr3());
+ 
+ #ifdef NXK_MM_PHYS
++    NxkPageSupplyInitializeRelocation();
++
+     /* The loader's identity PTs died with the user-PDE zero and its
+      * KSEG0 PTs were just replaced by the PSE paint; on the retail-
+      * shaped map they sit in title-visible RAM at the head of the
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index 37ff7ea1138283e09e2704ec4013e6c30f258627..afb0fc1905af1097c4917518da0c882a00f59c81 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -223,3 +223,6 @@ VOID NxkPageSupplyClearPinBatchPage(PFN_NUMBER Page);
+ VOID NxkPageSupplyAssertPinBatchEmpty(VOID);
+ #endif
+ BOOLEAN NxkPageSupplyRecordPin(PFN_NUMBER Page, BOOLEAN Unlock);
++
++/* Reserve stable copy aliases once, before titles can request relocation. */
++VOID NxkPageSupplyInitializeRelocation(VOID);
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index 6efa43927280dc16d4f8f78ccee17677c061b0f9..42cff1dd14ee87c4c60d3223c59cebe622ccb0b6 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -478,6 +478,51 @@ NxkPageSupplyTakeRun(
+     return 0;
+ }
+ 
++/* Two boot-reserved system PTEs provide copy aliases even when a frame has
++ * no KSEG0 identity mapping (system-PTE overlap or upper devkit RAM).
++ * The system-PTE backing tables are ARM3-owned, not relocatable supply
++ * pages. The PFN lock serializes use; mappings live only at HIGH_LEVEL. */
++static PMMPTE NxpRelocationPtes;
++static ULONG_PTR NxpRelocationSourceVa, NxpRelocationTargetVa;
++
++VOID
++NxkPageSupplyInitializeRelocation(VOID)
++{
++    ASSERT(NxpRelocationPtes == NULL);
++    NxpRelocationPtes = MiReserveSystemPtes(2, SystemPteSpace);
++    if (NxpRelocationPtes == NULL)
++    {
++        DPRINT1("Unable to reserve relocation copy mappings\n");
++        return;
++    }
++    NxpRelocationSourceVa = (ULONG_PTR)MiPteToAddress(NxpRelocationPtes);
++    NxpRelocationTargetVa = NxpRelocationSourceVa + PAGE_SIZE;
++    NxpRelocationPtes[0].u.Long = 0;
++    NxpRelocationPtes[1].u.Long = 0;
++}
++
++static VOID
++NxpMapRelocationPages(PFN_NUMBER Source, PFN_NUMBER Target)
++{
++    MI_ASSERT_PFN_LOCK_HELD();
++    ASSERT(KeGetCurrentIrql() == HIGH_LEVEL);
++    ASSERT(Source != 0 && Source <= NxpHighestPfn);
++    ASSERT(Target != 0 && Target <= NxpHighestPfn);
++    NxpRelocationPtes[0].u.Long = ((ULONG)Source << PAGE_SHIFT) | NXK_PTE_VALID;
++    NxpRelocationPtes[1].u.Long = ((ULONG)Target << PAGE_SHIFT) | NXK_PTE_VALID;
++    __invlpg((PVOID)NxpRelocationSourceVa);
++    __invlpg((PVOID)NxpRelocationTargetVa);
++}
++
++static VOID
++NxpUnmapRelocationPages(VOID)
++{
++    NxpRelocationPtes[0].u.Long = 0;
++    NxpRelocationPtes[1].u.Long = 0;
++    __invlpg((PVOID)NxpRelocationSourceVa);
++    __invlpg((PVOID)NxpRelocationTargetVa);
++}
++
+ /*
+  * Run-take with relocation, the retail-probed semantic: an exact-window
+  * contiguous request succeeds even when live VM pages sit inside the
+@@ -538,7 +583,8 @@ NxkPageSupplyTakeRunRelocate(
+         /* Only generic free pages are eligible relocation destinations.
+          * Low pin-only pages in this window are absent from the global
+          * generic count and must not be subtracted from it. */
+-        if (Fits && (NxpGenericAvail < FreeGenericInWindow ||
++        if (Fits && ((Movable != 0 && NxpRelocationPtes == NULL) ||
++                     NxpGenericAvail < FreeGenericInWindow ||
+                      NxpGenericAvail - FreeGenericInWindow < Movable))
+         {
+             Fits = FALSE;
+@@ -586,6 +632,7 @@ NxkPageSupplyTakeRunRelocate(
+                         ULONG NewEntry;
+ 
+                         KeRaiseIrql(HIGH_LEVEL, &HighIrql);
++                        NxpMapRelocationPages(Page, Dest);
+                         Entry = *Pte;
+                         NewEntry = ((ULONG)Dest << PAGE_SHIFT) |
+                                    (Entry & (PAGE_SIZE - 1));
+@@ -607,10 +654,8 @@ NxkPageSupplyTakeRunRelocate(
+                                 "movl %%cr3, %%eax\n\t"
+                                 "movl %%eax, %%cr3"
+                                 : "=S"(S0), "=D"(D0), "=c"(C0), "+a"(A0)
+-                                : "0"(0x80000000UL |
+-                                      ((ULONG_PTR)Page << PAGE_SHIFT)),
+-                                  "1"(0x80000000UL |
+-                                      ((ULONG_PTR)Dest << PAGE_SHIFT)),
++                                : "0"(NxpRelocationSourceVa),
++                                  "1"(NxpRelocationTargetVa),
+                                   "2"(PAGE_SIZE / 4),
+                                   "d"(Pte)
+                                 : "memory", "cc");
+@@ -626,14 +671,13 @@ NxkPageSupplyTakeRunRelocate(
+                                 "movl %%eax, (%%edx)\n\t"
+                                 "invlpg (%%ebx)"
+                                 : "=S"(S0), "=D"(D0), "=c"(C0)
+-                                : "0"(0x80000000UL |
+-                                      ((ULONG_PTR)Page << PAGE_SHIFT)),
+-                                  "1"(0x80000000UL |
+-                                      ((ULONG_PTR)Dest << PAGE_SHIFT)),
++                                : "0"(NxpRelocationSourceVa),
++                                  "1"(NxpRelocationTargetVa),
+                                   "2"(PAGE_SIZE / 4),
+                                   "a"(NewEntry), "d"(Pte), "b"(Va)
+                                 : "memory", "cc");
+                         }
++                        NxpUnmapRelocationPages();
+                         KeLowerIrql(HighIrql);
+                     }
+                     NxpLinks[Dest] = (ULONG)((PteVa - NXP_OWNER_BASE) >> 2);
+diff --git a/tests/host/relocation/check-capacity.py b/tests/host/relocation/check-capacity.py
+index 4b1ce8daf001d332cf54a220949f850a1500799c..af27d2ac12dd8648cbcfd20be1868277dbc5fd63 100644
+--- a/tests/host/relocation/check-capacity.py
++++ b/tests/host/relocation/check-capacity.py
+@@ -37,8 +37,10 @@ static uint32_t *NxpLinks=links;
+ static uint16_t NxpPins[256];
+ static PFN_NUMBER NxpHighestPfn=255, NxpGenericAvail;
+ static unsigned admitted;
++static void *NxpRelocationPtes=(void *)1;
+ '''
+ wrapper = r'''
++void mapping_available(unsigned available) { NxpRelocationPtes=available ? (void *)1 : 0; }
+ unsigned scenario(unsigned generic, unsigned inside, unsigned lowfree,
+                   unsigned movable) {
+  memset(links,0,sizeof(links));memset(NxpPins,0,sizeof(NxpPins));
+@@ -56,7 +58,8 @@ unsigned scenario(unsigned generic, unsigned inside, unsigned lowfree,
+  '        if (Fits) { ++admitted; return Base; }\n' + tail + wrapper)
+ subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC',
+                str(out/'capacity.c'),'-o',str(out/'capacity.so')],check=True)
+-f=C.CDLL(str(out/'capacity.so')).scenario
++library=C.CDLL(str(out/'capacity.so'))
++f=library.scenario
+ f.argtypes=[C.c_uint]*4;f.restype=C.c_uint
+ checks=0;failures=[]
+ for generic in range(17):
+@@ -68,6 +71,10 @@ for generic in range(17):
+     expected=generic-inside>=movable
+     checks+=1
+     if actual!=expected:failures.append((generic,inside,lowfree,movable,actual))
++library.mapping_available(0)
++assert not f(4,0,0,1), 'missing mappings must reject before mutation'
++assert f(1,1,1,0), 'a free-only window does not need copy mappings'
++library.mapping_available(1)
+ print(f'{checks} production preflight cases; {len(failures)} mismatches')
+ if failures:print('first mismatches (generic, inside-generic, pin-only, movable, admitted):', failures[:5])
+ sys.exit(bool(failures))
+diff --git a/tests/xbe/relocation-alias/Makefile b/tests/xbe/relocation-alias/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..514561dff053828dd20ea0c75d188912455a4733
+--- /dev/null
++++ b/tests/xbe/relocation-alias/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = RELOCATION-ALIAS
++GEN_XISO = relocation.iso
++SRCS = $(CURDIR)/main.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/relocation-alias/main.c b/tests/xbe/relocation-alias/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..2fd2040d99c880a08e3923c07ecbf147a288d335
+--- /dev/null
++++ b/tests/xbe/relocation-alias/main.c
+@@ -0,0 +1,37 @@
++#include <stdio.h>
++#include <stdint.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <hal/video.h>
++#include <nxdk/mount.h>
++static PVOID regions[112];
++int main(void) {
++ XVideoSetMode(640,480,32,REFRESH_DEFAULT);
++ if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
++ FILE *out=fopen("E:\\relocation-result.txt","wb");if(!out)for(;;)Sleep(1000);
++ PVOID victim=NULL, high=NULL;ULONG before=0;unsigned blocks=0;
++ for(;blocks<112&&!victim;blocks++){
++  SIZE_T n=1024*1024;NTSTATUS s=NtAllocateVirtualMemory(&regions[blocks],0,&n,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
++  if(!NT_SUCCESS(s)){fprintf(out,"FAIL allocation block=%u status=%08lx\n",blocks,s);break;}
++  for(unsigned off=0;off<n;off+=4096){
++   PVOID va=(char*)regions[blocks]+off;ULONG pa=MmGetPhysicalAddress(va);
++   if(pa>=0x04000000&&!high)high=va;
++   if(pa&&pa<0x04000000&&!victim){victim=va;before=pa;}
++  }
++ }
++ fprintf(out,"SETUP blocks=%u victim=%p physical=%08lx high=%p\n",blocks,victim,before,high);fflush(out);
++ if(!victim||!high){fprintf(out,"FAIL required memory domains unavailable\n");goto done;}
++ for(unsigned i=0;i<1024;i++)((volatile uint32_t*)victim)[i]=0x13570000u+i;
++ ULONG freed=MmGetPhysicalAddress(high);SIZE_T n=4096;PVOID release=high;
++ NTSTATUS s=NtFreeVirtualMemory(&release,&n,MEM_DECOMMIT);
++ fprintf(out,"DEST freed=%08lx status=%08lx\n",freed,s);fflush(out);
++ if(!NT_SUCCESS(s))goto done;
++ PVOID pin=MmAllocateContiguousMemoryEx(4096,before,before+4095,4096,PAGE_READWRITE);
++ ULONG after=MmGetPhysicalAddress(victim);unsigned bad=0;
++ for(unsigned i=0;i<1024;i++)if(((volatile uint32_t*)victim)[i]!=0x13570000u+i)bad++;
++ fprintf(out,"RESULT pin=%p before=%08lx after=%08lx mismatch=%u\n",pin,before,after,bad);
++ fprintf(out,"%s relocation to upper RAM\n",pin&&after>=0x04000000&&after!=before&&!bad?"PASS":"FAIL");
++ if(pin)MmFreeContiguousMemory(pin);
++done:
++ fclose(out);for(;;)Sleep(1000);
++}

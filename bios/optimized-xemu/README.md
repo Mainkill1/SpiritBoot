@@ -4,7 +4,11 @@ These exact images passed direct xemu qualification at 128 MiB. Release is
 262144 bytes (DBG=0); checked is 524288 bytes (DBG=1, KDBG=FALSE). Both use public
 kernel commit `87aba89a6ba9b2a58f2edd6e52d5e3aa1e8649d7`, tree
 `f7adb302a762ed1945cc07d9c2ff428c643ba959`, reconstructed by the pinned Roswell
-base and two ordered hashed patches in `sources/firmware-lock.json`.
+base and the two ordered hashed patches in the
+[historical publication lock](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/sources/firmware-lock.json).
+Current main builds additionally apply later correctness patches; these
+archived images do not contain those fixes. Use the current CI artifacts
+and their build manifests when testing main.
 
 Download the [release image](https://github.com/Mainkill1/SpiritBoot/raw/9bd0d975346603ecb28e3d54bba87d6fe982551c/bios/optimized-xemu/SpiritBoot-release.bin),
 [checked image](https://github.com/Mainkill1/SpiritBoot/raw/9bd0d975346603ecb28e3d54bba87d6fe982551c/bios/optimized-xemu/SpiritBoot-checked.bin),
