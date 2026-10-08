@@ -47,7 +47,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 5719e364924cdf3daa203b83b02731c7c25dd7c0
+            test "$actual_tree" = 6070231960158688fa6affc1a2df346523340023
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-unwind.py" "$output/cache-pin-unwind" >"$output/cache-pin-unwind.log" 2>&1
@@ -59,6 +59,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/critical-section/check.py" "$output/critical-section" >"$output/critical-section.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs/check.py" "$output/xdvdfs-create" >"$output/xdvdfs-create.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs-directory/check.py" "$output/xdvdfs-directory" >"$output/xdvdfs-directory.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/xdvdfs-masks/check.py" "$output/xdvdfs-masks" >"$output/xdvdfs-masks.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-wait/check.py" "$output/thread-wait" >"$output/thread-wait.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-stack/check.py" "$output/thread-stack" >"$output/thread-stack.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/zero-alias/check.py" "$output/zero-alias" >"$output/zero-alias.log" 2>&1
