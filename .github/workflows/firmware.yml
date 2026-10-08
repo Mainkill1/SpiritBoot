@@ -47,7 +47,8 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 9d0ab58b811133c6f2462bd9b7b5f50d472d2751
+            test "$actual_tree" = 336fdbbf8f8e72b89e2605729687451bf7307055
+            python3 "$GUEST_SOURCE/tests/host/xdvdfs/check.py" "$output/xdvdfs" >"$output/xdvdfs.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-lifetime/check.py" "$output/dma-lifetime" >"$output/dma-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-stack/check.py" "$output/thread-stack" >"$output/thread-stack.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/critical-section/check.py" "$output/critical-section" >"$output/critical-section.log" 2>&1
