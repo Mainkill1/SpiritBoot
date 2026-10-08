@@ -1,0 +1,204 @@
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index f1853f14676de0aed5962b63d3741614c7c94877..c321f43affcd517d45d37d3bb0b731c3288f4ed7 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -362,8 +362,8 @@ NxcClaimReserve(VOID)
+ 
+ /* Find a reusable slot: a free one, else the least-recently-used clean
+  * unreferenced block, else flush the LRU dirty unreferenced block.
+- * Returns NULL only when !Wait.  Mutex held throughout (the dirty case
+- * drops it inside NxcFlushBlock). */
++ * Returns NULL when !Wait would block; raises after releasing the mutex on
++ * paging-write failure. The dirty case drops/retakes it in NxcFlushBlock. */
+ static NXC_BLOCK *
+ NxcClaimSlot(
+     IN BOOLEAN Wait)
+@@ -403,10 +403,18 @@ NxcClaimSlot(
+             if (Victim->Dirty)
+             {
+                 SIZE_T Written;
++                NTSTATUS Status;
+                 Victim->RefCount++;
+                 Victim->Busy = TRUE;
+-                (void)NxcFlushBlock(Victim, &Written);  /* drops/retakes mutex */
++                Status = NxcFlushBlock(Victim, &Written); /* drops/retakes mutex */
+                 Victim->RefCount--;
++                if (!NT_SUCCESS(Status))
++                {
++                    /* Retain dirty contents, but do not retry a permanent
++                     * error forever while trying to acquire cache space. */
++                    ExReleaseFastMutex(&NxcMutex);
++                    ExRaiseStatus(Status);
++                }
+                 /* State changed while unlocked; rescan. */
+                 continue;
+             }
+@@ -1139,9 +1147,19 @@ NxcPinCommon(
+         ExRaiseStatus(STATUS_INSUFFICIENT_RESOURCES);
+     }
+ 
+-    ExAcquireFastMutex(&NxcMutex);
+-    Block = NxcGetBlock(Map, BlockOffset, Wait);
+-    ExReleaseFastMutex(&NxcMutex);
++    _SEH2_TRY
++    {
++        ExAcquireFastMutex(&NxcMutex);
++        Block = NxcGetBlock(Map, BlockOffset, Wait);
++        ExReleaseFastMutex(&NxcMutex);
++    }
++    _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
++    {
++        /* NxcGetBlock releases the cache mutex before raising. */
++        ExFreePoolWithTag(Bcb, NXC_TAG);
++        ExRaiseStatus(_SEH2_GetExceptionCode());
++    }
++    _SEH2_END;
+ 
+     if (Block == NULL)
+     {
+diff --git a/tests/host/cache/check-pin-unwind.py b/tests/host/cache/check-pin-unwind.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..8692efacbf68d1f916856d7dabcca75c0491390c
+--- /dev/null
++++ b/tests/host/cache/check-pin-unwind.py
+@@ -0,0 +1,65 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Inject the accessor exception into the actual pin adapter."""
++from pathlib import Path
++import importlib.util,subprocess,sys
++sys.dont_write_bytecode=True
++root=Path(__file__).resolve().parents[3];out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
++body=m.function((root/'ntoskrnl/xb/mm/cache.c').read_text(),'NxcPinCommon')
++shim=r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <stdlib.h>
++#include <assert.h>
++#include <setjmp.h>
++#include <string.h>
++#include <stdio.h>
++typedef unsigned ULONG;typedef long long LONGLONG;typedef int BOOLEAN;typedef void *PVOID;
++typedef struct {LONGLONG QuadPart;} LARGE_INTEGER,*PLARGE_INTEGER;
++typedef struct {int dummy;} NXC_MAP;
++typedef struct {NXC_MAP *SharedCacheMap;} SECTION;
++typedef struct {SECTION *SectionObjectPointer;} FILE_OBJECT,*PFILE_OBJECT;
++typedef struct {unsigned char *Data;} NXC_BLOCK;
++typedef struct {struct {unsigned NodeTypeCode,NodeByteSize,MappedLength;LARGE_INTEGER MappedFileOffset;} PFCB;NXC_BLOCK *Block;NXC_MAP *Map;unsigned RefCount,PinCount;} NXC_BCB;
++#define IN
++#define OUT
++#define ASSERT assert
++#define NXC_BLOCK_SIZE 4096
++#define NXC_TAG 1
++#define NonPagedPool 0
++#define NXC_NODE_BCB 1
++#define FALSE 0
++#define TRUE 1
++#define STATUS_INVALID_PARAMETER 1
++#define STATUS_INSUFFICIENT_RESOURCES 2
++#define XbDbg(...) ((void)0)
++#define RtlZeroMemory(p,n) memset(p,0,n)
++static jmp_buf outer,inner;static int catching,held,allocated,mode,NxcMutex;
++static unsigned char data[4096];static NXC_BLOCK block={data};
++static void *ExAllocatePoolWithTag(int a,size_t n,int t){(void)a;(void)t;allocated++;return malloc(n);}
++static void ExFreePoolWithTag(void*p,int t){(void)t;assert(allocated==1);allocated--;free(p);}
++static void ExAcquireFastMutex(int *m){(void)m;assert(!held);held=1;}
++static void ExReleaseFastMutex(int *m){(void)m;assert(held);held=0;}
++static _Noreturn void ExRaiseStatus(int s){assert(s==123);if(catching)longjmp(inner,1);longjmp(outer,1);}
++#define _SEH2_TRY if ((catching=1,setjmp(inner))==0)
++#define _SEH2_EXCEPT(x) else for(catching=0;!catching;catching=1)
++#define _SEH2_END catching=0
++#define _SEH2_GetExceptionCode() 123
++static NXC_BLOCK *NxcGetBlock(NXC_MAP*m,LONGLONG o,BOOLEAN w){(void)m;(void)o;(void)w;assert(held);if(mode==0){ExReleaseFastMutex(&NxcMutex);ExRaiseStatus(123);}return mode==1?NULL:&block;}
++'''
++main=r'''
++int main(void){
++ NXC_MAP map={0};SECTION section={&map};FILE_OBJECT file={&section};LARGE_INTEGER offset={0};
++ void *bcb=(void*)0x1234,*buffer=(void*)0x5678;
++ if(!setjmp(outer)){NxcPinCommon(&file,&offset,8,TRUE,TRUE,&bcb,&buffer);assert(0);}
++ if(allocated){puts("FAIL provisional BCB leaked on cache IO exception");return 1;}
++ assert(!held&&bcb==(void*)0x1234&&buffer==(void*)0x5678);
++ mode=1;assert(!NxcPinCommon(&file,&offset,8,FALSE,FALSE,&bcb,&buffer));assert(!held&&!allocated&&!bcb&&!buffer);
++ mode=2;assert(NxcPinCommon(&file,&offset,8,TRUE,TRUE,&bcb,&buffer));assert(!held&&allocated==1&&buffer==data);
++ ExFreePoolWithTag(bcb,1);puts("pin unwind: exception frees provisional BCB, preserves prior outputs, normal false/success PASS");
++}
++'''
++(out/'pin.c').write_text(shim+body+main)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',str(out/'pin.c'),'-o',str(out/'pin')],check=True)
++subprocess.run([str(out/'pin')],check=True)
+diff --git a/tests/host/cache/check-writeback.py b/tests/host/cache/check-writeback.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6579c4052b6111cfa739469f98bf0db456e330b2
+--- /dev/null
++++ b/tests/host/cache/check-writeback.py
+@@ -0,0 +1,69 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Fault injection around the production cache eviction loop."""
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++sys.dont_write_bytecode=True
++root=Path(__file__).resolve().parents[3];out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
++s=(root/'ntoskrnl/xb/mm/cache.c').read_text();body=m.function(s,'NxcClaimSlot')
++shim=r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <setjmp.h>
++#include <assert.h>
++#include <string.h>
++#include <stdlib.h>
++typedef unsigned ULONG;typedef size_t SIZE_T;typedef int BOOLEAN;typedef int32_t NTSTATUS;
++#define IN
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(s) ((s)>=0)
++#define DPRINT1(...) ((void)0)
++#define NXC_MAX_BLOCKS 2
++#define CONTAINING_RECORD(p,t,f) ((t*)((char*)(p)-offsetof(t,f)))
++typedef struct LIST_ENTRY {struct LIST_ENTRY *Flink,*Blink;} LIST_ENTRY,*PLIST_ENTRY;
++typedef struct {void *Data,*Map;unsigned RefCount;int Busy,Dirty,Valid,Reserved;LIST_ENTRY LruLink;} NXC_BLOCK;
++static NXC_BLOCK NxcBlocks[2];static LIST_ENTRY NxcLruList;
++static unsigned NxcWbDepth, calls;static int NxcMutex, held, status;
++static unsigned char data[16];static jmp_buf failure;
++static void RemoveEntryList(LIST_ENTRY *l){l->Blink->Flink=l->Flink;l->Flink->Blink=l->Blink;}
++static void ExReleaseFastMutex(int *m){(void)m;assert(held);held=0;}
++static void ExAcquireFastMutex(int *m){(void)m;assert(!held);held=1;}
++static __attribute__((unused,noreturn)) void ExRaiseStatus(NTSTATUS s){assert(s==status);longjmp(failure,1);}
++static NXC_BLOCK *NxcClaimReserve(void){return NULL;}
++static void NxcShortWait(void){abort();}
++static NTSTATUS NxcFlushBlock(NXC_BLOCK *b,SIZE_T *n){
++ assert(held&&b->Busy&&b->RefCount==1&&b->Dirty&&b->Valid);
++ if(++calls>1)longjmp(failure,2); /* Stop an unbounded retry deterministically. */
++ ExReleaseFastMutex(&NxcMutex);ExAcquireFastMutex(&NxcMutex);
++ *n=status?0:sizeof(data);b->Busy=0;if(!status)b->Dirty=0;return status;
++}
++'''
++main=r'''
++static void setup(int error){
++ memset(NxcBlocks,0,sizeof(NxcBlocks));memset(data,0xa5,sizeof(data));
++ NXC_BLOCK *b=&NxcBlocks[0];b->Data=data;b->Map=(void*)1;b->Dirty=b->Valid=1;
++ NxcLruList.Flink=NxcLruList.Blink=&b->LruLink;
++ b->LruLink.Flink=b->LruLink.Blink=&NxcLruList;calls=0;held=1;status=error;
++}
++int main(void){
++ for(volatile int wait=0;wait<2;wait++){
++  setup((int32_t)0xc0000185);int outcome=setjmp(failure);
++  if(!outcome){NxcClaimSlot(wait);assert(!"failed paging IO must propagate");}
++  if(outcome!=1){fprintf(stderr,"FAIL persistent writeback retried without returning IO error\n");return 1;}
++  assert(calls==1&&!held&&NxcBlocks[0].RefCount==0&&!NxcBlocks[0].Busy&&NxcBlocks[0].Dirty);
++  for(unsigned i=0;i<sizeof(data);i++)assert(data[i]==0xa5);
++ }
++ setup(0);assert(NxcClaimSlot(TRUE)==&NxcBlocks[0]);
++ assert(calls==1&&held&&!NxcBlocks[0].Dirty&&NxcBlocks[0].RefCount==1&&NxcBlocks[0].Map==NULL);
++ setup(0);NxcBlocks[0].Busy=1;assert(NxcClaimSlot(FALSE)==NULL&&calls==0&&held);
++ puts("cache eviction: persistent error, dirty data, reference/mutex cleanup, success and busy/no-wait PASS");
++}
++'''
++(out/'writeback.c').write_text(shim+body+main)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',str(out/'writeback.c'),'-o',str(out/'writeback')],check=True)
++subprocess.run([str(out/'writeback')],check=True)
