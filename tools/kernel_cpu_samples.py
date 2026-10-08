@@ -15,7 +15,7 @@ except ImportError:
     from kernel_hotpaths import parse_sections, parse_symbols
 
 LINE = re.compile(r'\s*(.+?)\s+(\d+)/(\d+)\s+(\d+)\.(\d{1,9}):\s+(\d+)\s+'
-                  r'([a-fA-F0-9]+)\s+(.*?)\s+\((.*?)\)\s*')
+                  r'([a-fA-F0-9]+)\s+(.*)\s+\((.*?)\)\s*')
 GUEST = re.compile(r'guest-0x([a-fA-F0-9]+)(?:\+0x([a-fA-F0-9]+))?')
 MAP = re.compile(r'perf-(\d+)\.map')
 

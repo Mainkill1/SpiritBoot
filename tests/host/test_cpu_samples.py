@@ -65,6 +65,14 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual(result['categories']['host_library']['share_pct'], 50)
         self.assertEqual(result['host_executable'], '/build/qemu-system-i386')
 
+    def test_demangled_symbol_parentheses_do_not_consume_the_module_field(self):
+        symbol = 'helper(int) (anonymous namespace)::foo()'
+        rows = self.rows(self.sample(symbol=symbol, dso='/build/xemu'))
+        self.assertEqual(rows[0]['symbol'], symbol)
+        self.assertEqual(rows[0]['dso'], '/build/xemu')
+        result = self.cpu.rank_samples(rows, self.symbols(), host_executable='/build/xemu')
+        self.assertEqual(result['categories']['xemu_host']['share_pct'], 100)
+
     def test_host_symbol_offset_cannot_change_guest_instruction_identity(self):
         rows = self.rows(self.sample() + '\n' + self.sample(symbol='guest-0x84001000+0x11'))
         result = self.cpu.rank_samples(rows, self.symbols())
