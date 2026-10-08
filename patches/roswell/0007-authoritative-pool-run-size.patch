@@ -1,0 +1,249 @@
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index afb0fc1905af1097c4917518da0c882a00f59c81..75afdccd37f6bbd6d686597e31f4c8f31d7432c8 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -188,6 +188,7 @@ PFN_COUNT NxVmCommittedPagesInRange(IN ULONG_PTR Start, IN ULONG_PTR End);
+ #define NXK_POOL_WINDOW_BASE   0xC1000000UL
+ #define NXK_POOL_WINDOW_PAGES  4096
+ PVOID NxPoolPagesAlloc(IN SIZE_T NumberOfBytes);
++SIZE_T NxPoolPagesQueryRunBytes(PVOID BaseAddress);
+ VOID NxPoolPagesSetMovable(IN PVOID BaseAddress, IN SIZE_T NumberOfBytes,
+                            IN BOOLEAN Movable);
+ ULONG NxPoolPagesFree(IN PVOID BaseAddress);
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index 071f645f1f7a650fb11150f7b437676cf2413bcf..4863c29ec34b26e9b6086c1d771e8534698d57a6 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -97,6 +97,7 @@ static UCHAR NxpPageState[NXK_POOL_WINDOW_PAGES];
+ 
+ /* BIG-BLOCK TABLE **********************************************************/
+ 
++#ifndef NXK_MM_POOLPAGES
+ /* VA -> page count for whole-page allocations, only so the pool-size
+  * query keeps answering for them.  Fixed size: overflow just degrades
+  * that query to 0 for the untracked block (alloc/free are unaffected;
+@@ -110,6 +111,8 @@ typedef struct _NXP_BIG_ENTRY
+ #define NXP_BIG_ENTRIES 128
+ static NXP_BIG_ENTRY NxpBigTable[NXP_BIG_ENTRIES];
+ 
++#endif
++
+ /* LINK-LEVEL SURFACE OF THE UNLINKED expool.c ******************************/
+ 
+ /* kd64/kddata.c (DBG tree) and mm/ARM3/special.c reference these. */
+@@ -255,6 +258,7 @@ ExAllocatePoolWithTag(IN POOL_TYPE PoolType,
+         }
+         ASSERT(PAGE_ALIGN(Va) == Va);
+ 
++#ifndef NXK_MM_POOLPAGES
+         KeAcquireSpinLock(&NxpLock, &OldIrql);
+         for (ULONG i = 0; i < NXP_BIG_ENTRIES; i++)
+         {
+@@ -266,6 +270,7 @@ ExAllocatePoolWithTag(IN POOL_TYPE PoolType,
+             }
+         }
+         KeReleaseSpinLock(&NxpLock, OldIrql);
++#endif
+         return Va;
+     }
+ 
+@@ -359,6 +364,7 @@ ExFreePoolWithTag(IN PVOID P,
+             NxPoolPagesNoteFreer(_ReturnAddress());
+         }
+ #endif
++#ifndef NXK_MM_POOLPAGES
+         KeAcquireSpinLock(&NxpLock, &OldIrql);
+         for (ULONG i = 0; i < NXP_BIG_ENTRIES; i++)
+         {
+@@ -370,6 +376,7 @@ ExFreePoolWithTag(IN PVOID P,
+             }
+         }
+         KeReleaseSpinLock(&NxpLock, OldIrql);
++#endif
+         NXP_PAGES_FREE(P);
+         return;
+     }
+@@ -468,6 +475,16 @@ ExQueryPoolBlockSize(IN PVOID PoolBlock,
+ 
+     if (PAGE_ALIGN(PoolBlock) == PoolBlock)
+     {
++#ifdef NXK_MM_POOLPAGES
++        BOOLEAN IsBucket;
++        if (!NxPoolPagesOwns(PoolBlock)) return 0;
++        /* A bucket's page base is not a public allocation. Do not broaden
++         * the whole-allocation query to include those raw addresses. */
++        KeAcquireSpinLock(&NxpLock, &OldIrql);
++        IsBucket = NxpPageState[NXP_PAGE_INDEX(PoolBlock)] != NXP_NOT_BUCKET;
++        KeReleaseSpinLock(&NxpLock, OldIrql);
++        Size = IsBucket ? 0 : NxPoolPagesQueryRunBytes(PoolBlock);
++#else
+         KeAcquireSpinLock(&NxpLock, &OldIrql);
+         for (ULONG i = 0; i < NXP_BIG_ENTRIES; i++)
+         {
+@@ -478,6 +495,7 @@ ExQueryPoolBlockSize(IN PVOID PoolBlock,
+             }
+         }
+         KeReleaseSpinLock(&NxpLock, OldIrql);
++#endif
+         return Size;
+     }
+ 
+diff --git a/ntoskrnl/xb/mm/poolpages.c b/ntoskrnl/xb/mm/poolpages.c
+index 1e0d5915bc9feb64ba0757a8a2f46684846c7d06..56fe6b14a817e9e844e5bf42281602fe47ba9f2e 100644
+--- a/ntoskrnl/xb/mm/poolpages.c
++++ b/ntoskrnl/xb/mm/poolpages.c
+@@ -147,6 +147,28 @@ NxPoolPagesOwns(
+     return Va >= NXPP_BASE && Va < NXPP_END;
+ }
+ 
++/* Query only an active run start. Raw page-layer ownership remains private;
++ * ExQueryPoolBlockSize separately excludes small-object bucket pages. */
++SIZE_T
++NxPoolPagesQueryRunBytes(PVOID BaseAddress)
++{
++    ULONG_PTR Va = (ULONG_PTR)BaseAddress;
++    ULONG Start, Count;
++    KIRQL OldIrql;
++
++    if (NxppRunPages == NULL || !NxppLockInit ||
++        !NxPoolPagesOwns(BaseAddress) || (Va & (PAGE_SIZE - 1)) != 0)
++        return 0;
++    Start = (ULONG)((Va - NXPP_BASE) >> PAGE_SHIFT);
++    KeAcquireSpinLock(&NxppLock, &OldIrql);
++    Count = NxppRunPages[Start];
++    if (!(NxppUsedMap[Start >> 5] & (1UL << (Start & 31))) ||
++        Count > NXPP_PAGES - Start)
++        Count = 0;
++    KeReleaseSpinLock(&NxppLock, OldIrql);
++    return (SIZE_T)Count << PAGE_SHIFT;
++}
++
+ PVOID
+ NxPoolPagesAlloc(
+     IN SIZE_T NumberOfBytes)
+diff --git a/tests/host/pool-size/check.py b/tests/host/pool-size/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..56d450246bfe7aae42fed27e3722dc23ead925dc
+--- /dev/null
++++ b/tests/host/pool-size/check.py
+@@ -0,0 +1,72 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Compile public pool-size query and authoritative run query with lock shims."""
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++sys.dont_write_bytecode = True
++root=Path(__file__).resolve().parents[3]
++out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
++pool=(root/'ntoskrnl/xb/mm/pool.c').read_text();pages=(root/'ntoskrnl/xb/mm/poolpages.c').read_text()
++body=m.function(pages,'NxPoolPagesOwns')+m.function(pages,'NxPoolPagesQueryRunBytes')+m.function(pool,'ExQueryPoolBlockSize')
++shim=r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <assert.h>
++#include <string.h>
++#include <stdio.h>
++typedef uintptr_t ULONG_PTR;
++typedef uint32_t ULONG;
++typedef size_t SIZE_T;
++typedef unsigned char BOOLEAN, *PBOOLEAN, KIRQL;
++typedef void *PVOID;
++#define IN
++#define OUT
++#define NTAPI
++#define FALSE 0
++#define PAGE_SIZE 4096u
++#define PAGE_SHIFT 12
++#define PAGE_ALIGN(p) ((PVOID)((uintptr_t)(p)&~(uintptr_t)4095))
++#define ASSERT assert
++#define NXPP_BASE 0x90000000u
++#define NXPP_PAGES 4096u
++#define NXPP_END (NXPP_BASE+NXPP_PAGES*PAGE_SIZE)
++#define NXP_NOT_BUCKET 255
++#define NXP_PAGE_INDEX(p) (((uintptr_t)(p)-NXPP_BASE)/PAGE_SIZE)
++#define NXP_MAGIC_ALLOC 42
++#define NXP_CLASSES 1
++static unsigned NxpClassSize[]={32};
++typedef struct {unsigned Magic,ClassIndex;} NXP_HEADER;
++static uint16_t runs[NXPP_PAGES], *NxppRunPages=runs;
++static uint32_t NxppUsedMap[NXPP_PAGES/32];
++static unsigned char NxpPageState[NXPP_PAGES];
++static int NxppLockInit=1,NxppLock,NxpLock, held;
++static void KeAcquireSpinLock(int *lock,KIRQL *old) {assert(!held);held=1;*lock=1;*old=0;}
++static void KeReleaseSpinLock(int *lock,KIRQL old) {(void)old;assert(held&&*lock);*lock=0;held=0;}
++'''
++main=r'''
++int main(void) {
++ memset(NxpPageState,NXP_NOT_BUCKET,sizeof(NxpPageState));
++ for(unsigned i=0;i<160;i++) {
++  unsigned start=i*3; runs[start]=2;NxppUsedMap[start/32]|=1u<<(start%32);
++  void *p=(void*)(uintptr_t)(NXPP_BASE+start*PAGE_SIZE);
++  BOOLEAN quota=1;assert(ExQueryPoolBlockSize(p,&quota)==8192&&!quota);
++  assert(ExQueryPoolBlockSize((char*)p+PAGE_SIZE,NULL)==0);
++ }
++ assert(ExQueryPoolBlockSize(NULL,NULL)==0);
++ assert(ExQueryPoolBlockSize((void*)NXPP_END,NULL)==0);
++ assert(NxPoolPagesQueryRunBytes((void*)(NXPP_BASE+1))==0);
++ NxpPageState[0]=0;assert(ExQueryPoolBlockSize((void*)NXPP_BASE,NULL)==0);
++ NxpPageState[0]=NXP_NOT_BUCKET;runs[0]=0;
++ assert(ExQueryPoolBlockSize((void*)NXPP_BASE,NULL)==0);
++ runs[0]=2;NxppUsedMap[0]=0;
++ assert(ExQueryPoolBlockSize((void*)NXPP_BASE,NULL)==0);
++ NxppLockInit=0;assert(NxPoolPagesQueryRunBytes((void*)NXPP_BASE)==0);
++ assert(!held);puts("pool-size: 160 active runs, interiors, bucket/free/outside boundaries and nonnested locks PASS");
++}
++'''
++(out/'pool-size.c').write_text(shim+'\n#define NXK_MM_POOLPAGES\n'+body+main)
++subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(out/'pool-size.c'),'-o',str(out/'pool-size')],check=True)
++subprocess.run([str(out/'pool-size')],check=True)
+diff --git a/tests/xbe/pool-size-limit/Makefile b/tests/xbe/pool-size-limit/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..26c984df9e9e5a950321449d7f23293e1bd0160e
+--- /dev/null
++++ b/tests/xbe/pool-size-limit/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = POOL-SIZE-LIMIT
++GEN_XISO = pool.iso
++SRCS = $(CURDIR)/main.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/pool-size-limit/main.c b/tests/xbe/pool-size-limit/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..8d03b17405fbe7cae8839dda94ade5e5ffdf8623
+--- /dev/null
++++ b/tests/xbe/pool-size-limit/main.c
+@@ -0,0 +1,30 @@
++#include <stdio.h>
++#include <stdint.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <hal/video.h>
++#include <nxdk/mount.h>
++static PVOID blocks[160];
++int main(void){
++ XVideoSetMode(640,480,32,REFRESH_DEFAULT);
++ if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
++ FILE *out=fopen("E:\\pool-result.txt","wb");if(!out)for(;;)Sleep(1000);
++ unsigned bad=0;const unsigned sizes[]={2041,4096,4097};
++ for(unsigned i=0;i<160;i++){
++  unsigned n=sizes[i%3];blocks[i]=ExAllocatePool(n);
++  if(!blocks[i]){bad++;fprintf(out,"FAIL allocation %u\n",i);continue;}
++  ((volatile uint8_t*)blocks[i])[0]=(uint8_t)i;
++  ((volatile uint8_t*)blocks[i])[n-1]=(uint8_t)(i^0x5a);
++ }
++ for(unsigned i=0;i<160;i++)if(blocks[i]){
++  unsigned n=sizes[i%3],expected=(n+4095)&~4095u,actual=ExQueryPoolBlockSize(blocks[i]);
++  unsigned failed=actual!=expected||((volatile uint8_t*)blocks[i])[0]!=(uint8_t)i||((volatile uint8_t*)blocks[i])[n-1]!=(uint8_t)(i^0x5a);
++  bad+=failed;if(failed)fprintf(out,"FAIL size i=%u actual=%u expected=%u\n",i,actual,expected);
++ }
++ for(unsigned i=0;i<160;i++)if(blocks[i])ExFreePool(blocks[i]);
++ PVOID small=ExAllocatePool(2040);if(!small||ExQueryPoolBlockSize(small)!=2040)bad++;if(small)ExFreePool(small);
++ for(unsigned i=0;i<160;i++){
++  PVOID p=ExAllocatePool(4097);if(!p){bad++;continue;}if(ExQueryPoolBlockSize(p)!=8192)bad++;ExFreePool(p);
++ }
++ fprintf(out,"COMPLETE checks=321 failures=%u\n",bad);fclose(out);for(;;)Sleep(1000);
++}
