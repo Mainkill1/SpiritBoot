@@ -1,0 +1,168 @@
+diff --git a/tests/xbe/relocation-alias/Makefile b/tests/xbe/relocation-alias/Makefile
+index 514561df..c6fd742b 100644
+--- a/tests/xbe/relocation-alias/Makefile
++++ b/tests/xbe/relocation-alias/Makefile
+@@ -1,6 +1,6 @@
+ XBE_TITLE = RELOCATION-ALIAS
+ GEN_XISO = relocation.iso
+-SRCS = $(CURDIR)/main.c
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/relocation-alias/main.c b/tests/xbe/relocation-alias/main.c
+index 2fd2040d..ef7c246c 100644
+--- a/tests/xbe/relocation-alias/main.c
++++ b/tests/xbe/relocation-alias/main.c
+@@ -1,37 +1,116 @@
+-#include <stdio.h>
++/* SPDX-License-Identifier: GPL-2.0-or-later */
+ #include <stdint.h>
+-#include <windows.h>
+-#include <xboxkrnl/xboxkrnl.h>
+-#include <hal/video.h>
+-#include <nxdk/mount.h>
+-static PVOID regions[112];
+-int main(void) {
+- XVideoSetMode(640,480,32,REFRESH_DEFAULT);
+- if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
+- FILE *out=fopen("E:\\relocation-result.txt","wb");if(!out)for(;;)Sleep(1000);
+- PVOID victim=NULL, high=NULL;ULONG before=0;unsigned blocks=0;
+- for(;blocks<112&&!victim;blocks++){
+-  SIZE_T n=1024*1024;NTSTATUS s=NtAllocateVirtualMemory(&regions[blocks],0,&n,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+-  if(!NT_SUCCESS(s)){fprintf(out,"FAIL allocation block=%u status=%08lx\n",blocks,s);break;}
+-  for(unsigned off=0;off<n;off+=4096){
+-   PVOID va=(char*)regions[blocks]+off;ULONG pa=MmGetPhysicalAddress(va);
+-   if(pa>=0x04000000&&!high)high=va;
+-   if(pa&&pa<0x04000000&&!victim){victim=va;before=pa;}
+-  }
+- }
+- fprintf(out,"SETUP blocks=%u victim=%p physical=%08lx high=%p\n",blocks,victim,before,high);fflush(out);
+- if(!victim||!high){fprintf(out,"FAIL required memory domains unavailable\n");goto done;}
+- for(unsigned i=0;i<1024;i++)((volatile uint32_t*)victim)[i]=0x13570000u+i;
+- ULONG freed=MmGetPhysicalAddress(high);SIZE_T n=4096;PVOID release=high;
+- NTSTATUS s=NtFreeVirtualMemory(&release,&n,MEM_DECOMMIT);
+- fprintf(out,"DEST freed=%08lx status=%08lx\n",freed,s);fflush(out);
+- if(!NT_SUCCESS(s))goto done;
+- PVOID pin=MmAllocateContiguousMemoryEx(4096,before,before+4095,4096,PAGE_READWRITE);
+- ULONG after=MmGetPhysicalAddress(victim);unsigned bad=0;
+- for(unsigned i=0;i<1024;i++)if(((volatile uint32_t*)victim)[i]!=0x13570000u+i)bad++;
+- fprintf(out,"RESULT pin=%p before=%08lx after=%08lx mismatch=%u\n",pin,before,after,bad);
+- fprintf(out,"%s relocation to upper RAM\n",pin&&after>=0x04000000&&after!=before&&!bad?"PASS":"FAIL");
+- if(pin)MmFreeContiguousMemory(pin);
+-done:
+- fclose(out);for(;;)Sleep(1000);
++#include "../regression.h"
++
++#define PAGE_BYTES 4096u
++#define REGION_BYTES (1024u * 1024u)
++#define MAX_REGIONS 112u
++#define UPPER_RAM 0x04000000u
++
++static PVOID regions[MAX_REGIONS];
++
++static void fill_page(PVOID page, uint32_t seed)
++{
++    volatile uint32_t *words = page;
++    for (unsigned i = 0; i < PAGE_BYTES / sizeof(*words); ++i)
++        words[i] = seed + i;
++}
++
++static int page_matches(PVOID page, uint32_t seed)
++{
++    volatile uint32_t *words = page;
++    for (unsigned i = 0; i < PAGE_BYTES / sizeof(*words); ++i)
++        if (words[i] != seed + i) return 0;
++    return 1;
++}
++
++static int page_zeroed(PVOID page)
++{
++    volatile uint32_t *words = page;
++    for (unsigned i = 0; i < PAGE_BYTES / sizeof(*words); ++i)
++        if (words[i] != 0) return 0;
++    return 1;
++}
++
++int main(void)
++{
++    PVOID victim = NULL, high = NULL, left = NULL, right = NULL;
++    unsigned used = 0;
++    ULONG before = 0;
++    regression_begin();
++
++    /* Consume upper generic RAM until an interior low-RAM VM page appears.
++     * Both neighbors remain committed; the only reclaimed page is upper RAM.
++     * A domain/setup failure is a failing result, not a skipped relocation. */
++    for (; used < MAX_REGIONS && !victim;) {
++        SIZE_T size = REGION_BYTES;
++        NTSTATUS status = NtAllocateVirtualMemory(&regions[used], 0, &size,
++            MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
++        if (!NT_SUCCESS(status)) break;
++        PUCHAR base = regions[used++];
++        for (unsigned off = 0; off < size; off += PAGE_BYTES) {
++            PVOID page = base + off;
++            ULONG physical = MmGetPhysicalAddress(page);
++            if (physical >= UPPER_RAM && !high) high = page;
++            if (physical && physical < UPPER_RAM && !victim &&
++                off >= PAGE_BYTES && off + 2 * PAGE_BYTES <= size) {
++                victim = page;
++                before = physical;
++                left = base + off - PAGE_BYTES;
++                right = base + off + PAGE_BYTES;
++            }
++        }
++    }
++    regression_require(victim && high, "low victim and upper destination domains available");
++    ULONG left_pa = MmGetPhysicalAddress(left), right_pa = MmGetPhysicalAddress(right);
++    fill_page(victim, 0x13570000u);
++    fill_page(left, 0x24680000u);
++    fill_page(right, 0x35790000u);
++    ULONG freed = MmGetPhysicalAddress(high);
++    SIZE_T size = PAGE_BYTES;
++    PVOID release = high;
++    regression_require(NT_SUCCESS(NtFreeVirtualMemory(&release, &size, MEM_DECOMMIT)),
++                       "free upper-RAM spill destination");
++    tap_comment("regions=%u source=%08lx freed=%08lx", used, before, freed);
++
++    PVOID pin = MmAllocateContiguousMemoryEx(PAGE_BYTES, before,
++        before + PAGE_BYTES - 1, PAGE_BYTES, PAGE_READWRITE);
++    regression_require(pin && MmGetPhysicalAddress(pin) == before,
++                       "exact contiguous window acquired over movable victim");
++    ULONG after = MmGetPhysicalAddress(victim);
++    tap_comment("destination=%08lx", after);
++    regression_check(after >= UPPER_RAM && after != before,
++                     "victim moved to upper RAM at its original virtual address");
++    regression_check(page_matches(victim, 0x13570000u), "all 4096 victim bytes preserved");
++    regression_check(page_matches(left, 0x24680000u) && page_matches(right, 0x35790000u),
++                     "all bytes in both neighboring pages preserved");
++    regression_check(MmGetPhysicalAddress(left) == left_pa &&
++                     MmGetPhysicalAddress(right) == right_pa,
++                     "neighbor physical mappings unchanged");
++    fill_page(pin, 0x468a0000u);
++    regression_check(page_matches(victim, 0x13570000u),
++                     "new contiguous owner does not alias relocated virtual bytes");
++    MmFreeContiguousMemory(pin);
++
++    int released = 1;
++    for (unsigned i = 0; i < used; ++i) {
++        size = 0;
++        PVOID base = regions[i];
++        if (!NT_SUCCESS(NtFreeVirtualMemory(&base, &size, MEM_RELEASE))) released = 0;
++    }
++    regression_check(released, "all original VM regions released");
++    PVOID continued = NULL;
++    size = 3 * PAGE_BYTES;
++    regression_require(NT_SUCCESS(NtAllocateVirtualMemory(&continued, 0, &size,
++        MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)), "allocation continues after relocation and cleanup");
++    regression_check(page_zeroed(continued), "continued allocation begins zeroed");
++    fill_page(continued, 0x579b0000u);
++    fill_page((PUCHAR)continued + 2 * PAGE_BYTES, 0x68ac0000u);
++    regression_check(page_matches(continued, 0x579b0000u) &&
++                     page_matches((PUCHAR)continued + 2 * PAGE_BYTES, 0x68ac0000u),
++                     "continued allocation is writable across its extent");
++    size = 0;
++    regression_check(NT_SUCCESS(NtFreeVirtualMemory(&continued, &size, MEM_RELEASE)),
++                     "continued allocation released");
++    regression_finish();
+ }
