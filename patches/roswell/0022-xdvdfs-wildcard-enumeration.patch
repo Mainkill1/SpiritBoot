@@ -1,7 +1,15 @@
 diff --git a/drivers/filesystems/xdvdfs/xdvdfs.c b/drivers/filesystems/xdvdfs/xdvdfs.c
 --- a/drivers/filesystems/xdvdfs/xdvdfs.c
 +++ b/drivers/filesystems/xdvdfs/xdvdfs.c
-@@ -1149,36 +1149,44 @@
+@@ -40,6 +40,7 @@
+  */
+ 
+ #include <ntifs.h>
++#include <pseh/pseh2.h>
+ #include <ntdddisk.h>
+ #include <ntddcdrm.h>
+ #include <ntddstor.h>
+@@ -1149,36 +1150,61 @@
      return STATUS_SUCCESS;
  }
  
@@ -10,32 +18,42 @@ diff --git a/drivers/filesystems/xdvdfs/xdvdfs.c b/drivers/filesystems/xdvdfs/xd
 - * support '*' and exact-name only -- that's what titles typically pass for
 - * D:\.  Anything more complex degrades to "match all" rather than failing.
 - */
+-static BOOLEAN
 +/* Match optical ASCII names using the kernel's Xbox wildcard semantics. */
- static BOOLEAN
++static NTSTATUS
  XdvdMatchName(_In_reads_(NameLen) PCSTR Name, _In_ ULONG NameLen,
 -                _In_opt_ PUNICODE_STRING Pattern)
 -{
 -    ULONG i;
-+              _In_opt_ PUNICODE_STRING Pattern)
++              _In_opt_ PUNICODE_STRING Pattern, _Out_ PBOOLEAN Matches)
 +{
 +    WCHAR nameBuffer[255], patternBuffer[255];
 +    UNICODE_STRING name, pattern;
 +    ULONG i, patternChars;
++    NTSTATUS status = STATUS_SUCCESS;
++
++    *Matches = FALSE;
  
      if (Pattern == NULL || Pattern->Length == 0)
-         return TRUE;
- 
+-        return TRUE;
+-
 -    /* "*" -- accept everything. */
 -    if (Pattern->Length == sizeof(WCHAR) && Pattern->Buffer[0] == L'*')
 -        return TRUE;
 -
 -    /* Exact ASCII compare against the unicode pattern. */
 -    if (Pattern->Length != NameLen * sizeof(WCHAR))
+-        return FALSE;
++    {
++        *Matches = TRUE;
++        return STATUS_SUCCESS;
++    }
++
 +    if (NameLen > RTL_NUMBER_OF(nameBuffer) ||
 +        Pattern->Buffer == NULL ||
 +        Pattern->Length > sizeof(patternBuffer) ||
 +        Pattern->Length % sizeof(WCHAR) != 0)
-         return FALSE;
++        return STATUS_SUCCESS;
 +
 +    /* Fold ASCII only, as in the previous exact-name comparison.  Passing
 +     * FALSE avoids allocating an uppercase copy for every directory entry. */
@@ -63,15 +81,46 @@ diff --git a/drivers/filesystems/xdvdfs/xdvdfs.c b/drivers/filesystems/xdvdfs/xd
 +    name.Length = name.MaximumLength = NameLen * sizeof(WCHAR);
 +    pattern.Buffer = patternBuffer;
 +    pattern.Length = pattern.MaximumLength = Pattern->Length;
-+    return FsRtlIsNameInExpression(&pattern, &name, FALSE, NULL);
++    /* Complex masks may allocate backtracking storage.  Return allocation
++     * failures to the queued IRP instead of unwinding past its completion. */
++    _SEH2_TRY
++    {
++        *Matches = FsRtlIsNameInExpression(&pattern, &name, FALSE, NULL);
++    }
++    _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
++    {
++        status = _SEH2_GetExceptionCode();
++    }
++    _SEH2_END;
++    return status;
  }
  
  static NTSTATUS NTAPI
+@@ -1290,10 +1316,15 @@
+         PUCHAR e;
+         ULONG  ulAttr;
+         ULONG  k;
+-
+-        if (!XdvdMatchName(ccb->Entries[i].Name, nameLen,
+-                             pattern && pattern->Length ? pattern :
+-                             (ccb->SearchPattern.Length ? &ccb->SearchPattern : NULL)))
++        BOOLEAN matches;
++
++        status = XdvdMatchName(ccb->Entries[i].Name, nameLen,
++                              pattern && pattern->Length ? pattern :
++                              (ccb->SearchPattern.Length ? &ccb->SearchPattern : NULL),
++                              &matches);
++        if (!NT_SUCCESS(status))
++            return XdvdCompleteRequest(Irp, status, 0);
++        if (!matches)
+             continue;
+ 
+         ulAttr = (attrs & XDVD_ATTR_DIRECTORY)
 diff --git a/tests/host/xdvdfs-masks/check.py b/tests/host/xdvdfs-masks/check.py
 new file mode 100755
 --- /dev/null
 +++ b/tests/host/xdvdfs-masks/check.py
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,137 @@
 +#!/usr/bin/env python3
 +# SPDX-License-Identifier: GPL-2.0-or-later
 +"""Run the actual optical matcher and Xbox FsRtl matcher against literal masks."""
@@ -92,11 +141,13 @@ new file mode 100755
 +#include <stdio.h>
 +#include <string.h>
 +#include <assert.h>
++#include <setjmp.h>
 +#define IN
 +#define OPTIONAL
 +#define NTAPI
 +#define _In_reads_(n)
 +#define _In_
++#define _Out_
 +#define _In_opt_
 +#define TRUE 1
 +#define FALSE 0
@@ -114,26 +165,48 @@ new file mode 100755
 +#define RtlEqualMemory(p,q,n) (memcmp(p,q,n)==0)
 +#define FsRtlIsUnicodeCharacterWild(c) ((c)=='*'||(c)=='?'||(c)=='<'||(c)=='>'||(c)=='"')
 +typedef uint16_t WCHAR,*PWCHAR,USHORT,*PUSHORT;
-+typedef uint32_t ULONG;typedef uint8_t UCHAR,BOOLEAN;
++typedef uint32_t ULONG;typedef uint8_t UCHAR,BOOLEAN,*PBOOLEAN;
 +typedef const char *PCSTR;typedef void *PVOID;typedef int32_t NTSTATUS;
 +typedef struct {USHORT Length,MaximumLength;PWCHAR Buffer;} UNICODE_STRING,*PUNICODE_STRING;
-+static void *ExAllocatePoolWithTag(ULONG flags,size_t bytes,ULONG tag){(void)flags;(void)tag;return malloc(bytes);}
++#define STATUS_SUCCESS 0
++#define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xc000009a)
++#define EXCEPTION_EXECUTE_HANDLER 1
++static jmp_buf exceptionJump;
++static NTSTATUS exceptionCode;
++static unsigned failAllocation, allocations;
++#define _SEH2_TRY if (setjmp(exceptionJump) == 0)
++#define _SEH2_EXCEPT(filter) else
++#define _SEH2_END
++#define _SEH2_GetExceptionCode() exceptionCode
++static void ExRaiseStatus(NTSTATUS s){exceptionCode=s;longjmp(exceptionJump,1);}
++static void *ExAllocatePoolWithTag(ULONG flags,size_t bytes,ULONG tag){
++ (void)tag;allocations++;
++ if(failAllocation){if(flags&POOL_RAISE_IF_ALLOCATION_FAILURE)ExRaiseStatus(STATUS_INSUFFICIENT_RESOURCES);return NULL;}
++ return malloc(bytes);
++}
 +static void ExFreePoolWithTag(void *p,ULONG tag){(void)tag;free(p);}
 +static NTSTATUS RtlUpcaseUnicodeString(PUNICODE_STRING d,PUNICODE_STRING s,BOOLEAN allocate){
 + (void)d;(void)s;(void)allocate;abort();}
 +static void RtlFreeUnicodeString(PUNICODE_STRING s){free(s->Buffer);}
-+static void ExRaiseStatus(NTSTATUS s){(void)s;abort();}
 +BOOLEAN FsRtlDoesNameContainWildCards(PUNICODE_STRING);
 +BOOLEAN FsRtlIsNameInExpression(PUNICODE_STRING,PUNICODE_STRING,BOOLEAN,PWCHAR);
 +'''
 +functions='\n'.join(extract.function(rtl[rtl.rfind('\n\n',0,rtl.index(n+'(IN')): ],n) for n in ['FsRtlDoesNameContainWildCards','FsRtlIsNameInExpressionPrivate','FsRtlIsNameInExpression'])+'\n'+extract.function(driver,'XdvdMatchName')
++shim += '#define MATCH_WITH_STATUS '+str(int('NTSTATUS' in extract.function(driver,'XdvdMatchName').split('XdvdMatchName')[0]))+'\n'
 +tests=r'''
 +static unsigned cases,failures;
++static NTSTATUS match(const char *name,ULONG length,PUNICODE_STRING p,PBOOLEAN result){
++#if MATCH_WITH_STATUS
++ return XdvdMatchName(name,length,p,result);
++#else
++ *result=XdvdMatchName(name,length,p);return STATUS_SUCCESS;
++#endif
++}
 +static void run(const char *name,const char *mask,int expected){
 + WCHAR pattern[256];memset(pattern,0x77,sizeof(pattern));
 + size_t n=strlen(mask);assert(n<=255);for(size_t i=0;i<n;i++)pattern[i]=(unsigned char)mask[i];
 + UNICODE_STRING p={(USHORT)(n*2),(USHORT)(n*2),pattern};
-+ int got=XdvdMatchName(name,strlen(name),&p);
++ BOOLEAN got=FALSE;NTSTATUS status=match(name,strlen(name),&p,&got);assert(status==STATUS_SUCCESS);
 + if(got!=expected){printf("FAIL name=%s mask=%s expected=%d got=%d\n",name,mask,expected,got);failures++;}cases++;
 +}
 +int main(void){
@@ -165,7 +238,19 @@ new file mode 100755
 + run("help_00.dds","h?lp*1*.dds",0);
 + char longest[256];memset(longest,'a',255);longest[255]=0;
 + run(longest,longest,1);run(longest,"*",1);
-+ assert(XdvdMatchName("name",4,NULL));cases++;
++ BOOLEAN matched=FALSE;assert(match("name",4,NULL,&matched)==STATUS_SUCCESS && matched);cases++;
++ char stars[256];memset(stars,'*',255);stars[255]=0;run("a",stars,1);
++ WCHAR wm[30];for(unsigned i=0;i<30;i++)wm[i]='*';
++ UNICODE_STRING heavy={sizeof(wm),sizeof(wm),wm};
++ failAllocation=1;allocations=0;matched=FALSE;
++ /* An unguarded pool exception escapes this outer request boundary. */
++ NTSTATUS status;int escaped=0;
++ if(setjmp(exceptionJump)==0) status=match("a",1,&heavy,&matched);
++ else {status=exceptionCode;escaped=1;}
++ if(status!=STATUS_INSUFFICIENT_RESOURCES || allocations!=1 || matched || escaped){
++  puts("FAIL allocation failure must be returned by matcher");failures++;
++ }cases++;
++ failAllocation=0;
 + printf("%u production optical/FsRtl checks, %u failures\n",cases,failures);
 + return failures?1:0;
 +}
