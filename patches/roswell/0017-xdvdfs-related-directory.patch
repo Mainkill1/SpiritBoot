@@ -1,0 +1,284 @@
+diff --git a/drivers/filesystems/xdvdfs/xdvdfs.c b/drivers/filesystems/xdvdfs/xdvdfs.c
+index 328f1e5d71736f79896d0c108d72393ee8368569..fe20ac9cfc92034a2dca9bd3600f5910192aa11e 100644
+--- a/drivers/filesystems/xdvdfs/xdvdfs.c
++++ b/drivers/filesystems/xdvdfs/xdvdfs.c
+@@ -355,12 +355,13 @@ XdvdFindInTable(_In_reads_bytes_(TableSize) PUCHAR Table,
+  */
+ static NTSTATUS
+ XdvdResolvePath(_In_ PXDVD_VCB Vcb,
++                  _In_opt_ PXDVD_FCB StartDirectory,
+                   _In_ PUNICODE_STRING Path,
+                   _Out_ PXDVD_FCB Fcb,
+                   _Out_writes_(256) PWCHAR NameBuf)
+ {
+-    ULONG sector = Vcb->RootSector;
+-    ULONG size = Vcb->RootSize;
++    ULONG sector = StartDirectory ? StartDirectory->DataSector : Vcb->RootSector;
++    ULONG size = StartDirectory ? StartDirectory->DataSize : Vcb->RootSize;
+     PVOID table = NULL;
+     ULONG tableSize = 0;
+     PWCHAR p, end;
+@@ -373,6 +374,27 @@ XdvdResolvePath(_In_ PXDVD_VCB Vcb,
+     RtlZeroMemory(Fcb, sizeof(*Fcb));
+     Fcb->Vcb = Vcb;
+ 
++    if ((Path->Length % sizeof(WCHAR)) != 0 ||
++        (Path->Length != 0 && Path->Buffer == NULL))
++        return STATUS_OBJECT_NAME_INVALID;
++
++    /* A related open requires a relative name. Do not let the normal
++     * volume-root separator handling redirect it to a different object. */
++    if (StartDirectory && Path->Length != 0 && Path->Buffer[0] == L'\\')
++        return STATUS_OBJECT_NAME_INVALID;
++
++    /* An empty related name reopens the directory with independent FCB/name
++     * ownership. The create request only borrows the related file object. */
++    if (StartDirectory && Path->Length == 0)
++    {
++        *Fcb = *StartDirectory;
++        RtlCopyMemory(NameBuf, StartDirectory->Name.Buffer,
++                      StartDirectory->Name.Length);
++        Fcb->Name.Buffer = NameBuf;
++        Fcb->Name.MaximumLength = 256 * sizeof(WCHAR);
++        return STATUS_SUCCESS;
++    }
++
+     if (Path->Length == 0 ||
+         (Path->Length == sizeof(WCHAR) && Path->Buffer[0] == L'\\'))
+     {
+@@ -425,7 +447,7 @@ XdvdResolvePath(_In_ PXDVD_VCB Vcb,
+         d = XdvdFindInTable(table, tableSize, seg, segLen);
+         if (d == NULL)
+         {
+-            BOOLEAN intermediate = (p < end);
++            BOOLEAN intermediate = (p < end && p + 1 < end);
+             ExFreePoolWithTag(table, XDVD_TAG);
+             /* Win32 convention: missing intermediate directory yields
+              * STATUS_OBJECT_PATH_NOT_FOUND; missing leaf yields
+@@ -445,7 +467,8 @@ XdvdResolvePath(_In_ PXDVD_VCB Vcb,
+             if (!(d->Attributes & XDVD_ATTR_DIRECTORY))
+             {
+                 ExFreePoolWithTag(table, XDVD_TAG);
+-                return STATUS_OBJECT_PATH_NOT_FOUND;
++                return p + 1 == end ? STATUS_NOT_A_DIRECTORY
++                                    : STATUS_OBJECT_PATH_NOT_FOUND;
+             }
+             sector = d->DataSector;
+             size = d->DataSize;
+@@ -595,6 +618,7 @@ XdvdDispatchCreate(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp)
+     PIO_STACK_LOCATION sp = IoGetCurrentIrpStackLocation(Irp);
+     PFILE_OBJECT fo = sp->FileObject;
+     PXDVD_VCB vcb;
++    PXDVD_FCB startDirectory = NULL;
+     XDVD_FCB scratch;
+     PXDVD_FCB fcb;
+     PWCHAR nameBuf;
+@@ -618,12 +642,28 @@ XdvdDispatchCreate(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp)
+     if (sp->Parameters.Create.Options & FILE_DELETE_ON_CLOSE)
+         return XdvdCompleteRequest(Irp, STATUS_MEDIA_WRITE_PROTECTED, 0);
+ 
++    if (fo->RelatedFileObject)
++    {
++        PFILE_OBJECT related = fo->RelatedFileObject;
++        /* Check volume ownership before interpreting another driver's
++         * FsContext. The I/O manager keeps the related object live during
++         * create; no borrowed FCB or name pointer survives this request. */
++        if (related->Vpb != vcb->Vpb || related->FsContext == NULL)
++            return XdvdCompleteRequest(Irp, STATUS_INVALID_PARAMETER, 0);
++        startDirectory = (PXDVD_FCB)related->FsContext;
++        if (startDirectory->Vcb != vcb)
++            return XdvdCompleteRequest(Irp, STATUS_INVALID_PARAMETER, 0);
++        if (!startDirectory->IsDirectory)
++            return XdvdCompleteRequest(Irp, STATUS_NOT_A_DIRECTORY, 0);
++    }
++
+     nameBuf = ExAllocatePoolWithTag(PagedPool, 256 * sizeof(WCHAR),
+                                     XDVD_FCB_TAG);
+     if (nameBuf == NULL)
+         return XdvdCompleteRequest(Irp, STATUS_INSUFFICIENT_RESOURCES, 0);
+ 
+-    status = XdvdResolvePath(vcb, &fo->FileName, &scratch, nameBuf);
++    status = XdvdResolvePath(vcb, startDirectory, &fo->FileName,
++                             &scratch, nameBuf);
+     if (!NT_SUCCESS(status))
+     {
+         ExFreePoolWithTag(nameBuf, XDVD_FCB_TAG);
+diff --git a/tests/host/xdvdfs/check.py b/tests/host/xdvdfs/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..4c900a86ca0ddc266773e7fb42bd8936b49bff3d
+--- /dev/null
++++ b/tests/host/xdvdfs/check.py
+@@ -0,0 +1,173 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise production XDVDFS create/resolve with controlled allocation failures."""
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    'extract', root / 'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++source = (root / 'drivers/filesystems/xdvdfs/xdvdfs.c').read_text()
++shim = r'''
++#include <stdint.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++#include <assert.h>
++typedef uint32_t ULONG; typedef uint16_t USHORT, WCHAR, *PWCHAR;
++typedef uint8_t UCHAR, *PUCHAR; typedef char CHAR;
++typedef int BOOLEAN; typedef int32_t NTSTATUS; typedef void *PVOID;
++#define _In_
++#define _In_opt_
++#define _Out_
++#define _Inout_
++#define _Out_writes_(n)
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(s) ((s) >= 0)
++#define STATUS_SUCCESS 0
++#define STATUS_OBJECT_NAME_INVALID ((NTSTATUS)0xc0000033)
++#define STATUS_OBJECT_NAME_NOT_FOUND ((NTSTATUS)0xc0000034)
++#define STATUS_OBJECT_PATH_NOT_FOUND ((NTSTATUS)0xc000003a)
++#define STATUS_NOT_A_DIRECTORY ((NTSTATUS)0xc0000103)
++#define STATUS_FILE_IS_A_DIRECTORY ((NTSTATUS)0xc00000ba)
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000d)
++#define STATUS_VOLUME_DISMOUNTED ((NTSTATUS)0xc000026e)
++#define STATUS_MEDIA_WRITE_PROTECTED ((NTSTATUS)0xc00000a2)
++#define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xc000009a)
++#define XDVD_ATTR_DIRECTORY 0x10
++#define FILE_DIRECTORY_FILE 1
++#define FILE_NON_DIRECTORY_FILE 2
++#define FILE_DELETE_ON_CLOSE 4
++#define FILE_OPENED 1
++#define PagedPool 0
++#define NonPagedPool 1
++#define XDVD_TAG 1
++#define XDVD_FCB_TAG 2
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define RtlCopyMemory(p,q,n) memcpy(p,q,n)
++typedef struct { USHORT Length, MaximumLength; PWCHAR Buffer; } UNICODE_STRING, *PUNICODE_STRING;
++typedef struct { void *Vpb; ULONG RootSector, RootSize; int OpenCount; BOOLEAN Mounted; } XDVD_VCB, *PXDVD_VCB;
++typedef struct { PXDVD_VCB Vcb; ULONG DataSector, DataSize; UCHAR Attributes; BOOLEAN IsDirectory, IsRoot; UNICODE_STRING Name; } XDVD_FCB, *PXDVD_FCB;
++typedef struct { ULONG DataSector, DataSize; UCHAR Attributes, NameLength; CHAR Name[32]; } XDVD_DIRENT, *PXDVD_DIRENT;
++typedef struct FILE_OBJECT { struct FILE_OBJECT *RelatedFileObject; void *FsContext, *FsContext2, *Vpb, *SectionObjectPointer; UNICODE_STRING FileName; } FILE_OBJECT, *PFILE_OBJECT;
++typedef struct { void *DeviceExtension; } DEVICE_OBJECT, *PDEVICE_OBJECT;
++typedef struct { PFILE_OBJECT FileObject; struct { struct { ULONG Options; } Create; } Parameters; } IO_STACK_LOCATION, *PIO_STACK_LOCATION;
++typedef struct { struct { ULONG Information; } IoStatus; IO_STACK_LOCATION Stack; } IRP, *PIRP;
++static struct { PDEVICE_OBJECT ControlDevice; } XdvdGlobals;
++static unsigned allocations, fail_at, outstanding, reads;
++static void *ExAllocatePoolWithTag(int pool, size_t size, int tag) {
++    (void)pool; (void)tag;
++    if (++allocations == fail_at) return NULL;
++    void *p = malloc(size); assert(p); ++outstanding; return p;
++}
++static void ExFreePoolWithTag(void *p, int tag) {
++    (void)tag; assert(p && outstanding); --outstanding; free(p);
++}
++static int InterlockedIncrement(int *p) { return ++*p; }
++static PIO_STACK_LOCATION IoGetCurrentIrpStackLocation(PIRP irp) { return &irp->Stack; }
++static NTSTATUS XdvdCompleteRequest(PIRP irp, NTSTATUS status, ULONG info) {
++    irp->IoStatus.Information = info; return status;
++}
++static NTSTATUS XdvdReadDirentTable(PXDVD_VCB vcb, ULONG sector, ULONG size,
++                                  PVOID *table, ULONG *tableSize) {
++    (void)vcb; (void)size; ++reads;
++    *table = ExAllocatePoolWithTag(0, sizeof(XDVD_DIRENT), 1);
++    if (!*table) return STATUS_INSUFFICIENT_RESOURCES;
++    XDVD_DIRENT *d = *table; memset(d, 0, sizeof(*d));
++    const char *name = sector == 10 ? "Cache" : sector == 20 ? "Resource" : "probe.bin";
++    d->NameLength = strlen(name); memcpy(d->Name, name, d->NameLength);
++    d->DataSector = sector == 10 ? 20 : sector == 20 ? 30 : 40;
++    d->DataSize = sector == 30 ? 18 : 2048;
++    d->Attributes = sector == 30 ? 0 : XDVD_ATTR_DIRECTORY;
++    *tableSize = sizeof(*d); return STATUS_SUCCESS;
++}
++static PXDVD_DIRENT XdvdFindInTable(PVOID table, ULONG size, const CHAR *name, ULONG len) {
++    (void)size; PXDVD_DIRENT d = table;
++    return len == d->NameLength && !memcmp(name, d->Name, len) ? d : NULL;
++}
++'''
++main = r'''
++static UNICODE_STRING name(const char *text, WCHAR *buffer) {
++    unsigned n = strlen(text); for (unsigned i = 0; i < n; ++i) buffer[i] = text[i];
++    buffer[n] = 'X'; return (UNICODE_STRING){n * 2, (n + 1) * 2, buffer};
++}
++static NTSTATUS create(PDEVICE_OBJECT dev, PFILE_OBJECT related, const char *path,
++                       ULONG options, PFILE_OBJECT child) {
++    WCHAR buffer[128]; memset(child, 0, sizeof(*child));
++    child->RelatedFileObject = related; child->FileName = name(path, buffer);
++    IRP irp = {0}; irp.Stack.FileObject = child; irp.Stack.Parameters.Create.Options = options;
++    return XdvdDispatchCreate(dev, &irp);
++}
++static void close_file(PFILE_OBJECT file) {
++    PXDVD_FCB fcb = file->FsContext;
++    assert(fcb); --fcb->Vcb->OpenCount;
++    ExFreePoolWithTag(fcb->Name.Buffer, 2); ExFreePoolWithTag(fcb, 2); file->FsContext = NULL;
++}
++int main(void) {
++    XDVD_VCB vcb = {.Vpb = &vcb, .RootSector = 10, .RootSize = 2048, .Mounted = TRUE};
++    DEVICE_OBJECT dev = {&vcb}; FILE_OBJECT parent, child;
++    assert(create(&dev, NULL, "Cache\\Resource", FILE_DIRECTORY_FILE, &parent) == 0);
++    assert(create(&dev, &parent, "probe.bin", FILE_NON_DIRECTORY_FILE, &child) == 0);
++    PXDVD_FCB fcb = child.FsContext;
++    assert(fcb->DataSector == 40 && fcb->DataSize == 18 && fcb->Name.Length == 18);
++    close_file(&parent); assert(fcb->Name.Buffer[0] == 'p' && vcb.OpenCount == 1);
++    assert(create(&dev, &child, "other", 0, &parent) == STATUS_NOT_A_DIRECTORY);
++    close_file(&child); assert(!outstanding && !vcb.OpenCount);
++
++    /* Foreign volume must be rejected before dereferencing its FsContext. */
++    FILE_OBJECT foreign = {.Vpb = &dev, .FsContext = (void *)(uintptr_t)1};
++    unsigned before = allocations;
++    assert(create(&dev, &foreign, "probe.bin", 0, &child) == STATUS_INVALID_PARAMETER);
++    assert(allocations == before && !outstanding);
++    foreign.Vpb = vcb.Vpb; foreign.FsContext = NULL;
++    assert(create(&dev, &foreign, "probe.bin", 0, &child) == STATUS_INVALID_PARAMETER);
++    XDVD_VCB other = {0}; XDVD_FCB wrong = {.Vcb = &other, .IsDirectory = TRUE};
++    foreign.FsContext = &wrong;
++    assert(create(&dev, &foreign, "probe.bin", 0, &child) == STATUS_INVALID_PARAMETER);
++
++    assert(create(&dev, NULL, "Cache\\Missing\\", 0, &child) == STATUS_OBJECT_NAME_NOT_FOUND);
++    assert(create(&dev, NULL, "Missing\\probe.bin", 0, &child) == STATUS_OBJECT_PATH_NOT_FOUND);
++    assert(create(&dev, NULL, "Cache\\Resource\\probe.bin\\", 0, &child) == STATUS_NOT_A_DIRECTORY);
++    assert(create(&dev, NULL, "Cache\\\\Resource", 0, &child) == STATUS_OBJECT_NAME_INVALID);
++    assert(create(&dev, NULL, "Cache", FILE_NON_DIRECTORY_FILE, &child) == STATUS_FILE_IS_A_DIRECTORY);
++    assert(!outstanding && !vcb.OpenCount);
++
++    assert(create(&dev, NULL, "Cache", FILE_DIRECTORY_FILE, &parent) == 0);
++    assert(create(&dev, &parent, "\\Resource", 0, &child) == STATUS_OBJECT_NAME_INVALID);
++    assert(create(&dev, &parent, "\\", 0, &child) == STATUS_OBJECT_NAME_INVALID);
++    assert(create(&dev, &parent, "", FILE_DIRECTORY_FILE, &child) == 0);
++    assert(((PXDVD_FCB)child.FsContext)->Name.Buffer != ((PXDVD_FCB)parent.FsContext)->Name.Buffer);
++    close_file(&parent); assert(((PXDVD_FCB)child.FsContext)->Name.Buffer[0] == 'C');
++    close_file(&child);
++
++    /* Name, directory table and FCB allocation failures must all unwind. */
++    for (unsigned fail = 1; fail <= 4; ++fail) {
++        allocations = 0; fail_at = fail;
++        assert(create(&dev, NULL, "Cache\\Resource", 0, &child) == STATUS_INSUFFICIENT_RESOURCES);
++        assert(!outstanding && !vcb.OpenCount && !child.FsContext);
++    }
++    fail_at = 0;
++    WCHAR buffer[2] = {'x', 'X'}, basename[256]; XDVD_FCB scratch;
++    UNICODE_STRING odd = {1, 2, buffer}, missing = {2, 2, NULL};
++    assert(XdvdResolvePath(&vcb, NULL, &odd, &scratch, basename) == STATUS_OBJECT_NAME_INVALID);
++    assert(XdvdResolvePath(&vcb, NULL, &missing, &scratch, basename) == STATUS_OBJECT_NAME_INVALID);
++    vcb.Mounted = FALSE;
++    assert(create(&dev, NULL, "Cache", 0, &child) == STATUS_VOLUME_DISMOUNTED);
++    assert(!outstanding && !vcb.OpenCount);
++    printf("production XDVDFS create/resolve ownership, lengths, errors and allocation cleanup PASS (%u table reads)\n", reads);
++}
++'''
++(out / 'xdvdfs.c').write_text(shim + extract.function(source, 'XdvdResolvePath') +
++                               extract.function(source, 'XdvdDispatchCreate') + main)
++subprocess.run(['cc', '-std=c11', '-fshort-wchar', '-O2', '-Wall', '-Wextra',
++                '-Werror', str(out / 'xdvdfs.c'), '-o', str(out / 'xdvdfs')], check=True)
++subprocess.run([str(out / 'xdvdfs')], check=True)
