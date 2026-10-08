@@ -67,7 +67,7 @@ slots on every exit in both ordinary and diagnostic modes.
 
 ## Host work evidence
 
-[host-work.json](host-work.json) is copied byte-for-byte from controller-retained
+[host-work.json](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/optimization/2026-10-07/host-work.json) is copied byte-for-byte from controller-retained
 `artifacts/optimization/host-work.json`, produced by the actual-source fixtures
 on the frozen source and public baseline. It contains operation counts and
 complete caller-state differential hashes. These establish reduced work in
