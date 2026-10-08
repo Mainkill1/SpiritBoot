@@ -1,0 +1,605 @@
+diff --git a/ntoskrnl/include/internal/ke.h b/ntoskrnl/include/internal/ke.h
+index df429921..f68fea2a 100644
+--- a/ntoskrnl/include/internal/ke.h
++++ b/ntoskrnl/include/internal/ke.h
+@@ -655,9 +655,6 @@ VOID
+ NTAPI
+ KiDeliverUserApcs(VOID);
+ 
+-VOID
+-NTAPI
+-KiSetCurrentThreadUserApcPending(VOID);
+ #endif
+ 
+ LONG
+diff --git a/ntoskrnl/include/internal/ke_x.h b/ntoskrnl/include/internal/ke_x.h
+index 7bffd74e..77f1eba5 100644
+--- a/ntoskrnl/include/internal/ke_x.h
++++ b/ntoskrnl/include/internal/ke_x.h
+@@ -886,12 +886,9 @@ KiCheckAlertability(IN PKTHREAD Thread,
+         else if ((WaitMode != KernelMode) &&
+                  (Thread->ApcState.UserApcPending))
+         {
+-            /* Xbox: async-IO completion routines run as in-kernel APCs (titles
+-             * are ring 0) and flag UserApcPending without a queued user APC; honor
+-             * it so the title's alertable poll-wait breaks with STATUS_USER_APC,
+-             * which it explicitly tests for.  One-shot: the list is empty here, so
+-             * this can only be the synthetic completion flag (a real user APC
+-             * would have been taken by the branch above). */
++            /* Keep the existing one-shot handling of an empty-queue stale
++             * pending flag. Normal Xbox I/O completion now enters through
++             * the real queued-user-APC branch above. */
+             Thread->ApcState.UserApcPending = FALSE;
+             return STATUS_USER_APC;
+         }
+@@ -904,19 +901,9 @@ KiCheckAlertability(IN PKTHREAD Thread,
+     }
+     else if ((WaitMode != KernelMode) && (Thread->ApcState.UserApcPending))
+     {
+-        /* Not alertable, but this is a user wait with pending user APCs.
+-         *
+-         * Xbox: the async-IO completion mechanism (see KiSetCurrentThreadUserApcPending
+-         * + ntoskrnl/xbe NtUserIoApcDispatcher) sets UserApcPending synthetically,
+-         * without a queued user APC, to break the title's *alertable* poll-waits with
+-         * STATUS_USER_APC.  On retail this branch fires only when a real user APC is
+-         * queued; with our synthetic flag it would also leak into non-alertable user
+-         * waits -- the title issues those between streaming phases (e.g. blocking on
+-         * the per-buffer "data ready" event signalled by the completion routine), and
+-         * a spurious USER_APC return makes it miss the event signal and stall.
+-         * Distinguish: if the UserMode APC list is empty, the flag is synthetic --
+-         * clear it and fall through to the normal wait so the in-kernel completion
+-         * APC can run and signal the object, matching retail. */
++        /* Preserve the existing wait policy. Clear an empty-queue stale
++         * pending flag defensively; Xbox I/O callbacks now use actual queued
++         * user APCs rather than synthesizing this flag after early delivery. */
+         if (IsListEmpty(&Thread->ApcState.ApcListHead[UserMode]))
+         {
+             Thread->ApcState.UserApcPending = FALSE;
+diff --git a/ntoskrnl/ke/apc.c b/ntoskrnl/ke/apc.c
+index 46fe61b2..70b2ac0f 100644
+--- a/ntoskrnl/ke/apc.c
++++ b/ntoskrnl/ke/apc.c
+@@ -435,9 +435,8 @@ KiDeliverApc(IN KPROCESSOR_MODE DeliveryMode,
+         }
+     }
+ 
+-    /* Xbox: no ring 3, so the user-return trap exits that pass UserMode here
+-     * never execute; user APCs are delivered through the synthetic
+-     * UserApcPending mechanism (see KiSetCurrentThreadUserApcPending). */
++    /* Xbox has no ring-3 return trap. KiDeliverUserApcs drains the actual
++     * user APC queue when an alertable wait reports STATUS_USER_APC. */
+ #ifndef SARCH_XBOX
+     /* Now we do the User APCs */
+     if ((DeliveryMode == UserMode) &&
+@@ -571,22 +570,6 @@ KiDeliverUserApcs(VOID)
+     }
+ }
+ 
+-/*
+- * Xbox: flag a user APC as pending on the current thread.  Titles run in ring 0,
+- * so async-IO completion routines are delivered as in-kernel (kernel-mode) APCs
+- * (see ntoskrnl/xbe NtUserIoApcDispatcher) rather than real user APCs -- the
+- * completion runs but UserApcPending is never set, so the title's alertable
+- * UserMode poll-waits never see STATUS_USER_APC and sleep out their full timeout.
+- * The dispatcher calls this from the title thread's own context to mark the wait
+- * abortable; KiCheckAlertability consumes it and returns STATUS_USER_APC.
+- */
+-VOID
+-NTAPI
+-KiSetCurrentThreadUserApcPending(VOID)
+-{
+-    KeGetCurrentThread()->ApcState.UserApcPending = TRUE;
+-}
+-
+ FORCEINLINE
+ VOID
+ RepairList(IN PLIST_ENTRY Original,
+diff --git a/tests/host/io-apc-order/check.py b/tests/host/io-apc-order/check.py
+new file mode 100644
+index 00000000..6792d7fa
+--- /dev/null
++++ b/tests/host/io-apc-order/check.py
+@@ -0,0 +1,41 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Run actual completion, trampoline, delivery and rundown bodies with OS shims.
++
++The dispatcher/allocator are modeled. This tests production control flow and
++lifetime ordering, not a native in-flight NtReadFile scheduling boundary.
++"""
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++
++def function(path, signature):
++    source = (root / path).read_text()
++    start = source.index(signature)
++    brace = source.index('{', start)
++    depth = 1
++    end = brace + 1
++    while depth:
++        depth += (source[end] == '{') - (source[end] == '}')
++        end += 1
++    return source[start:end] + '\n'
++
++bodies = ''.join([
++    function('ntoskrnl/xb/xbe.c', 'VOID NTAPI NtUserIoApcDispatcher('),
++    function('ntoskrnl/io/iomgr/irp.c', 'VOID\nNTAPI\nIopFreeIrpKernelApc('),
++    function('ntoskrnl/io/iomgr/irp.c', 'VOID\nNTAPI\nIopAbortIrpKernelApc('),
++    function('ntoskrnl/io/iomgr/irp.c', 'VOID\nNTAPI\nIopCompleteRequest('),
++    function('ntoskrnl/ke/apc.c', 'VOID\nNTAPI\nKiDeliverUserApcs('),
++])
++source = Path(__file__).with_name('fixture.c').read_text()
++source = source.replace('/* PRODUCTION_BODIES */', bodies)
++(out / 'io-apc.c').write_text(source)
++subprocess.run(['cc', '-std=c11', '-O2', '-g', '-fsanitize=address,undefined',
++                '-fno-omit-frame-pointer', '-Wall', '-Wextra', '-Werror',
++                '-Wno-unused-parameter', '-Wno-unused-function', '-Wno-cast-function-type',
++                str(out / 'io-apc.c'), '-o', str(out / 'io-apc')], check=True)
++subprocess.run([str(out / 'io-apc')], check=True)
+diff --git a/tests/host/io-apc-order/fixture.c b/tests/host/io-apc-order/fixture.c
+new file mode 100644
+index 00000000..c86e0ef7
+--- /dev/null
++++ b/tests/host/io-apc-order/fixture.c
+@@ -0,0 +1,195 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <assert.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#define SARCH_XBOX 1
++#define IN
++#define VOID void
++#define NTAPI
++#define _In_
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define ASSERT(x) assert(x)
++#define IOTRACE(...) ((void)0)
++#define TRUE 1
++#define FALSE 0
++#define NULL_STATUS ((int32_t)0)
++#define NT_ERROR(s) (((uint32_t)(s) >> 30) == 3)
++#define NT_SUCCESS(s) ((int32_t)(s) >= 0)
++#define STATUS_VERIFY_REQUIRED ((int32_t)0x80000016)
++#define IRP_BUFFERED_IO 1u
++#define IRP_INPUT_OPERATION 2u
++#define IRP_DEALLOCATE_BUFFER 4u
++#define IRP_XB_SG_COMPLETION 8u
++#define IRP_SYNCHRONOUS_API 16u
++#define IRP_OB_QUERY_NAME 32u
++#define IRP_CREATE_OPERATION 64u
++#define IRP_WRITE_OPERATION 128u
++#define IRP_READ_OPERATION 256u
++#define FO_SYNCHRONOUS_IO 1u
++#define IopWriteTransfer 0
++#define IopReadTransfer 1
++#define IopOtherTransfer 2
++#define CONTAINING_RECORD(p,t,m) ((t *)((char *)(p) - offsetof(t,m)))
++#define RtlCopyMemory memcpy
++typedef uint32_t ULONG;
++typedef int32_t LONG;
++typedef int32_t NTSTATUS;
++typedef int BOOLEAN;
++typedef void *PVOID;
++typedef int KPROCESSOR_MODE;
++enum { KernelMode, UserMode, CurrentApcEnvironment = 0 };
++typedef struct { int32_t Status; uintptr_t Information; } IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
++typedef struct _LIST_ENTRY { struct _LIST_ENTRY *Flink, *Blink; } LIST_ENTRY, *PLIST_ENTRY;
++typedef struct { unsigned signals, refs; } KEVENT, *PKEVENT;
++typedef struct { unsigned Flags, refs; KEVENT Event; int32_t FinalStatus; } FILE_OBJECT, *PFILE_OBJECT;
++typedef struct _MDL { struct _MDL *Next; } MDL, *PMDL;
++typedef void (*PIO_APC_ROUTINE)(PVOID,PIO_STATUS_BLOCK,ULONG);
++typedef void (*PKNORMAL_ROUTINE)(PVOID,PVOID,PVOID);
++struct _KAPC;
++typedef void (*PKKERNEL_ROUTINE)(struct _KAPC *,PKNORMAL_ROUTINE *,PVOID *,PVOID *,PVOID *);
++typedef void (*PKRUNDOWN_ROUTINE)(struct _KAPC *);
++typedef struct _THREAD {
++    struct { LIST_ENTRY ApcListHead[2]; BOOLEAN UserApcPending; } ApcState;
++} THREAD, *PKTHREAD;
++typedef struct _KAPC {
++    LIST_ENTRY ApcListEntry;
++    PKTHREAD thread;
++    PKNORMAL_ROUTINE NormalRoutine;
++    PKKERNEL_ROUTINE KernelRoutine;
++    PKRUNDOWN_ROUTINE RundownRoutine;
++    PVOID NormalContext, SystemArgument1, SystemArgument2;
++    int mode, Inserted;
++} KAPC, *PKAPC;
++typedef struct {
++    unsigned Flags;
++    PMDL MdlAddress;
++    struct { PVOID SystemBuffer; } AssociatedIrp;
++    PVOID UserBuffer;
++    IO_STATUS_BLOCK IoStatus;
++    PIO_STATUS_BLOCK UserIosb;
++    PKEVENT UserEvent;
++    BOOLEAN PendingReturned;
++    KPROCESSOR_MODE RequestorMode;
++    struct { struct { PIO_APC_ROUTINE UserApcRoutine; PVOID UserApcContext; } AsynchronousParameters; } Overlay;
++    struct { KAPC Apc; } Tail;
++    int unqueued;
++} IRP, *PIRP;
++typedef int KLOCK_QUEUE_HANDLE;
++static THREAD issuer, other;
++static PKTHREAD current = &issuer;
++static unsigned allocated, freed, callbacks, mdls_freed, buffers_freed, case_count;
++static IO_STATUS_BLOCK expected[8];
++static unsigned expected_index, expected_count;
++static int exiting;
++static void init_list(PLIST_ENTRY l) { l->Flink = l->Blink = l; }
++static int IsListEmpty(PLIST_ENTRY l) { return l->Flink == l; }
++static void RemoveEntryList(PLIST_ENTRY l) { l->Blink->Flink=l->Flink; l->Flink->Blink=l->Blink; }
++static void append(PLIST_ENTRY head, PLIST_ENTRY l) {
++    l->Flink=head; l->Blink=head->Blink; head->Blink->Flink=l; head->Blink=l;
++}
++static PKTHREAD KeGetCurrentThread(void) { return current; }
++static void KiSetCurrentThreadUserApcPending(void) { current->ApcState.UserApcPending=1; }
++static void KiAcquireApcLockRaiseToDpc(PKTHREAD t,KLOCK_QUEUE_HANDLE *l) { assert(t==current); *l=1; }
++static void KiReleaseApcLock(KLOCK_QUEUE_HANDLE *l) { assert(*l); }
++static ULONG RtlNtStatusToDosError(int32_t status) { return (ULONG)status ^ 0x1357u; }
++static void IoFreeIrp(PIRP irp) { ++freed; assert(freed<=allocated); free(irp); }
++static void IoFreeMdl(PMDL m) { mdls_freed++; free(m); }
++static void ExFreePool(PVOID p) { buffers_freed++; free(p); }
++static void KeSetEvent(PKEVENT e,int boost,int wait) { (void)boost;(void)wait;e->signals++; }
++static PKEVENT referenced_event;
++static void dereference_event(PVOID p) {
++    assert(p==referenced_event && referenced_event->refs==1); referenced_event->refs--;
++}
++#define ObDereferenceObject dereference_event
++static void ObDereferenceObjectDeferDelete(PFILE_OBJECT f) { assert(f->refs==1); f->refs--; }
++static int IsIrpSynchronous(PIRP i,PFILE_OBJECT f) { return (i->Flags&IRP_SYNCHRONOUS_API)||(f&&(f->Flags&FO_SYNCHRONOUS_IO)); }
++static void IopUpdateTransferCount(int kind,ULONG bytes) { assert(kind<=2); (void)bytes; }
++static void IopUnQueueIrpFromThread(PIRP i) { assert(!i->unqueued); i->unqueued=1; }
++static void KeInitializeApc(PKAPC a,PKTHREAD t,int env,PKKERNEL_ROUTINE k,
++                            PKRUNDOWN_ROUTINE r,PKNORMAL_ROUTINE n,int mode,PVOID context) {
++    assert(CONTAINING_RECORD(a,IRP,Tail.Apc)->unqueued);
++    (void)env; a->thread=t; a->KernelRoutine=k; a->RundownRoutine=r;
++    a->NormalRoutine=n; a->mode=mode; a->NormalContext=context;
++}
++static void deliver_kernel(PKAPC a) {
++    PKNORMAL_ROUTINE n=a->NormalRoutine; PVOID c=a->NormalContext;
++    PVOID x=a->SystemArgument1,y=a->SystemArgument2;
++    PKKERNEL_ROUTINE k=a->KernelRoutine; a->Inserted=0;
++    k(a,&n,&c,&x,&y); if(n)n(c,x,y);
++}
++static int KeInsertQueueApc(PKAPC a,PVOID x,PVOID y,int boost) {
++    (void)boost; assert(a->thread==current); a->SystemArgument1=x;a->SystemArgument2=y;a->Inserted=1;
++    if(a->mode==KernelMode) deliver_kernel(a);
++    else {append(&a->thread->ApcState.ApcListHead[UserMode],&a->ApcListEntry);a->thread->ApcState.UserApcPending=1;}
++    return 1;
++}
++/* PRODUCTION_BODIES */
++static void win_completed(ULONG error,ULONG bytes,PVOID context) {
++    assert(!exiting && current==&issuer && expected_index<expected_count);
++    PIO_STATUS_BLOCK s=&expected[expected_index++]; assert(context==s);
++    assert(error==(NT_SUCCESS(s->Status)?0:RtlNtStatusToDosError(s->Status)));
++    assert(bytes==(NT_SUCCESS(s->Status)?s->Information:0)); callbacks++;
++}
++static void raw_completed(PVOID context,PIO_STATUS_BLOCK s,ULONG reserved) {
++    (void)context; (void)reserved;
++    assert(!exiting && current==&issuer && s==&expected[expected_index++]); callbacks++;
++}
++static void reset(void) {
++    assert(allocated==freed); memset(&issuer,0,sizeof(issuer)); memset(&other,0,sizeof(other));
++    for(unsigned i=0;i<2;i++){init_list(&issuer.ApcState.ApcListHead[i]);init_list(&other.ApcState.ApcListHead[i]);}
++    current=&issuer; callbacks=expected_index=0; exiting=0; referenced_event=NULL;
++}
++static void complete(unsigned slot,int dispatcher,int request_mode,int32_t status,int pending,
++                     PFILE_OBJECT file,PKEVENT event,int buffered) {
++    PIRP i=calloc(1,sizeof(*i)); assert(i); allocated++;
++    i->RequestorMode=request_mode; i->IoStatus.Status=status; i->IoStatus.Information=NT_SUCCESS(status)?8:0;
++    expected[slot].Status=(int32_t)0x103;expected[slot].Information=0;i->UserIosb=&expected[slot];
++    i->PendingReturned=pending; i->Flags=IRP_READ_OPERATION; i->UserEvent=event;
++    i->Overlay.AsynchronousParameters.UserApcRoutine=dispatcher?(PIO_APC_ROUTINE)NtUserIoApcDispatcher:raw_completed;
++    i->Overlay.AsynchronousParameters.UserApcContext=dispatcher?(PVOID)win_completed:NULL;
++    unsigned char output[8]={0}; i->UserBuffer=output;
++    if(buffered){i->Flags|=IRP_BUFFERED_IO|IRP_INPUT_OPERATION|IRP_DEALLOCATE_BUFFER;
++        i->AssociatedIrp.SystemBuffer=malloc(8);assert(i->AssociatedIrp.SystemBuffer);memset(i->AssociatedIrp.SystemBuffer,0x5a,8);
++        i->MdlAddress=calloc(1,sizeof(MDL));i->MdlAddress->Next=calloc(1,sizeof(MDL));assert(i->MdlAddress->Next);}
++    KAPC *a=&i->Tail.Apc; PKNORMAL_ROUTINE n=NULL;PVOID c=NULL,f=file,extra=NULL;
++    IopCompleteRequest(a,&n,&c,&f,&extra);
++    if(buffered&&NT_SUCCESS(status))for(unsigned k=0;k<8;k++)assert(output[k]==0x5a);
++    if(NT_ERROR(status)&&!pending){assert(IsListEmpty(&issuer.ApcState.ApcListHead[UserMode]));return;}
++    assert(expected[slot].Status==status && expected[slot].Information==(NT_SUCCESS(status)?8:0));
++    if(dispatcher || request_mode==UserMode){
++        assert(!IsListEmpty(&issuer.ApcState.ApcListHead[UserMode]));
++        PKAPC queued=CONTAINING_RECORD(issuer.ApcState.ApcListHead[UserMode].Blink,KAPC,ApcListEntry);
++        assert(queued->mode==UserMode && CONTAINING_RECORD(queued,IRP,Tail.Apc)->RequestorMode==request_mode);
++    }
++}
++static void rundown(void) {
++    PLIST_ENTRY h=&issuer.ApcState.ApcListHead[UserMode];exiting=1;
++    while(!IsListEmpty(h)){PKAPC a=CONTAINING_RECORD(h->Flink,KAPC,ApcListEntry);RemoveEntryList(&a->ApcListEntry);
++        PKRUNDOWN_ROUTINE r=a->RundownRoutine;a->Inserted=0;r(a);}
++}
++int main(void) {
++    const int32_t statuses[]={0,(int32_t)0xc0000011,(int32_t)0xc0000120};
++    for(int dispatcher=0;dispatcher<2;dispatcher++)for(int mode=0;mode<2;mode++)
++    for(unsigned s=0;s<3;s++)for(int event_on=0;event_on<2;event_on++)for(int buffered=0;buffered<2;buffered++){
++        reset();expected_count=1;FILE_OBJECT f={.refs=1};KEVENT e={.refs=1};referenced_event=&e;
++        unsigned before=freed;
++        complete(0,dispatcher,mode,statuses[s],1,&f,event_on?&e:NULL,buffered);
++        assert(!f.refs && (event_on?e.signals==1&&e.refs==0:f.Event.signals==1));
++        if(dispatcher||mode==UserMode){assert(!callbacks&&freed==before);KiDeliverUserApcs();}
++        assert(callbacks==1&&expected_index==1&&allocated==freed);
++        KiDeliverUserApcs();assert(callbacks==1);case_count++;
++    }
++    for(unsigned count=2;count<=8;count++)for(int aborting=0;aborting<2;aborting++){
++        reset();expected_count=count;
++        for(unsigned n=0;n<count;n++){FILE_OBJECT f={.refs=1};complete(n,1,KernelMode,0,1,&f,NULL,0);}
++        assert(callbacks==0 && allocated-freed==count);
++        if(aborting){rundown();assert(!callbacks);}else{KiDeliverUserApcs();assert(callbacks==count&&expected_index==count);}
++        assert(allocated==freed);KiDeliverUserApcs();assert(callbacks==(aborting?0:count));case_count++;
++    }
++    reset();expected_count=1;FILE_OBJECT f={.refs=1};complete(0,1,KernelMode,(int32_t)0xc0000011,0,&f,NULL,0);
++    assert(!callbacks&&allocated==freed);case_count++;
++    printf("io APC production completion/delivery/rundown: %u cases PASS, %u IRPs freed exactly once, %u MDLs and %u buffers freed\n",case_count,freed,mdls_freed,buffers_freed);
++}
+diff --git a/tests/xbe/io-apc-order/Makefile b/tests/xbe/io-apc-order/Makefile
+index 6ec14af7..88729aff 100644
+--- a/tests/xbe/io-apc-order/Makefile
++++ b/tests/xbe/io-apc-order/Makefile
+@@ -1,6 +1,6 @@
+ XBE_TITLE = IO-APC-ORDER
+ GEN_XISO = io-apc.iso
+-SRCS = $(CURDIR)/main.c
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/io-apc-order/main.c b/tests/xbe/io-apc-order/main.c
+index 580de120..9d698cb1 100644
+--- a/tests/xbe/io-apc-order/main.c
++++ b/tests/xbe/io-apc-order/main.c
+@@ -1,8 +1,9 @@
+ #include <stdio.h>
++#include <stdint.h>
++#include <string.h>
+ #include <windows.h>
+ #include <xboxkrnl/xboxkrnl.h>
+-#include <hal/debug.h>
+-#include <hal/video.h>
++#include "../regression.h"
+ #include <nxdk/mount.h>
+ 
+ static unsigned char source[8192], target[8192];
+@@ -26,34 +27,26 @@ static void NTAPI nt_completed(PVOID context, PIO_STATUS_BLOCK status,
+               (DWORD)status->Information, status);
+ }
+ 
++static void queues(void);
++static void exits(void);
++
+ int main(void)
+ {
+-    XVideoSetMode(640, 480, 32, REFRESH_DEFAULT);
++    regression_begin();
+     if (!nxIsDriveMounted('E'))
+         nxMountDrive('E', "\\Device\\Harddisk0\\Partition1");
+-    FILE *out = fopen("E:\\io-apc-result.txt", "wb");
+-    if (!out) for (;;) Sleep(1000);
+     for (unsigned i = 0; i < sizeof(source); i++) source[i] = i ^ (i >> 8);
+     HANDLE writer = CreateFile("E:\\io-apc-data.bin", GENERIC_WRITE, 0, NULL,
+                                CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+     DWORD written = 0;
+-    if (writer == INVALID_HANDLE_VALUE ||
+-        !WriteFile(writer, source, sizeof(source), &written, NULL) ||
+-        written != sizeof(source)) {
+-        fprintf(out, "FAIL setup error=%lu\n", GetLastError());
+-        fclose(out);
+-        for (;;) Sleep(1000);
+-    }
++    regression_require(writer != INVALID_HANDLE_VALUE, "open APC data writer");
++    regression_require(WriteFile(writer, source, sizeof(source), &written, NULL) &&
++                       written == sizeof(source), "write exact APC data");
+     CloseHandle(writer);
+     HANDLE reader = CreateFile("E:\\io-apc-data.bin", GENERIC_READ,
+                                FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                                FILE_FLAG_OVERLAPPED, NULL);
+-    if (reader == INVALID_HANDLE_VALUE) {
+-        fprintf(out, "FAIL open error=%lu\n", GetLastError());
+-        fclose(out);
+-        for (;;) Sleep(1000);
+-    }
+-    unsigned checks = 0, failures = 0;
++    regression_require(reader != INVALID_HANDLE_VALUE, "open asynchronous reader");
+     for (unsigned mode = 0; mode < 2; mode++) {
+         for (unsigned iteration = 0; iteration < 4; iteration++) {
+             callbacks = pending = bad_completion = 0;
+@@ -71,28 +64,175 @@ int main(void)
+             if (mode || iteration != 0) Sleep(100);
+             LONG early = callbacks;
+             /* Original BIOS: dispatcher is deferred, raw kernel APC is not. */
+-            checks++; failures += early != (mode ? 1 : 0);
++            regression_check(early == (mode ? 1 : 0),
++                             "dispatcher deferral and raw kernel callback timing");
+             DWORD wait = SleepEx(1000, TRUE);
+-            checks++; failures += wait != (mode ? 0 : WAIT_IO_COMPLETION);
+-            checks++; failures += callbacks != 1 || (!mode && pending) ||
+-                                  bad_completion;
+-            checks++; failures += !NT_SUCCESS(status) ||
+-                !NT_SUCCESS(iosb.Status) || iosb.Information != sizeof(target);
++            regression_check(wait == (mode ? 0 : WAIT_IO_COMPLETION),
++                             "alertable wait result");
++            regression_check(callbacks == 1 && (mode || !pending) &&
++                             !bad_completion, "exactly one valid completion");
++            regression_check(NT_SUCCESS(status) && NT_SUCCESS(iosb.Status) &&
++                iosb.Information == sizeof(target), "completed status and byte count");
+             unsigned mismatch = 0;
+             for (unsigned i = 0; i < sizeof(target); i++)
+                 mismatch += source[i] != target[i];
+-            checks++; failures += mismatch != 0;
+-            fprintf(out, "mode=%u iteration=%u early=%ld calls=%ld pending=%ld "
+-                         "wait=%lu status=%08lx bytes=%lu mismatch=%u\n",
++            regression_check(mismatch == 0, "every payload byte matches");
++            tap_comment("mode=%u iteration=%u early=%ld calls=%ld pending=%ld "
++                         "wait=%lu status=%08lx bytes=%lu mismatch=%u",
+                     mode, iteration, early, callbacks, pending, wait,
+                     (unsigned long)status, (unsigned long)iosb.Information,
+                     mismatch);
+-            fflush(out);
+         }
+     }
+     CloseHandle(reader);
+-    fprintf(out, "COMPLETE checks=%u failures=%u\n", checks, failures);
+-    fclose(out);
+-    debugPrint("IO APC COMPLETE checks=%u failures=%u\n", checks, failures);
+-    for (;;) Sleep(1000);
++    queues();
++    exits();
++    regression_finish();
++}
++
++/* Each request owns its IOSB, callback identity and payload independently. */
++struct request {
++    IO_STATUS_BLOCK status;
++    unsigned char bytes[8192];
++    PVOID issuer;
++    HANDLE event;
++    volatile LONG calls, errors;
++};
++static struct request requests[4];
++static HANDLE exit_ready, exit_go;
++static volatile LONG exit_errors;
++
++static void NTAPI queued_completed(DWORD error, DWORD bytes, PVOID overlapped)
++{
++    struct request *r = overlapped;
++    if (error || bytes != sizeof(r->bytes) || KeGetCurrentThread() != r->issuer)
++        InterlockedIncrement(&r->errors);
++    InterlockedIncrement(&r->calls);
++}
++static void NTAPI queued_raw(PVOID context, PIO_STATUS_BLOCK status, ULONG reserved)
++{
++    struct request *r = context;
++    (void)reserved;
++    if (status != &r->status) InterlockedIncrement(&r->errors);
++    queued_completed(NT_SUCCESS(status->Status) ? 0 : 1,
++                     (DWORD)status->Information, r);
++}
++static HANDLE reader_open(void)
++{
++    HANDLE reader = CreateFile("E:\\io-apc-data.bin", GENERIC_READ,
++        FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
++    regression_require(reader != INVALID_HANDLE_VALUE, "open independent async queue reader");
++    return reader;
++}
++static void request_init(struct request *r)
++{
++    memset(r, 0, sizeof(*r));
++    r->issuer = KeGetCurrentThread();
++    r->status.Status = STATUS_PENDING;
++    regression_require(NtCreateEvent(&r->event, NULL, NotificationEvent, FALSE)
++                       == STATUS_SUCCESS, "create per-request completion event");
++}
++static NTSTATUS request_submit(HANDLE reader, struct request *r, int raw, LONGLONG offset)
++{
++    LARGE_INTEGER position = {.QuadPart = offset};
++    return NtReadFile(reader, r->event,
++        raw ? queued_raw : (PIO_APC_ROUTINE)NtUserIoApcDispatcher,
++        raw ? (PVOID)r : (PVOID)queued_completed, &r->status,
++        r->bytes, sizeof(r->bytes), &position);
++}
++static void queues(void)
++{
++    for (int raw = 0; raw < 2; ++raw) {
++        HANDLE reader = reader_open();
++        for (unsigned n = 0; n < 4; ++n) {
++            request_init(&requests[n]);
++            regression_require(NT_SUCCESS(request_submit(reader, &requests[n], raw, 0)),
++                               "submit distinct IOSB/context with event plus APC");
++        }
++        LARGE_INTEGER timeout = {.QuadPart = -20000000};
++        for (unsigned n = 0; n < 4; ++n) {
++            regression_require(NtWaitForSingleObject(requests[n].event, FALSE, &timeout)
++                               == STATUS_SUCCESS, "completion event signals before alertable delivery");
++            regression_require(requests[n].status.Status == STATUS_SUCCESS &&
++                               requests[n].status.Information == sizeof(source),
++                               "completed IOSB published independently of callback");
++        }
++        for (unsigned n = 0; n < 4; ++n)
++            regression_require(requests[n].calls == (raw ? 1 : 0),
++                               "queued Win32 callbacks remain deferred; raw control delivered");
++        regression_require(SleepEx(100, TRUE) == (raw ? 0 : WAIT_IO_COMPLETION),
++                           "alertable boundary drains completed Win32 queue only");
++        for (unsigned n = 0; n < 4; ++n) {
++            regression_require(requests[n].calls == 1 && !requests[n].errors,
++                               "distinct request callback runs once on its issuer");
++            regression_require(!memcmp(requests[n].bytes, source, sizeof(source)),
++                               "every separately owned queued payload matches");
++            regression_require(NtClose(requests[n].event) == STATUS_SUCCESS,
++                               "close per-request completion event");
++        }
++        regression_require(SleepEx(1, TRUE) == 0, "drained queue has no synthetic extra completion");
++        regression_require(CloseHandle(reader), "close queue reader");
++    }
++    HANDLE reader = reader_open();
++    for (int raw = 0; raw < 2; ++raw) {
++        request_init(&requests[0]);
++        NTSTATUS status = request_submit(reader, &requests[0], raw, sizeof(source) * 2);
++        regression_require(status == (NTSTATUS)STATUS_END_OF_FILE, "past-EOF error returned by async submission");
++        regression_require(SleepEx(1, TRUE) == 0 && !requests[0].calls,
++                           "immediate failed request queues no completion");
++        regression_require(NtClose(requests[0].event) == STATUS_SUCCESS,
++                           "close immediate-error request event");
++    }
++    regression_require(CloseHandle(reader), "close error control reader");
++}
++static void NTAPI exit_worker(PVOID context)
++{
++    int raw = (int)(uintptr_t)context;
++    struct request *r = &requests[0];
++    HANDLE reader = CreateFile("E:\\io-apc-data.bin", GENERIC_READ,
++        FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
++    memset(r, 0, sizeof(*r));r->issuer = KeGetCurrentThread();r->status.Status = STATUS_PENDING;
++    if (reader == INVALID_HANDLE_VALUE || NtCreateEvent(&r->event, NULL, NotificationEvent, FALSE)
++        != STATUS_SUCCESS) { exit_errors++; NtSetEvent(exit_ready, NULL); return; }
++    LARGE_INTEGER timeout = {.QuadPart = -20000000};
++    if (!NT_SUCCESS(request_submit(reader, r, raw, 0)) ||
++        NtWaitForSingleObject(r->event, FALSE, &timeout) != STATUS_SUCCESS ||
++        r->status.Status != STATUS_SUCCESS || r->status.Information != sizeof(source) ||
++        r->calls != (raw ? 1 : 0) || r->errors || memcmp(r->bytes, source, sizeof(source)))
++        exit_errors++;
++    NtSetEvent(exit_ready, NULL);
++    if (NtWaitForSingleObject(exit_go, FALSE, &timeout) != STATUS_SUCCESS) exit_errors++;
++    NtClose(r->event);CloseHandle(reader);
++    /* Return without any alertable wait: queued Win32 normal callback must
++     * be rundown by thread exit, while raw control already ran normally. */
++}
++static void NTAPI exit_startup(PKSTART_ROUTINE start, PVOID context)
++{
++    start(context);PsTerminateSystemThread(STATUS_SUCCESS);
++}
++static void exits(void)
++{
++    for (unsigned round = 0; round < 4; ++round) for (int raw = 0; raw < 2; ++raw) {
++        exit_errors = 0;
++        regression_require(NtCreateEvent(&exit_ready, NULL, NotificationEvent, FALSE) == STATUS_SUCCESS,
++                           "create issuer exit-ready event");
++        regression_require(NtCreateEvent(&exit_go, NULL, NotificationEvent, FALSE) == STATUS_SUCCESS,
++                           "create controlled issuer exit gate");
++        HANDLE thread = NULL;
++        regression_require(PsCreateSystemThreadEx(&thread, 0, 0, 0, NULL, exit_worker,
++            (PVOID)(uintptr_t)raw, FALSE, FALSE, exit_startup) == STATUS_SUCCESS && thread,
++            "create independent I/O issuer");
++        LARGE_INTEGER timeout = {.QuadPart = -20000000};
++        regression_require(NtWaitForSingleObject(exit_ready, FALSE, &timeout) == STATUS_SUCCESS &&
++            !exit_errors && requests[0].calls == (raw ? 1 : 0),
++            "issuer completed I/O with correct pre-exit callback state");
++        regression_require(NtSetEvent(exit_go, NULL) == STATUS_SUCCESS, "permit issuer exit after verified completion");
++        regression_require(NtWaitForSingleObject(thread, FALSE, &timeout) == STATUS_SUCCESS,
++                           "issuer terminates without alertable delivery");
++        Sleep(1);
++        regression_require(!exit_errors && requests[0].calls == (raw ? 1 : 0),
++                           "no deferred normal callback runs during or after issuer exit");
++        regression_require(NtClose(thread) == STATUS_SUCCESS && NtClose(exit_ready) == STATUS_SUCCESS &&
++            NtClose(exit_go) == STATUS_SUCCESS, "close issuer lifecycle handles");
++    }
+ }

@@ -1,0 +1,187 @@
+diff --git a/ntoskrnl/io/iomgr/irp.c b/ntoskrnl/io/iomgr/irp.c
+index c3a4e1747102c4ff34b121f13fe9055fd8bbe664..faec125c1931c5ceea387b11c1c6c34706b7b73a 100644
+--- a/ntoskrnl/io/iomgr/irp.c
++++ b/ntoskrnl/io/iomgr/irp.c
+@@ -465,6 +465,16 @@ IopCompleteRequest(IN PKAPC Apc,
+         /* Now check if a User APC Routine was requested */
+         if (Irp->Overlay.AsynchronousParameters.UserApcRoutine)
+         {
++            KPROCESSOR_MODE ApcMode = Irp->RequestorMode;
++#ifdef SARCH_XBOX
++            /* The Xbox Win32 trampoline belongs to the user APC queue even
++             * though titles run in ring 0. A kernel APC may invoke it before
++             * NtReadFile returns and before the title records the request.
++             * Preserve raw kernel APCs and RequestorMode's probing semantics. */
++            if (Irp->Overlay.AsynchronousParameters.UserApcRoutine ==
++                (PIO_APC_ROUTINE)NtUserIoApcDispatcher)
++                ApcMode = UserMode;
++#endif
+             /* Initialize it */
+             KeInitializeApc(&Irp->Tail.Apc,
+                             KeGetCurrentThread(),
+@@ -473,7 +483,7 @@ IopCompleteRequest(IN PKAPC Apc,
+                             IopAbortIrpKernelApc,
+                             (PKNORMAL_ROUTINE)Irp->
+                             Overlay.AsynchronousParameters.UserApcRoutine,
+-                            Irp->RequestorMode,
++                            ApcMode,
+                             Irp->
+                             Overlay.AsynchronousParameters.UserApcContext);
+ 
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index 53eb75226c07787d5cc613135799183b351b6ab4..ffb366ce2f4cfd178ac29348fdc69ffa4aac72cf 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -1049,13 +1049,9 @@ VOID NTAPI IoMarkIrpMustComplete(_In_ PVOID Irp) { UNREFERENCED_PARAMETER(Irp);
+  * completion routine and IosbPtr doubles as the title's OVERLAPPED.  Convert
+  * NTSTATUS/Information to (dwErrorCode, dwBytesTransferred) and invoke.
+  *
+- * Titles run ring 0, so RequestorMode = KernelMode and the completion comes
+- * as a kernel-mode APC -- it runs but does not set UserApcPending, so an
+- * alertable UserMode wait sleeps its full timeout instead of waking with
+- * STATUS_USER_APC.  Flag the pending user APC here so KiCheckAlertability
+- * returns STATUS_USER_APC from the wait. */
++ * IopCompleteRequest queues title completions as user APCs even though titles
++ * run in ring 0. KiDeliverUserApcs invokes this during an alertable wait. */
+ NTKERNELAPI ULONG NTAPI RtlNtStatusToDosError(IN NTSTATUS Status);
+-NTKERNELAPI VOID NTAPI KiSetCurrentThreadUserApcPending(VOID);
+ VOID NTAPI NtUserIoApcDispatcher(_In_ PVOID ApcContext, _In_ PVOID IosbPtr,
+                                      _In_ ULONG Reserved)
+ {
+@@ -1076,7 +1072,6 @@ VOID NTAPI NtUserIoApcDispatcher(_In_ PVOID ApcContext, _In_ PVOID IosbPtr,
+     /* lpOverlapped == the IoStatusBlock the title handed to Nt{Read,Write}File. */
+     CompletionRoutine(dwError, dwTransferred, (PVOID)Iosb);
+ 
+-    KiSetCurrentThreadUserApcPending();
+ }
+ 
+ /* --- kernel ordinal export ------------------------------------------------ *
+diff --git a/sdk/include/reactos/xb-io.h b/sdk/include/reactos/xb-io.h
+index b8a6adfee6957a2a9dbb3961453253007585ad23..dcd5153dd9274f27da355635ad8d0d740b13d21c 100644
+--- a/sdk/include/reactos/xb-io.h
++++ b/sdk/include/reactos/xb-io.h
+@@ -3,3 +3,8 @@
+ /* Native private IRP flag: Xbox SG always publishes a final result, including
+  * inline errors, synchronous-file errors and cancellation. Not a title flag. */
+ #define IRP_XB_SG_COMPLETION 0x00010000UL
++
++/* Xbox Win32 I/O-completion trampoline; unlike a raw kernel APC routine,
++ * this callback must execute only at an alertable user wait. */
++VOID NTAPI NtUserIoApcDispatcher(PVOID ApcContext, PVOID IosbPtr,
++                                ULONG Reserved);
+diff --git a/tests/xbe/io-apc-order/Makefile b/tests/xbe/io-apc-order/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..6ec14af77a5ce602c0b33066382af8b1712b66d6
+--- /dev/null
++++ b/tests/xbe/io-apc-order/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = IO-APC-ORDER
++GEN_XISO = io-apc.iso
++SRCS = $(CURDIR)/main.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/io-apc-order/main.c b/tests/xbe/io-apc-order/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..580de1206882d44654b6f6ed0603145f600d22e7
+--- /dev/null
++++ b/tests/xbe/io-apc-order/main.c
+@@ -0,0 +1,98 @@
++#include <stdio.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <hal/debug.h>
++#include <hal/video.h>
++#include <nxdk/mount.h>
++
++static unsigned char source[8192], target[8192];
++static volatile LONG callbacks, pending, bad_completion;
++static IO_STATUS_BLOCK iosb;
++
++static void NTAPI completed(DWORD error, DWORD bytes, PVOID overlapped)
++{
++    if (error || bytes != sizeof(target) || overlapped != &iosb)
++        InterlockedIncrement(&bad_completion);
++    InterlockedIncrement(&callbacks);
++    pending = 0;
++}
++
++static void NTAPI nt_completed(PVOID context, PIO_STATUS_BLOCK status,
++                               ULONG reserved)
++{
++    (void)context;
++    (void)reserved;
++    completed(NT_SUCCESS(status->Status) ? 0 : 1,
++              (DWORD)status->Information, status);
++}
++
++int main(void)
++{
++    XVideoSetMode(640, 480, 32, REFRESH_DEFAULT);
++    if (!nxIsDriveMounted('E'))
++        nxMountDrive('E', "\\Device\\Harddisk0\\Partition1");
++    FILE *out = fopen("E:\\io-apc-result.txt", "wb");
++    if (!out) for (;;) Sleep(1000);
++    for (unsigned i = 0; i < sizeof(source); i++) source[i] = i ^ (i >> 8);
++    HANDLE writer = CreateFile("E:\\io-apc-data.bin", GENERIC_WRITE, 0, NULL,
++                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
++    DWORD written = 0;
++    if (writer == INVALID_HANDLE_VALUE ||
++        !WriteFile(writer, source, sizeof(source), &written, NULL) ||
++        written != sizeof(source)) {
++        fprintf(out, "FAIL setup error=%lu\n", GetLastError());
++        fclose(out);
++        for (;;) Sleep(1000);
++    }
++    CloseHandle(writer);
++    HANDLE reader = CreateFile("E:\\io-apc-data.bin", GENERIC_READ,
++                               FILE_SHARE_READ, NULL, OPEN_EXISTING,
++                               FILE_FLAG_OVERLAPPED, NULL);
++    if (reader == INVALID_HANDLE_VALUE) {
++        fprintf(out, "FAIL open error=%lu\n", GetLastError());
++        fclose(out);
++        for (;;) Sleep(1000);
++    }
++    unsigned checks = 0, failures = 0;
++    for (unsigned mode = 0; mode < 2; mode++) {
++        for (unsigned iteration = 0; iteration < 4; iteration++) {
++            callbacks = pending = bad_completion = 0;
++            iosb.Status = STATUS_PENDING;
++            iosb.Information = 0;
++            LARGE_INTEGER offset = { .QuadPart = 0 };
++            NTSTATUS status = NtReadFile(reader, NULL,
++                mode ? nt_completed : (PIO_APC_ROUTINE)NtUserIoApcDispatcher,
++                mode ? NULL : (PVOID)completed, &iosb, target,
++                sizeof(target), &offset);
++            /* The title records its request only AFTER submission returns. */
++            pending = 1;
++            /* First dispatcher request enters the wait immediately; the other
++             * dispatcher reads also exercise a long nonalertable interval. */
++            if (mode || iteration != 0) Sleep(100);
++            LONG early = callbacks;
++            /* Original BIOS: dispatcher is deferred, raw kernel APC is not. */
++            checks++; failures += early != (mode ? 1 : 0);
++            DWORD wait = SleepEx(1000, TRUE);
++            checks++; failures += wait != (mode ? 0 : WAIT_IO_COMPLETION);
++            checks++; failures += callbacks != 1 || (!mode && pending) ||
++                                  bad_completion;
++            checks++; failures += !NT_SUCCESS(status) ||
++                !NT_SUCCESS(iosb.Status) || iosb.Information != sizeof(target);
++            unsigned mismatch = 0;
++            for (unsigned i = 0; i < sizeof(target); i++)
++                mismatch += source[i] != target[i];
++            checks++; failures += mismatch != 0;
++            fprintf(out, "mode=%u iteration=%u early=%ld calls=%ld pending=%ld "
++                         "wait=%lu status=%08lx bytes=%lu mismatch=%u\n",
++                    mode, iteration, early, callbacks, pending, wait,
++                    (unsigned long)status, (unsigned long)iosb.Information,
++                    mismatch);
++            fflush(out);
++        }
++    }
++    CloseHandle(reader);
++    fprintf(out, "COMPLETE checks=%u failures=%u\n", checks, failures);
++    fclose(out);
++    debugPrint("IO APC COMPLETE checks=%u failures=%u\n", checks, failures);
++    for (;;) Sleep(1000);
++}
