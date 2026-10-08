@@ -362,7 +362,7 @@ shutil.copyfile(sys.argv[-2], sys.argv[-1])
 ''')
         self.converter.chmod(0o755)
 
-    def launch(self, tap=False, preserve_hdd=False, **env):
+    def launch(self, tap=False, preserve_hdd=False, tb_plugin=None, **env):
         args = [sys.executable, str(ROOT / "scripts/run-firmware.py"),
                 "--xemu", str(self.xemu), "--flash", str(self.flash),
                 "--hdd", str(self.hdd), "--dvd", str(self.dvd),
@@ -371,6 +371,8 @@ shutil.copyfile(sys.argv[-2], sys.argv[-1])
             args.append("--expect-tap")
         if preserve_hdd:
             args.append("--preserve-hdd")
+        if tb_plugin is not None:
+            args.extend(["--tb-plugin", str(tb_plugin)])
         return subprocess.run(args, capture_output=True, text=True,
                               env=dict(os.environ, ARGS_FILE=str(self.args_file),
                                        PATH=str(self.root) + os.pathsep + os.environ['PATH'], **env))
@@ -395,6 +397,23 @@ shutil.copyfile(sys.argv[-2], sys.argv[-1])
         result = self.launch()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing", result.stderr.lower())
+        self.assertFalse(self.args_file.exists())
+
+    def test_optional_profiler_is_explicit_and_hash_pinned(self):
+        plugin = self.root / "tb_frequency.so"
+        plugin.write_bytes(b"plugin fixture")
+        result = self.launch(tb_plugin=plugin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = json.loads(self.args_file.read_text())
+        self.assertEqual(args[args.index("-plugin") + 1],
+                         f"{plugin},output={self.output}/tb-frequency.ndjson")
+        manifest = json.loads((self.output / "run.json").read_text())
+        self.assertEqual(manifest["assets"]["tb_plugin"]["sha256"],
+                         hashlib.sha256(b"plugin fixture").hexdigest())
+
+    def test_missing_plugin_never_launches(self):
+        result = self.launch(tb_plugin=self.root / "missing.so")
+        self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.args_file.exists())
 
     def test_preserved_guest_writes_use_private_copy(self):
