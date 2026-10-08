@@ -1,0 +1,133 @@
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -2001,13 +2001,47 @@
+         PFILE_RENAME_INFORMATION nt;
+         UNICODE_STRING u;
+         ULONG ntlen;
++        HANDLE RootDirectory;
++        ANSI_STRING Target;
++        PCHAR Prefixed = NULL;
++        CHAR Drive;
+         NTSTATUS status;
+ 
+         if (Length < sizeof(XBE_RENAME) || x->FileName.Buffer == NULL ||
+             x->FileName.Length == 0)
+             return STATUS_INVALID_PARAMETER;
+ 
+-        status = RtlAnsiStringToUnicodeString(&u, &x->FileName, TRUE);
++        RootDirectory = x->RootDirectory;
++        Target = x->FileName;
++        Drive = Target.Length >= 2 ? Target.Buffer[0] : 0;
++        if ((((Drive >= 'A' && Drive <= 'Z') ||
++              (Drive >= 'a' && Drive <= 'z')) && Target.Buffer[1] == ':') ||
++            (RootDirectory == (HANDLE)(LONG_PTR)-3 && Target.Buffer[0] != '\\'))
++        {
++            static const CHAR Prefix[] = "\\??\\";
++            ULONG Total = sizeof(Prefix) - 1 + Target.Length;
++
++            /* The NT target is a counted Unicode string. */
++            if (Total > 0x7ffe)
++                return STATUS_NAME_TOO_LONG;
++            Prefixed = ExAllocatePoolWithTag(PagedPool, Total, 'nRbX');
++            if (Prefixed == NULL)
++                return STATUS_INSUFFICIENT_RESOURCES;
++            RtlCopyMemory(Prefixed, Prefix, sizeof(Prefix) - 1);
++            RtlCopyMemory(Prefixed + sizeof(Prefix) - 1,
++                          Target.Buffer, Target.Length);
++            Target.Buffer = Prefixed;
++            Target.Length = Target.MaximumLength = Total;
++            RootDirectory = NULL;
++        }
++        else if (RootDirectory == (HANDLE)(LONG_PTR)-3)
++        {
++            RootDirectory = NULL;
++        }
++
++        status = RtlAnsiStringToUnicodeString(&u, &Target, TRUE);
++        if (Prefixed != NULL)
++            ExFreePoolWithTag(Prefixed, 'nRbX');
+         if (!NT_SUCCESS(status))
+             return status;
+ 
+@@ -2019,7 +2053,7 @@
+             return STATUS_INSUFFICIENT_RESOURCES;
+         }
+         nt->ReplaceIfExists = x->ReplaceIfExists;
+-        nt->RootDirectory = x->RootDirectory;
++        nt->RootDirectory = RootDirectory;
+         nt->FileNameLength = u.Length;
+         RtlCopyMemory(nt->FileName, u.Buffer, u.Length);
+ 
+diff --git a/tests/host/xbox-rename/check.py b/tests/host/xbox-rename/check.py
+new file mode 100755
+--- /dev/null
++++ b/tests/host/xbox-rename/check.py
+@@ -0,0 +1,67 @@
++#!/usr/bin/env python3
++"""Compile the production Xbox rename adapter against a checked NT boundary."""
++import subprocess, sys
++from pathlib import Path
++root, out = map(Path, sys.argv[1:3]); out.mkdir(parents=True, exist_ok=True)
++s = (root/'ntoskrnl/xb/xbe.c').read_text()
++a = s.index('NTSTATUS NTAPI\nXeNtSetInformationFile'); b = s.index('/* Xbox returns the link target', a)
++shim = r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdio.h>
++#include <assert.h>
++typedef uint8_t BOOLEAN;typedef uint16_t USHORT,WCHAR;typedef uint32_t ULONG;typedef intptr_t LONG_PTR;typedef int32_t NTSTATUS;
++typedef char CHAR;typedef void *HANDLE,*PVOID,*PIO_STATUS_BLOCK;typedef char *PCHAR;
++typedef struct {USHORT Length,MaximumLength;char *Buffer;} ANSI_STRING;
++typedef struct {USHORT Length,MaximumLength;WCHAR *Buffer;} UNICODE_STRING;
++typedef struct {BOOLEAN ReplaceIfExists;HANDLE RootDirectory;ULONG FileNameLength;WCHAR FileName[1];} FILE_RENAME_INFORMATION,*PFILE_RENAME_INFORMATION;
++typedef ULONG FILE_INFORMATION_CLASS;
++#define NTAPI
++#define TRUE 1
++#define NULL_ROOT NULL
++#define PagedPool 1
++#define NonPagedPool 0
++#define FileRenameInformation 10
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000d)
++#define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xc000009a)
++#define STATUS_NAME_TOO_LONG ((NTSTATUS)0xc0000106)
++#define NT_SUCCESS(s) ((s)>=0)
++#define FIELD_OFFSET(t,f) offsetof(t,f)
++#define RtlCopyMemory memcpy
++static unsigned allocations,fail_at,live,calls;static HANDLE seen_root;static char seen_name[256];static NTSTATUS native_status;
++static void *ExAllocatePoolWithTag(int pool,size_t n,unsigned tag){(void)pool;(void)tag;if(++allocations==fail_at)return NULL;void *p=malloc(n);if(p)live++;return p;}
++static void ExFreePoolWithTag(void *p,unsigned tag){(void)tag;if(p){live--;free(p);}}
++static void ExFreePool(void *p){ExFreePoolWithTag(p,0);}
++static NTSTATUS RtlAnsiStringToUnicodeString(UNICODE_STRING *u,const ANSI_STRING *a,int alloc){(void)alloc;u->Buffer=ExAllocatePoolWithTag(0,(a->Length+1)*2,0);if(!u->Buffer)return STATUS_INSUFFICIENT_RESOURCES;u->Length=a->Length*2;u->MaximumLength=u->Length+2;for(unsigned i=0;i<a->Length;i++)u->Buffer[i]=(unsigned char)a->Buffer[i];u->Buffer[a->Length]=0;return 0;}
++static void RtlFreeUnicodeString(UNICODE_STRING *u){ExFreePool(u->Buffer);}
++static NTSTATUS NtSetInformationFile(HANDLE h,PIO_STATUS_BLOCK i,PVOID v,ULONG n,ULONG c){(void)h;(void)i;(void)n;calls++;if(c!=10)return native_status;PFILE_RENAME_INFORMATION r=v;seen_root=r->RootDirectory;unsigned len=r->FileNameLength/2;assert(len<sizeof(seen_name));for(unsigned j=0;j<len;j++)seen_name[j]=(char)r->FileName[j];seen_name[len]=0;return native_status;}
++'''
++tests = r'''
++typedef struct {BOOLEAN ReplaceIfExists;HANDLE RootDirectory;ANSI_STRING FileName;} XBOX_RENAME;
++static unsigned cases,failures;
++static void run(const char *path,HANDLE root,const char *expected,HANDLE expected_root,unsigned oom,NTSTATUS status){
++ allocations=live=calls=0;fail_at=oom;seen_name[0]=0;native_status=0;
++ XBOX_RENAME x={0,root,{strlen(path),strlen(path)+1,(char*)path}};
++ NTSTATUS r=XeNtSetInformationFile((HANDLE)1,NULL,&x,sizeof(x),10);cases++;
++ if(r!=status || live || (!status && (calls!=1 || strcmp(seen_name,expected) || seen_root!=expected_root)) || (status && calls)){
++  fprintf(stderr,"FAIL path=%s root=%ld result=%08x name=%s root=%ld live=%u calls=%u\n",path,(long)(intptr_t)root,(unsigned)r,seen_name,(long)(intptr_t)seen_root,live,calls);failures++;
++ }
++}
++int main(void){
++ run("Z:\\tempsave.ess",(HANDLE)(intptr_t)-3,"\\??\\Z:\\tempsave.ess",NULL,0,0);
++ run("z:\\tempsave.ess",(HANDLE)77,"\\??\\z:\\tempsave.ess",NULL,0,0);
++ run("relative.ess",(HANDLE)77,"relative.ess",(HANDLE)77,0,0);
++ run("relative.ess",NULL,"relative.ess",NULL,0,0);
++ run("Z:\\tempsave.ess",NULL,"\\??\\Z:\\tempsave.ess",NULL,0,0);
++ run("\\Device\\Harddisk0\\test.ess",(HANDLE)(intptr_t)-3,"\\Device\\Harddisk0\\test.ess",NULL,0,0);
++ run("Z:\\tempsave.ess",(HANDLE)(intptr_t)-3,"",NULL,1,STATUS_INSUFFICIENT_RESOURCES);
++ run("Z:\\tempsave.ess",(HANDLE)(intptr_t)-3,"",NULL,2,STATUS_INSUFFICIENT_RESOURCES);
++ run("Z:\\tempsave.ess",(HANDLE)(intptr_t)-3,"",NULL,3,STATUS_INSUFFICIENT_RESOURCES);
++ printf("%u production rename cases, %u failures\n",cases,failures);return !!failures;
++}
++'''
++(out/'rename.c').write_text(shim+s[a:b]+tests)
++subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-multichar','-fsanitize=address,undefined',str(out/'rename.c'),'-o',str(out/'rename')],check=True)
++subprocess.run([str(out/'rename')],check=True)
