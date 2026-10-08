@@ -1,0 +1,175 @@
+diff --git a/drivers/filesystems/xdvdfs/xdvdfs.c b/drivers/filesystems/xdvdfs/xdvdfs.c
+--- a/drivers/filesystems/xdvdfs/xdvdfs.c
++++ b/drivers/filesystems/xdvdfs/xdvdfs.c
+@@ -1149,36 +1149,44 @@
+     return STATUS_SUCCESS;
+ }
+ 
+-/*
+- * Match an ASCII name against the caller's UNICODE search pattern.  We
+- * support '*' and exact-name only -- that's what titles typically pass for
+- * D:\.  Anything more complex degrades to "match all" rather than failing.
+- */
++/* Match optical ASCII names using the kernel's Xbox wildcard semantics. */
+ static BOOLEAN
+ XdvdMatchName(_In_reads_(NameLen) PCSTR Name, _In_ ULONG NameLen,
+-                _In_opt_ PUNICODE_STRING Pattern)
+-{
+-    ULONG i;
++              _In_opt_ PUNICODE_STRING Pattern)
++{
++    WCHAR nameBuffer[255], patternBuffer[255];
++    UNICODE_STRING name, pattern;
++    ULONG i, patternChars;
+ 
+     if (Pattern == NULL || Pattern->Length == 0)
+         return TRUE;
+ 
+-    /* "*" -- accept everything. */
+-    if (Pattern->Length == sizeof(WCHAR) && Pattern->Buffer[0] == L'*')
+-        return TRUE;
+-
+-    /* Exact ASCII compare against the unicode pattern. */
+-    if (Pattern->Length != NameLen * sizeof(WCHAR))
++    if (NameLen > RTL_NUMBER_OF(nameBuffer) ||
++        Pattern->Buffer == NULL ||
++        Pattern->Length > sizeof(patternBuffer) ||
++        Pattern->Length % sizeof(WCHAR) != 0)
+         return FALSE;
++
++    /* Fold ASCII only, as in the previous exact-name comparison.  Passing
++     * FALSE avoids allocating an uppercase copy for every directory entry. */
+     for (i = 0; i < NameLen; ++i)
+     {
+-        UCHAR a = (UCHAR)Name[i];
+-        WCHAR b = Pattern->Buffer[i];
+-        if (a >= 'a' && a <= 'z') a -= ('a' - 'A');
+-        if (b >= L'a' && b <= L'z') b -= (L'a' - L'A');
+-        if ((WCHAR)a != b) return FALSE;
+-    }
+-    return TRUE;
++        WCHAR c = (UCHAR)Name[i];
++        if (c >= L'a' && c <= L'z') c -= (L'a' - L'A');
++        nameBuffer[i] = c;
++    }
++    patternChars = Pattern->Length / sizeof(WCHAR);
++    for (i = 0; i < patternChars; ++i)
++    {
++        WCHAR c = Pattern->Buffer[i];
++        if (c >= L'a' && c <= L'z') c -= (L'a' - L'A');
++        patternBuffer[i] = c;
++    }
++    name.Buffer = nameBuffer;
++    name.Length = name.MaximumLength = NameLen * sizeof(WCHAR);
++    pattern.Buffer = patternBuffer;
++    pattern.Length = pattern.MaximumLength = Pattern->Length;
++    return FsRtlIsNameInExpression(&pattern, &name, FALSE, NULL);
+ }
+ 
+ static NTSTATUS NTAPI
+diff --git a/tests/host/xdvdfs-masks/check.py b/tests/host/xdvdfs-masks/check.py
+new file mode 100755
+--- /dev/null
++++ b/tests/host/xdvdfs-masks/check.py
+@@ -0,0 +1,101 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Run the actual optical matcher and Xbox FsRtl matcher against literal masks."""
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++sys.dont_write_bytecode = True
++root = Path(sys.argv[2]).resolve() if len(sys.argv)>2 else Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve();out.mkdir(parents=True, exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py')
++extract=importlib.util.module_from_spec(spec);spec.loader.exec_module(extract)
++driver=(root/'drivers/filesystems/xdvdfs/xdvdfs.c').read_text()
++rtl=(root/'ntoskrnl/fsrtl/name.c').read_text()
++shim=r'''
++#include <stdint.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++#include <assert.h>
++#define IN
++#define OPTIONAL
++#define NTAPI
++#define _In_reads_(n)
++#define _In_
++#define _In_opt_
++#define TRUE 1
++#define FALSE 0
++#define SARCH_XBOX
++#define PAGED_CODE() ((void)0)
++#define ASSERT assert
++#define RTL_NUMBER_OF(a) (sizeof(a)/sizeof((a)[0]))
++#define UNICODE_NULL 0
++#define PagedPool 1
++#define POOL_RAISE_IF_ALLOCATION_FAILURE 16
++#define NT_SUCCESS(s) ((s)>=0)
++#define DPRINT1(...) ((void)0)
++#define RtlCopyMemory memcpy
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define RtlEqualMemory(p,q,n) (memcmp(p,q,n)==0)
++#define FsRtlIsUnicodeCharacterWild(c) ((c)=='*'||(c)=='?'||(c)=='<'||(c)=='>'||(c)=='"')
++typedef uint16_t WCHAR,*PWCHAR,USHORT,*PUSHORT;
++typedef uint32_t ULONG;typedef uint8_t UCHAR,BOOLEAN;
++typedef const char *PCSTR;typedef void *PVOID;typedef int32_t NTSTATUS;
++typedef struct {USHORT Length,MaximumLength;PWCHAR Buffer;} UNICODE_STRING,*PUNICODE_STRING;
++static void *ExAllocatePoolWithTag(ULONG flags,size_t bytes,ULONG tag){(void)flags;(void)tag;return malloc(bytes);}
++static void ExFreePoolWithTag(void *p,ULONG tag){(void)tag;free(p);}
++static NTSTATUS RtlUpcaseUnicodeString(PUNICODE_STRING d,PUNICODE_STRING s,BOOLEAN allocate){
++ (void)d;(void)s;(void)allocate;abort();}
++static void RtlFreeUnicodeString(PUNICODE_STRING s){free(s->Buffer);}
++static void ExRaiseStatus(NTSTATUS s){(void)s;abort();}
++BOOLEAN FsRtlDoesNameContainWildCards(PUNICODE_STRING);
++BOOLEAN FsRtlIsNameInExpression(PUNICODE_STRING,PUNICODE_STRING,BOOLEAN,PWCHAR);
++'''
++functions='\n'.join(extract.function(rtl[rtl.rfind('\n\n',0,rtl.index(n+'(IN')): ],n) for n in ['FsRtlDoesNameContainWildCards','FsRtlIsNameInExpressionPrivate','FsRtlIsNameInExpression'])+'\n'+extract.function(driver,'XdvdMatchName')
++tests=r'''
++static unsigned cases,failures;
++static void run(const char *name,const char *mask,int expected){
++ WCHAR pattern[256];memset(pattern,0x77,sizeof(pattern));
++ size_t n=strlen(mask);assert(n<=255);for(size_t i=0;i<n;i++)pattern[i]=(unsigned char)mask[i];
++ UNICODE_STRING p={(USHORT)(n*2),(USHORT)(n*2),pattern};
++ int got=XdvdMatchName(name,strlen(name),&p);
++ if(got!=expected){printf("FAIL name=%s mask=%s expected=%d got=%d\n",name,mask,expected,got);failures++;}cases++;
++}
++int main(void){
++ run("help_00.dds","help_*.dds",1);
++ run("controller_01.dds","controller_*.dds",1);
++ run("help_02.dds","controller_*.dds",0);
++ run("controller_03.dds","help_*.dds",0);
++ run("HELP_00.DDS","help_*.dds",1);
++ run("help_00.dds","HELP_*.DDS",1);
++ run("help_.dds","help_*.dds",1);
++ run("help_00.dds.bak","help_*.dds",0);
++ run("help_00.dds","*.dds",1);
++ run("help_00.txt","*.dds",0);
++ run("help_01.dds","help_0?.dds",1);
++ run("help_001.dds","help_0?.dds",0);
++ run("controller_01.dds","*trol*01.*",1);
++ run("help_00.dds","*trol*01.*",0);
++ run("Font3.xpr","font3.XPR",1);
++ run("Font3.xpr","font2.XPR",0);
++ run("no_extension","*.*",0);
++ run("Font3.xpr","*.*",1);
++ run("Font3.xpr","*",1);
++ run("<", "<", 1);run("file.dds", "<", 0);
++ run(">", ">", 1);run("x", ">", 0);
++ run("\"", "\"", 1);run(".", "\"", 0);
++ run("Font3.xpr","",1);
++ run("help_00.dds","**help_**.dds",1);
++ run("help_00.dds","h?lp*0*.dds",1);
++ run("help_00.dds","h?lp*1*.dds",0);
++ char longest[256];memset(longest,'a',255);longest[255]=0;
++ run(longest,longest,1);run(longest,"*",1);
++ assert(XdvdMatchName("name",4,NULL));cases++;
++ printf("%u production optical/FsRtl checks, %u failures\n",cases,failures);
++ return failures?1:0;
++}
++'''
++(out/'matcher.c').write_text(shim+functions+tests)
++subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-multichar','-fsanitize=address,undefined','-fno-omit-frame-pointer',str(out/'matcher.c'),'-o',str(out/'matcher')],check=True)
++subprocess.run([str(out/'matcher')],check=True)
