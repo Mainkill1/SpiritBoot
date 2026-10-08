@@ -1,0 +1,24 @@
+name: hotpath-profiler
+on:
+  pull_request:
+  push:
+jobs:
+  plugin-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Mainkill1/xemu
+          ref: dcc536830deba245eec36cd009db5860ca04884c
+          path: .profiling-xemu
+          sparse-checkout: include/qemu/qemu-plugin.h
+          sparse-checkout-cone-mode: false
+      - name: Install plugin compiler dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev pkg-config
+      - name: Compile production plugin against pinned ABI
+        run: python3 scripts/build-profiler.py --xemu-source .profiling-xemu --output artifacts/profiler
+      - name: Host and production-plugin callback contracts
+        env:
+          XEMU_PLUGIN_INCLUDE: ${{ github.workspace }}/.profiling-xemu/include/qemu
+        run: python3 -m unittest discover -s tests/host -v

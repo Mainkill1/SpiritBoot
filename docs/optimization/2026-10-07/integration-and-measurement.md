@@ -1,6 +1,6 @@
 # Kernel optimization integration and measurement
 
-This packages the independently reviewed public source at commit
+This historical report describes the independently reviewed public source at commit
 `87aba89a6ba9b2a58f2edd6e52d5e3aa1e8649d7`, tree
 `f7adb302a762ed1945cc07d9c2ff428c643ba959`. The frozen source passed Task 1
 specification and quality review. The final qualification report below separates
@@ -11,10 +11,14 @@ preserve this exact tree and its licensing notices.
 
 ## Reproducible source inputs
 
-The existing build driver clones the pristine public Roswell base
+For this report, the build driver cloned the pristine public Roswell base
 `1569e2e89fb47cc72b9c704a8884f98200432bd4` into an isolated work directory,
-validates the ordered lock entries and applies them to its index. Both patches
-must apply cleanly; `git write-tree` must equal the approved tree above.
+validated the ordered entries in the
+[historical publication lock](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/sources/firmware-lock.json)
+and applied them to its index. Both historical patches must apply cleanly;
+their `git write-tree` must equal the approved tree above. Current main's
+lock includes later patches and its build manifest identifies a different
+reconstructed tree; the timing results here do not qualify those additions.
 The second patch is exactly `git diff --binary 291ad9759f7993cb1f96d73bfa1c6f333c2bef34 87aba89a6ba9b2a58f2edd6e52d5e3aa1e8649d7`
 from the public source repository. It includes source, host fixtures and the
 public performance guest, with no generated executables or media.
@@ -67,7 +71,7 @@ slots on every exit in both ordinary and diagnostic modes.
 
 ## Host work evidence
 
-[host-work.json](host-work.json) is copied byte-for-byte from controller-retained
+[host-work.json](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/optimization/2026-10-07/host-work.json) is copied byte-for-byte from controller-retained
 `artifacts/optimization/host-work.json`, produced by the actual-source fixtures
 on the frozen source and public baseline. It contains operation counts and
 complete caller-state differential hashes. These establish reduced work in
@@ -102,7 +106,7 @@ IRQL, backing rollback or native callbacks.
 
 ## CI correctness and direct runtime qualification
 
-The firmware workflow builds both variants in the pinned toolchain, checks
+The historical firmware workflow built both variants in the pinned toolchain, checking
 `git write-tree` of the manifest source directory, runs existing clean-room
 host checks and the new `check.py --optimized`, `pins.py --optimized` and
 `pins.py --optimized --diagnostics`. It retains logs and `work.json` as artifacts.
@@ -237,6 +241,6 @@ SHA medians include slower observations; their inconsistent paired signs and
 observed variation leave them inconclusive. Those raw results are retained.
 No game FPS or gameplay improvement is asserted.
 
-See the [complete timing table](../../evidence/optimization-2026-10-07/performance-report-final.md),
-[raw samples and exact decisions](../../evidence/optimization-2026-10-07/performance-report-final.json),
-and [build and qualification evidence](../../evidence/optimization-2026-10-07/README.md).
+See the [complete timing table](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/evidence/optimization-2026-10-07/performance-report-final.md),
+[raw samples and exact decisions](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/evidence/optimization-2026-10-07/performance-report-final.json),
+and [build and qualification evidence](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/evidence/optimization-2026-10-07/README.md).

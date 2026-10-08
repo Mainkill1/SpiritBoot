@@ -18,10 +18,13 @@ def main():
     parser.add_argument("--expect-tap", action="store_true")
     parser.add_argument("--preserve-hdd", action="store_true",
                         help="retain guest writes on a private HDD copy in the capture directory")
+    parser.add_argument("--tb-plugin", type=Path,
+                        help="explicit optional TB-frequency plugin; requires plugin-enabled xemu")
     args = parser.parse_args()
     try:
         result = run_firmware(args.xemu, args.flash, args.hdd, args.dvd,
-                              args.output, args.timeout, args.expect_tap, args.preserve_hdd)
+                              args.output, args.timeout, args.expect_tap, args.preserve_hdd,
+                              tb_plugin=args.tb_plugin)
     except (OSError, ValueError) as error:
         print(f"launch failed: {error}", file=sys.stderr)
         return 1
