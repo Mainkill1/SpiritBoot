@@ -227,7 +227,8 @@ def grade_tap(text):
             "ran": len(results), "errors": errors, **counts}
 
 
-def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve_hdd=False):
+def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve_hdd=False,
+                 tb_plugin=None):
     """Capture an open-firmware run. A deadline never becomes a passing test."""
     if not isinstance(timeout, (int, float)) or not 0 < timeout <= 86400:
         raise ValueError("timeout must be between 0 and 86400 seconds")
@@ -235,6 +236,10 @@ def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve
              "hdd": Path(hdd).resolve()}
     if dvd is not None:
         paths["dvd"] = Path(dvd).resolve()
+    if tb_plugin is not None:
+        paths["tb_plugin"] = Path(tb_plugin).resolve()
+        if "," in str(paths["tb_plugin"]):
+            raise ValueError("plugin path cannot contain a comma")
     for name, path in paths.items():
         if not path.is_file():
             raise ValueError(f"missing {name} input: {path}")
@@ -269,6 +274,11 @@ def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve
     if not preserve_hdd:
         command.append("-snapshot")
     command.extend(["-device", "lpc47m157", "-serial", f"file:{serial}"])
+    if tb_plugin is not None:
+        capture = output / "tb-frequency.ndjson"
+        if "," in str(capture):
+            raise ValueError("profile output path cannot contain a comma")
+        command.extend(["-plugin", f'{paths["tb_plugin"]},output={capture}'])
     manifest = {"schema": 1, "status": "launch_failed", "command": command,
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "timeout_seconds": timeout, "memory_mib": 128,

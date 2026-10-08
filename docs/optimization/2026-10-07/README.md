@@ -2,7 +2,7 @@
 
 Branch: `perf/kernel-call-optimization`, based on validated `feat/clean-room-kernel` product a88247760c91de599a14342158561373b072dfce. Source references in this report identify the exact public kernel snapshot 291ad9759f7993cb1f96d73bfa1c6f333c2bef34, tree 8ba32f2153b4716c8cac269bad06a78553f98ded, before optimization. Build inputs include 569 release and 583 checked source files; unused desktop and other-architecture code is excluded.
 
-[JSON audit](kernel-call-audit.json) and [CSV audit](kernel-call-audit.csv) give a source reference, backend, verdict, reason, risk and measurement proposal for every declared export. Coverage checks confirmed 371 unique entries, exact names/kinds against the actual build definition, matching source tree, and existing source files/line references.
+[JSON audit](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/optimization/2026-10-07/kernel-call-audit.json) and [CSV audit](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/optimization/2026-10-07/kernel-call-audit.csv) give a source reference, backend, verdict, reason, risk and measurement proposal for every declared export. Coverage checks confirmed 371 unique entries, exact names/kinds against the actual build definition, matching source tree, and existing source files/line references.
 
 | Kind | Count |
 | --- | ---: |
@@ -34,7 +34,7 @@ The scheduler audit identified a wait-block gap: NxkWaitForMultipleObjectsMode a
 
 Before implementation, product host checks: 41 passes and one root-only skip; kernel clean-room host checks: 88/88. Validated starting BIOS passed direct API/contract/warm-reboot guests and both full XISO variants. Its GitHub firmware workflow 37689569960 also completed successfully. No optimization timing, new firmware qualification or Conker gameplay result is asserted by this audit. Per-export decisions are static source assessments; runtime frequency and speedups require actual measurements. Existing public Xbox test coverage was inspected, not rerun by audit workers. Clean-room agents received public source and behavior requirements only; shared filesystem separation is procedural.
 
-[Integration and measurement guide](integration-and-measurement.md) records the reviewed source tree, ordered patch hashes, actual-source work evidence and conservative paired-capture analyzer contract. Runtime qualification is complete. Validated images and supporting evidence are included in this branch: [final evidence](../../evidence/optimization-2026-10-07/README.md) and [BIOS publication details](../../../bios/optimized-xemu/README.md).
+[Integration and measurement guide](integration-and-measurement.md) records the reviewed source tree, ordered patch hashes, actual-source work evidence and conservative paired-capture analyzer contract. Runtime qualification is complete. Validated images and supporting evidence remain in the immutable publication archive: [final evidence](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/evidence/optimization-2026-10-07/README.md) and [BIOS publication details](../../../bios/optimized-xemu/README.md).
 
 
 ## Implemented optimization results
@@ -45,4 +45,4 @@ to the original source so their references stay reproducible. Seven matched
 benchmark pairs demonstrate six small pin-workload gains of 81.76–99.52%;
 35 workloads remain timing inconclusive. Other retained changes reduce verified
 source work without a wall-time claim. See the [implementation and measurement
-report](integration-and-measurement.md) and [final qualification evidence](../../evidence/optimization-2026-10-07/README.md).
+report](integration-and-measurement.md) and [final qualification evidence](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/evidence/optimization-2026-10-07/README.md).
