@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -19,6 +20,7 @@ class BuildTests(unittest.TestCase):
         self.source = self.root / "source tree"
         self.source.mkdir()
         (self.source / "toolchain-gcc.cmake").write_text("# fixture\n")
+        (self.source / "fixture.txt").write_text("base\n")
         subprocess.run(["git", "init", "-q", str(self.source)], check=True)
         subprocess.run(["git", "-C", str(self.source), "add", "."], check=True)
         subprocess.run(["git", "-C", str(self.source), "-c", "user.name=Test",
@@ -34,11 +36,15 @@ class BuildTests(unittest.TestCase):
         self.bin.mkdir()
         cmake = self.bin / "cmake"
         cmake.write_text("#!" + sys.executable + "\n" + '''
-import os, pathlib, sys
+import json, os, pathlib, sys
 if '--version' in sys.argv:
     print('cmake fixture 1.0')
 elif '-B' in sys.argv:
     p = pathlib.Path(sys.argv[sys.argv.index('-B') + 1]); p.mkdir(parents=True, exist_ok=True)
+    source = pathlib.Path(sys.argv[sys.argv.index('-S') + 1])
+    (p / 'configured-source.json').write_text(json.dumps({
+        'path': str(source), 'fixture': (source / 'fixture.txt').read_text(),
+        'new_guest': (source / 'tests/xbe/probe.c').exists()}))
     if not (p / 'CMakeCache.txt').exists():
         (p / 'CMakeCache.txt').write_text('clean flags')
 elif '--build' in sys.argv:
@@ -69,6 +75,8 @@ elif '--build' in sys.argv:
         self.assertEqual(manifest["source_revision"], self.revision)
         self.assertEqual(manifest["flash_size"], 262144)
         self.assertEqual(manifest["flash_sha256"], hashlib.sha256(b"X" * 262144).hexdigest())
+        self.assertEqual(manifest["source_directory"], str(self.source))
+        self.assertEqual(manifest["patches"], [])
         self.assertTrue((self.output / "build.log").exists())
 
     def test_failed_build_invalidates_previous_flash(self):
@@ -142,6 +150,175 @@ elif '--build' in sys.argv:
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(json.loads((self.output / "build.json").read_text())["flash_sha256"],
                          manifest["flash_sha256"])
+
+    def fixture_patch(self, name="first.patch", before="base", after="patched", new_guest=False):
+        content = (f"diff --git a/fixture.txt b/fixture.txt\n"
+                   f"--- a/fixture.txt\n+++ b/fixture.txt\n@@ -1 +1 @@\n-{before}\n+{after}\n")
+        if new_guest:
+            content += ("diff --git a/tests/xbe/probe.c b/tests/xbe/probe.c\n"
+                        "new file mode 100644\n--- /dev/null\n+++ b/tests/xbe/probe.c\n"
+                        "@@ -0,0 +1 @@\n+/* Licensed fixture guest */\n")
+        path = self.root / "patches" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(content)
+        return {"path": "patches/" + name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+    def set_patches(self, patches):
+        lock = json.loads(self.lock.read_text())
+        lock["repositories"]["roswell"]["patches"] = patches
+        self.lock.write_text(json.dumps(lock))
+
+    def build_direct(self):
+        from tools.firmware import build_firmware
+        with mock.patch("tools.firmware.ROOT", self.root), mock.patch.dict(os.environ, self.env):
+            return build_firmware(self.source, self.output, lock_path=self.lock)
+
+    def assert_patch_failure(self, pattern):
+        self.output.mkdir(exist_ok=True)
+        (self.output / "flash.bin").write_bytes(b"stale")
+        with self.assertRaisesRegex((ValueError, subprocess.SubprocessError), pattern):
+            self.build_direct()
+        self.assertFalse((self.output / "flash.bin").exists())
+        self.assertEqual(json.loads((self.output / "build.json").read_text())["status"], "failed")
+        self.assertFalse(list(self.output.glob("work-*/build/configured-source.json")))
+        self.assertEqual((self.source / "fixture.txt").read_text(), "base\n")
+        self.assertEqual(subprocess.check_output(
+            ["git", "-C", str(self.source), "status", "--porcelain"], text=True), "")
+
+    def test_patched_source_reaches_cmake_and_preserves_pristine_checkout(self):
+        patch = self.fixture_patch(new_guest=True)
+        self.set_patches([patch])
+        manifest = self.build_direct()
+        source = Path(manifest["source_directory"])
+        self.assertNotEqual(source, self.source)
+        self.assertTrue(source.is_relative_to(self.output))
+        self.assertTrue((source / ".git").is_dir())
+        self.assertFalse((source / ".git/objects/info/alternates").exists())
+        configured = json.loads((Path(manifest["build_directory"]) / "configured-source.json").read_text())
+        self.assertEqual(configured, {"path": str(source), "fixture": "patched\n", "new_guest": True})
+        self.assertEqual(manifest["patches"], [patch])
+        tree = subprocess.check_output(["git", "-C", str(source), "write-tree"], text=True).strip()
+        self.assertEqual(manifest["source_tree"], tree)
+        tracked = subprocess.check_output(["git", "-C", str(source), "ls-files"], text=True)
+        self.assertIn("tests/xbe/probe.c", tracked)
+        self.assertEqual((self.source / "fixture.txt").read_text(), "base\n")
+        self.assertFalse((self.source / "tests").exists())
+        self.assertEqual(subprocess.check_output(
+            ["git", "-C", str(self.source), "status", "--porcelain"], text=True), "")
+        self.assertEqual(subprocess.check_output(
+            ["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True).strip(), self.revision)
+        epoch = subprocess.check_output(
+            ["git", "-C", str(self.source), "show", "-s", "--format=%ct", "HEAD"], text=True).strip()
+        self.assertEqual(manifest["source_date_epoch"], epoch)
+        base_objects = {p.name: p for p in (self.source / ".git/objects").glob("*/*") if p.is_file()}
+        for obj in (source / ".git/objects").glob("*/*"):
+            if obj.is_file() and obj.name in base_objects:
+                self.assertNotEqual(obj.stat().st_ino, base_objects[obj.name].stat().st_ino)
+
+    def test_ordered_patches_and_rebuild_use_fresh_reproducible_source(self):
+        first = self.fixture_patch()
+        second = self.fixture_patch("second.patch", "patched", "second")
+        self.set_patches([first, second])
+        a = self.build_direct()
+        source = Path(a["source_directory"])
+        self.assertEqual((source / "fixture.txt").read_text(), "second\n")
+        (source / "fixture.txt").write_text("stale modified source\n")
+        b = self.build_direct()
+        self.assertNotEqual(a["source_directory"], b["source_directory"])
+        self.assertEqual((Path(b["source_directory"]) / "fixture.txt").read_text(), "second\n")
+        self.assertEqual(a["source_tree"], b["source_tree"])
+        self.assertEqual(b["patches"], [first, second])
+
+    def test_reverse_patch_order_fails_before_configuring(self):
+        first = self.fixture_patch()
+        second = self.fixture_patch("second.patch", "patched", "second")
+        self.set_patches([second, first])
+        self.assert_patch_failure("patch")
+
+    def test_patch_hash_mismatch_invalidates_stale_image(self):
+        patch = self.fixture_patch()
+        patch["sha256"] = "0" * 64
+        self.set_patches([patch])
+        self.assert_patch_failure("checksum")
+
+    def test_missing_patch_fails(self):
+        self.set_patches([{"path": "patches/missing.patch", "sha256": "0" * 64}])
+        self.assert_patch_failure("patch")
+
+    def test_failed_patch_application_preserves_base(self):
+        self.set_patches([self.fixture_patch(before="wrong base")])
+        self.assert_patch_failure("patch")
+
+    def test_patch_schema_rejects_malformed_entries(self):
+        for patches in (None, {}, "bad", [None], [{}], [{"path": 2, "sha256": "0" * 64}],
+                        [{"path": "patches/x", "sha256": "A" * 64}],
+                        [{"path": "patches/x", "sha256": "0" * 63}],
+                        [{"path": "patches/x", "sha256": 0}],
+                        [{"path": "patches/x", "sha256": "0" * 64, "extra": True}]):
+            with self.subTest(patches=patches):
+                self.set_patches(patches)
+                self.assert_patch_failure("lock")
+
+    def test_patch_paths_reject_absolute_traversal_and_symlink_escape(self):
+        for path in ("../outside.patch", "/tmp/outside.patch", "patches/../../outside.patch", "", "."):
+            with self.subTest(path=path):
+                self.set_patches([{"path": path, "sha256": "0" * 64}])
+                self.assert_patch_failure("path")
+        external = self.root.parent / (self.root.name + "-outside.patch")
+        external.write_text("outside")
+        self.addCleanup(external.unlink)
+        link = self.root / "escape.patch"
+        link.symlink_to(external)
+        self.set_patches([{"path": link.name, "sha256": hashlib.sha256(b"outside").hexdigest()}])
+        self.assert_patch_failure("path")
+
+    def test_empty_patches_keep_original_source_and_tree(self):
+        self.set_patches([])
+        manifest = self.build_direct()
+        self.assertEqual(manifest["source_directory"], str(self.source))
+        self.assertEqual(manifest["patches"], [])
+        tree = subprocess.check_output(
+            ["git", "-C", str(self.source), "rev-parse", "HEAD^{tree}"], text=True).strip()
+        self.assertEqual(manifest["source_tree"], tree)
+
+    def test_clone_dissociates_existing_source_object_alternates(self):
+        original = self.root / "object donor"
+        self.source.rename(original)
+        subprocess.run(["git", "clone", "-q", "--shared", str(original), str(self.source)], check=True)
+        self.assertTrue((self.source / ".git/objects/info/alternates").exists())
+        self.set_patches([self.fixture_patch()])
+        manifest = self.build_direct()
+        patched = Path(manifest["source_directory"])
+        self.assertFalse((patched / ".git/objects/info/alternates").exists())
+        original.rename(self.root / "donor moved")
+        objects = subprocess.check_output(["git", "-C", str(patched), "fsck", "--full"],
+                                          text=True, stderr=subprocess.STDOUT)
+        self.assertNotIn("missing", objects)
+
+    def test_patched_build_under_broken_ancestor_worktree_git_link(self):
+        # Docker may mount a host worktree without the external Git metadata
+        # named by its .git file. The explicit Roswell source has its own .git.
+        (self.root / ".git").write_text("gitdir: /absent-spiritboot-worktree/git/worktrees/fixture\n")
+        config = (self.source / ".git/config").read_bytes()
+        self.set_patches([self.fixture_patch(new_guest=True)])
+        manifest = self.build_direct()
+        self.assertEqual(manifest["status"], "built")
+        self.assertEqual((self.source / ".git/config").read_bytes(), config)
+        self.assertEqual((self.source / "fixture.txt").read_text(), "base\n")
+        self.assertEqual((Path(manifest["source_directory"]) / "fixture.txt").read_text(), "patched\n")
+        self.assertTrue((Path(manifest["source_directory"]) / "tests/xbe/probe.c").is_file())
+        self.assertEqual(subprocess.check_output(
+            ["git", "-C", str(self.source), "status", "--porcelain"], text=True), "")
+
+    @unittest.skipUnless(hasattr(os, "geteuid") and os.geteuid() == 0, "requires root CI ownership fixture")
+    def test_root_build_accepts_foreign_owned_pristine_checkout(self):
+        for path in self.source.rglob("*"):
+            os.chown(path, 65534, 65534)
+        os.chown(self.source, 65534, 65534)
+        self.set_patches([self.fixture_patch()])
+        manifest = self.build_direct()
+        self.assertEqual(manifest["status"], "built")
+        self.assertEqual((self.source / "fixture.txt").read_text(), "base\n")
 
 
 class LaunchTests(unittest.TestCase):

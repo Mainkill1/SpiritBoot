@@ -61,22 +61,44 @@ jobs:
           PY
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             -w /work/artifacts spiritboot-toolchain ./xemu.AppImage --appimage-extract
-          nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
-          docker run --rm -v "$PWD:/work" \
-            -w /work/.reference/roswell/tests/xbe/api-regression \
-            "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
-      - name: Run open API regression XBE
+      - name: Build guests from the tested patched source
         run: |
+          nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
+          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
+          for guest in api-regression clean-room-contracts clean-room-warm-reboot; do
+            docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+              -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+              -w "$guest_source/tests/xbe/$guest" \
+              "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
+          done
+      - name: Run API, targeted contracts, and warm reboot guests
+        run: |
+          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
           docker run --rm -v "$PWD:/work" \
-            -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -c '
+            -e GUEST_SOURCE="$guest_source" -e VARIANT=${{ matrix.variant }} \
+            -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -ec '
             Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
             python3 -c "import time; time.sleep(1)"
-            DISPLAY=:99 exec python3 scripts/run-firmware.py \
-              --xemu artifacts/squashfs-root/usr/bin/xemu \
-              --flash artifacts/firmware-${{ matrix.variant }}/flash.bin \
-              --hdd artifacts/xbox_hdd.qcow2 \
-              --dvd .reference/roswell/tests/xbe/api-regression/nxkrnl-api-regression.iso \
-              --output artifacts/open-xbe-${{ matrix.variant }} --timeout 240 --expect-tap'
+            for guest in api-regression clean-room-contracts clean-room-warm-reboot; do
+              case "$guest" in
+                api-regression) iso=nxkrnl-api-regression.iso; capture=open-xbe ;;
+                *) iso=$guest.iso; capture=$guest ;;
+              esac
+              DISPLAY=:99 python3 scripts/run-firmware.py \
+                --xemu artifacts/squashfs-root/usr/bin/xemu \
+                --flash "artifacts/firmware-$VARIANT/flash.bin" \
+                --hdd artifacts/xbox_hdd.qcow2 \
+                --dvd "$GUEST_SOURCE/tests/xbe/$guest/$iso" \
+                --output "artifacts/$capture-$VARIANT" --timeout 240 --expect-tap
+            done'
+          python3 - <<'PY'
+          import json
+          for guest, plan in (('clean-room-contracts', 23), ('clean-room-warm-reboot', 5)):
+              result = json.load(open(f'artifacts/{guest}-${{ matrix.variant }}/run.json'))
+              assert result['status'] == 'passed' and result['tap']['plan'] == plan, result
+              assert result['tap']['ok'] == plan, result
+              assert result['tap']['todo'] == 0 and result['tap']['skipped'] == 0, result
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -86,4 +108,6 @@ jobs:
             artifacts/firmware-${{ matrix.variant }}/build.json
             artifacts/firmware-${{ matrix.variant }}/build.log
             artifacts/open-xbe-${{ matrix.variant }}/
+            artifacts/clean-room-contracts-${{ matrix.variant }}/
+            artifacts/clean-room-warm-reboot-${{ matrix.variant }}/
             LICENSE

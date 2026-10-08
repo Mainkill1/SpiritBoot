@@ -1,0 +1,3618 @@
+diff --git a/boot/nxldr/loader.c b/boot/nxldr/loader.c
+index d55b46e678e118fd3cc1e4f7aef176d29035d325..12ec0c3c4b1b8fc8ac2c8ebde77d10271a604888 100644
+--- a/boot/nxldr/loader.c
++++ b/boot/nxldr/loader.c
+@@ -67,12 +67,12 @@ DecompressKernel(void)
+     /* Scratch buffer at PA 0x02000000 (32 MiB) -- clear of the kernel PA and
+      * above nxldr's own footprint (nxldr is at PA 0x00100000, stack tops at
+      * 0x001ffff0). */
+-    UCHAR *Scratch = (UCHAR *)0x02000000;
++    UCHAR *Scratch = (UCHAR *)0x07000000;
+     struct xz_dec *Xz;
+     struct xz_buf Buf;
+     enum xz_ret Ret;
+ 
+-    if (Header->Magic != NXKRNL_XZ_MAGIC)
++    if (Header->DecompressedSize > 0x00800000 || Header->Magic != NXKRNL_XZ_MAGIC)
+     {
+         LoaderFailCode = 0x585a; /* 'XZ' */
+         dprintf("bad payload magic %#x\n", Header->Magic);
+diff --git a/boot/nxldr/nxldr.ld b/boot/nxldr/nxldr.ld
+index 63ae998120b84b726647a3fb114dce64543a10e2..3ffec446e0548e346410f7b70f2f81665074e7e4 100644
+--- a/boot/nxldr/nxldr.ld
++++ b/boot/nxldr/nxldr.ld
+@@ -43,7 +43,7 @@ FLASH_SIZE_LMA = __nxldr_flash_size__;
+  * Xcode entry sit.  Linking the in-flash image here makes every flash-resident
+  * VMA match where it actually executes. */
+ LOW_ROM_BASE   = 0x100000000 - FLASH_SIZE_LMA;   /* 0xfffc0000 at 256 KB */
+-RAM_CODE       = 0x00100000;   /* VA the ramcopied .text/.rodata/.data run at */
++RAM_CODE       = 0x07D00000;   /* VA the ramcopied .text/.rodata/.data run at */
+ 
+ SECTIONS {
+     /DISCARD/ : {
+@@ -145,7 +145,7 @@ RamCopySrc       = LOW_ROM_BASE + TEXT_SRC_LMA;
+ RamCopyDst       = RAM_CODE;
+ RamCopySizeLongs = (SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data) + 3) / 4;
+ BssSizeLongs     = (BssEnd - BssStart + 3) / 4;
+-StackTop         = 0x001ffff0;
++StackTop         = 0x07effff0;
+ 
+ /* Kernel payload region: the XZ-compressed xboxkrnl follows the .data source
+  * and runs up to the reset page -- its offset is wherever the loader code
+diff --git a/boot/nxldr/paging.c b/boot/nxldr/paging.c
+index f4f7c0a9611d94b4d4bf3e4cb2b364374327bb31..9b983a5b46a9804ee80e95ebed4c68ebaf44b8fd 100644
+--- a/boot/nxldr/paging.c
++++ b/boot/nxldr/paging.c
+@@ -60,6 +60,8 @@ PagingInit(void)
+         }
+         Pd[i] = ((ULONG)PtId) | PTE_FLAGS;
+     }
++    /* Loader code/stack moved above the persistent low-64-MiB aperture. */
++    Pd[0x1F] = 0x07C00083; /* identity PSE: 124..128 MiB */
+     dprintf("pi2\n");
+ 
+     /* KSEG0: NT's expected high-half identity for loader pages.
+diff --git a/drivers/storage/ide/atapi/atapi.c b/drivers/storage/ide/atapi/atapi.c
+index 69e46ff4c1c1fa11045384707a79340743a53b02..ecec428750e51c1f8936d5621694c0d85cb7634e 100644
+--- a/drivers/storage/ide/atapi/atapi.c
++++ b/drivers/storage/ide/atapi/atapi.c
+@@ -870,7 +870,11 @@ DriverEntry(
+     DriverObject->DriverUnload = AtaUnload;
+ #endif
+ 
++#ifdef SARCH_XBOX
++    NxkIdeInitializeCompletion(AtaReqCompletionDpc);
++#else
+     KeInitializeDpc(&AtapCompletionDpc, AtaReqCompletionDpc, NULL);
++#endif
+     InitializeSListHead(&AtapCompletionQueueList);
+ 
+     /* Create a directory to hold the driver's device objects */
+diff --git a/drivers/storage/ide/atapi/atapi.h b/drivers/storage/ide/atapi/atapi.h
+index 86ecea4c0986a09ad2e4dfcd98d52069be1b843e..603bd9963fe8c95060f2345ef2c158ffaf77c93f 100644
+--- a/drivers/storage/ide/atapi/atapi.h
++++ b/drivers/storage/ide/atapi/atapi.h
+@@ -1018,3 +1018,7 @@ NTSTATUS
+ AtaPdoWmiRegistration(
+     _In_ PATAPORT_DEVICE_EXTENSION DevExt,
+     _In_ BOOLEAN Register);
++
++#ifdef SARCH_XBOX
++#include <reactos/xb-ide.h>
++#endif
+diff --git a/drivers/storage/ide/atapi/fdo.c b/drivers/storage/ide/atapi/fdo.c
+index d1e3d6e9cabb53c813589d60101830aae3ce48ef..29c629ffa0298dbff00683846d53dc7a1acf9d80 100644
+--- a/drivers/storage/ide/atapi/fdo.c
++++ b/drivers/storage/ide/atapi/fdo.c
+@@ -374,7 +374,12 @@ AtaFdoStartDevice(
+     if (!NT_SUCCESS(Status))
+         return Status;
+ 
+-    IoStartTimer(ChanExt->Common.Self);
++#ifdef SARCH_XBOX
++    if (PortData->PortNumber == 0)
++        NxkIdeStartTimer(ChanExt->Common.Self, PortData, AtaPortIoTimer);
++    else
++#endif
++        IoStartTimer(ChanExt->Common.Self);
+     PortData->PortFlags |= PORT_FLAG_IO_TIMER_ACTIVE;
+ 
+     Status = PortData->AttachChannel(PortData->ChannelContext, TRUE);
+@@ -414,6 +419,13 @@ AtaFdoStopDevice(
+ {
+     PAGED_CODE();
+ 
++    if (ChanExt->PortData.PortFlags & PORT_FLAG_IO_TIMER_ACTIVE) {
++#ifdef SARCH_XBOX
++        NxkIdeStopTimer(&ChanExt->PortData);
++#endif
++        IoStopTimer(ChanExt->Common.Self);
++        ChanExt->PortData.PortFlags &= ~PORT_FLAG_IO_TIMER_ACTIVE;
++    }
+     AtaFdoDetachChannel(ChanExt);
+ 
+ #ifndef SARCH_XBOX
+@@ -450,6 +462,9 @@ AtaFdoRemoveDevice(
+ 
+     if (ChanExt->PortData.PortFlags & PORT_FLAG_IO_TIMER_ACTIVE)
+     {
++#ifdef SARCH_XBOX
++        NxkIdeStopTimer(&ChanExt->PortData);
++#endif
+         IoStopTimer(ChanExt->Common.Self);
+         ChanExt->PortData.PortFlags &= ~PORT_FLAG_IO_TIMER_ACTIVE;
+     }
+diff --git a/drivers/storage/ide/atapi/portstate.c b/drivers/storage/ide/atapi/portstate.c
+index 9cb9adcf10ce8605886e5b2ad50d84771a00426c..741fe5fc883d844bc37c50778ce9dbfafd085392 100644
+--- a/drivers/storage/ide/atapi/portstate.c
++++ b/drivers/storage/ide/atapi/portstate.c
+@@ -228,7 +228,11 @@ AtaPortOnRequestComplete(
+         InterlockedPushEntrySList(&AtapCompletionQueueList, &Request->CompletionEntry);
+     }
+ 
++#ifdef SARCH_XBOX
++    KeInsertQueueDpc(NxkIdeCompletionDpc(), NULL, NULL);
++#else
+     KeInsertQueueDpc(&AtapCompletionDpc, NULL, NULL);
++#endif
+ }
+ 
+ static
+@@ -296,6 +300,12 @@ AtaPortResetPort(
+ {
+     _InterlockedOr(&PortData->InterruptFlags, PORT_INT_FLAG_IGNORE_LINK_IRQ);
+     PortData->ResetChannel(PortData->ChannelContext);
++#ifdef SARCH_XBOX
++    if (!NxkIdeResetComplete(PortData->ChannelContext)) {
++        _InterlockedAnd(&PortData->InterruptFlags, ~PORT_INT_FLAG_IGNORE_LINK_IRQ);
++        return STATUS_IO_TIMEOUT;
++    }
++#endif
+     _InterlockedAnd(&PortData->InterruptFlags, ~PORT_INT_FLAG_IGNORE_LINK_IRQ);
+ 
+     AtaPortEnumeratePort(PortData);
+diff --git a/drivers/storage/ide/atapi/scsi.c b/drivers/storage/ide/atapi/scsi.c
+index ff08c69ff44eacff04e0803726273087c2f15a0c..4093b51690e6b23c8560cdc1dee19012fc4492ea 100644
+--- a/drivers/storage/ide/atapi/scsi.c
++++ b/drivers/storage/ide/atapi/scsi.c
+@@ -342,7 +342,11 @@ AtaReqCompleteRequest(
+         }
+ 
+         /* Start the next request on the port queue */
++#ifdef SARCH_XBOX
++        if (!NxkIdeStartNext(PortData, (BOOLEAN (*)(PVOID))AtaReqPortQueueListDispatchNextRequest))
++#else
+         if (!AtaReqPortQueueListDispatchNextRequest(PortData))
++#endif
+             KeReleaseSpinLockFromDpcLevel(&PortData->QueueLock);
+     }
+ 
+@@ -514,7 +518,13 @@ AtaReqStartIo(
+     {
+         PortData->ActiveSlotsBitmap |= 1 << Request->Slot;
+ 
++#ifdef SARCH_XBOX
++        if (!NxkIdeStartRequest(PortData->ChannelContext, Request,
++            (BOOLEAN (*)(PVOID, PVOID))PortData->StartIo,
++            PortData->ChannelObject, Request->Irp, Request->TimeOut))
++#else
+         if (!PortData->StartIo(PortData->ChannelContext, Request))
++#endif
+         {
+             PortData->TimerCount[Request->Slot] = Request->TimeOut;
+         }
+@@ -788,7 +798,11 @@ AtaReqCompletionDpc(
+         Request = CONTAINING_RECORD(CurrentEntry, ATA_DEVICE_REQUEST, CompletionEntry);
+         ASSERT_REQUEST(Request);
+ 
++#ifdef SARCH_XBOX
++        NxkIdeFinishRequest(Request, (VOID (*)(PVOID))AtaReqCompleteRequest, Request->Irp);
++#else
+         AtaReqCompleteRequest(Request);
++#endif
+ 
+         CurrentEntry = NextEntry;
+     }
+@@ -801,7 +815,11 @@ AtaReqStartCompletionDpc(
+     ASSERT_REQUEST(Request);
+ 
+     InterlockedPushEntrySList(&AtapCompletionQueueList, &Request->CompletionEntry);
++    #ifdef SARCH_XBOX
++    KeInsertQueueDpc(NxkIdeCompletionDpc(), NULL, NULL);
++#else
+     KeInsertQueueDpc(&AtapCompletionDpc, NULL, NULL);
++#endif
+ }
+ 
+ /*
+@@ -1465,7 +1483,11 @@ AtaReqWaitForOutstandingIoToComplete(
+         Request->InternalState = REQUEST_STATE_NOT_STARTED;
+ 
+         KeRaiseIrql(DISPATCH_LEVEL, &OldIrql);
++#ifdef SARCH_XBOX
++        NxkIdeFinishRequest(Request, (VOID (*)(PVOID))AtaReqCompleteRequest, Request->Irp);
++#else
+         AtaReqCompleteRequest(Request);
++#endif
+         KeLowerIrql(OldIrql);
+     }
+ 
+@@ -1534,7 +1556,11 @@ AtaReqFlushDeviceQueue(
+         Request->InternalState = REQUEST_STATE_NOT_STARTED;
+ 
+         KeRaiseIrql(DISPATCH_LEVEL, &OldIrql);
++#ifdef SARCH_XBOX
++        NxkIdeFinishRequest(Request, (VOID (*)(PVOID))AtaReqCompleteRequest, Request->Irp);
++#else
+         AtaReqCompleteRequest(Request);
++#endif
+         KeLowerIrql(OldIrql);
+     }
+ }
+@@ -1826,6 +1852,10 @@ AtaPortIoTimer(
+     {
+         ActiveTimersBitmap &= ~(1 << Slot);
+ 
++#ifdef SARCH_XBOX
++        NxkIdeSetTimeout(PortData, PortData->TimerCount[Slot] > 0 ?
++                                  PortData->TimerCount[Slot] - 1 : 0);
++#endif
+         /* Decrease the timeout counter */
+         if ((PortData->TimerCount[Slot] > 0) && (--PortData->TimerCount[Slot] == 0))
+         {
+@@ -1833,7 +1863,11 @@ AtaPortIoTimer(
+ 
+             /* Handle timeout of an active command */
+             if (PortData->ActiveSlotsBitmap & (1 << Slot))
++#ifdef SARCH_XBOX
++                NxkIdeTimeout(PortData, Slot, (VOID (*)(PVOID, ULONG))AtaPortTimeout);
++#else
+                 AtaPortTimeout(PortData, Slot);
++#endif
+ 
+             KeReleaseInterruptSpinLock(PortData->InterruptObject, OldIrql);
+         }
+diff --git a/drivers/storage/ide/pciidex/chipset/pata_generic.c b/drivers/storage/ide/pciidex/chipset/pata_generic.c
+index ffa31d90381ad321a6209f6af0e7fc34d13556e9..43ace31a8829675912f9fb118e5803713fa6cf8d 100644
+--- a/drivers/storage/ide/pciidex/chipset/pata_generic.c
++++ b/drivers/storage/ide/pciidex/chipset/pata_generic.c
+@@ -533,6 +533,10 @@ PciIdeAllocateMemory(
+     RtlZeroMemory(ChanData->PrdTable, BlockSize);
+ 
+     ChanData->PrdTablePhysicalAddress = LogicalAddress.LowPart;
++#ifdef SARCH_XBOX
++    if (ChanData->Channel == 0)
++        IdexChannelObject.PhysicalRegionDescriptorTablePhysical = LogicalAddress.LowPart;
++#endif
+ 
+     /* 32-bit DMA */
+     ASSERT(LogicalAddress.HighPart == 0);
+@@ -892,10 +896,16 @@ PciIdeFreeResources(
+     {
+         AtaChanEnableInterruptsSync(ChanData, FALSE);
+ 
++#ifdef SARCH_XBOX
++        if (ChanData->Channel == 0) NxkIdeUnbindChannel(ChanData);
++#endif
+         IoDisconnectInterrupt(ChanData->InterruptObject);
+         ChanData->InterruptObject = NULL;
+     }
+ 
++#ifdef SARCH_XBOX
++    if (ChanData->Channel == 0) NxkIdeUnbindChannel(ChanData);
++#endif
+     ChanData->Regs.Dma = NULL;
+ 
+     ChanData->ChanInfo &= ~(CHANNEL_FLAG_DRIVE0_DMA_CAPABLE |
+@@ -1037,6 +1047,12 @@ PciIdeConnectInterrupt(
+         IsrHandler = PciIdeChannelIsr;
+     else
+         IsrHandler = PataChannelIsr;
++#ifdef SARCH_XBOX
++    if (ChanData->Channel == 0) {
++        NxkIdeSetHardwareIsr(IsrHandler, ChanData);
++        IsrHandler = NxkIdeIsr;
++    }
++#endif
+     Status = IoConnectInterrupt(&ChanData->InterruptObject,
+                                 IsrHandler,
+                                 ChanData,
+@@ -1049,6 +1065,12 @@ PciIdeConnectInterrupt(
+                                 (InterruptDesc->ShareDisposition == CmResourceShareShared),
+                                 InterruptDesc->u.Interrupt.Affinity,
+                                 FALSE);
++#ifdef SARCH_XBOX
++    if (ChanData->Channel == 0) {
++        if (NT_SUCCESS(Status)) NxkIdeBindInterrupt(ChanData->InterruptObject);
++        else NxkIdeUnbindChannel(ChanData);
++    }
++#endif
+     if (!NT_SUCCESS(Status))
+     {
+         ERR("Could not connect to interrupt %lu, status 0x%lx\n",
+diff --git a/drivers/storage/ide/pciidex/pciidex.h b/drivers/storage/ide/pciidex/pciidex.h
+index 871fbab58906b0cdb68a6df8bc108cbcc840ab86..970e1e5cf55e69024c5b1af6bf63f3009a03d7e6 100644
+--- a/drivers/storage/ide/pciidex/pciidex.h
++++ b/drivers/storage/ide/pciidex/pciidex.h
+@@ -905,3 +905,7 @@ PciWrite32(
+ {
+     PciWrite(Controller, &Value, ConfigDataOffset, sizeof(Value));
+ }
++
++#ifdef SARCH_XBOX
++#include <reactos/xb-ide.h>
++#endif
+diff --git a/hal/halx86/xbox/reboot.c b/hal/halx86/xbox/reboot.c
+index 5daf0c1098bc6ca6df149497289e87d9d218d5ef..5745b739219bb4b332cef572ce59fc224d4a31cc 100644
+--- a/hal/halx86/xbox/reboot.c
++++ b/hal/halx86/xbox/reboot.c
+@@ -19,11 +19,38 @@
+ 
+ /* PRIVATE FUNCTIONS *********************************************************/
+ 
+-static DECLSPEC_NORETURN
+-VOID
++static volatile LONG HalpPowerActionStarted;
++
++static DECLSPEC_NORETURN VOID
+ HalpXboxPowerAction(
+     _In_ UCHAR Action)
+ {
++#ifndef _MINIHAL_
++    extern VOID NTAPI NxkShutdownNotifications(VOID);
++    extern DECLSPEC_NORETURN VOID NTAPI NxkShutdownAbortPowerRequest(VOID);
++    extern VOID NTAPI NxkMmPublishPersistence(BOOLEAN WarmReset);
++    /* Normal callbacks may wait/use IO. Bugcheck/debugger/high-IRQL reset
++     * must never acquire their locks: discard the RAM handoff lock-free. */
++    if (KeGetCurrentIrql() != PASSIVE_LEVEL ||
++        !(__readeflags() & EFLAGS_INTERRUPT_MASK)) {
++        NxkMmPublishPersistence(FALSE);
++    } else {
++        /* Enter before claiming: a normal APC between claim and entry could
++         * recursively lose the claim and park this very reset thread. Keep
++         * the winner's critical region through handoff and hardware reset;
++         * reenabling normal APCs after drain could likewise park the owner.
++         * Special APCs remain enabled for native synchronous IO completion. */
++        KeEnterCriticalRegion();
++        if (InterlockedCompareExchange(&HalpPowerActionStarted, 1, 0)) {
++            /* The callback owner retains its inherited outer guard; another
++             * thread balances its own guard before waiting for the reset. */
++            KeLeaveCriticalRegion();
++            NxkShutdownAbortPowerRequest();
++        }
++        NxkShutdownNotifications();
++        NxkMmPublishPersistence(Action == SMC_REG_POWER_RESET);
++    }
++#endif
+     /* Disable interrupts */
+     _disable();
+ 
+@@ -61,14 +88,17 @@ HalReturnToFirmware(
+         case HalPowerDownRoutine:
+         {
+             HalpXboxPowerAction(SMC_REG_POWER_SHUTDOWN);
++            return;
+         }
+         case HalRestartRoutine:
+         {
+             HalpXboxPowerAction(SMC_REG_POWER_CYCLE);
++            return;
+         }
+         case HalRebootRoutine:
+         {
+             HalpXboxPowerAction(SMC_REG_POWER_RESET);
++            return;
+         }
+ 
+         /* Anything else */
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index 21a22ba6270a76189f02df858c39094dc722f3ea..f96372b62bef9e66a858f66d5f5cbfcc49b638fe 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -131,6 +131,7 @@ list(APPEND PCH_SKIP_SOURCE
+     # (see xb/mm/mm.h for the layout).
+     xb/mm/init.c
+     xb/mm/contig.c
++    xb/mm/persistence.c
+     xb/mm/sysva.c
+     xb/mm/iospace.c
+     xb/mm/api.c
+@@ -145,6 +146,10 @@ list(APPEND PCH_SKIP_SOURCE
+     xb/refurb.c
+     xb/titlekeys.c
+     xb/procobj.c
++    xb/ide.c
++    xb/interrupt.c
++    xb/shutdown.c
++    xb/debugprompt.c
+     xb/sizeddata.c
+     xb/scattergather.c
+     xb/exflist.c
+diff --git a/ntoskrnl/io/iomgr/irp.c b/ntoskrnl/io/iomgr/irp.c
+index 5d94d174a0b54e59b0a36cec6dc7fee7ba448150..c3a4e1747102c4ff34b121f13fe9055fd8bbe664 100644
+--- a/ntoskrnl/io/iomgr/irp.c
++++ b/ntoskrnl/io/iomgr/irp.c
+@@ -12,6 +12,9 @@
+ /* INCLUDES ****************************************************************/
+ 
+ #include <ntoskrnl.h>
++#ifdef SARCH_XBOX
++#include <reactos/xb-io.h>
++#endif
+ #define NDEBUG
+ #include <debug.h>
+ 
+@@ -336,7 +339,11 @@ IopCompleteRequest(IN PKAPC Apc,
+      * (but warnings are OK!), or if it was completed with an error, but
+      * did return from a pending I/O Operation and is not synchronous.
+      */
+-    if (!NT_ERROR(Irp->IoStatus.Status) ||
++    if (
++#ifdef SARCH_XBOX
++        (Irp->Flags & IRP_XB_SG_COMPLETION) ||
++#endif
++        !NT_ERROR(Irp->IoStatus.Status) ||
+         (Irp->PendingReturned &&
+          !IsIrpSynchronous(Irp, FileObject)))
+     {
+diff --git a/ntoskrnl/kd/kdio.c b/ntoskrnl/kd/kdio.c
+index b3aa1a7fbff78db57c07ce91edbeb6e22e45d6a1..ce67ac3d1dd8ef9d8a260be8539ebb37868f081a 100644
+--- a/ntoskrnl/kd/kdio.c
++++ b/ntoskrnl/kd/kdio.c
+@@ -806,3 +806,14 @@ KdReceivePacket(
+ }
+ 
+ /* EOF */
++
++/* DbgPrompt must distinguish a working input backend from the diagnostic
++ * packet shim, whose synthetic packet receipt does not contain a response. */
++BOOLEAN NTAPI NxkDebuggerPromptAvailable(VOID)
++{
++#ifdef KDBG
++    return KdpDebugMode.Value != 0;
++#else
++    return FALSE;
++#endif
++}
+diff --git a/ntoskrnl/mm/ARM3/i386/init.c b/ntoskrnl/mm/ARM3/i386/init.c
+index 56920be9f6671ceb736fa5d5f659c768a4da7595..b0fdb0dcb6eb92d9c5dc35acadd3b3f24d494401 100644
+--- a/ntoskrnl/mm/ARM3/i386/init.c
++++ b/ntoskrnl/mm/ARM3/i386/init.c
+@@ -516,7 +516,7 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
+         PUCHAR Carve, Links;
+ 
+         if (SupplyHigh < 0x3FFF) SupplyHigh = 0x3FFF;   /* 64 MB of pages */
+-        ArrayBytes = (SupplyHigh + 1) * sizeof(ULONG);
++        ArrayBytes = (SupplyHigh + 1) * (sizeof(ULONG) + 2 * sizeof(USHORT));
+ 
+         /* (The NV2A padding at PA 0x3FF0000 -- retail's PFN-database
+          * home -- is NOT usable for this in xemu: PRAMIN aliases the
+diff --git a/ntoskrnl/mm/ARM3/mminit.c b/ntoskrnl/mm/ARM3/mminit.c
+index 605a6a32a9108a8a90cfac011f594c6334c909a9..da35b4722c2eda08d4c697d5cdd3aa5211014bab 100644
+--- a/ntoskrnl/mm/ARM3/mminit.c
++++ b/ntoskrnl/mm/ARM3/mminit.c
+@@ -483,6 +483,24 @@ MxGetNextPage(IN PFN_NUMBER PageCount)
+                 (ULONG)PageCount, (ULONG)((PageCount << PAGE_SHIFT) >> 10),
+                 __builtin_return_address(0));
+ 
++#ifdef SARCH_XBOX
++    /* Skip restored warm pages before any competing MM boot carve. The
++     * original descriptor retains these pages for the later supply walk,
++     * which also excludes restored pages. */
++    {
++        extern BOOLEAN NxkMmPersistentPage(PFN_NUMBER Page);
++        PFN_NUMBER offset, skip;
++        for (;;) {
++            if (PageCount > MxFreeDescriptor->PageCount) break;
++            for (offset = 0; offset < PageCount; ++offset)
++                if (NxkMmPersistentPage(MxFreeDescriptor->BasePage + offset)) break;
++            if (offset == PageCount) break;
++            skip = offset + 1;
++            MxFreeDescriptor->BasePage += skip;
++            MxFreeDescriptor->PageCount -= skip;
++        }
++    }
++#endif
+     /* Make sure we have enough pages */
+     if (PageCount > MxFreeDescriptor->PageCount)
+     {
+diff --git a/ntoskrnl/xb/debugprompt.c b/ntoskrnl/xb/debugprompt.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..9966004054ac5f7f43b8e31852fff9c975e08abb
+--- /dev/null
++++ b/ntoskrnl/xb/debugprompt.c
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Public nxdk DbgPrompt character count; existing RTL/KD debug transport.
++ */
++#include <ntoskrnl.h>
++ULONG NTAPI XeDbgPrompt(PCCH Prompt, PCH Response, ULONG MaximumResponseLength)
++{
++    ULONG length;
++    STRING output, input;
++    extern ULONG NTAPI DebugPrompt(PSTRING, PSTRING);
++    if (MaximumResponseLength == 0 || Response == NULL) return 0;
++    Response[0] = '\0';
++#if DBG
++    extern BOOLEAN NTAPI NxkDebuggerPromptAvailable(VOID);
++    if (!NxkDebuggerPromptAvailable()) return 0;
++#else
++    return 0; /* release omits all debugger input transport */
++#endif
++    if (!KdDebuggerEnabled || KdDebuggerNotPresent || Prompt == NULL) return 0;
++    /* The transport STRING length is a USHORT; never let it wrap. The
++     * existing prompt transport caps its packet buffer as well. */
++    if (MaximumResponseLength > 0xFFFF) MaximumResponseLength = 0xFFFF;
++    for (length = 0; length < 0xFFFF && Prompt[length]; ++length) ;
++    output.Buffer = (PCHAR)Prompt; output.Length = (USHORT)length;
++    output.MaximumLength = (USHORT)length;
++    input.Buffer = Response; input.Length = 0;
++    input.MaximumLength = (USHORT)MaximumResponseLength;
++    length = DebugPrompt(&output, &input);
++    return length <= MaximumResponseLength ? length : MaximumResponseLength;
++}
+diff --git a/ntoskrnl/xb/ide.c b/ntoskrnl/xb/ide.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..556c404e03d0d7d5b04b020bd5831417f947a163
+--- /dev/null
++++ b/ntoskrnl/xb/ide.c
+@@ -0,0 +1,227 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Bridge the nxdk channel object to the existing primary ATAPI channel.
++ * Hardware IRQ ownership remains PCIIDEX's; the console interrupt is borrowed.
++ * Mutable callbacks replace the corresponding operation and may chain their
++ * saved original once inside the callback. Defaults never claim a second IRQ.
++ */
++#include <ntoskrnl.h>
++#include <reactos/xb-ide.h>
++__declspec(align(16)) NX_IDE_CHANNEL IdexChannelObject;
++static BOOLEAN IdeInitialized;
++static PKSERVICE_ROUTINE HardwareIsr;
++static PVOID HardwareContext;
++static PKINTERRUPT HardwareInterrupt;
++static BOOLEAN IrqResult, IrqChained;
++static BOOLEAN (*StartOperation)(PVOID, PVOID);
++static PVOID StartChannel, StartRequest;
++static BOOLEAN StartResult;
++static ULONG RequestGeneration;
++static VOID (*FinishOperation)(PVOID);
++static PVOID FinishRequest;
++static BOOLEAN (*NextOperation)(PVOID);
++static PVOID NextPort;
++static BOOLEAN NextResult;
++static VOID (*TimeoutOperation)(PVOID, ULONG);
++static PVOID TimeoutPort;
++static ULONG TimeoutSlot;
++static PIO_TIMER_ROUTINE TimerOperation;
++static PDEVICE_OBJECT TimerDevice;
++static PVOID TimerPort;
++
++static VOID NTAPI IdeInterrupt(VOID)
++{
++    if (HardwareIsr && HardwareInterrupt && !IrqChained) {
++        IrqChained = TRUE;
++        IrqResult = HardwareIsr(HardwareInterrupt, HardwareContext);
++    }
++}
++static VOID NTAPI IdeStart(PDEVICE_OBJECT Device, PIRP Irp)
++{
++    UNREFERENCED_PARAMETER(Device); UNREFERENCED_PARAMETER(Irp);
++    if (StartOperation) {
++        BOOLEAN (*routine)(PVOID, PVOID) = StartOperation;
++        StartOperation = NULL; /* chaining twice must not issue a second command */
++        StartResult = routine(StartChannel, StartRequest);
++    }
++}
++static VOID NTAPI IdeFinish(VOID)
++{
++    if (FinishOperation) {
++        VOID (*routine)(PVOID) = FinishOperation;
++        PVOID request = FinishRequest;
++        FinishOperation = NULL;
++        routine(request);
++    }
++}
++static VOID NTAPI IdeNext(VOID)
++{
++    if (NextOperation) {
++        BOOLEAN (*routine)(PVOID) = NextOperation;
++        NextOperation = NULL;
++        NextResult = routine(NextPort);
++    }
++}
++static VOID NTAPI IdeTimeout(VOID)
++{
++    if (TimeoutOperation) {
++        VOID (*routine)(PVOID, ULONG) = TimeoutOperation;
++        TimeoutOperation = NULL;
++        routine(TimeoutPort, TimeoutSlot);
++    }
++}
++static BOOLEAN NTAPI IdePoll(VOID)
++{ return !IdexChannelObject.StartPacketBusy; }
++static VOID NTAPI IdeTimerDpc(PKDPC Dpc, PVOID Context, PVOID A1, PVOID A2)
++{
++    UNREFERENCED_PARAMETER(Dpc); UNREFERENCED_PARAMETER(Context);
++    UNREFERENCED_PARAMETER(A1); UNREFERENCED_PARAMETER(A2);
++    if (TimerOperation) TimerOperation(TimerDevice, TimerPort);
++}
++static VOID IdeInitialize(VOID)
++{
++    if (IdeInitialized) return;
++    IdeInitialized = TRUE;
++    IdexChannelObject.InterruptRoutine = IdeInterrupt;
++    IdexChannelObject.FinishIoRoutine = IdeFinish;
++    IdexChannelObject.PollResetCompleteRoutine = IdePoll;
++    IdexChannelObject.TimeoutExpiredRoutine = IdeTimeout;
++    IdexChannelObject.StartPacketRoutine = IdeStart;
++    IdexChannelObject.StartNextPacketRoutine = IdeNext;
++    IdexChannelObject.MaximumIoRetries = 3;
++    KeInitializeDeviceQueue(&IdexChannelObject.DeviceQueue);
++    KeInitializeDpc(&IdexChannelObject.TimerDpc, IdeTimerDpc, NULL);
++    KeInitializeTimer(&IdexChannelObject.Timer);
++}
++VOID NxkIdeSetHardwareIsr(PKSERVICE_ROUTINE Routine, PVOID Context)
++{ IdeInitialize(); HardwareIsr = Routine; HardwareContext = Context; }
++BOOLEAN NTAPI NxkIdeIsr(PKINTERRUPT Interrupt, PVOID Context)
++{
++    UNREFERENCED_PARAMETER(Context);
++    if (!HardwareIsr || !HardwareContext) return FALSE;
++    HardwareInterrupt = Interrupt; IrqResult = FALSE; IrqChained = FALSE;
++    ++IdexChannelObject.InterruptObject.ServiceCount;
++    IdexChannelObject.InterruptRoutine();
++    HardwareInterrupt = NULL;
++    return IrqResult;
++}
++VOID NxkIdeBindInterrupt(PKINTERRUPT Native)
++{
++    IdeInitialize();
++    IdexChannelObject.InterruptIrql = Native->Irql;
++    IdexChannelObject.InterruptObject.ServiceRoutine = NxkIdeIsr;
++    IdexChannelObject.InterruptObject.ServiceContext = HardwareContext;
++    IdexChannelObject.InterruptObject.BusInterruptLevel = Native->Vector;
++    IdexChannelObject.InterruptObject.Irql = Native->Irql;
++    IdexChannelObject.InterruptObject.Connected = Native->Connected;
++    IdexChannelObject.InterruptObject.ShareVector = Native->ShareVector;
++    IdexChannelObject.InterruptObject.Mode = Native->Mode;
++    XeInterruptBindNative((PKINTERRUPT)&IdexChannelObject.InterruptObject, Native);
++}
++/* Disable device interrupts first; unpublish before disconnect frees the IRQ.
++ * The channel key prevents a secondary/unrelated teardown from clearing it. */
++VOID NxkIdeUnbindChannel(PVOID Channel)
++{
++    KIRQL old;
++    /* Pageable teardown on UP: cancel any future timer work before removing
++     * its channel/context. Do not take timer locks at HIGH_LEVEL. */
++    if (Channel == HardwareContext && TimerOperation) NxkIdeStopTimer(TimerPort);
++    KeRaiseIrql(HIGH_LEVEL, &old);
++    if (Channel == HardwareContext) {
++        XeInterruptBindNative((PKINTERRUPT)&IdexChannelObject.InterruptObject, NULL);
++        HardwareIsr = NULL; HardwareContext = NULL; HardwareInterrupt = NULL;
++        StartOperation = NULL; StartChannel = NULL; StartRequest = NULL;
++        FinishOperation = NULL; FinishRequest = NULL;
++        NextOperation = NULL; NextPort = NULL;
++        TimeoutOperation = NULL; TimeoutPort = NULL;
++        IdexChannelObject.CurrentIrp = NULL;
++        IdexChannelObject.StartPacketBusy = FALSE;
++        IdexChannelObject.StartPacketRequested = FALSE;
++        IdexChannelObject.ExpectingBusMasterInterrupt = FALSE;
++        IdexChannelObject.DeviceQueue.Busy = FALSE;
++        IdexChannelObject.Timeout = 0;
++        IdexChannelObject.PhysicalRegionDescriptorTablePhysical = 0;
++        RtlZeroMemory(&IdexChannelObject.InterruptObject,
++                      sizeof(IdexChannelObject.InterruptObject));
++        ++RequestGeneration;
++    }
++    KeLowerIrql(old);
++}
++VOID NxkIdeInitializeCompletion(PKDEFERRED_ROUTINE Routine)
++{ IdeInitialize(); KeInitializeDpc(&IdexChannelObject.FinishDpc, Routine, NULL); }
++PKDPC NxkIdeCompletionDpc(VOID) { return &IdexChannelObject.FinishDpc; }
++VOID NxkIdeStartTimer(PDEVICE_OBJECT Device, PVOID Port, PIO_TIMER_ROUTINE Routine)
++{
++    LARGE_INTEGER due;
++    TimerDevice = Device; TimerPort = Port; TimerOperation = Routine;
++    due.QuadPart = -10000000;
++    KeSetTimerEx(&IdexChannelObject.Timer, due, 1000, &IdexChannelObject.TimerDpc);
++}
++VOID NxkIdeStopTimer(PVOID Port)
++{
++    if (TimerPort != Port) return;
++    KeCancelTimer(&IdexChannelObject.Timer);
++    KeRemoveQueueDpc(&IdexChannelObject.TimerDpc);
++    TimerOperation = NULL; TimerDevice = NULL; TimerPort = NULL;
++    NextOperation = NULL; NextPort = NULL;
++    TimeoutOperation = NULL; TimeoutPort = NULL;
++}
++BOOLEAN NxkIdeStartRequest(PVOID Channel, PVOID Request,
++    BOOLEAN (*Start)(PVOID, PVOID), PDEVICE_OBJECT Device, PIRP Irp, ULONG Timeout)
++{
++    if (Channel != HardwareContext) return Start(Channel, Request);
++    ++RequestGeneration;
++    IdexChannelObject.CurrentIrp = Irp;
++    IdexChannelObject.StartPacketBusy = TRUE;
++    IdexChannelObject.DeviceQueue.Busy = TRUE;
++    IdexChannelObject.StartPacketRequested = TRUE;
++    IdexChannelObject.ExpectingBusMasterInterrupt = TRUE;
++    IdexChannelObject.Timeout = (UCHAR)min(Timeout, 255);
++    StartChannel = Channel; StartRequest = Request; StartOperation = Start;
++    StartResult = FALSE;
++    IdexChannelObject.StartPacketRoutine(Device, Irp);
++    StartOperation = NULL;
++    IdexChannelObject.StartPacketRequested = FALSE;
++    return StartResult;
++}
++VOID NxkIdeFinishRequest(PVOID Request, VOID (*Finish)(PVOID), PIRP Irp)
++{
++    /* Shared completion DPC can also carry an unrelated secondary channel. */
++    if (IdexChannelObject.CurrentIrp != Irp) { Finish(Request); return; }
++    ULONG generation = RequestGeneration;
++    IdexChannelObject.ExpectingBusMasterInterrupt = FALSE;
++    IdexChannelObject.StartPacketBusy = FALSE;
++    IdexChannelObject.DeviceQueue.Busy = FALSE;
++    FinishRequest = Request; FinishOperation = Finish;
++    IdexChannelObject.FinishIoRoutine();
++    FinishOperation = NULL;
++    /* Completion may requeue this exact IRP: pointer equality is insufficient. */
++    if (generation == RequestGeneration) IdexChannelObject.CurrentIrp = NULL;
++}
++BOOLEAN NxkIdeStartNext(PVOID Port, BOOLEAN (*StartNext)(PVOID))
++{
++    if (TimerPort != Port) return StartNext(Port);
++    NextPort = Port; NextOperation = StartNext; NextResult = FALSE;
++    IdexChannelObject.StartNextPacketRoutine(); NextOperation = NULL;
++    return NextResult;
++}
++VOID NxkIdeTimeout(PVOID Port, ULONG Slot, VOID (*Timeout)(PVOID, ULONG))
++{
++    if (TimerPort != Port) { Timeout(Port, Slot); return; }
++    IdexChannelObject.Timeout = 0;
++    TimeoutPort = Port; TimeoutSlot = Slot; TimeoutOperation = Timeout;
++    IdexChannelObject.TimeoutExpiredRoutine(); TimeoutOperation = NULL;
++}
++
++BOOLEAN NxkIdeResetComplete(PVOID Channel)
++{
++    if (Channel != HardwareContext) return TRUE;
++    /* The native reset is synchronous; poll the title hook only after its
++     * actual completion. Default poll therefore observes completed reset. */
++    IdexChannelObject.StartPacketBusy = FALSE;
++    IdexChannelObject.ExpectingBusMasterInterrupt = FALSE;
++    return IdexChannelObject.PollResetCompleteRoutine();
++}
++VOID NxkIdeSetTimeout(PVOID Port, ULONG Seconds)
++{
++    if (Port == TimerPort) IdexChannelObject.Timeout = (UCHAR)min(Seconds, 255);
++}
+diff --git a/ntoskrnl/xb/interrupt.c b/ntoskrnl/xb/interrupt.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..cebe50d6ead091dfbadb6002cde6fb88cbf45dfa
+--- /dev/null
++++ b/ntoskrnl/xb/interrupt.c
+@@ -0,0 +1,188 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <ntoskrnl.h>
++#include <xb-debug.h>
++
++/* KeInitializeInterrupt / Connect / Disconnect are NDK (ndk/kefuncs.h)
++ * prototypes, not part of the DDK headers xbe.c includes -- declare them
++ * locally. */
++NTKERNELAPI
++VOID
++NTAPI
++KeInitializeInterrupt(IN PKINTERRUPT Interrupt,
++                      IN PKSERVICE_ROUTINE ServiceRoutine,
++                      IN PVOID ServiceContext,
++                      IN PKSPIN_LOCK SpinLock,
++                      IN ULONG Vector,
++                      IN KIRQL Irql,
++                      IN KIRQL SynchronizeIrql,
++                      IN KINTERRUPT_MODE InterruptMode,
++                      IN BOOLEAN ShareVector,
++                      IN CHAR ProcessorNumber,
++                      IN BOOLEAN FloatingSave);
++NTKERNELAPI BOOLEAN NTAPI KeConnectInterrupt(IN PKINTERRUPT Interrupt);
++NTKERNELAPI BOOLEAN NTAPI KeDisconnectInterrupt(IN PKINTERRUPT Interrupt);
++
++/* KINTERRUPT shadow.  Xbox KINTERRUPT is 112 bytes; NT's is 484 (60-byte
++ * header + 424-byte DispatchCode tail).  Letting NT initialise into the
++ * caller's buffer writes 372 bytes past the end.  Maintain an NT-shaped
++ * buffer per Xbox KINTERRUPT and dispatch the lifecycle through it. */
++typedef struct _XBE_INTERRUPT_SHADOW
++{
++    PKINTERRUPT XboxInterrupt;          /* title's pointer -- lookup key */
++    BOOLEAN DriverOwned;               /* tombstone survives unbind */
++    PKINTERRUPT BorrowedInterrupt;      /* active hardware owner, if borrowed */
++    /* 512 bytes is comfortably > NT's sizeof(KINTERRUPT) (484) and a clean
++     * paragraph round.  C_ASSERT below pins down the choice. */
++    UCHAR       NtInterruptStorage[512];
++} XBE_INTERRUPT_SHADOW;
++
++#define XBE_INTERRUPT_SHADOW_SLOTS 8
++
++static XBE_INTERRUPT_SHADOW XeInterruptShadows[XBE_INTERRUPT_SHADOW_SLOTS];
++
++static XBE_INTERRUPT_SHADOW *
++XeInterruptGetShadow(PKINTERRUPT XboxInt, BOOLEAN Allocate)
++{
++    KIRQL OldIrql;
++    XBE_INTERRUPT_SHADOW *Result = NULL;
++    ULONG i;
++
++    KeRaiseIrql(HIGH_LEVEL, &OldIrql);
++    for (i = 0; i < XBE_INTERRUPT_SHADOW_SLOTS; i++)
++    {
++        if (XeInterruptShadows[i].XboxInterrupt == XboxInt)
++        {
++            Result = &XeInterruptShadows[i];
++            break;
++        }
++    }
++    if (Result == NULL && Allocate)
++    {
++        for (i = 0; i < XBE_INTERRUPT_SHADOW_SLOTS; i++)
++        {
++            if (XeInterruptShadows[i].XboxInterrupt == NULL)
++            {
++                XeInterruptShadows[i].XboxInterrupt = XboxInt;
++                RtlZeroMemory(XeInterruptShadows[i].NtInterruptStorage,
++                              sizeof(XeInterruptShadows[i].NtInterruptStorage));
++                Result = &XeInterruptShadows[i];
++                break;
++            }
++        }
++    }
++    KeLowerIrql(OldIrql);
++    return Result;
++}
++
++/* Associate a public interrupt with the driver's actual IRQ object. */
++VOID XeInterruptBindNative(PKINTERRUPT Xbox, PKINTERRUPT Native)
++{
++    XBE_INTERRUPT_SHADOW *shadow = XeInterruptGetShadow(Xbox, TRUE);
++    if (shadow) {
++        KIRQL old;
++        KeRaiseIrql(HIGH_LEVEL, &old);
++        shadow->DriverOwned = TRUE;
++        shadow->BorrowedInterrupt = Native;
++        KeLowerIrql(old);
++    }
++}
++static PKINTERRUPT XeInterruptNative(XBE_INTERRUPT_SHADOW *shadow)
++{
++    return shadow->BorrowedInterrupt ? shadow->BorrowedInterrupt :
++           (PKINTERRUPT)shadow->NtInterruptStorage;
++}
++
++/* Xbox KeInitializeInterrupt has no caller-supplied spin lock and no SMP
++ * params; NT's does.  Pass NULL for the lock (use KINTERRUPT's built-in
++ * one), mirror Irql as the synchronize IRQL, pin processor 0 without FP
++ * save.  Writes 484 bytes into the *shadow*; the title's buffer is left
++ * alone (its address is still the lookup key for Connect/Disconnect). */
++VOID NTAPI
++XeKeInitializeInterrupt(PKINTERRUPT Interrupt,
++                          PKSERVICE_ROUTINE ServiceRoutine,
++                          PVOID ServiceContext,
++                          ULONG Vector,
++                          KIRQL Irql,
++                          KINTERRUPT_MODE InterruptMode,
++                          BOOLEAN ShareVector)
++{
++    XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, TRUE);
++    if (Shadow == NULL)
++    {
++        XbDbg("KeInitializeInterrupt: shadow table full, KINTERRUPT %p "
++                 "ignored\n", Interrupt);
++        return;
++    }
++    if (Shadow->DriverOwned) return; /* title cannot replace active IRQ owner */
++    KeInitializeInterrupt((PKINTERRUPT)Shadow->NtInterruptStorage,
++                          ServiceRoutine, ServiceContext,
++                          NULL, Vector, Irql, Irql, InterruptMode,
++                          ShareVector, 0, FALSE);
++}
++
++/* Title KINTERRUPT leaves ActualLock NULL.  NT's KeSynchronizeExecution
++ * derefs Interrupt->ActualLock at +0x1C; KefAcquireSpinLockAtDpcLevel then
++ * bugchecks with IRQL_NOT_GREATER_OR_EQUAL.  Route through the shadow's NT
++ * KINTERRUPT (stamps ActualLock = &SpinLock) so the lock is real.
++ * If no shadow exists, just call the routine directly -- uniprocessor Xbox
++ * makes the lock a no-op anyway and titles expect forward progress. */
++BOOLEAN NTAPI
++XeKeSynchronizeExecution(_In_ PKINTERRUPT Interrupt,
++                           _In_ PKSYNCHRONIZE_ROUTINE SynchronizeRoutine,
++                           _In_opt_ PVOID SynchronizeContext)
++{
++    XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, FALSE);
++    if (Shadow == NULL)
++    {
++        XbDbg("KeSynchronizeExecution(%p): no shadow; running "
++                 "uncontended\n", Interrupt);
++        return SynchronizeRoutine(SynchronizeContext);
++    }
++    if (Shadow->DriverOwned) {
++        /* Xbox is UP: DPC level excludes pageable driver teardown while the
++         * borrowed pointer is inspected and used. No lock spans the callback,
++         * so nested synchronization remains safe. Teardown unbinds at HIGH. */
++        KIRQL old = KeGetCurrentIrql();
++        BOOLEAN result;
++        if (old < DISPATCH_LEVEL) KeRaiseIrql(DISPATCH_LEVEL, &old);
++        result = Shadow->BorrowedInterrupt ?
++            KeSynchronizeExecution(Shadow->BorrowedInterrupt,
++                                   SynchronizeRoutine, SynchronizeContext) : FALSE;
++        if (old < DISPATCH_LEVEL) KeLowerIrql(old);
++        return result;
++    }
++    return KeSynchronizeExecution(XeInterruptNative(Shadow),
++                                  SynchronizeRoutine, SynchronizeContext);
++}
++
++/* No-shadow means KeInitializeInterrupt was never called for this
++ * KINTERRUPT -- a caller bug; log and refuse. */
++BOOLEAN NTAPI
++XeKeConnectInterrupt(PKINTERRUPT Interrupt)
++{
++    XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, FALSE);
++    if (Shadow == NULL)
++    {
++        XbDbg("KeConnectInterrupt(%p): no shadow; ignored\n", Interrupt);
++        return FALSE;
++    }
++    if (Shadow->DriverOwned) {
++        KIRQL old = KeGetCurrentIrql();
++        BOOLEAN connected;
++        if (old < DISPATCH_LEVEL) KeRaiseIrql(DISPATCH_LEVEL, &old);
++        connected = Shadow->BorrowedInterrupt && Shadow->BorrowedInterrupt->Connected;
++        if (old < DISPATCH_LEVEL) KeLowerIrql(old);
++        return connected;
++    }
++    return KeConnectInterrupt(XeInterruptNative(Shadow));
++}
++
++BOOLEAN NTAPI
++XeKeDisconnectInterrupt(PKINTERRUPT Interrupt)
++{
++    XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, FALSE);
++    if (Shadow == NULL)
++        return FALSE;
++    if (Shadow->DriverOwned) return FALSE; /* driver owns lifecycle, even detached */
++    return KeDisconnectInterrupt(XeInterruptNative(Shadow));
++}
+diff --git a/ntoskrnl/xb/mm/api.c b/ntoskrnl/xb/mm/api.c
+index 89df2f71107eea50c1be459380a0eb181c5bb60b..b524116ff00a9141407331a6909b2aefdbfa8462 100644
+--- a/ntoskrnl/xb/mm/api.c
++++ b/ntoskrnl/xb/mm/api.c
+@@ -8,7 +8,7 @@
+  * Most are thin -- the heavy lifting sits in the Nx* helpers in xb/mm/
+  * contig.c / sysva.c / iospace.c.  This file holds:
+  *   - MmAllocateSystemMemory / MmFreeSystemMemory     (system-VA aperture)
+- *   - MmLockUnlockBufferPages / MmLockUnlockPhysicalPage  (no-op: no pager)
++ *   - MmLockUnlockBufferPages / MmLockUnlockPhysicalPage  (nested physical pins)
+  *   - MmQueryAddressProtect / MmQueryStatistics       (queries)
+  *   - NxMmCreateKernelStack / NxMmDeleteKernelStack   (per-thread stack)
+  */
+@@ -21,6 +21,7 @@
+ #include <xb-debug.h>
+ 
+ #include "mm.h"
++#include <mm/ARM3/miarm.h>
+ 
+ #define NXMM_TAG  'mMxN'
+ 
+@@ -68,22 +69,42 @@ MmFreeSystemMemory(_In_ PVOID Base, _In_ SIZE_T Size)
+ 
+ /* LOCK / UNLOCK ************************************************************/
+ 
+-/* No-ops: the kernel never pages out, so locking against the pager has
+- * nothing to do. */
+-ULONG NTAPI
+-MmLockUnlockBufferPages(_In_ PVOID Base, _In_ SIZE_T Size, _In_ BOOLEAN Unlock)
++/* Public ABI uses VOID and byte physical addresses. Invalid requests are
++ * inert. Validate the whole buffer and per-PFN alias multiplicity before
++ * changing counts. Count overflow conservatively pins until reboot. */
++VOID NTAPI
++MmLockUnlockBufferPages(PVOID Base, SIZE_T Size, BOOLEAN Unlock)
+ {
+-    UNREFERENCED_PARAMETER(Base);
+-    UNREFERENCED_PARAMETER(Size);
+-    UNREFERENCED_PARAMETER(Unlock);
+-    return 0;
++#ifdef NXK_MM_PHYS
++    ULONG_PTR first = (ULONG_PTR)Base & ~(PAGE_SIZE - 1), last, va;
++    KIRQL irql;
++    if (Size == 0 || Size - 1 > MAXULONG_PTR - (ULONG_PTR)Base) return;
++    last = ((ULONG_PTR)Base + Size - 1) & ~(PAGE_SIZE - 1);
++    irql = MiAcquirePfnLock();
++    NxkPageSupplyBeginPinBatch();
++    for (va = first;; va += PAGE_SIZE) {
++        ULONG_PTR pa;
++        if (!NxMmIsAddressValid((PVOID)va)) goto out;
++        pa = NxMmGetPhysicalAddress((PVOID)va);
++        if (!NxkPageSupplyRecordPin(pa >> PAGE_SHIFT, Unlock)) goto out;
++        if (va == last) break;
++    }
++    for (va = first;; va += PAGE_SIZE) {
++        NxkPageSupplyPin(NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT, Unlock);
++        if (va == last) break;
++    }
++out:
++    MiReleasePfnLock(irql);
++#endif
+ }
+-ULONG NTAPI
+-MmLockUnlockPhysicalPage(_In_ ULONG_PTR Pfn, _In_ BOOLEAN Unlock)
++VOID NTAPI
++MmLockUnlockPhysicalPage(ULONG_PTR PhysicalAddress, BOOLEAN Unlock)
+ {
+-    UNREFERENCED_PARAMETER(Pfn);
+-    UNREFERENCED_PARAMETER(Unlock);
+-    return 0;
++#ifdef NXK_MM_PHYS
++    KIRQL irql = MiAcquirePfnLock();
++    NxkPageSupplyPin(PhysicalAddress >> PAGE_SHIFT, Unlock);
++    MiReleasePfnLock(irql);
++#endif
+ }
+ 
+ /* QUERIES ******************************************************************/
+diff --git a/ntoskrnl/xb/mm/contig.c b/ntoskrnl/xb/mm/contig.c
+index 0f385b0d8e7e8c9ed99d68268c348907536f3691..16cafc69751883ad273c2421a29965f7dc6b7438 100644
+--- a/ntoskrnl/xb/mm/contig.c
++++ b/ntoskrnl/xb/mm/contig.c
+@@ -422,6 +422,25 @@ NxpHeapFree(PVOID Alias, SIZE_T *OutSize)
+             if (OutSize) *OutSize = NxContigTable[i].Size;
+             Pa    = NxContigTable[i].Pa;
+             PaEnd = NxContigTable[i].PaEnd;
++            {
++                ULONG_PTR check;
++                KIRQL pfnIrql = MiAcquirePfnLock();
++                for (check = Pa; check < PaEnd; check += PAGE_SIZE)
++                    if (NxkPageSupplyIsPinned(check >> PAGE_SHIFT)) break;
++                if (check != PaEnd) {
++                    MiReleasePfnLock(pfnIrql);
++                    KeReleaseSpinLock(&NxContigLock, OldIrql);
++                    /* VOID free refuses a pinned contiguous allocation;
++                     * caller must unlock and retry. Tracking stays intact. */
++                    return TRUE;
++                }
++                NxkMmClearPersistence(Pa, PaEnd);
++                while (Pa < PaEnd) {
++                    NxkPageSupplyReturn(Pa >> PAGE_SHIFT);
++                    Pa += PAGE_SIZE;
++                }
++                MiReleasePfnLock(pfnIrql);
++            }
+             NxContigTable[i].Alias = NULL;
+             NxContigTable[i].Pa    = 0;
+             NxContigTable[i].PaEnd = 0;
+@@ -703,7 +722,7 @@ NTAPI
+ NxMmFreeContiguousMemory(IN PVOID BaseAddress)
+ {
+     SIZE_T Size = 0;
+-    if (!NxpHeapFree(BaseAddress, &Size))
++    if (!NxpHeapFree(BaseAddress, &Size) && !NxkMmFreeRestored(BaseAddress))
+         DPRINT1("MmFreeContiguousMemory(%p) -- not a contiguous alloc\n",
+                 BaseAddress);
+ }
+@@ -727,12 +746,11 @@ NxMmQueryAllocationSize(IN PVOID BaseAddress)
+         }
+     }
+     KeReleaseSpinLock(&NxContigLock, OldIrql);
+-    return Size;
++    return Size ? Size : NxkMmQueryRestored(BaseAddress);
+ }
+ 
+-/* "Persist" keeps a contiguous allocation alive across a soft reboot so a
+- * newly launched title can inherit it.  Bring-up has no reboot handoff, so
+- * the request is accepted as a no-op. */
++/* Mark/unmark whole pages covering a valid subrange of one live allocation.
++ * Invalid/overflowing/stale ranges are inert (the public ABI is VOID). */
+ VOID
+ NTAPI
+ NxMmPersistContiguousMemory(
+@@ -740,9 +758,53 @@ NxMmPersistContiguousMemory(
+     IN SIZE_T NumberOfBytes,
+     IN BOOLEAN Persist)
+ {
+-    UNREFERENCED_PARAMETER(BaseAddress);
+-    UNREFERENCED_PARAMETER(NumberOfBytes);
+-    UNREFERENCED_PARAMETER(Persist);
++    ULONG_PTR base = (ULONG_PTR)BaseAddress;
++    KIRQL irql;
++    ULONG i;
++    SIZE_T restored;
++    if (NumberOfBytes == 0 || NumberOfBytes - 1 > MAXULONG_PTR - base) return;
++    KeAcquireSpinLock(&NxContigLock, &irql);
++    for (i = 0; i < NxContigSlots; ++i) {
++        NXK_CONTIG_ENTRY *e = &NxContigTable[i];
++        ULONG_PTR start = (ULONG_PTR)e->Alias;
++        if (e->Alias && base >= start && base - start < e->Size &&
++            NumberOfBytes <= e->Size - (base - start)) {
++            NxkMmSetPersistentPages(e->Pa + base - start, NumberOfBytes, Persist);
++            KeReleaseSpinLock(&NxContigLock, irql); return;
++        }
++    }
++    /* Restored run may be marked/unmarked by the next title as well. */
++    if (base >= NXK_KSEG0_BASE && base < NXK_KSEG0_BASE + NXK_KSEG0_RAM_SIZE) {
++        ULONG_PTR start = base & ~(PAGE_SIZE - 1);
++        while (start > NXK_KSEG0_BASE &&
++               NxkMmPersistentPage((start - NXK_KSEG0_BASE) / PAGE_SIZE - 1))
++            start -= PAGE_SIZE;
++        restored = NxkMmQueryRestored((PVOID)start);
++        if (restored && base - start < restored && NumberOfBytes <= restored - (base - start))
++            NxkMmSetPersistentPages(base - NXK_KSEG0_BASE, NumberOfBytes, Persist);
++    }
++    KeReleaseSpinLock(&NxContigLock, irql);
++}
++
++/* Adopt the original launch-data page into ordinary allocation tracking;
++ * this avoids retaining an orphaned old launch page on every warm reboot. */
++BOOLEAN NxkMmAdoptRestored(PVOID Alias, SIZE_T Size)
++{
++    ULONG slot;
++    ULONG_PTR pa = (ULONG_PTR)Alias - NXK_KSEG0_BASE, check;
++    KIRQL irql, pfnIrql;
++    if ((pa & (PAGE_SIZE - 1)) || Size == 0 || (Size & (PAGE_SIZE - 1)) ||
++        pa >= NXK_KSEG0_RAM_SIZE || Size > NXK_KSEG0_RAM_SIZE - pa) return FALSE;
++    if (!NxpContigTakeSlot(&slot, &irql)) return FALSE;
++    pfnIrql = MiAcquirePfnLock();
++    for (check = pa; check < pa + Size; check += PAGE_SIZE)
++        if (!NxkMmPersistentPage(check >> PAGE_SHIFT)) break;
++    if (check != pa + Size) {
++        MiReleasePfnLock(pfnIrql); KeReleaseSpinLock(&NxContigLock, irql); return FALSE;
++    }
++    NxkMmDetachRestored(pa, Size);
++    NxpRecordHeapContigLocked(slot, Alias, pa, Size, Size);
++    MiReleasePfnLock(pfnIrql); KeReleaseSpinLock(&NxContigLock, irql); return TRUE;
+ }
+ 
+ /* GPU INSTANCE MEMORY ******************************************************/
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index 0d87735bfacfbb88155a6a81bba9f826eb5e2bf9..e2ba3ee8d7c6446093f665699d6f91c3ace17bdd 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -156,6 +156,7 @@ VOID NxkMmEnsureXboxWindows(VOID);
+ 
+ /* xb/mm/iospace.c -- VA->PA for sysva.c's PTE painting. */
+ ULONG_PTR NTAPI NxMmGetPhysicalAddress(IN PVOID Va);
++BOOLEAN NTAPI NxMmIsAddressValid(IN PVOID Va);
+ 
+ /* xb/mm/vm.c -- the title VM manager (NXK_MM_VM). */
+ NTSTATUS NTAPI NxVmAllocateVirtualMemory(IN OUT PVOID *BaseAddress,
+@@ -197,3 +198,22 @@ ULONG NxPoolPagesCommitted(VOID);
+  * subtracted from PoolPagesCommitted so the classes stay disjoint. */
+ extern volatile LONG NxkMmStackPages;
+ extern volatile LONG NxkMmStackPagesInPool;
++
++/* PFN lock required for page pin operations. */
++BOOLEAN NxkPageSupplyCanPin(PFN_NUMBER Page, BOOLEAN Unlock);
++BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER Page);
++VOID NxkPageSupplyPin(PFN_NUMBER Page, BOOLEAN Unlock);
++
++BOOLEAN NxkMmPersistentPage(PFN_NUMBER Page);
++VOID NxkMmReadPersistence(PLOADER_PARAMETER_BLOCK Lb);
++VOID NTAPI NxkMmPublishPersistence(BOOLEAN WarmReset);
++VOID NxkMmSetPersistentPages(ULONG_PTR Pa, SIZE_T Size, BOOLEAN Persist);
++VOID NxkMmClearPersistence(ULONG_PTR Pa, ULONG_PTR End);
++SIZE_T NxkMmQueryRestored(PVOID Alias);
++BOOLEAN NxkMmFreeRestored(PVOID Alias);
++
++VOID NxkMmDetachRestored(ULONG_PTR Pa, SIZE_T Size);
++BOOLEAN NxkMmAdoptRestored(PVOID Alias, SIZE_T Size);
++
++VOID NxkPageSupplyBeginPinBatch(VOID);
++BOOLEAN NxkPageSupplyRecordPin(PFN_NUMBER Page, BOOLEAN Unlock);
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index e4bb929b14ef67d020656cbcc90089a09a7683c2..07a89c1d846bea2590a9b763f2b5e2c7f84b8a88 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -86,6 +86,11 @@
+ #define NXP_GENERIC_FLOOR_PFN  0x10
+ 
+ static PULONG NxpLinks;
++static PUSHORT NxpPins; /* count, sticky overflow, deferred free */
++static PUSHORT NxpPinBatch; /* per-PFN multiplicity scratch under PFN lock */
++#define NXP_PIN_LIMIT 0x3FFF
++#define NXP_PIN_OVERFLOW 0x4000
++#define NXP_RETURN_PENDING 0x8000
+ static PFN_NUMBER NxpHighestPfn;
+ static ULONG NxpFreeHeadKernel;         /* 0 = empty */
+ static ULONG NxpFreeHeadTitle;
+@@ -157,6 +162,9 @@ NxkPageSupplyInitialize(
+     ASSERT(HighestPfn <= NXP_PFN_MASK);
+     NxpLinks = LinksArray;
+     NxpHighestPfn = HighestPfn;
++    NxpPins = (PUSHORT)(NxpLinks + HighestPfn + 1);
++    NxpPinBatch = NxpPins + HighestPfn + 1;
++    RtlZeroMemory(NxpPins, (HighestPfn + 1) * 2 * sizeof(USHORT));
+     RtlZeroMemory(LinksArray, (HighestPfn + 1) * sizeof(ULONG));
+ 
+     if (NxkMmRetailShapedMap())
+@@ -233,10 +241,67 @@ NxkPageSupplyReturn(PFN_NUMBER Page)
+      * (PushHead overwrites it). */
+     ASSERT(!(NxpLinks[Page] & NXP_FREE));
+ 
++    if (NxpPins[Page] & (NXP_PIN_LIMIT | NXP_PIN_OVERFLOW)) {
++        /* Preserve physical contents after a non-contiguous owner releases
++         * its mapping. The final physical unlock returns this page. */
++        NxpLinks[Page] = 0;
++        NxpPins[Page] |= NXP_RETURN_PENDING;
++        return;
++    }
++    if (NxkMmPersistentPage(Page)) return;
+     NxpPushHead(Page);
+     if (Page < NxpSpillHint) NxpSpillHint = Page;
+ }
+ 
++/* Callers hold the PFN lock, including translation of buffer VAs, so
++ * relocation cannot race a pin. Overflow latches a permanent pin until reboot:
++ * VOID lock cannot report failure, so discarding an extra lock is unsafe. */
++BOOLEAN NxkPageSupplyCanPin(PFN_NUMBER Page, BOOLEAN Unlock)
++{
++    if (NxpLinks == NULL || Page == 0 || Page > NxpHighestPfn ||
++        (NxpLinks[Page] & NXP_FREE)) return FALSE;
++    return Unlock ? (NxpPins[Page] & (NXP_PIN_LIMIT | NXP_PIN_OVERFLOW)) != 0 :
++                    !(NxpPins[Page] & NXP_RETURN_PENDING);
++}
++BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER Page)
++{
++    return NxpLinks != NULL && Page > 0 && Page <= NxpHighestPfn &&
++           (NxpPins[Page] & (NXP_PIN_LIMIT | NXP_PIN_OVERFLOW)) != 0;
++}
++VOID NxkPageSupplyPin(PFN_NUMBER Page, BOOLEAN Unlock)
++{
++    MI_ASSERT_PFN_LOCK_HELD();
++    if (!NxkPageSupplyCanPin(Page, Unlock)) return;
++    if (NxpPins[Page] & NXP_PIN_OVERFLOW) return;
++    if (Unlock) {
++        --NxpPins[Page];
++        if (NxpPins[Page] == NXP_RETURN_PENDING) {
++            NxpPins[Page] = 0;
++            NxpPushHead(Page);
++            if (Page < NxpSpillHint) NxpSpillHint = Page;
++        }
++    } else if ((NxpPins[Page] & NXP_PIN_LIMIT) == NXP_PIN_LIMIT)
++        NxpPins[Page] |= NXP_PIN_OVERFLOW;
++    else ++NxpPins[Page];
++}
++
++/* Buffer preflight counts aliases of the same PFN before any mutation.
++ * Overflowed PFNs remain pinned regardless of subsequent locks/unlocks. */
++VOID NxkPageSupplyBeginPinBatch(VOID)
++{
++    MI_ASSERT_PFN_LOCK_HELD();
++    RtlZeroMemory(NxpPinBatch, (NxpHighestPfn + 1) * sizeof(USHORT));
++}
++BOOLEAN NxkPageSupplyRecordPin(PFN_NUMBER Page, BOOLEAN Unlock)
++{
++    MI_ASSERT_PFN_LOCK_HELD();
++    if (!NxkPageSupplyCanPin(Page, Unlock)) return FALSE;
++    if (NxpPinBatch[Page] != MAXUSHORT) ++NxpPinBatch[Page];
++    if (Unlock && !(NxpPins[Page] & NXP_PIN_OVERFLOW) &&
++        NxpPinBatch[Page] > (NxpPins[Page] & NXP_PIN_LIMIT)) return FALSE;
++    return TRUE;
++}
++
+ /*
+  * Frame ownership: the PTE (self-map VA) that maps a relocatable frame.
+  * Maintained by nxvm on map/unmap; consumed by the contiguous
+@@ -434,7 +499,7 @@ NxkPageSupplyTakeRunRelocate(
+ 
+             if (NxpLinks[Page] & NXP_FREE)
+                 FreeInWindow++;
+-            else if (NxpLinks[Page] != 0)
++            else if (NxpLinks[Page] != 0 && NxpPins[Page] == 0)
+                 Movable++;
+             else
+             {
+diff --git a/ntoskrnl/xb/mm/persistence.c b/ntoskrnl/xb/mm/persistence.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..ea6fd57a5b98fd715eb66f3501d5db603854a766
+--- /dev/null
++++ b/ntoskrnl/xb/mm/persistence.c
+@@ -0,0 +1,163 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independently designed one-shot warm RAM handoff. No firmware-derived data.
++ * Only the low 64 MiB contiguous aperture can persist. A selected partial page
++ * is retained whole. Restored allocations are maximal selected page runs;
++ * their alias bases can be queried/freed by the next title. Original holes and
++ * unselected pages are ordinary free memory on reboot.
++ */
++#include <ntoskrnl.h>
++#include <mm/ARM3/miarm.h>
++#include "mm.h"
++#define PM_PAGES (NXK_KSEG0_RAM_SIZE / PAGE_SIZE)
++#define PM_BYTES (PM_PAGES / 8)
++#define PM_VA (NXK_KSEG0_BASE | 0xD000)
++#define PM_MAGIC 0x4D50584EUL /* independently chosen format tag: NXPM */
++#define PM_VERSION 1
++#define PM_LAUNCH_VA (NXK_KSEG0_BASE | 0xE000)
++#define PM_LAUNCH_MAGIC 0x6E78436CUL /* existing kernel launch protocol */
++#define PM_LAUNCH_BYTES 3616
++
++typedef struct _PM_HANDOFF {
++    ULONG Magic, Version, BitmapBytes, ImageBase, LaunchHash, Checksum;
++    UCHAR Pages[PM_BYTES];
++} PM_HANDOFF;
++C_ASSERT(sizeof(PM_HANDOFF) <= PAGE_SIZE);
++static UCHAR PmSelected[PM_BYTES];
++static UCHAR PmRestored[PM_BYTES];
++
++static BOOLEAN PmBit(const UCHAR *Map, PFN_NUMBER Page)
++{ return Page < PM_PAGES && (Map[Page >> 3] & (1 << (Page & 7))) != 0; }
++static VOID PmSet(UCHAR *Map, PFN_NUMBER Page, BOOLEAN Set)
++{
++    if (Set) Map[Page >> 3] |= (UCHAR)(1 << (Page & 7));
++    else Map[Page >> 3] &= (UCHAR)~(1 << (Page & 7));
++}
++static ULONG PmHash(const UCHAR *Bytes, ULONG Length)
++{
++    /* FNV-1a: integrity detection, not authentication or proprietary keys. */
++    ULONG hash = 2166136261UL, i;
++    for (i = 0; i < Length; ++i) hash = (hash ^ Bytes[i]) * 16777619UL;
++    return hash;
++}
++static ULONG PmLaunchHash(VOID)
++{
++    if (*(volatile ULONG *)PM_LAUNCH_VA != PM_LAUNCH_MAGIC) return 0;
++    return PmHash((const UCHAR *)PM_LAUNCH_VA, PM_LAUNCH_BYTES);
++}
++static ULONG PmChecksum(const PM_HANDOFF *H)
++{
++    ULONG h = PmHash((const UCHAR *)&H->Version,
++                    FIELD_OFFSET(PM_HANDOFF, Checksum) - sizeof(ULONG));
++    return h ^ PmHash(H->Pages, PM_BYTES);
++}
++BOOLEAN NxkMmPersistentPage(PFN_NUMBER Page)
++{ return PmBit(PmRestored, Page); }
++
++/* Called while boot descriptors are complete, before MM scans/carves them.
++ * Validate every selected page against actual reservations, not just RAM size.
++ * Any invalid page rejects the whole handoff. Magic is consumed even on error.
++ */
++VOID NxkMmReadPersistence(PLOADER_PARAMETER_BLOCK Lb)
++{
++    PM_HANDOFF *slot = (PM_HANDOFF *)PM_VA;
++    PFN_NUMBER p;
++    BOOLEAN valid;
++    valid = slot->Magic == PM_MAGIC && slot->Version == PM_VERSION &&
++        slot->BitmapBytes == PM_BYTES && slot->ImageBase == (ULONG)__ImageBase &&
++        slot->Checksum == PmChecksum(slot) && slot->LaunchHash == PmLaunchHash();
++    slot->Magic = 0; /* stale handoffs cannot be consumed twice */
++    if (!valid) return;
++    for (p = 0; p < PM_PAGES; ++p) {
++        PLIST_ENTRY e;
++        BOOLEAN allowed = FALSE;
++        if (!PmBit(slot->Pages, p)) continue;
++        for (e = Lb->MemoryDescriptorListHead.Flink;
++             e != &Lb->MemoryDescriptorListHead; e = e->Flink) {
++            PMEMORY_ALLOCATION_DESCRIPTOR d = CONTAINING_RECORD(e,
++                MEMORY_ALLOCATION_DESCRIPTOR, ListEntry);
++            if (p < d->BasePage || p - d->BasePage >= d->PageCount) continue;
++            allowed = d->MemoryType == LoaderFree ||
++                (d->MemoryType == LoaderFirmwarePermanent && p >= 0x3C00 &&
++                 p < (NXK_NV2A_INSTANCE_BASE >> PAGE_SHIFT));
++            break;
++        }
++        if (!allowed || p == 0) return;
++    }
++    RtlCopyMemory(PmSelected, slot->Pages, PM_BYTES);
++    RtlCopyMemory(PmRestored, slot->Pages, PM_BYTES);
++}
++
++/* The HAL calls this after shutdown callbacks, immediately before reset.
++ * Clear first, copy/checksum, publish last; no allocator state pointers cross.
++ * Power-off/cycle invalidates the slot. Cold xemu RAM has no valid slot.
++ */
++VOID NTAPI NxkMmPublishPersistence(BOOLEAN WarmReset)
++{
++    PM_HANDOFF *slot = (PM_HANDOFF *)PM_VA;
++    KIRQL irql;
++    slot->Magic = 0;
++    if (!WarmReset) return;
++    irql = MiAcquirePfnLock();
++    slot->Version = PM_VERSION; slot->BitmapBytes = PM_BYTES;
++    slot->ImageBase = (ULONG)__ImageBase; slot->LaunchHash = PmLaunchHash();
++    RtlCopyMemory(slot->Pages, PmSelected, PM_BYTES);
++    slot->Checksum = PmChecksum(slot);
++    KeMemoryBarrier(); slot->Magic = PM_MAGIC;
++    MiReleasePfnLock(irql);
++}
++VOID NxkMmSetPersistentPages(ULONG_PTR Pa, SIZE_T Size, BOOLEAN Persist)
++{
++    PFN_NUMBER first = Pa >> PAGE_SHIFT, last = (Pa + Size - 1) >> PAGE_SHIFT, p;
++    KIRQL irql;
++    /* Reclaimed boot objects may be live title allocations, but their PAs
++     * must be reused by the next loader. Reject these collisions as a whole. */
++    if (first == 0 || last >= PM_PAGES ||
++        (first < 0x11 && last >= 0xD) ||
++        (first < 0x42 && last >= 0x30) ||
++        last >= (NXK_NV2A_INSTANCE_BASE >> PAGE_SHIFT)) return;
++    irql = MiAcquirePfnLock();
++    for (p = first; p <= last; ++p) PmSet(PmSelected, p, Persist);
++    MiReleasePfnLock(irql);
++}
++VOID NxkMmClearPersistence(ULONG_PTR Pa, ULONG_PTR End)
++{
++    PFN_NUMBER p;
++    /* Caller holds PFN lock and owns the allocation. */
++    for (p = Pa >> PAGE_SHIFT; p < (End >> PAGE_SHIFT); ++p) {
++        PmSet(PmSelected, p, FALSE); PmSet(PmRestored, p, FALSE);
++    }
++}
++SIZE_T NxkMmQueryRestored(PVOID Alias)
++{
++    ULONG_PTR va = (ULONG_PTR)Alias;
++    PFN_NUMBER p, end;
++    if (va < NXK_KSEG0_BASE || va >= NXK_KSEG0_BASE + NXK_KSEG0_RAM_SIZE ||
++        (va & (PAGE_SIZE - 1))) return 0;
++    p = (va - NXK_KSEG0_BASE) >> PAGE_SHIFT;
++    if (!PmBit(PmRestored, p) || (p && PmBit(PmRestored, p - 1))) return 0;
++    for (end = p + 1; PmBit(PmRestored, end); ++end) ;
++    return (end - p) << PAGE_SHIFT;
++}
++VOID NxkMmDetachRestored(ULONG_PTR Pa, SIZE_T Size)
++{
++    PFN_NUMBER p;
++    for (p = Pa >> PAGE_SHIFT; p < ((Pa + Size) >> PAGE_SHIFT); ++p)
++        PmSet(PmRestored, p, FALSE);
++}
++BOOLEAN NxkMmFreeRestored(PVOID Alias)
++{
++    SIZE_T size;
++    ULONG_PTR pa = (ULONG_PTR)Alias - NXK_KSEG0_BASE, end, check;
++    KIRQL irql = MiAcquirePfnLock();
++    size = NxkMmQueryRestored(Alias);
++    if (!size) { MiReleasePfnLock(irql); return FALSE; }
++    end = pa + size;
++    for (check = pa; check < end; check += PAGE_SIZE)
++        if (NxkPageSupplyIsPinned(check >> PAGE_SHIFT)) {
++            MiReleasePfnLock(irql); return TRUE; /* unlock and retry */
++        }
++    NxkMmClearPersistence(pa, end);
++    for (; pa < end; pa += PAGE_SIZE) NxkPageSupplyReturn(pa >> PAGE_SHIFT);
++    MiReleasePfnLock(irql);
++    return TRUE;
++}
+diff --git a/ntoskrnl/xb/nxldr-entry.c b/ntoskrnl/xb/nxldr-entry.c
+index fb7257593fdbc1a501d8b70c1ff619686174014a..fe778413a7c18225ec1a986ee10bbaf64ef33996 100644
+--- a/ntoskrnl/xb/nxldr-entry.c
++++ b/ntoskrnl/xb/nxldr-entry.c
+@@ -23,6 +23,7 @@
+ 
+ #include <ntoskrnl.h>
+ #include "nxldr-entry.h"
++#include "mm/mm.h"
+ #include "../../boot/nxldr/boot-layout.h"
+ 
+ #define LB_VA  ((PUCHAR)NXBL_PA_TO_KSEG0(NXBL_LB_PA))
+@@ -315,13 +316,13 @@ NxldrBuildLoaderBlock(VOID)
+     HighCount = 4 + NXBL_PT_KSEG0_COUNT + 1;
+ 
+     AddMd(Lb, &Cursor, LoaderMemoryData, 0x000, 0x001);          /* IVT/BDA: page 0 reserved */
+-    AddMd(Lb, &Cursor, LoaderFree, 0x001, 0x00E - 0x001);
+-    AddMd(Lb, &Cursor, LoaderMemoryData, 0x00E, 0x011 - 0x00E);  /* persist + PD + hdr */
++    AddMd(Lb, &Cursor, LoaderFree, 0x001, 0x00D - 0x001);
++    AddMd(Lb, &Cursor, LoaderMemoryData, 0x00D, 0x011 - 0x00D);  /* persist + PD + hdr */
+     AddMd(Lb, &Cursor, LoaderFree, 0x011, 0x030 - 0x011);        /* freed PT slots + GDT/IDT/TSS */
+     AddMd(Lb, &Cursor, LoaderMemoryData, NXBL_PCR_REGION_PA >> PAGE_SHIFT, 16); /* PCR backing */
+     AddMd(Lb, &Cursor, LoaderOsloaderHeap, 0x040, 2);            /* LoaderBlock + Aux */
+     AddMd(Lb, &Cursor, LoaderFree, 0x042, 0x100 - 0x042);
+-    AddMd(Lb, &Cursor, LoaderFirmwareTemporary, 0x100, 0x100);   /* loader code+stack */
++    AddMd(Lb, &Cursor, LoaderFree, 0x100, 0x100); /* loader moved above title RAM */
+     AddMd(Lb, &Cursor, LoaderFree, 0x200, 0x3C00 - 0x200);       /* title arena */
+     AddMd(Lb, &Cursor, LoaderFirmwarePermanent, 0x3C00, 0x400);  /* FB + NV2A reserve */
+     AddMd(Lb, &Cursor, LoaderSystemCode, 0x4000, KernelPages);
+@@ -329,6 +330,8 @@ NxldrBuildLoaderBlock(VOID)
+     AddMd(Lb, &Cursor, LoaderMemoryData, HighBase, HighCount);   /* page tables */
+     AddMd(Lb, &Cursor, LoaderFree, HighBase + HighCount, 0x8000 - (HighBase + HighCount));
+ 
++    NxkMmReadPersistence(Lb);
++
+     /* Extension.  Mm reads LoaderPagesSpanned to floor MmSystemPteSpaceStart
+      * above everything we mapped at KSEG0 (16 MB KSEG0 + the kernel image
+      * PT); see boot-layout.h NXBL_PAGES_SPANNED. */
+diff --git a/ntoskrnl/xb/ordinals.map b/ntoskrnl/xb/ordinals.map
+index 00fcc7848353dae5f8072a9e66bd2f519d2911d2..1302186e7310613952e5f93c93817c2d2e4fbd6b 100644
+--- a/ntoskrnl/xb/ordinals.map
++++ b/ntoskrnl/xb/ordinals.map
+@@ -27,6 +27,7 @@
+ # --- Dbg* ----------------------------------------------------------------- #
+ 5    DbgBreakPoint                    # int3; only reachable through SEH here
+ 6    DbgBreakPointWithStatus          # the status reaches a debugger in EAX
++10   XeDbgPrompt                     # bounded existing KD transport
+ 8    DbgPrint
+ 
+ # --- Fsc* file-system cache ------------------------------------------------ #
+@@ -81,7 +82,7 @@
+ 44   XeHalGetInterruptVector         # Xbox form: IRQ in, IDT vector out
+ 45   HalReadSMBusValue             # SMBus byte/word read via MCPX 0xC000 ports
+ 46   HalReadWritePCISpace
+-47   HalRegisterShutdownNotification  # shutdown callback -- accepted, no-op
++47   HalRegisterShutdownNotification  # priority-ordered shutdown callbacks
+ 49   XeHalReturnToFirmware
+ 50   HalWriteSMBusValue            # SMBus byte/word write
+ 
+diff --git a/ntoskrnl/xb/scattergather.c b/ntoskrnl/xb/scattergather.c
+index 7cb3967ebd4f480753c9cc6f2d802fb8afff6f56..6a1535e8960a99eb1eb6a9580ea4671418c8f417 100644
+--- a/ntoskrnl/xb/scattergather.c
++++ b/ntoskrnl/xb/scattergather.c
+@@ -1,183 +1,185 @@
+-/*
+- * NtReadFileScatter / NtWriteFileGather -- file IO whose buffer is an array
+- * of FILE_SEGMENT_ELEMENTs, one page each, rather than one flat range.
+- *
+- * Probed on the console: the handle must have been opened with
+- * FILE_NO_INTERMEDIATE_BUFFERING (a buffered handle is rejected outright,
+- * with nothing transferred); each element addresses the page it points
+- * into, low bits ignored; Length need not be a whole number of pages, and a
+- * short Length simply stops the transfer partway through an element; a
+- * transfer that runs into end-of-file is a short success, and one that
+- * starts at or past it is STATUS_END_OF_FILE.
+- *
+- * That is exactly a run of per-page transfers, which is how this is built:
+- * one ordinary read or write per element, the caller's completion signalled
+- * once at the end.  The console can leave an asynchronous request pending
+- * and complete it later; this runs the elements to completion first and
+- * then reports, so the caller gets its final status directly rather than
+- * STATUS_PENDING.  Either is a legal answer to the same call.
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Xbox FILE_SEGMENT_ELEMENT is a four-byte page pointer (public nxdk ABI).
++ * One bounce-backed IRP owns its segments and buffer through completion.
++ * Native I/O manager handles pending, event/APC, cancellation and file locking.
+  */
+-
+ #include <ntoskrnl.h>
+-#define NDEBUG
+-#include <debug.h>
++#include <mm/ARM3/miarm.h>
++#include "mm/mm.h"
++#include <reactos/xb-io.h>
+ 
+-/* NT's FILE_SEGMENT_ELEMENT is eight bytes wide (PVOID64); the console's is
+- * a bare pointer, so a title's array is half the stride the NT type would
+- * step through.  These two ordinals take the console's. */
+ typedef union _XB_FILE_SEGMENT_ELEMENT {
+     PVOID Buffer;
+     ULONG Alignment;
+ } XB_FILE_SEGMENT_ELEMENT, *PXB_FILE_SEGMENT_ELEMENT;
+-
+-/* An element addresses a page frame; the low bits carry no information. */
+-#define SEGMENT_PAGE(e) \
+-    ((PVOID)((ULONG_PTR)(e).Buffer & ~(ULONG_PTR)(PAGE_SIZE - 1)))
+-
+-static VOID NTAPI
+-XbSgFreeApc(PKAPC Apc, PKNORMAL_ROUTINE *NormalRoutine, PVOID *NormalContext,
+-            PVOID *SystemArgument1, PVOID *SystemArgument2)
++C_ASSERT(sizeof(XB_FILE_SEGMENT_ELEMENT) == 4);
++#define SG_TAG 'gSbX'
++typedef struct _XB_SG_PAGE { PVOID Buffer; PFN_NUMBER Pfn; } XB_SG_PAGE;
++typedef struct _XB_SG_REQUEST {
++    PVOID Allocation;
++    PUCHAR Bounce;
++    ULONG Count, Length;
++    BOOLEAN Write;
++    XB_SG_PAGE Pages[1];
++} XB_SG_REQUEST;
++extern NTSTATUS NTAPI IopPerformSynchronousRequest(PDEVICE_OBJECT, PIRP,
++    PFILE_OBJECT, BOOLEAN, KPROCESSOR_MODE, BOOLEAN, IOP_TRANSFER_TYPE);
++
++static VOID XbSgRelease(XB_SG_REQUEST *Request)
+ {
+-    UNREFERENCED_PARAMETER(NormalRoutine);
+-    UNREFERENCED_PARAMETER(NormalContext);
+-    UNREFERENCED_PARAMETER(SystemArgument1);
+-    UNREFERENCED_PARAMETER(SystemArgument2);
+-
+-    /* The delivery path has already taken its own copy of the routine and
+-     * its arguments, so the packet is ours to release here. */
+-    ExFreePool(Apc);
++#ifdef NXK_MM_PHYS
++    KIRQL irql = MiAcquirePfnLock();
++    ULONG i;
++    for (i = 0; i < Request->Count; ++i)
++        NxkPageSupplyPin(Request->Pages[i].Pfn, TRUE);
++    MiReleasePfnLock(irql);
++#endif
++    if (Request->Allocation) ExFreePoolWithTag(Request->Allocation, SG_TAG);
++    ExFreePoolWithTag(Request, SG_TAG);
+ }
+-
+-/* Report a finished transfer the way the IO manager reports one: status and
+- * count into the caller's block, then its event, then its APC. */
+-static VOID
+-XbSgComplete(HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
+-             PIO_STATUS_BLOCK IoStatusBlock, NTSTATUS Status, ULONG Transferred)
++static NTSTATUS NTAPI XbSgCompletion(PDEVICE_OBJECT Device, PIRP Irp, PVOID Context)
+ {
+-    PKAPC apc;
+-    PKEVENT event;
+-
+-    IoStatusBlock->Status = Status;
+-    IoStatusBlock->Information = Transferred;
+-
+-    if (Event != NULL &&
+-        NT_SUCCESS(ObReferenceObjectByHandle(Event, EVENT_MODIFY_STATE,
+-                                             ExEventObjectType, KernelMode,
+-                                             (PVOID *)&event, NULL)))
+-    {
+-        KeSetEvent(event, IO_NO_INCREMENT, FALSE);
+-        ObDereferenceObject(event);
++    XB_SG_REQUEST *r = Context;
++    ULONG i, copied = 0, bytes = (ULONG)Irp->IoStatus.Information;
++    UNREFERENCED_PARAMETER(Device);
++    if (bytes > r->Length) {
++        Irp->IoStatus.Status = STATUS_IO_DEVICE_ERROR;
++        Irp->IoStatus.Information = bytes = 0;
+     }
+-
+-    if (ApcRoutine == NULL)
+-        return;
+-
+-    apc = ExAllocatePoolWithTag(NonPagedPool, sizeof(*apc), 'gSbX');
+-    if (apc == NULL)
+-        return;
+-
+-    KeInitializeApc(apc, KeGetCurrentThread(), CurrentApcEnvironment,
+-                    XbSgFreeApc, NULL, (PKNORMAL_ROUTINE)ApcRoutine,
+-                    KernelMode, ApcContext);
+-    KeInsertQueueApc(apc, IoStatusBlock, NULL, IO_NO_INCREMENT);
++    if (!r->Write && !NT_ERROR(Irp->IoStatus.Status))
++        for (i = 0; copied < bytes; ++i) {
++            ULONG chunk = min(PAGE_SIZE, bytes - copied);
++            RtlCopyMemory(r->Pages[i].Buffer, r->Bounce + copied, chunk);
++            copied += chunk;
++        }
++    /* Native completion no longer needs the bounce MDL after this callback. */
++    if (Irp->MdlAddress) { IoFreeMdl(Irp->MdlAddress); Irp->MdlAddress = NULL; }
++    Irp->UserBuffer = NULL;
++    XbSgRelease(r);
++    if (Irp->PendingReturned) IoMarkIrpPending(Irp);
++    return STATUS_SUCCESS;
+ }
+-
+-static NTSTATUS
+-XbScatterGather(BOOLEAN Write, HANDLE FileHandle, HANDLE Event,
+-                PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,
+-                PIO_STATUS_BLOCK IoStatusBlock,
+-                PXB_FILE_SEGMENT_ELEMENT SegmentArray, ULONG Length,
+-                PLARGE_INTEGER ByteOffset)
++static NTSTATUS XbScatterGather(BOOLEAN Write, HANDLE FileHandle, HANDLE Event,
++    PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK Iosb,
++    PXB_FILE_SEGMENT_ELEMENT Segments, ULONG Length, PLARGE_INTEGER ByteOffset)
+ {
+-    IO_STATUS_BLOCK iosb;
++    PFILE_OBJECT file = NULL;
++    PKEVENT event = NULL;
++    PDEVICE_OBJECT device;
++    PIRP irp = NULL;
++    PIO_STACK_LOCATION stack;
++    XB_SG_REQUEST *r = NULL;
+     LARGE_INTEGER offset;
+-    PFILE_OBJECT file;
+     NTSTATUS status;
+-    ULONG done = 0;
+-    ULONG i;
+-
++    BOOLEAN synchronous, locked = FALSE;
++    ULONG count, i, copied;
++    if (Iosb == NULL || (Length && Segments == NULL)) return STATUS_INVALID_PARAMETER;
+     status = ObReferenceObjectByHandle(FileHandle,
+-                                       Write ? FILE_WRITE_DATA : FILE_READ_DATA,
+-                                       IoFileObjectType, KernelMode,
+-                                       (PVOID *)&file, NULL);
+-    if (!NT_SUCCESS(status))
+-        return status;
+-
+-    /* Unbuffered IO only: a cached handle is refused before anything moves. */
+-    if (!(file->Flags & FO_NO_INTERMEDIATE_BUFFERING))
+-    {
+-        ObDereferenceObject(file);
+-        IoStatusBlock->Status = STATUS_INVALID_PARAMETER;
+-        IoStatusBlock->Information = 0;
+-        return STATUS_INVALID_PARAMETER;
++        Write ? FILE_WRITE_DATA : FILE_READ_DATA, IoFileObjectType, KernelMode,
++        (PVOID *)&file, NULL);
++    if (!NT_SUCCESS(status)) goto fail;
++    synchronous = BooleanFlagOn(file->Flags, FO_SYNCHRONOUS_IO);
++    if (!(file->Flags & FO_NO_INTERMEDIATE_BUFFERING) ||
++        (!synchronous && ByteOffset == NULL) || Length > MAXULONG - PAGE_SIZE) {
++        status = STATUS_INVALID_PARAMETER; goto fail;
+     }
+-
+-    if (ByteOffset != NULL)
+-        offset = *ByteOffset;
+-
+-    status = STATUS_SUCCESS;
+-    for (i = 0; done < Length; i++)
+-    {
+-        ULONG chunk = Length - done;
+-        NTSTATUS one;
+-
+-        if (chunk > PAGE_SIZE)
+-            chunk = PAGE_SIZE;
+-        if (SegmentArray[i].Buffer == NULL)
+-            break;
+-
+-        one = Write
+-            ? NtWriteFile(FileHandle, NULL, NULL, NULL, &iosb,
+-                          SEGMENT_PAGE(SegmentArray[i]), chunk,
+-                          ByteOffset != NULL ? &offset : NULL, NULL)
+-            : NtReadFile(FileHandle, NULL, NULL, NULL, &iosb,
+-                         SEGMENT_PAGE(SegmentArray[i]), chunk,
+-                         ByteOffset != NULL ? &offset : NULL, NULL);
+-        if (one == STATUS_PENDING)
+-        {
+-            /* Asynchronous handle: nothing else of ours is outstanding on
+-             * it, so the file object's event is this element's completion. */
+-            KeWaitForSingleObject(&file->Event, Executive, KernelMode, FALSE,
+-                                  NULL);
+-            one = iosb.Status;
++    if (Event) {
++        status = ObReferenceObjectByHandle(Event, EVENT_MODIFY_STATE,
++            ExEventObjectType, KernelMode, (PVOID *)&event, NULL);
++        if (!NT_SUCCESS(status)) goto fail;
++    }
++    if (synchronous) {
++        status = IopLockFileObject(file, KernelMode);
++        if (!NT_SUCCESS(status)) goto fail;
++        locked = TRUE;
++    }
++    offset = ByteOffset ? *ByteOffset : file->CurrentByteOffset;
++    if (offset.QuadPart == -2 && synchronous) offset = file->CurrentByteOffset;
++    if (offset.QuadPart < 0 && !(Write && offset.QuadPart == -1)) {
++        status = STATUS_INVALID_PARAMETER; goto fail;
++    }
++    if (offset.QuadPart >= 0 && offset.QuadPart > MAXLONGLONG - Length) {
++        status = STATUS_INVALID_PARAMETER; goto fail;
++    }
++    count = (Length + PAGE_SIZE - 1) >> PAGE_SHIFT;
++    r = ExAllocatePoolWithTag(NonPagedPool,
++        FIELD_OFFSET(XB_SG_REQUEST, Pages) + count * sizeof(XB_SG_PAGE), SG_TAG);
++    if (!r) { status = STATUS_INSUFFICIENT_RESOURCES; goto fail; }
++    RtlZeroMemory(r, FIELD_OFFSET(XB_SG_REQUEST, Pages));
++    r->Write = Write; r->Length = Length;
++    for (i = 0; i < count; ++i) {
++        PVOID page;
++        if (!NxMmIsAddressValid(&Segments[i]) ||
++            !NxMmIsAddressValid((PUCHAR)&Segments[i] + sizeof(Segments[i]) - 1)) {
++            status = STATUS_ACCESS_VIOLATION; goto fail;
+         }
+-
+-        /* Running into end-of-file partway through is a short success; only
+-         * a transfer that moved nothing reports the error. */
+-        if (!NT_SUCCESS(one))
+-        {
+-            if (done == 0)
+-                status = one;
+-            break;
++        page = (PVOID)((ULONG_PTR)Segments[i].Buffer & ~(PAGE_SIZE - 1));
++        KIRQL pfnIrql;
++        PFN_NUMBER pfn;
++        if (page == NULL || !NxMmIsAddressValid(page) ||
++            !NxMmIsAddressValid((PUCHAR)page + PAGE_SIZE - 1)) {
++            status = STATUS_ACCESS_VIOLATION; goto fail;
+         }
+-
+-        done += (ULONG)iosb.Information;
+-        offset.QuadPart += (LONGLONG)iosb.Information;
+-        if (iosb.Information < chunk)
+-            break;
++        pfnIrql = MiAcquirePfnLock();
++        pfn = NxMmGetPhysicalAddress(page) >> PAGE_SHIFT;
++#ifdef NXK_MM_PHYS
++        if (!NxkPageSupplyCanPin(pfn, FALSE)) {
++            MiReleasePfnLock(pfnIrql); status = STATUS_INVALID_PARAMETER; goto fail;
++        }
++        NxkPageSupplyPin(pfn, FALSE);
++#endif
++        r->Pages[i].Buffer = page; r->Pages[i].Pfn = pfn; ++r->Count;
++        MiReleasePfnLock(pfnIrql);
+     }
+-
+-    ObDereferenceObject(file);
+-    XbSgComplete(Event, ApcRoutine, ApcContext, IoStatusBlock, status, done);
++    r->Allocation = ExAllocatePoolWithTag(NonPagedPool, Length + PAGE_SIZE, SG_TAG);
++    if (!r->Allocation) { status = STATUS_INSUFFICIENT_RESOURCES; goto fail; }
++    r->Bounce = (PUCHAR)(((ULONG_PTR)r->Allocation + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1));
++    if (Write)
++        for (i = 0, copied = 0; copied < Length; ++i) {
++            ULONG chunk = min(PAGE_SIZE, Length - copied);
++            RtlCopyMemory(r->Bounce + copied, r->Pages[i].Buffer, chunk); copied += chunk;
++        }
++    device = IoGetRelatedDeviceObject(file);
++    irp = IoAllocateIrp(device->StackSize, FALSE);
++    if (!irp) { status = STATUS_INSUFFICIENT_RESOURCES; goto fail; }
++    irp->Tail.Overlay.OriginalFileObject = file;
++    irp->Tail.Overlay.Thread = PsGetCurrentThread();
++    irp->RequestorMode = KernelMode;
++    irp->UserIosb = Iosb; irp->UserEvent = event;
++    irp->UserBuffer = r->Bounce;
++    irp->Overlay.AsynchronousParameters.UserApcRoutine = ApcRoutine;
++    irp->Overlay.AsynchronousParameters.UserApcContext = ApcContext;
++    irp->Flags = IRP_NOCACHE | IRP_DEFER_IO_COMPLETION | IRP_XB_SG_COMPLETION |
++                 (Write ? IRP_WRITE_OPERATION : IRP_READ_OPERATION);
++    if (Length) {
++        irp->MdlAddress = IoAllocateMdl(r->Bounce, Length, FALSE, FALSE, NULL);
++        if (!irp->MdlAddress) { status = STATUS_INSUFFICIENT_RESOURCES; goto fail; }
++        MmBuildMdlForNonPagedPool(irp->MdlAddress);
++    }
++    stack = IoGetNextIrpStackLocation(irp);
++    stack->MajorFunction = Write ? IRP_MJ_WRITE : IRP_MJ_READ;
++    stack->FileObject = file;
++    stack->Parameters.Read.Length = Length;
++    stack->Parameters.Read.ByteOffset = offset;
++    IoSetCompletionRoutine(irp, XbSgCompletion, r, TRUE, TRUE, TRUE);
++    if (event) KeClearEvent(event);
++    KeClearEvent(&file->Event);
++    /* Ownership transfers to the IRP/completion, including FO/event refs.
++     * Async returns dispatch status, never waits on the shared FO event. */
++    return IopPerformSynchronousRequest(device, irp, file, TRUE, KernelMode,
++        synchronous, Write ? IopWriteTransfer : IopReadTransfer);
++fail:
++    if (irp) { if (irp->MdlAddress) IoFreeMdl(irp->MdlAddress); IoFreeIrp(irp); }
++    if (r) XbSgRelease(r);
++    if (locked) IopUnlockFileObject(file);
++    if (event) ObDereferenceObject(event);
++    if (file) ObDereferenceObject(file);
++    Iosb->Status = status; Iosb->Information = 0;
+     return status;
+ }
+-
+-NTSTATUS NTAPI
+-XeNtReadFileScatter(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine,
+-                    PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock,
+-                    PXB_FILE_SEGMENT_ELEMENT SegmentArray, ULONG Length,
+-                    PLARGE_INTEGER ByteOffset)
+-{
+-    return XbScatterGather(FALSE, FileHandle, Event, ApcRoutine, ApcContext,
+-                           IoStatusBlock, SegmentArray, Length, ByteOffset);
+-}
+-
+-NTSTATUS NTAPI
+-XeNtWriteFileGather(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine,
+-                    PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock,
+-                    PXB_FILE_SEGMENT_ELEMENT SegmentArray, ULONG Length,
+-                    PLARGE_INTEGER ByteOffset)
+-{
+-    return XbScatterGather(TRUE, FileHandle, Event, ApcRoutine, ApcContext,
+-                           IoStatusBlock, SegmentArray, Length, ByteOffset);
+-}
++NTSTATUS NTAPI XeNtReadFileScatter(HANDLE f, HANDLE e, PIO_APC_ROUTINE a,
++    PVOID c, PIO_STATUS_BLOCK s, PXB_FILE_SEGMENT_ELEMENT p, ULONG n, PLARGE_INTEGER o)
++{ return XbScatterGather(FALSE, f, e, a, c, s, p, n, o); }
++NTSTATUS NTAPI XeNtWriteFileGather(HANDLE f, HANDLE e, PIO_APC_ROUTINE a,
++    PVOID c, PIO_STATUS_BLOCK s, PXB_FILE_SEGMENT_ELEMENT p, ULONG n, PLARGE_INTEGER o)
++{ return XbScatterGather(TRUE, f, e, a, c, s, p, n, o); }
+diff --git a/ntoskrnl/xb/shutdown.c b/ntoskrnl/xb/shutdown.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..67fc86f464b64dd6a52e1dcf2e1cf6c93572db26
+--- /dev/null
++++ b/ntoskrnl/xb/shutdown.c
+@@ -0,0 +1,131 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independently implemented from public XboxDev/nxdk HAL declarations.
++ * Storage remains caller-owned until removed or invoked. Unregister cancels
++ * pending callbacks, but cannot cancel a callback already executing; callers
++ * must keep that registration alive until its callback returns. Registration
++ * during shutdown is ignored. Nested direct drains are inert. A nested
++ * power request aborts only the current callback to our SEH drain boundary;
++ * its noreturn callsite never resumes. Callbacks must release resources
++ * before that call or through supported SEH unwind/finally cleanup. Normal
++ * kernel APCs are suppressed during drain: callbacks must not await them.
++ * Special APCs needed by synchronous native IO completion remain enabled.
++ */
++#include <ntoskrnl.h>
++typedef struct _NX_SHUTDOWN_REGISTRATION NX_SHUTDOWN_REGISTRATION;
++typedef VOID (NTAPI *NX_SHUTDOWN_CALLBACK)(NX_SHUTDOWN_REGISTRATION *);
++struct _NX_SHUTDOWN_REGISTRATION {
++    NX_SHUTDOWN_CALLBACK NotificationRoutine;
++    LONG Priority;
++    LIST_ENTRY ListEntry;
++};
++C_ASSERT(sizeof(NX_SHUTDOWN_REGISTRATION) == 16);
++static LIST_ENTRY NxRegistered = { &NxRegistered, &NxRegistered };
++static LIST_ENTRY NxPending = { &NxPending, &NxPending };
++static KSPIN_LOCK NxShutdownLock;
++static BOOLEAN NxShuttingDown;
++static PETHREAD NxCallbackThread;
++static KEVENT NxShutdownGate;
++static BOOLEAN NxShutdownGateReady;
++#define NX_SHUTDOWN_UNWIND_STATUS ((NTSTATUS)0xE0425842L)
++
++static BOOLEAN NxRemoveRegistration(PLIST_ENTRY Head, NX_SHUTDOWN_REGISTRATION *Registration)
++{
++    PLIST_ENTRY e;
++    for (e = Head->Flink; e != Head; e = e->Flink)
++        if (e == &Registration->ListEntry) {
++            RemoveEntryList(e); InitializeListHead(e); return TRUE;
++        }
++    return FALSE;
++}
++VOID NTAPI HalRegisterShutdownNotification(PVOID Storage, BOOLEAN Register)
++{
++    NX_SHUTDOWN_REGISTRATION *r = Storage;
++    PLIST_ENTRY e;
++    KIRQL irql;
++    if (r == NULL) return;
++    KeAcquireSpinLock(&NxShutdownLock, &irql);
++    if (!Register) {
++        NxRemoveRegistration(&NxRegistered, r);
++        NxRemoveRegistration(&NxPending, r);
++    } else if (!NxShuttingDown && r->NotificationRoutine != NULL) {
++        /* Detect duplicates without trusting uninitialized caller link fields. */
++        for (e = NxRegistered.Flink; e != &NxRegistered; e = e->Flink)
++            if (e == &r->ListEntry) goto out;
++        for (e = NxRegistered.Flink; e != &NxRegistered; e = e->Flink)
++            if (CONTAINING_RECORD(e, NX_SHUTDOWN_REGISTRATION, ListEntry)->Priority < r->Priority)
++                break;
++        InsertTailList(e, &r->ListEntry); /* strictly lower: ties remain stable */
++    }
++out:
++    KeReleaseSpinLock(&NxShutdownLock, irql);
++}
++static VOID NxDrainShutdownNotifications(VOID)
++{
++    KIRQL irql;
++    KeAcquireSpinLock(&NxShutdownLock, &irql);
++    if (NxShuttingDown) { KeReleaseSpinLock(&NxShutdownLock, irql); return; }
++    if (!NxShutdownGateReady) {
++        KeInitializeEvent(&NxShutdownGate, NotificationEvent, FALSE);
++        NxShutdownGateReady = TRUE;
++    }
++    NxShuttingDown = TRUE;
++    while (!IsListEmpty(&NxRegistered))
++        InsertTailList(&NxPending, RemoveHeadList(&NxRegistered));
++    KeReleaseSpinLock(&NxShutdownLock, irql);
++    for (;;) {
++        NX_SHUTDOWN_REGISTRATION *r;
++        NX_SHUTDOWN_CALLBACK callback;
++        KeAcquireSpinLock(&NxShutdownLock, &irql);
++        if (IsListEmpty(&NxPending)) { KeReleaseSpinLock(&NxShutdownLock, irql); break; }
++        r = CONTAINING_RECORD(RemoveHeadList(&NxPending), NX_SHUTDOWN_REGISTRATION, ListEntry);
++        InitializeListHead(&r->ListEntry);
++        callback = r->NotificationRoutine;
++        NxCallbackThread = PsGetCurrentThread();
++        KeReleaseSpinLock(&NxShutdownLock, irql);
++        _SEH2_TRY {
++            _SEH2_TRY {
++                callback(r);
++            } _SEH2_EXCEPT(_SEH2_GetExceptionCode() == NX_SHUTDOWN_UNWIND_STATUS ?
++                          EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
++                /* Public return-to-firmware is noreturn: abandon this frame
++                 * while allowing the remaining registration list to run. */
++            } _SEH2_END;
++        } _SEH2_FINALLY {
++            NxCallbackThread = NULL;
++        } _SEH2_END;
++    }
++}
++
++/* Balanced for private direct-drain checks and on propagated exceptions.
++ * HAL holds an additional outer guard through the nonreturning hardware
++ * action, so this leave cannot deliver a normal APC on the reset owner. */
++VOID NTAPI NxkShutdownNotifications(VOID)
++{
++    KeEnterCriticalRegion();
++    _SEH2_TRY {
++        NxDrainShutdownNotifications();
++    } _SEH2_FINALLY {
++        KeLeaveCriticalRegion();
++    } _SEH2_END;
++}
++
++/* Latched for this boot. Title return wrapper avoids nested FS/launch work. */
++BOOLEAN NTAPI NxkShutdownInProgress(VOID) { return NxShuttingDown; }
++
++/* Only the active callback thread has the matching kernel unwind frame.
++ * A different ordinary thread requesting reset cannot return either: park
++ * until the outer action resets the machine, without raising an exception. */
++DECLSPEC_NORETURN VOID NTAPI NxkShutdownAbortPowerRequest(VOID)
++{
++    KIRQL irql;
++    BOOLEAN owner;
++    KeAcquireSpinLock(&NxShutdownLock, &irql);
++    owner = NxCallbackThread == PsGetCurrentThread();
++    if (!NxShutdownGateReady) {
++        KeInitializeEvent(&NxShutdownGate, NotificationEvent, FALSE);
++        NxShutdownGateReady = TRUE;
++    }
++    KeReleaseSpinLock(&NxShutdownLock, irql);
++    if (owner) RtlRaiseStatus(NX_SHUTDOWN_UNWIND_STATUS);
++    for (;;) KeWaitForSingleObject(&NxShutdownGate, Executive, KernelMode, FALSE, NULL);
++}
+diff --git a/ntoskrnl/xb/sizeddata.c b/ntoskrnl/xb/sizeddata.c
+index b0f66197b231b94ee49d28fb3ee26ec09d13b1c3..acf0625d81db5b2a87fe0dffc3d519fecbc91911 100644
+--- a/ntoskrnl/xb/sizeddata.c
++++ b/ntoskrnl/xb/sizeddata.c
+@@ -34,17 +34,6 @@
+ 
+ __declspec(align(16)) UCHAR XePublicKeyData[XE_PUBLIC_KEY_SIZE];
+ 
+-/*
+- * The IDE channel object the console's ATAPI path hangs off.  Filling
+- * it in means giving KINTERRUPT, two KDPCs, a KTIMER and a
+- * KDEVICE_QUEUE the console's layout first, so it stays zero and a
+- * title's fast path stays unclaimed -- Halo 2 falls back to ordinary
+- * IRP I/O, which is what it does today.
+- */
+-#define IDE_CHANNEL_OBJECT_SIZE 264
+-
+-__declspec(align(16)) UCHAR IdexChannelObject[IDE_CHANNEL_OBJECT_SIZE];
+-
+ /*
+  * The remaining three are not imported by any title in the swept
+  * corpus, so nothing reads or writes them today.  They are sized anyway:
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index b00b8459411c23f1342e77e1ad280f8fdd7da8f6..4ce9824c5fa91b8ebd910dcb657bb3ec03083f10 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -472,6 +472,7 @@ typedef struct _XB_PERSIST_SLOT
+     ULONG              HadLaunchData; /* title supplied a LaunchDataPage   */
+     LAUNCH_DATA_HEADER Header;      /* copied from the title's LaunchDataPage */
+     UCHAR              LaunchData[3072]; /* the payload titles hand across */
++    ULONG              LaunchPagePa; /* independently added original page PA */
+ } XB_PERSIST_SLOT, *PXB_PERSIST_SLOT;
+ 
+ /* The disc/HDD path of the XBE currently running, recorded at launch so a
+@@ -503,6 +504,7 @@ XeStashRebootIntent(VOID)
+     RtlZeroMemory((PVOID)&slot->Header, sizeof(slot->Header));
+     RtlZeroMemory((PVOID)slot->LaunchData, sizeof(slot->LaunchData));
+     slot->HadLaunchData = (p != NULL);
++    slot->LaunchPagePa = p ? ((ULONG_PTR)p & 0x03FFFFFF) : 0;
+ 
+     if (p == NULL || p->Header.dwLaunchDataType == LDT_NONE)
+     {
+@@ -559,6 +561,17 @@ VOID NTAPI
+ XeHalReturnToFirmware(_In_ XBE_FIRMWARE_REENTRY Routine)
+ {
+     FIRMWARE_REENTRY Action;
++    extern BOOLEAN NTAPI NxkShutdownInProgress(VOID);
++    extern DECLSPEC_NORETURN VOID NTAPI NxkShutdownAbortPowerRequest(VOID);
++    /* Emergency path cannot flush FS or rebuild launch intent. The HAL
++     * invalidates the handoff and skips callback/PFN locks in this context. */
++    if (KeGetCurrentIrql() != PASSIVE_LEVEL ||
++        !(__readeflags() & EFLAGS_INTERRUPT_MASK)) {
++        HalReturnToFirmware(Routine == XeFwHalt ? HalHaltRoutine : HalRebootRoutine);
++        return;
++    }
++    /* The outer command owns shutdown and its launch intent. */
++    if (NxkShutdownInProgress()) NxkShutdownAbortPowerRequest();
+ 
+     /* Walk EBP frames to identify the title-side call site that decided to
+      * reboot.  Recording the first few return addresses pins down which
+@@ -2702,15 +2715,6 @@ XeHalGetInterruptVector(ULONG BusInterruptLevel, PKIRQL Irql)
+                                  Irql, &Affinity);
+ }
+ 
+-/* Accepted but no-op: bring-up exits via HalReturnToFirmware without
+- * walking the shutdown-callback chain, so the callback never fires. */
+-VOID NTAPI
+-HalRegisterShutdownNotification(PVOID ShutdownRegistration, BOOLEAN Register)
+-{
+-    UNREFERENCED_PARAMETER(ShutdownRegistration);
+-    UNREFERENCED_PARAMETER(Register);
+-}
+-
+ /* One-shot SMBus byte/word transaction.  Xbox uses the slave's 8-bit
+  * write address (R/W cleared) -- e.g. 0x20 for the SMC, 0xd4 for the Focus
+  * FS454 -- while HalpXboxSmBus*Byte/Word take the 7-bit address.  Shift to translate.
+@@ -3006,148 +3010,6 @@ XeKeInsertQueueApc(PXBE_KAPC Apc,
+     return TRUE;
+ }
+ 
+-/* KeInitializeInterrupt / Connect / Disconnect are NDK (ndk/kefuncs.h)
+- * prototypes, not part of the DDK headers xbe.c includes -- declare them
+- * locally. */
+-NTKERNELAPI
+-VOID
+-NTAPI
+-KeInitializeInterrupt(IN PKINTERRUPT Interrupt,
+-                      IN PKSERVICE_ROUTINE ServiceRoutine,
+-                      IN PVOID ServiceContext,
+-                      IN PKSPIN_LOCK SpinLock,
+-                      IN ULONG Vector,
+-                      IN KIRQL Irql,
+-                      IN KIRQL SynchronizeIrql,
+-                      IN KINTERRUPT_MODE InterruptMode,
+-                      IN BOOLEAN ShareVector,
+-                      IN CHAR ProcessorNumber,
+-                      IN BOOLEAN FloatingSave);
+-NTKERNELAPI BOOLEAN NTAPI KeConnectInterrupt(IN PKINTERRUPT Interrupt);
+-NTKERNELAPI BOOLEAN NTAPI KeDisconnectInterrupt(IN PKINTERRUPT Interrupt);
+-
+-/* KINTERRUPT shadow.  Xbox KINTERRUPT is 112 bytes; NT's is 484 (60-byte
+- * header + 424-byte DispatchCode tail).  Letting NT initialise into the
+- * caller's buffer writes 372 bytes past the end.  Maintain an NT-shaped
+- * buffer per Xbox KINTERRUPT and dispatch the lifecycle through it. */
+-typedef struct _XBE_INTERRUPT_SHADOW
+-{
+-    PKINTERRUPT XboxInterrupt;          /* title's pointer -- lookup key */
+-    /* 512 bytes is comfortably > NT's sizeof(KINTERRUPT) (484) and a clean
+-     * paragraph round.  C_ASSERT below pins down the choice. */
+-    UCHAR       NtInterruptStorage[512];
+-} XBE_INTERRUPT_SHADOW;
+-
+-#define XBE_INTERRUPT_SHADOW_SLOTS 8
+-
+-static XBE_INTERRUPT_SHADOW XeInterruptShadows[XBE_INTERRUPT_SHADOW_SLOTS];
+-
+-static XBE_INTERRUPT_SHADOW *
+-XeInterruptGetShadow(PKINTERRUPT XboxInt, BOOLEAN Allocate)
+-{
+-    KIRQL OldIrql;
+-    XBE_INTERRUPT_SHADOW *Result = NULL;
+-    ULONG i;
+-
+-    KeRaiseIrql(HIGH_LEVEL, &OldIrql);
+-    for (i = 0; i < XBE_INTERRUPT_SHADOW_SLOTS; i++)
+-    {
+-        if (XeInterruptShadows[i].XboxInterrupt == XboxInt)
+-        {
+-            Result = &XeInterruptShadows[i];
+-            break;
+-        }
+-    }
+-    if (Result == NULL && Allocate)
+-    {
+-        for (i = 0; i < XBE_INTERRUPT_SHADOW_SLOTS; i++)
+-        {
+-            if (XeInterruptShadows[i].XboxInterrupt == NULL)
+-            {
+-                XeInterruptShadows[i].XboxInterrupt = XboxInt;
+-                RtlZeroMemory(XeInterruptShadows[i].NtInterruptStorage,
+-                              sizeof(XeInterruptShadows[i].NtInterruptStorage));
+-                Result = &XeInterruptShadows[i];
+-                break;
+-            }
+-        }
+-    }
+-    KeLowerIrql(OldIrql);
+-    return Result;
+-}
+-
+-/* Xbox KeInitializeInterrupt has no caller-supplied spin lock and no SMP
+- * params; NT's does.  Pass NULL for the lock (use KINTERRUPT's built-in
+- * one), mirror Irql as the synchronize IRQL, pin processor 0 without FP
+- * save.  Writes 484 bytes into the *shadow*; the title's buffer is left
+- * alone (its address is still the lookup key for Connect/Disconnect). */
+-VOID NTAPI
+-XeKeInitializeInterrupt(PKINTERRUPT Interrupt,
+-                          PKSERVICE_ROUTINE ServiceRoutine,
+-                          PVOID ServiceContext,
+-                          ULONG Vector,
+-                          KIRQL Irql,
+-                          KINTERRUPT_MODE InterruptMode,
+-                          BOOLEAN ShareVector)
+-{
+-    XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, TRUE);
+-    if (Shadow == NULL)
+-    {
+-        XbDbg("KeInitializeInterrupt: shadow table full, KINTERRUPT %p "
+-                 "ignored\n", Interrupt);
+-        return;
+-    }
+-    KeInitializeInterrupt((PKINTERRUPT)Shadow->NtInterruptStorage,
+-                          ServiceRoutine, ServiceContext,
+-                          NULL, Vector, Irql, Irql, InterruptMode,
+-                          ShareVector, 0, FALSE);
+-}
+-
+-/* Title KINTERRUPT leaves ActualLock NULL.  NT's KeSynchronizeExecution
+- * derefs Interrupt->ActualLock at +0x1C; KefAcquireSpinLockAtDpcLevel then
+- * bugchecks with IRQL_NOT_GREATER_OR_EQUAL.  Route through the shadow's NT
+- * KINTERRUPT (stamps ActualLock = &SpinLock) so the lock is real.
+- * If no shadow exists, just call the routine directly -- uniprocessor Xbox
+- * makes the lock a no-op anyway and titles expect forward progress. */
+-BOOLEAN NTAPI
+-XeKeSynchronizeExecution(_In_ PKINTERRUPT Interrupt,
+-                           _In_ PKSYNCHRONIZE_ROUTINE SynchronizeRoutine,
+-                           _In_opt_ PVOID SynchronizeContext)
+-{
+-    XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, FALSE);
+-    if (Shadow == NULL)
+-    {
+-        XbDbg("KeSynchronizeExecution(%p): no shadow; running "
+-                 "uncontended\n", Interrupt);
+-        return SynchronizeRoutine(SynchronizeContext);
+-    }
+-    return KeSynchronizeExecution((PKINTERRUPT)Shadow->NtInterruptStorage,
+-                                  SynchronizeRoutine, SynchronizeContext);
+-}
+-
+-/* No-shadow means KeInitializeInterrupt was never called for this
+- * KINTERRUPT -- a caller bug; log and refuse. */
+-BOOLEAN NTAPI
+-XeKeConnectInterrupt(PKINTERRUPT Interrupt)
+-{
+-    XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, FALSE);
+-    if (Shadow == NULL)
+-    {
+-        XbDbg("KeConnectInterrupt(%p): no shadow; ignored\n", Interrupt);
+-        return FALSE;
+-    }
+-    return KeConnectInterrupt((PKINTERRUPT)Shadow->NtInterruptStorage);
+-}
+-
+-BOOLEAN NTAPI
+-XeKeDisconnectInterrupt(PKINTERRUPT Interrupt)
+-{
+-    XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, FALSE);
+-    if (Shadow == NULL)
+-        return FALSE;
+-    return KeDisconnectInterrupt((PKINTERRUPT)Shadow->NtInterruptStorage);
+-}
+-
+ /* --- data exports --------------------------------------------------------- *
+  * Some ordinals are data, not functions: the thunk slot must hold the address
+  * of the datum (the title reads through it).  A NULL slot would fault.
+@@ -3659,8 +3521,12 @@ XeConsumeChainloadSlot(VOID)
+     if (slot->HadLaunchData)
+     {
+         PVOID NTAPI NxMmAllocateContiguousMemory(IN SIZE_T NumberOfBytes);
+-        PLAUNCH_DATA_PAGE page =
+-            NxMmAllocateContiguousMemory(sizeof(LAUNCH_DATA_PAGE));
++        extern BOOLEAN NxkMmAdoptRestored(PVOID Alias, SIZE_T Size);
++        PLAUNCH_DATA_PAGE page = (PLAUNCH_DATA_PAGE)
++            (0x80000000UL | slot->LaunchPagePa);
++        if (!slot->LaunchPagePa ||
++            !NxkMmAdoptRestored(page, sizeof(LAUNCH_DATA_PAGE)))
++            page = NxMmAllocateContiguousMemory(sizeof(LAUNCH_DATA_PAGE));
+         if (page != NULL)
+         {
+             RtlZeroMemory(page, sizeof(*page));
+diff --git a/sdk/include/reactos/xb-ide.h b/sdk/include/reactos/xb-ide.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..cf899b4966358cdf2fa8a1175c4e3471b00f971c
+--- /dev/null
++++ b/sdk/include/reactos/xb-ide.h
+@@ -0,0 +1,58 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Public XboxDev/nxdk IDE_CHANNEL_OBJECT ABI, revision
++ * 14d5ee97e73347c973f1f57b68b79ec08c9e77f2. Native interrupt uses an adapter.
++ */
++#pragma once
++
++typedef struct _NX_IDE_INTERRUPT {
++    PVOID ServiceRoutine, ServiceContext;
++    ULONG BusInterruptLevel, Irql;
++    UCHAR Connected, ShareVector, Mode, Padding;
++    ULONG ServiceCount, DispatchCode[22];
++} NX_IDE_INTERRUPT;
++typedef VOID (NTAPI *NX_IDE_VOID_ROUTINE)(VOID);
++typedef VOID (NTAPI *NX_IDE_START_ROUTINE)(PDEVICE_OBJECT, PIRP);
++typedef BOOLEAN (NTAPI *NX_IDE_POLL_ROUTINE)(VOID);
++typedef struct _NX_IDE_CHANNEL {
++    NX_IDE_VOID_ROUTINE InterruptRoutine, FinishIoRoutine;
++    NX_IDE_POLL_ROUTINE PollResetCompleteRoutine;
++    NX_IDE_VOID_ROUTINE TimeoutExpiredRoutine;
++    NX_IDE_START_ROUTINE StartPacketRoutine;
++    NX_IDE_VOID_ROUTINE StartNextPacketRoutine;
++    KIRQL InterruptIrql;
++    BOOLEAN ExpectingBusMasterInterrupt, StartPacketBusy, StartPacketRequested;
++    UCHAR Timeout, IoRetries, MaximumIoRetries;
++    PIRP CurrentIrp;
++    KDEVICE_QUEUE DeviceQueue;
++    ULONG PhysicalRegionDescriptorTablePhysical;
++    KDPC TimerDpc, FinishDpc;
++    KTIMER Timer;
++    NX_IDE_INTERRUPT InterruptObject;
++} NX_IDE_CHANNEL;
++C_ASSERT(sizeof(KDEVICE_QUEUE) == 12);
++C_ASSERT(sizeof(KDPC) == 28);
++C_ASSERT(sizeof(KTIMER) == 40);
++C_ASSERT(sizeof(NX_IDE_INTERRUPT) == 112);
++C_ASSERT(sizeof(NX_IDE_CHANNEL) == 264);
++C_ASSERT(FIELD_OFFSET(NX_IDE_CHANNEL, StartPacketRoutine) == 0x10);
++C_ASSERT(FIELD_OFFSET(NX_IDE_CHANNEL, CurrentIrp) == 0x20);
++extern NX_IDE_CHANNEL IdexChannelObject;
++
++VOID NxkIdeSetHardwareIsr(PKSERVICE_ROUTINE Routine, PVOID Context);
++BOOLEAN NTAPI NxkIdeIsr(PKINTERRUPT Interrupt, PVOID Context);
++VOID NxkIdeBindInterrupt(PKINTERRUPT Native);
++VOID NxkIdeUnbindChannel(PVOID Channel);
++VOID NxkIdeInitializeCompletion(PKDEFERRED_ROUTINE Routine);
++PKDPC NxkIdeCompletionDpc(VOID);
++VOID NxkIdeStartTimer(PDEVICE_OBJECT Device, PVOID Port, PIO_TIMER_ROUTINE Routine);
++VOID NxkIdeStopTimer(PVOID Port);
++/* Driver request types stay private to ATAPI: adapters carry opaque state. */
++BOOLEAN NxkIdeStartRequest(PVOID Channel, PVOID Request,
++    BOOLEAN (*Start)(PVOID, PVOID), PDEVICE_OBJECT Device, PIRP Irp, ULONG Timeout);
++VOID NxkIdeFinishRequest(PVOID Request, VOID (*Finish)(PVOID), PIRP Irp);
++BOOLEAN NxkIdeStartNext(PVOID Port, BOOLEAN (*StartNext)(PVOID));
++VOID NxkIdeTimeout(PVOID Port, ULONG Slot, VOID (*Timeout)(PVOID, ULONG));
++VOID XeInterruptBindNative(PKINTERRUPT Xbox, PKINTERRUPT Native);
++
++BOOLEAN NxkIdeResetComplete(PVOID Channel);
++VOID NxkIdeSetTimeout(PVOID Port, ULONG Seconds);
+diff --git a/sdk/include/reactos/xb-io.h b/sdk/include/reactos/xb-io.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..b8a6adfee6957a2a9dbb3961453253007585ad23
+--- /dev/null
++++ b/sdk/include/reactos/xb-io.h
+@@ -0,0 +1,5 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++/* Native private IRP flag: Xbox SG always publishes a final result, including
++ * inline errors, synchronous-file errors and cancellation. Not a title flag. */
++#define IRP_XB_SG_COMPLETION 0x00010000UL
+diff --git a/tests/host/clean-room/extract-pins.py b/tests/host/clean-room/extract-pins.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..8ffb7357b813426193108cce9d3771d7ac1a055d
+--- /dev/null
++++ b/tests/host/clean-room/extract-pins.py
+@@ -0,0 +1,13 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Compile the actual supply bookkeeping and public API bodies. The omitted
++# supply functions contain privileged i386 relocation assembly unavailable on
++# this host. Markers fail loudly if source organization changes.
++from pathlib import Path
++import sys
++root = Path(__file__).resolve().parents[3]
++supply = (root / 'ntoskrnl/xb/mm/pagesupply.c').read_text()
++api = (root / 'ntoskrnl/xb/mm/api.c').read_text()
++body = supply[:supply.index('/*\n * Frame ownership:')] + '\n#endif\n'
++body += supply[supply.index('BOOLEAN\nNxkPageSupplyIsFree'):supply.index('BOOLEAN\nNxkPageSupplyTakeSpecific')]
++body += api[api.index('/* LOCK / UNLOCK '):api.index('/* QUERIES ')]
++Path(sys.argv[1]).write_text(body)
+diff --git a/tests/host/clean-room/ide.c b/tests/host/clean-room/ide.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..16ca9e67e6f1f3cc3da14bd9a78cfab4744231ec
+--- /dev/null
++++ b/tests/host/clean-room/ide.c
+@@ -0,0 +1,76 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Actual IDE/interrupt modules with poisoned released IRQ storage. */
++#include <ntoskrnl.h>
++#include <sys/mman.h>
++#include <stdio.h>
++static PKINTERRUPT expected;
++static ULONG callbacks, native_calls, starts_seen, finishes_seen;
++static unsigned checks;
++#define CHECK(c) do { ++checks; if (!(c)) { fprintf(stderr,"FAIL %u: %s\n",checks,#c); return 1; } } while(0)
++VOID NTAPI KeInitializeInterrupt(PKINTERRUPT i,PKSERVICE_ROUTINE r,PVOID c,PKSPIN_LOCK l,
++ ULONG v,KIRQL q,KIRQL s,KINTERRUPT_MODE m,BOOLEAN share,CHAR cpu,BOOLEAN f)
++{ (void)r;(void)c;(void)l;(void)s;(void)cpu;(void)f;
++ i->Initialized=TRUE;i->Vector=v;i->Irql=q;i->Mode=m;i->ShareVector=share;i->Connected=FALSE; }
++BOOLEAN NTAPI KeConnectInterrupt(PKINTERRUPT i) { assert(i->Initialized);i->Connected=TRUE;return TRUE; }
++BOOLEAN NTAPI KeDisconnectInterrupt(PKINTERRUPT i) { assert(i->Initialized);i->Connected=FALSE;return TRUE; }
++BOOLEAN NTAPI KeSynchronizeExecution(PKINTERRUPT i,PKSYNCHRONIZE_ROUTINE r,PVOID c)
++{ assert(i==expected); assert(i->Initialized);++native_calls;return r(c); }
++#include "../../../ntoskrnl/xb/interrupt.c"
++#include "../../../ntoskrnl/xb/ide.c"
++static BOOLEAN sync_callback(PVOID p) { assert(p==(PVOID)7);++callbacks;return TRUE; }
++static BOOLEAN irq(PKINTERRUPT i,PVOID p) { assert(i==expected);assert(p==(PVOID)1);return TRUE; }
++static VOID timer(PDEVICE_OBJECT d, PVOID p) { (void)d; assert(p==(PVOID)3); }
++static BOOLEAN start(PVOID c,PVOID r) { assert(c==(PVOID)1);assert(r==(PVOID)2);++starts_seen;return TRUE; }
++static IRP same_irp;
++static VOID finish_and_requeue(PVOID r)
++{ assert(r==(PVOID)2);++finishes_seen;
++  assert(NxkIdeStartRequest((PVOID)1,(PVOID)2,start,NULL,&same_irp,4)); }
++static VOID finish_final(PVOID r) { assert(r==(PVOID)2);++finishes_seen; }
++int main(void)
++{
++    PKINTERRUPT native = mmap(NULL,PAGE_SIZE,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
++    CHECK(native!=MAP_FAILED);
++    native->Initialized=TRUE;native->Connected=TRUE;native->Irql=5;native->Vector=14;
++    expected=native;
++    NxkIdeSetHardwareIsr(irq,(PVOID)1);NxkIdeBindInterrupt(native);
++    PKINTERRUPT public=(PKINTERRUPT)&IdexChannelObject.InterruptObject;
++    CHECK(XeKeConnectInterrupt(public));
++    CHECK(XeKeSynchronizeExecution(public,sync_callback,(PVOID)7));
++    CHECK(callbacks==1&&native_calls==1&&current_irql==0);
++    CHECK(!XeKeDisconnectInterrupt(public));
++    NxkIdeStartRequest((PVOID)1,(PVOID)2,start,NULL,&same_irp,5);
++    NxkIdeFinishRequest((PVOID)2,finish_and_requeue,&same_irp);
++    CHECK(IdexChannelObject.CurrentIrp==&same_irp);
++    CHECK(IdexChannelObject.StartPacketBusy&&IdexChannelObject.ExpectingBusMasterInterrupt);
++    NxkIdeFinishRequest((PVOID)2,finish_final,&same_irp);
++    CHECK(starts_seen==2&&finishes_seen==2);
++    CHECK(!IdexChannelObject.CurrentIrp&&!IdexChannelObject.StartPacketBusy&&!IdexChannelObject.ExpectingBusMasterInterrupt);
++    NxkIdeUnbindChannel((PVOID)9); /* unrelated teardown must preserve owner */
++    CHECK(XeKeConnectInterrupt(public));
++    NxkIdeStartTimer(NULL,(PVOID)3,timer);
++    CHECK(IdexChannelObject.Timer.Armed);
++    NxkIdeUnbindChannel((PVOID)1);
++    CHECK(!IdexChannelObject.Timer.Armed&&!TimerOperation&&!TimerPort&&!TimerDevice);
++    CHECK(mprotect(native,PAGE_SIZE,PROT_NONE)==0); /* released storage cannot be touched */
++    CHECK(!XeKeConnectInterrupt(public));
++    CHECK(!XeKeSynchronizeExecution(public,sync_callback,(PVOID)7));
++    CHECK(!XeKeDisconnectInterrupt(public));
++    CHECK(callbacks==1&&native_calls==1);
++    CHECK(!IdexChannelObject.InterruptObject.Connected&&!HardwareContext&&!HardwareIsr);
++    CHECK(!NxkIdeIsr(native,NULL));
++    /* Reinitializing the public interrupt cannot acquire a second owner. */
++    XeKeInitializeInterrupt(public,irq,NULL,14,5,LevelSensitive,FALSE);
++    CHECK(!XeKeConnectInterrupt(public));
++    KINTERRUPT replacement={.Initialized=TRUE,.Connected=TRUE,.Irql=5,.Vector=14};
++    expected=&replacement;
++    NxkIdeSetHardwareIsr(irq,(PVOID)1);NxkIdeBindInterrupt(expected);
++    CHECK(XeKeConnectInterrupt(public));
++    CHECK(XeKeSynchronizeExecution(public,sync_callback,(PVOID)7));
++    CHECK(callbacks==2&&native_calls==2);
++    NxkIdeUnbindChannel((PVOID)1);munmap(native,PAGE_SIZE);
++    /* Failed connect leaves no native object and no channel context. */
++    NxkIdeSetHardwareIsr(irq,(PVOID)1);NxkIdeUnbindChannel((PVOID)1);
++    CHECK(!XeKeConnectInterrupt(public)&&!HardwareContext);
++    printf("IDE lifecycle host checks: %u/%u passed\n",checks,checks);
++    return 0;
++}
+diff --git a/tests/host/clean-room/include/debug.h b/tests/host/clean-room/include/debug.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..19779e169ad2cfc6a6822d46063d94cf9e54860f
+--- /dev/null
++++ b/tests/host/clean-room/include/debug.h
+@@ -0,0 +1,2 @@
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
+diff --git a/tests/host/clean-room/include/ide/ntoskrnl.h b/tests/host/clean-room/include/ide/ntoskrnl.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..ce3ad8b0977be6d2dde7bd8c829bfb5ed1f922c7
+--- /dev/null
++++ b/tests/host/clean-room/include/ide/ntoskrnl.h
+@@ -0,0 +1,39 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include "../ntoskrnl.h"
++#include <assert.h>
++typedef char CHAR, *PCHAR;
++typedef ULONG *PKSPIN_LOCK;
++typedef enum { LevelSensitive, Latched } KINTERRUPT_MODE;
++typedef struct _KINTERRUPT { BOOLEAN Connected; KIRQL Irql; ULONG Vector;
++ BOOLEAN ShareVector; KINTERRUPT_MODE Mode; BOOLEAN Initialized; } KINTERRUPT, *PKINTERRUPT;
++typedef BOOLEAN (*PKSERVICE_ROUTINE)(PKINTERRUPT, PVOID);
++typedef BOOLEAN (*PKSYNCHRONIZE_ROUTINE)(PVOID);
++typedef struct { ULONG unused; } DEVICE_OBJECT, *PDEVICE_OBJECT;
++typedef struct { ULONG unused; } IRP, *PIRP;
++typedef struct { int64_t QuadPart; } LARGE_INTEGER;
++typedef struct _KDPC KDPC, *PKDPC;
++typedef VOID (*PKDEFERRED_ROUTINE)(PKDPC, PVOID, PVOID, PVOID);
++struct _KDPC { PKDEFERRED_ROUTINE Routine; PVOID Context; };
++typedef struct { BOOLEAN Armed; } KTIMER;
++typedef struct { BOOLEAN Busy; } KDEVICE_QUEUE;
++typedef VOID (*PIO_TIMER_ROUTINE)(PDEVICE_OBJECT, PVOID);
++#define __declspec(x)
++#define NTKERNELAPI
++#define _In_
++#define _In_opt_
++#define DISPATCH_LEVEL 2
++#define HIGH_LEVEL 31
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define min(a,b) ((a)<(b)?(a):(b))
++static KIRQL current_irql;
++static inline KIRQL KeGetCurrentIrql(void) { return current_irql; }
++static inline void KeRaiseIrql(KIRQL level,KIRQL *old) { assert(level>=current_irql); *old=current_irql;current_irql=level; }
++static inline void KeLowerIrql(KIRQL old) { assert(old<=current_irql); current_irql=old; }
++static inline void KeInitializeDeviceQueue(KDEVICE_QUEUE *q) { q->Busy=FALSE; }
++static inline void KeInitializeDpc(PKDPC d,PKDEFERRED_ROUTINE r,PVOID c) { d->Routine=r;d->Context=c; }
++static inline void KeInitializeTimer(KTIMER *t) { t->Armed=FALSE; }
++static inline void KeSetTimerEx(KTIMER *t,LARGE_INTEGER due,ULONG period,PKDPC d) { (void)due;(void)period;(void)d;t->Armed=TRUE; }
++static inline void KeCancelTimer(KTIMER *t) { t->Armed=FALSE; }
++static inline void KeRemoveQueueDpc(PKDPC d) { (void)d; }
++BOOLEAN NTAPI KeSynchronizeExecution(PKINTERRUPT,PKSYNCHRONIZE_ROUTINE,PVOID);
+diff --git a/tests/host/clean-room/include/ide/xb-debug.h b/tests/host/clean-room/include/ide/xb-debug.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..7189eb1cc522c11d7c5999b69fcd6f715fafe112
+--- /dev/null
++++ b/tests/host/clean-room/include/ide/xb-debug.h
+@@ -0,0 +1 @@
++#define XbDbg(...) ((void)0)
+diff --git a/tests/host/clean-room/include/mm/ARM3/miarm.h b/tests/host/clean-room/include/mm/ARM3/miarm.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..2a8cdd566a56ccb9c20bffe88922bed20885c9fc
+--- /dev/null
++++ b/tests/host/clean-room/include/mm/ARM3/miarm.h
+@@ -0,0 +1,4 @@
++#pragma once
++static inline KIRQL MiAcquirePfnLock(void) { return 0; }
++static inline void MiReleasePfnLock(KIRQL irql) { (void)irql; }
++void NxkPageSupplyReturn(PFN_NUMBER Page);
+diff --git a/tests/host/clean-room/include/ntoskrnl.h b/tests/host/clean-room/include/ntoskrnl.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..b6ff95141024fd43d728456291306644f073d609
+--- /dev/null
++++ b/tests/host/clean-room/include/ntoskrnl.h
+@@ -0,0 +1,90 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Minimal NT host shim: only persistence's pure bookkeeping is exercised. */
++#pragma once
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++#include <stdbool.h>
++typedef uint8_t UCHAR, BOOLEAN, KIRQL;
++typedef uint16_t USHORT;
++typedef uint32_t ULONG, PFN_NUMBER, PFN_COUNT;
++typedef int32_t LONG, NTSTATUS;
++typedef uintptr_t ULONG_PTR;
++typedef size_t SIZE_T, *PSIZE_T;
++typedef void VOID, *PVOID;
++typedef UCHAR *PUCHAR;
++typedef ULONG *PULONG;
++#define IN
++#define OUT
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define PAGE_SIZE 4096UL
++#define PAGE_SHIFT 12
++#define C_ASSERT(c) _Static_assert(sizeof(void *) != 4 || (c), #c)
++#define FIELD_OFFSET(t,f) offsetof(t,f)
++#define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p)-offsetof(t,f)))
++#define RtlCopyMemory memcpy
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define KeMemoryBarrier() __sync_synchronize()
++typedef struct _LIST_ENTRY { struct _LIST_ENTRY *Flink, *Blink; } LIST_ENTRY, *PLIST_ENTRY;
++typedef enum { LoaderFree, LoaderFirmwarePermanent, LoaderMemoryData } TYPE_OF_MEMORY;
++typedef struct { LIST_ENTRY ListEntry; TYPE_OF_MEMORY MemoryType; PFN_NUMBER BasePage, PageCount; } MEMORY_ALLOCATION_DESCRIPTOR, *PMEMORY_ALLOCATION_DESCRIPTOR;
++typedef struct { LIST_ENTRY MemoryDescriptorListHead; } LOADER_PARAMETER_BLOCK, *PLOADER_PARAMETER_BLOCK;
++extern UCHAR __ImageBase[];
++
++#ifdef HOST_SHUTDOWN_SCHEDULING_HOOKS
++VOID HostSchedulingHook(ULONG Phase);
++#define HOST_BOUNDARY(phase) HostSchedulingHook(phase)
++#else
++#define HOST_BOUNDARY(phase) ((void)0)
++#endif
++typedef ULONG KSPIN_LOCK;
++static inline void KeAcquireSpinLock(KSPIN_LOCK *l, KIRQL *i) { (void)l; *i=0; }
++static inline void KeReleaseSpinLock(KSPIN_LOCK *l, KIRQL i) { (void)l; (void)i; HOST_BOUNDARY(1); }
++static inline void InitializeListHead(LIST_ENTRY *h) { h->Flink=h->Blink=h; }
++static inline bool IsListEmpty(LIST_ENTRY *h) { return h->Flink==h; }
++static inline void RemoveEntryList(LIST_ENTRY *e) { e->Blink->Flink=e->Flink; e->Flink->Blink=e->Blink; }
++static inline LIST_ENTRY *RemoveHeadList(LIST_ENTRY *h) { LIST_ENTRY *e=h->Flink; RemoveEntryList(e); return e; }
++static inline void InsertTailList(LIST_ENTRY *h, LIST_ENTRY *e) { e->Flink=h; e->Blink=h->Blink; h->Blink->Flink=e; h->Blink=e; }
++
++/* Model the kernel-owned SEH boundary for source-level callback tests. Guest
++ * validation uses native PSEH/RTL and the public noreturn declaration. */
++#include <setjmp.h>
++#include <stdlib.h>
++#define DECLSPEC_NORETURN __attribute__((noreturn))
++typedef PVOID PETHREAD;
++typedef struct { BOOLEAN Signaled; } KEVENT;
++#define NotificationEvent 0
++#define Executive 0
++#define KernelMode 0
++#define EXCEPTION_EXECUTE_HANDLER 1
++#define EXCEPTION_CONTINUE_SEARCH 0
++static PETHREAD HostCurrentThread = (PVOID)1;
++static LONG HostCriticalDepth[3];
++static inline ULONG HostThreadIndex(void) { return (ULONG)(ULONG_PTR)HostCurrentThread; }
++static inline VOID KeEnterCriticalRegion(void) { ++HostCriticalDepth[HostThreadIndex()]; }
++static inline VOID KeLeaveCriticalRegion(void) { --HostCriticalDepth[HostThreadIndex()]; HOST_BOUNDARY(4); }
++static inline PETHREAD PsGetCurrentThread(void) { return HostCurrentThread; }
++static inline VOID KeInitializeEvent(KEVENT *e,ULONG kind,BOOLEAN state)
++{ (void)kind;e->Signaled=state; }
++typedef struct _HOST_SEH { jmp_buf Jump; struct _HOST_SEH *Previous; NTSTATUS Code; } HOST_SEH;
++static HOST_SEH *HostExceptionFrame;
++static ULONG HostUnwinds;
++static DECLSPEC_NORETURN inline VOID RtlRaiseStatus(NTSTATUS code)
++{ if(!HostExceptionFrame) abort();HostExceptionFrame->Code=code;++HostUnwinds;
++  longjmp(HostExceptionFrame->Jump,1); }
++#define _SEH2_TRY do { HOST_SEH host_frame; BOOLEAN host_handled=FALSE; \
++ host_frame.Previous=HostExceptionFrame; HOST_BOUNDARY(2); HostExceptionFrame=&host_frame; \
++ int host_exception=setjmp(host_frame.Jump); if(host_exception==0)
++#define _SEH2_EXCEPT(filter) else if((host_handled=((filter)==EXCEPTION_EXECUTE_HANDLER)))
++#define _SEH2_FINALLY ;
++#define _SEH2_GetExceptionCode() host_frame.Code
++#define _SEH2_END HostExceptionFrame=host_frame.Previous; HOST_BOUNDARY(3); \
++ if(host_exception&&!host_handled) RtlRaiseStatus(host_frame.Code); } while(0)
++#ifdef HOST_SHUTDOWN_WAIT_STUB
++NTSTATUS KeWaitForSingleObject(PVOID,ULONG,ULONG,BOOLEAN,PVOID);
++#else
++static inline NTSTATUS KeWaitForSingleObject(PVOID p,ULONG reason,ULONG mode,BOOLEAN alert,PVOID timeout)
++{ (void)p;(void)reason;(void)mode;(void)alert;(void)timeout;abort(); }
++#endif
+diff --git a/tests/host/clean-room/persistence.c b/tests/host/clean-room/persistence.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..1406e6b43e90b4d35b80379ebd19b5d1fa7b7b88
+--- /dev/null
++++ b/tests/host/clean-room/persistence.c
+@@ -0,0 +1,67 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/mman.h>
++#include "ntoskrnl.h"
++UCHAR __ImageBase[1];
++static bool pinned;
++static unsigned returned;
++void NxkPageSupplyReturn(PFN_NUMBER page) { (void)page; ++returned; }
++BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER page) { (void)page; return pinned; }
++#include "../../../ntoskrnl/xb/mm/persistence.c"
++static unsigned tests, failed;
++#define CHECK(c) do { ++tests; if (!(c)) { ++failed; printf("not ok %u - %s:%d %s\n", tests, __FILE__, __LINE__, #c); } else printf("ok %u - %s\n", tests, #c); } while(0)
++static void reset(void)
++{
++    memset((void *)PM_VA, 0, PAGE_SIZE); memset((void *)PM_LAUNCH_VA, 0, PAGE_SIZE);
++    memset(PmSelected, 0, sizeof(PmSelected)); memset(PmRestored, 0, sizeof(PmRestored));
++    pinned = false; returned = 0;
++}
++static void reboot_read(LOADER_PARAMETER_BLOCK *lb)
++{
++    memset(PmSelected, 0, sizeof(PmSelected)); memset(PmRestored, 0, sizeof(PmRestored));
++    NxkMmReadPersistence(lb);
++}
++int main(void)
++{
++    void *ram = mmap((void *)NXK_KSEG0_BASE, NXK_KSEG0_RAM_SIZE,
++        PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
++    if (ram == MAP_FAILED) { perror("mmap"); return 2; }
++    LOADER_PARAMETER_BLOCK lb;
++    MEMORY_ALLOCATION_DESCRIPTOR d;
++    lb.MemoryDescriptorListHead.Flink = lb.MemoryDescriptorListHead.Blink = &d.ListEntry;
++    d.ListEntry.Flink = d.ListEntry.Blink = &lb.MemoryDescriptorListHead;
++    d.MemoryType = LoaderFree; d.BasePage = 0x200; d.PageCount = 0x3C00 - 0x200;
++    PM_HANDOFF *slot = (PM_HANDOFF *)PM_VA;
++    PVOID alias = (void *)(NXK_KSEG0_BASE | 0x2001000);
++    reset(); reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
++    NxkMmSetPersistentPages(0x2001011, 20, TRUE);
++    CHECK(PmBit(PmSelected, 0x2001) && !PmBit(PmSelected, 0x2000));
++    NxkMmPublishPersistence(TRUE); CHECK(slot->Magic == PM_MAGIC);
++    reboot_read(&lb); CHECK(slot->Magic == 0 && NxkMmPersistentPage(0x2001));
++    CHECK(NxkMmQueryRestored(alias) == PAGE_SIZE);
++    NxkMmSetPersistentPages(0x2001000, PAGE_SIZE, FALSE);
++    CHECK(NxkMmPersistentPage(0x2001) && !PmBit(PmSelected, 0x2001));
++    pinned = true; CHECK(NxkMmFreeRestored(alias) && returned == 0);
++    CHECK(NxkMmQueryRestored(alias) == PAGE_SIZE);
++    pinned = false; CHECK(NxkMmFreeRestored(alias) && returned == 1);
++    CHECK(NxkMmQueryRestored(alias) == 0 && !PmBit(PmSelected, 0x2001));
++    reset(); PmSet(PmSelected, 0x2001, TRUE); NxkMmPublishPersistence(TRUE);
++    slot->Pages[0x2001 >> 3] ^= 1; reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
++    reset(); PmSet(PmSelected, 0x2001, TRUE); NxkMmPublishPersistence(TRUE);
++    slot->Version++; reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
++    reset(); PmSet(PmSelected, 0x2001, TRUE); NxkMmPublishPersistence(TRUE);
++    slot->ImageBase++; reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
++    reset(); PmSet(PmSelected, 0x2001, TRUE); NxkMmPublishPersistence(TRUE);
++    *(ULONG *)PM_LAUNCH_VA = PM_LAUNCH_MAGIC; reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
++    reset(); PmSet(PmSelected, 0x2001, TRUE); PmSet(PmSelected, 0x30, TRUE);
++    NxkMmPublishPersistence(TRUE); reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
++    reset(); PmSet(PmSelected, 0x2001, TRUE); NxkMmPublishPersistence(TRUE);
++    reboot_read(&lb); reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
++    reset(); PmSet(PmSelected, 0x2001, TRUE); NxkMmPublishPersistence(FALSE);
++    CHECK(slot->Magic == 0);
++    reset(); NxkMmSetPersistentPages(0x30000, PAGE_SIZE, TRUE);
++    CHECK(!PmBit(PmSelected, 0x30));
++    printf("persistence host checks: %u/%u passed\n", tests - failed, tests);
++    return failed ? 1 : 0;
++}
+diff --git a/tests/host/clean-room/pins.c b/tests/host/clean-room/pins.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..c48ec8174757804840c580cc45f33c6de1f9f69c
+--- /dev/null
++++ b/tests/host/clean-room/pins.c
+@@ -0,0 +1,58 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <ntoskrnl.h>
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++typedef USHORT *PUSHORT;
++#define ASSERT assert
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define MI_ASSERT_PFN_LOCK_HELD() ((void)0)
++#define MAXUSHORT 0xffff
++#define MAXULONG_PTR UINTPTR_MAX
++#define NXK_MM_PHYS
++static ULONG MmAvailablePages;
++static BOOLEAN NxkMmRetailShapedMap(void) { return FALSE; }
++static VOID MiZeroPhysicalPage(PFN_NUMBER p) { (void)p; }
++static BOOLEAN NxkMmPersistentPage(PFN_NUMBER p) { (void)p;return FALSE; }
++static BOOLEAN NxMmIsAddressValid(PVOID p) { return (ULONG_PTR)p>=0x1000&&(ULONG_PTR)p<0x5000; }
++/* VAs 0x1000 and 0x2000 alias the same PFN; 0x3000 and 0x4000 another. */
++static ULONG_PTR NxMmGetPhysicalAddress(PVOID p) { return (ULONG_PTR)p<0x3000?0x10000:0x11000; }
++#include "pins-actual.inc"
++static unsigned checks;
++#define CHECK(c) do{++checks;if(!(c)){fprintf(stderr,"FAIL %u: %s\n",checks,#c);return 1;}}while(0)
++int main(void)
++{
++    UCHAR metadata[32*(sizeof(ULONG)+2*sizeof(USHORT))];
++    NxkPageSupplyInitialize(31,metadata);
++    MmLockUnlockPhysicalPage(0x10025,FALSE);
++    CHECK(NxpPins[16]==1&&NxpPins[1]==0);
++    MmLockUnlockPhysicalPage(0xFD000000,FALSE);CHECK(NxpPins[16]==1);
++    /* Two aliases but only one pin: unlock preflight must change nothing. */
++    MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,TRUE);
++    CHECK(NxpPins[16]==1);
++    MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,FALSE);
++    CHECK(NxpPins[16]==3);
++    MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,TRUE);
++    CHECK(NxpPins[16]==1);
++    MmLockUnlockPhysicalPage(0x10000,TRUE);MmLockUnlockPhysicalPage(0x10000,TRUE);
++    CHECK(NxpPins[16]==0);
++    /* All mappings must validate before any count changes. */
++    MmLockUnlockBufferPages((PVOID)0x3000,3*PAGE_SIZE,FALSE);
++    CHECK(NxpPins[17]==0);
++    MmLockUnlockBufferPages((PVOID)(UINTPTR_MAX-1),PAGE_SIZE,FALSE);
++    CHECK(NxpPins[17]==0);
++    /* The exact count limit still balances. Crossing it via repeated aliases
++     * latches retention for the whole buffer instead of partial acquisition. */
++    for(unsigned i=0;i<NXP_PIN_LIMIT-1;++i) MmLockUnlockPhysicalPage(0x10000,FALSE);
++    MmLockUnlockBufferPages((PVOID)0x1000,4*PAGE_SIZE,FALSE);
++    CHECK((NxpPins[16]&NXP_PIN_OVERFLOW)!=0&&NxpPins[17]==2);
++    for(unsigned i=0;i<0x8000;++i) MmLockUnlockPhysicalPage(0x10000,TRUE);
++    CHECK(NxkPageSupplyIsPinned(16));
++    NxkPageSupplyReturn(16);
++    CHECK(!NxkPageSupplyIsFree(16)&&NxkPageSupplyIsPinned(16));
++    MmLockUnlockBufferPages((PVOID)0x3000,2*PAGE_SIZE,TRUE);
++    CHECK(!NxkPageSupplyIsPinned(17));
++    NxkPageSupplyReturn(17);CHECK(NxkPageSupplyIsFree(17));
++    printf("physical pin host checks: %u/%u passed\n",checks,checks);
++    return 0;
++}
+diff --git a/tests/host/clean-room/power.c b/tests/host/clean-room/power.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..162596c6f4b288777469d80e5cb9d068a9b921ab
+--- /dev/null
++++ b/tests/host/clean-room/power.c
+@@ -0,0 +1,135 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#define HOST_SHUTDOWN_WAIT_STUB
++#define HOST_SHUTDOWN_SCHEDULING_HOOKS
++#include <ntoskrnl.h>
++#include <stdio.h>
++#include <setjmp.h>
++#include <assert.h>
++#define HALXBOX_H_INCLUDED
++#define _In_
++#define EFLAGS_INTERRUPT_MASK 0x200
++#define SMB_DEVICE_SMC_PIC16LC 0x10
++#define SMC_REG_POWER 2
++#define SMC_REG_POWER_RESET 1
++#define SMC_REG_POWER_CYCLE 0x40
++#define SMC_REG_POWER_SHUTDOWN 0x80
++#define PASSIVE_LEVEL 0
++#define HIGH_LEVEL 31
++typedef enum { HalHaltRoutine,HalPowerDownRoutine,HalRestartRoutine,HalRebootRoutine } FIRMWARE_REENTRY;
++static KIRQL test_irql;
++static ULONG test_flags, hardware_calls, publish_calls, invalidations, callbacks, sequence[4], emitted_action;
++static jmp_buf halted, parked;
++static ULONG parks;
++static BOOLEAN other_thread_test;
++static BOOLEAN callback_after_reset;
++static BOOLEAN expect_emergency;
++static ULONG cas_unprotected, publication_unprotected, hardware_unprotected;
++static ULONG owner_gap_unprotected, owner_suppressed, special_deliveries, phases_seen;
++static KIRQL KeGetCurrentIrql(void) { return test_irql; }
++static ULONG __readeflags(void) { return test_flags; }
++static LONG InterlockedCompareExchange(volatile LONG *p,LONG value,LONG old)
++{ LONG result=*p;if(result==old)*p=value;HostSchedulingHook(100);return result; }
++static void _disable(void) { test_flags &= ~EFLAGS_INTERRUPT_MASK; }
++#define __halt() longjmp(halted,1)
++#define UNREACHABLE return
++static void DbgBreakPoint(void) { assert(0); }
++static void HalpXboxSmBusWriteByte(UCHAR dev,UCHAR reg,UCHAR action)
++{ HostSchedulingHook(300);assert(dev==SMB_DEVICE_SMC_PIC16LC&&reg==SMC_REG_POWER);++hardware_calls;emitted_action=action; }
++VOID NTAPI NxkMmPublishPersistence(BOOLEAN warm)
++{ HostSchedulingHook(200);if(warm) { assert(test_irql==0&&(test_flags&EFLAGS_INTERRUPT_MASK));++publish_calls; }
++  else ++invalidations; }
++NTSTATUS KeWaitForSingleObject(PVOID p,ULONG reason,ULONG mode,BOOLEAN alert,PVOID timeout)
++{ (void)p;(void)reason;(void)mode;(void)alert;(void)timeout;++parks;longjmp(parked,1); }
++DECLSPEC_NORETURN VOID NTAPI HalReturnToFirmware(FIRMWARE_REENTRY);
++#include "../../../ntoskrnl/xb/shutdown.c"
++#include "../../../hal/halx86/xbox/reboot.c"
++VOID HostSchedulingHook(ULONG phase)
++{
++    BOOLEAN normal_blocked = HostCriticalDepth[HostThreadIndex()] > 0;
++    /* Model a pending normal kernel APC at every scheduling boundary, and a
++     * special completion APC which remains deliverable independently. */
++    if (phase==100) { if(!normal_blocked) ++cas_unprotected; phases_seen|=8; }
++    if (phase==200&&!expect_emergency) { if(!normal_blocked) ++publication_unprotected; phases_seen|=16; }
++    if (phase==300&&!expect_emergency) { if(!normal_blocked) ++hardware_unprotected; phases_seen|=32; }
++    if (phase<=3 && NxCallbackThread==HostCurrentThread) {
++        phases_seen|=1u<<(phase-1);
++        if(!normal_blocked) ++owner_gap_unprotected; else ++owner_suppressed;
++        ++special_deliveries; /* No guarded-region/SpecialApcDisable used. */
++    }
++}
++static NX_SHUTDOWN_REGISTRATION regs[2];
++static VOID NTAPI callback(NX_SHUTDOWN_REGISTRATION *r)
++{
++    assert(test_irql==0&&(test_flags&EFLAGS_INTERRUPT_MASK));
++    sequence[callbacks++]=(ULONG)(r-regs);
++    if(r==&regs[0]) {
++        if(other_thread_test) {
++            HostCurrentThread=(PVOID)2;
++            if(!setjmp(parked)) HalReturnToFirmware(HalPowerDownRoutine);
++            /* Restore the owner thread after the simulated other thread parks.
++             * This is a scheduler model, not a return to its noreturn callsite. */
++            HostCurrentThread=(PVOID)1;
++            assert(!hardware_calls);
++        } else {
++            HalReturnToFirmware(HalPowerDownRoutine);
++            callback_after_reset=TRUE; /* must be unreachable */
++        }
++    }
++}
++static VOID reset_test(void)
++{
++    test_irql=0;test_flags=EFLAGS_INTERRUPT_MASK;hardware_calls=publish_calls=invalidations=callbacks=0;
++    HalpPowerActionStarted=0;NxShuttingDown=FALSE;NxCallbackThread=NULL;
++    NxShutdownGateReady=FALSE;HostCurrentThread=(PVOID)1;HostExceptionFrame=NULL;
++    parks=HostUnwinds=0;other_thread_test=callback_after_reset=expect_emergency=FALSE;
++    memset(HostCriticalDepth,0,sizeof(HostCriticalDepth));
++    cas_unprotected=publication_unprotected=hardware_unprotected=0;
++    owner_gap_unprotected=owner_suppressed=special_deliveries=phases_seen=0;
++    InitializeListHead(&NxRegistered);InitializeListHead(&NxPending);
++    for(unsigned i=0;i<2;++i) { regs[i].NotificationRoutine=callback;regs[i].Priority=2-i;
++        HalRegisterShutdownNotification(&regs[i],TRUE); }
++}
++static unsigned checks;
++#define CHECK(c) do{++checks;if(!(c)){fprintf(stderr,"FAIL %u: %s\n",checks,#c);return 1;}}while(0)
++int main(void)
++{
++    reset_test();
++    if(!setjmp(halted)) HalReturnToFirmware(HalRebootRoutine);
++    CHECK(callbacks==2&&sequence[0]==0&&sequence[1]==1);
++    CHECK(hardware_calls==1&&emitted_action==SMC_REG_POWER_RESET);
++    CHECK(publish_calls==1&&!invalidations);
++    CHECK(!(test_flags&EFLAGS_INTERRUPT_MASK));
++    CHECK(HostUnwinds==1&&!callback_after_reset&&!parks);
++    CHECK(!cas_unprotected&&!publication_unprotected&&!hardware_unprotected);
++    CHECK(!owner_gap_unprotected&&owner_suppressed>0&&special_deliveries>0);
++    CHECK((phases_seen&63)==63);
++    CHECK(HostCriticalDepth[1]==1); /* outer guard persists through reset */
++    /* A subsequent command also cannot issue hardware twice. */
++    test_flags=EFLAGS_INTERRUPT_MASK;
++    if(!setjmp(parked)) HalReturnToFirmware(HalRestartRoutine);
++    CHECK(parks==1&&HostUnwinds==1);
++    CHECK(hardware_calls==1&&publish_calls==1);
++    reset_test();other_thread_test=TRUE;
++    if(!setjmp(halted)) HalReturnToFirmware(HalRebootRoutine);
++    CHECK(callbacks==2&&hardware_calls==1&&emitted_action==SMC_REG_POWER_RESET);
++    CHECK(parks==1&&HostUnwinds==0&&!callback_after_reset);
++    CHECK(!cas_unprotected&&!publication_unprotected&&!hardware_unprotected&&!owner_gap_unprotected);
++    CHECK(HostCriticalDepth[1]==1&&HostCriticalDepth[2]==0); /* loser balances only its own guard */
++    reset_test();expect_emergency=TRUE;test_irql=HIGH_LEVEL;
++    if(!setjmp(halted)) HalpReboot();
++    CHECK(callbacks==0&&hardware_calls==1&&emitted_action==SMC_REG_POWER_RESET);
++    CHECK(publish_calls==0&&invalidations==1);
++    CHECK(HostCriticalDepth[1]==0);
++    reset_test();expect_emergency=TRUE;test_flags=0;
++    if(!setjmp(halted)) HalReturnToFirmware(HalRebootRoutine);
++    CHECK(callbacks==0&&hardware_calls==1);
++    CHECK(publish_calls==0&&invalidations==1);
++    CHECK(HostCriticalDepth[1]==0);
++    reset_test();expect_emergency=TRUE;test_irql=1; /* APC context is also unsafe for normal IO */
++    if(!setjmp(halted)) HalReturnToFirmware(HalPowerDownRoutine);
++    CHECK(callbacks==0&&hardware_calls==1&&emitted_action==SMC_REG_POWER_SHUTDOWN);
++    CHECK(publish_calls==0&&invalidations==1);
++    CHECK(HostCriticalDepth[1]==0);
++    printf("HAL power action host checks: %u/%u passed\n",checks,checks);
++    return 0;
++}
+diff --git a/tests/host/clean-room/run.sh b/tests/host/clean-room/run.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..cf6816ebd8966f01f1ec8e49ea52aaa967717648
+--- /dev/null
++++ b/tests/host/clean-room/run.sh
+@@ -0,0 +1,22 @@
++#!/bin/sh
++set -eu
++root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
++output=${1:?pass an isolated output directory}
++mkdir -p "$output"
++cc -std=c11 -D_GNU_SOURCE -Wall -Wextra -Wno-pointer-to-int-cast \
++   -I"$root/include" "$root/persistence.c" -o "$output/persistence-host"
++"$output/persistence-host"
++cc -std=c11 -Wall -Wextra -I"$root/include" "$root/shutdown.c" -o "$output/shutdown-host"
++"$output/shutdown-host"
++
++source_root=$(CDPATH= cd -- "$root/../../.." && pwd)
++cc -std=c11 -D_GNU_SOURCE -Wall -Wextra -I"$root/include/ide" -I"$source_root/sdk/include" \
++   "$root/ide.c" -o "$output/ide-host"
++"$output/ide-host"
++cc -std=c11 -Wall -Wextra -I"$root/include" -I"$root/include/ide" \
++   "$root/power.c" -o "$output/power-host"
++"$output/power-host"
++python3 "$root/extract-pins.py" "$output/pins-actual.inc"
++cc -std=c11 -Wall -Wextra -I"$root/include" -I"$output" -I"$source_root/ntoskrnl/xb/mm" \
++   "$root/pins.c" -o "$output/pins-host"
++"$output/pins-host"
+diff --git a/tests/host/clean-room/shutdown.c b/tests/host/clean-room/shutdown.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..45d176468fb2f136dc6f1eceb7bef129406ee472
+--- /dev/null
++++ b/tests/host/clean-room/shutdown.c
+@@ -0,0 +1,50 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <stdio.h>
++#include "ntoskrnl.h"
++#include "../../../ntoskrnl/xb/shutdown.c"
++static unsigned count, seen[8], checks, failed;
++static NX_SHUTDOWN_REGISTRATION regs[6];
++static BOOLEAN raise_unexpected;
++#define CHECK(c) do { ++checks; if (!(c)) { ++failed; printf("not ok %u - %s\n", checks, #c); } else printf("ok %u - %s\n", checks, #c); } while(0)
++static void callback(NX_SHUTDOWN_REGISTRATION *r)
++{
++    unsigned id = (unsigned)(r - regs);
++    seen[count++] = id;
++    if (raise_unexpected) RtlRaiseStatus((NTSTATUS)0xE0771234);
++    if (id == 0) {
++        HalRegisterShutdownNotification(&regs[4], FALSE); /* detached pending */
++        HalRegisterShutdownNotification(&regs[5], TRUE); /* ignored in drain */
++        NxkShutdownNotifications(); /* nested drain inert */
++    }
++}
++int main(void)
++{
++    for (unsigned i=0; i<6; ++i) { regs[i].NotificationRoutine=callback; regs[i].Priority=i<2 ? 100 : 20-(LONG)i; }
++    HalRegisterShutdownNotification(&regs[5], FALSE); /* uninitialized links */
++    for (unsigned i=0; i<5; ++i) HalRegisterShutdownNotification(&regs[i], TRUE);
++    HalRegisterShutdownNotification(&regs[0], TRUE);
++    HalRegisterShutdownNotification(&regs[1], TRUE);
++    HalRegisterShutdownNotification(&regs[3], FALSE);
++    CHECK(regs[0].ListEntry.Flink == &regs[1].ListEntry);
++    NxkShutdownNotifications();
++    CHECK(count == 3);
++    CHECK(seen[0] == 0 && seen[1] == 1 && seen[2] == 2);
++    CHECK(IsListEmpty(&NxRegistered) && IsListEmpty(&NxPending));
++    CHECK(regs[0].ListEntry.Flink == &regs[0].ListEntry);
++    CHECK(HostCriticalDepth[1]==0&&NxCallbackThread==NULL);
++    NxkShutdownNotifications(); CHECK(count == 3);
++    CHECK(HostCriticalDepth[1]==0&&NxCallbackThread==NULL);
++    /* An unrelated callback exception propagates while finally balances
++     * suppression and clears the owner before any normal APC can resume. */
++    NxShuttingDown=FALSE;raise_unexpected=TRUE;
++    HalRegisterShutdownNotification(&regs[0],TRUE);
++    BOOLEAN caught=FALSE;
++    _SEH2_TRY {
++        NxkShutdownNotifications();
++    } _SEH2_EXCEPT(_SEH2_GetExceptionCode()==(NTSTATUS)0xE0771234 ? 1 : 0) {
++        caught=TRUE;
++    } _SEH2_END;
++    CHECK(caught&&HostCriticalDepth[1]==0&&NxCallbackThread==NULL);
++    printf("shutdown host checks: %u/%u passed\n", checks-failed, checks);
++    return failed ? 1 : 0;
++}
+diff --git a/tests/xbe/api-regression/io/scatter.c b/tests/xbe/api-regression/io/scatter.c
+index b888307de15a3f985adf9bb6ef1d71614d224cb2..07e149207e09b35f0d952490be3459fcbfb0619e 100644
+--- a/tests/xbe/api-regression/io/scatter.c
++++ b/tests/xbe/api-regression/io/scatter.c
+@@ -595,6 +595,63 @@ static bool completion_apc_reports_the_whole_transfer(void)
+     return true;
+ }
+ 
++/* Both outstanding requests share a file object but own independent IOSBs,
++ * events and segment storage. Different offsets expose crossed completions. */
++static bool concurrent_async_requests_are_independent(void)
++{
++    ANSI_STRING name;
++    OBJECT_ATTRIBUTES oa;
++    IO_STATUS_BLOCK open_status, iosb[2];
++    FILE_SEGMENT_ELEMENT segments[2][3];
++    LARGE_INTEGER offsets[2];
++    HANDLE file, events[2] = {NULL, NULL};
++    PVOID pages = NULL;
++    NTSTATUS status;
++    bool ok = false;
++    if (!setup()) FAIL_SETUP();
++    pages = MmAllocateContiguousMemory(4 * PAGE_SIZE);
++    ASSERT_NOT_NULL(pages);
++    memset(pages, 0xEE, 4 * PAGE_SIZE);
++    name.Buffer = (PCHAR)SCATTER_PATH;
++    name.Length = (USHORT)strlen(SCATTER_PATH); name.MaximumLength = name.Length + 1;
++    oa.RootDirectory = NULL; oa.ObjectName = &name; oa.Attributes = OBJ_CASE_INSENSITIVE;
++    status = NtCreateFile(&file, GENERIC_READ, &oa, &open_status, NULL,
++        FILE_ATTRIBUTE_NORMAL, 0, FILE_OPEN,
++        FILE_NO_INTERMEDIATE_BUFFERING | FILE_NON_DIRECTORY_FILE);
++    if (!NT_SUCCESS(status)) goto free_pages;
++    for (unsigned i = 0; i < 2; ++i) {
++        status = NtCreateEvent(&events[i], NULL, NotificationEvent, FALSE);
++        if (!NT_SUCCESS(status)) goto close;
++        segments[i][0].Buffer = (PUCHAR)pages + i * 2 * PAGE_SIZE;
++        segments[i][1].Buffer = (PUCHAR)pages + (i * 2 + 1) * PAGE_SIZE;
++        segments[i][2].Buffer = NULL;
++        offsets[i].QuadPart = (LONGLONG)i * PAGE_SIZE;
++        iosb[i].Status = STATUS_PENDING; iosb[i].Information = 0;
++    }
++    for (unsigned i = 0; i < 2; ++i) {
++        status = NtReadFileScatter(file, events[i], NULL, NULL, &iosb[i],
++                                   segments[i], 2 * PAGE_SIZE, &offsets[i]);
++        if (status != STATUS_PENDING && !NT_SUCCESS(status)) goto close;
++    }
++    /* Reverse wait order so request one cannot borrow request zero's state. */
++    for (unsigned n = 2; n-- > 0;) {
++        status = NtWaitForSingleObject(events[n], FALSE, NULL);
++        if (!NT_SUCCESS(status) || iosb[n].Status != STATUS_SUCCESS ||
++            iosb[n].Information != 2 * PAGE_SIZE) goto close;
++        for (unsigned p = 0; p < 2; ++p)
++            for (unsigned b = 0; b < PAGE_SIZE; ++b)
++                if (((PUCHAR)segments[n][p].Buffer)[b] != page_tag(n + p)) goto close;
++    }
++    ok = true;
++close:
++    for (unsigned i = 0; i < 2; ++i) if (events[i]) NtClose(events[i]);
++    NtClose(file);
++free_pages:
++    MmFreeContiguousMemory(pages);
++    if (!ok) FAIL_AND_RETURN("concurrent scatter state/data mismatch: %08lx", status);
++    return true;
++}
++
+ static bool leaves_no_scratch_file(void)
+ {
+     IO_STATUS_BLOCK iosb;
+@@ -630,6 +687,7 @@ static const test_entry_t io_scatter_entries[] = {
+       asynchronous_handle_signals_its_event, NULL },
+     { "completion_apc_reports_the_whole_transfer",
+       completion_apc_reports_the_whole_transfer, NULL },
++    { "concurrent_async_requests_are_independent", concurrent_async_requests_are_independent, NULL },
+     { "leaves_no_scratch_file",       leaves_no_scratch_file,       NULL },
+ };
+ 
+diff --git a/tests/xbe/clean-room-contracts/Makefile b/tests/xbe/clean-room-contracts/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..49bd2702835394dd8971afff5ca7e3edc1e66ec4
+--- /dev/null
++++ b/tests/xbe/clean-room-contracts/Makefile
+@@ -0,0 +1,5 @@
++XBE_TITLE = clean-room-contracts
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /usr/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/pending.c $(CURDIR)/../api-regression/tap.c $(CURDIR)/../api-regression/io/scatter.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/clean-room-contracts/main.c b/tests/xbe/clean-room-contracts/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..8499042c3c6be3cc96a7423a5f18c46cb3473bfa
+--- /dev/null
++++ b/tests/xbe/clean-room-contracts/main.c
+@@ -0,0 +1,207 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../api-regression/harness.h"
++#include <string.h>
++#include <stdarg.h>
++#include <stdio.h>
++const char *g_fail_file;
++int g_fail_line;
++char g_fail_what[160];
++void test_record_failure(const char *file, int line, const char *fmt, ...)
++{
++    va_list ap; g_fail_file = file; g_fail_line = line;
++    va_start(ap, fmt); vsnprintf(g_fail_what, sizeof(g_fail_what), fmt, ap); va_end(ap);
++}
++
++static bool locks_block_relocation(void)
++{
++    PVOID va = NULL, pin, chunks[160] = {0};
++    SIZE_T bytes;
++    ULONG pa = 0, n;
++    /* VM pages prefer upper RAM. Fill that class until a movable page is
++     * actually inside the contiguous allocator's low-64-MiB aperture. */
++    for (n = 0; n < 160; ++n) {
++        bytes = 512 * 1024;
++        if (NtAllocateVirtualMemory(&chunks[n], 0, &bytes,
++            MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) != STATUS_SUCCESS) break;
++        for (ULONG off = 0; off < bytes; off += PAGE_SIZE) {
++            PVOID candidate = (PUCHAR)chunks[n] + off;
++            pa = MmGetPhysicalAddress(candidate) & ~(PAGE_SIZE - 1);
++            if (pa && pa < 0x03FE0000) { va = candidate; break; }
++        }
++        if (va) { ++n; break; }
++    }
++    ASSERT_NOT_NULL(va);
++    tap_comment("eligible movable page PA=0x%08lx after %lu chunks", pa, n);
++    /* Establish the unpinned control before exercising locks. */
++    pin = MmAllocateContiguousMemoryEx(PAGE_SIZE, pa, pa + PAGE_SIZE - 1,
++                                      PAGE_SIZE, PAGE_READWRITE);
++    ASSERT_NOT_NULL(pin);
++    MmFreeContiguousMemory(pin);
++    pa = MmGetPhysicalAddress(va) & ~(PAGE_SIZE - 1);
++    ASSERT_TRUE(pa < 0x03FE0000);
++    memset(va, 0x61, PAGE_SIZE);
++    pa = MmGetPhysicalAddress(va) & ~(PAGE_SIZE - 1);
++    /* Two APIs share one count; PA has deliberately nonzero low bits. */
++    MmLockUnlockBufferPages(va, PAGE_SIZE, FALSE);
++    MmLockUnlockPhysicalPage(pa + 37, FALSE);
++    pin = MmAllocateContiguousMemoryEx(PAGE_SIZE, pa, pa + PAGE_SIZE - 1,
++                                       PAGE_SIZE, PAGE_READWRITE);
++    ASSERT_EQ_PTR(pin, NULL);
++    MmLockUnlockBufferPages(va, PAGE_SIZE, TRUE);
++    pin = MmAllocateContiguousMemoryEx(PAGE_SIZE, pa, pa + PAGE_SIZE - 1,
++                                       PAGE_SIZE, PAGE_READWRITE);
++    ASSERT_EQ_PTR(pin, NULL);
++    MmLockUnlockPhysicalPage(pa + 37, TRUE);
++    MmLockUnlockPhysicalPage(pa + 37, TRUE); /* no underflow */
++    MmLockUnlockPhysicalPage(0xFD000000, FALSE); /* device address */
++    pin = MmAllocateContiguousMemoryEx(PAGE_SIZE, pa, pa + PAGE_SIZE - 1,
++                                       PAGE_SIZE, PAGE_READWRITE);
++    ASSERT_NOT_NULL(pin);
++    ASSERT_EQ_U32(MmGetPhysicalAddress(va) == pa, 0);
++    ASSERT_EQ_U32(*(UCHAR *)va, 0x61);
++    MmFreeContiguousMemory(pin);
++    for (ULONG i = 0; i < n; ++i) {
++        bytes = 0;
++        ASSERT_NTSTATUS(NtFreeVirtualMemory(&chunks[i], &bytes, MEM_RELEASE), STATUS_SUCCESS);
++    }
++    return true;
++}
++static bool prompt_detached_is_bounded(void)
++{
++    char response[3] = { 'x', 'y', 'z' };
++    ASSERT_EQ_U32(DbgPrompt("detached", NULL, 0), 0);
++    ULONG count = DbgPrompt("detached", response, 1);
++    tap_puts("\n"); /* preserve a separate TAP record even on transport failure */
++    ASSERT_EQ_U32(count, 0);
++    ASSERT_EQ_U32(response[0], 0);
++    ASSERT_EQ_U32(response[1], 'y');
++    ASSERT_EQ_U32(response[2], 'z');
++    return true;
++}
++static PIDE_START_PACKET_ROUTINE original_start;
++static PIDE_FINISHIO_ROUTINE original_finish;
++static PIDE_INTERRUPT_ROUTINE original_irq;
++static PIDE_START_NEXT_PACKET_ROUTINE original_next;
++static ULONG starts, finishes, interrupts, nexts, bad_state;
++static VOID NTAPI hooked_start(PDEVICE_OBJECT Device, PIRP Irp)
++{
++    ++starts;
++    if (IdexChannelObject.CurrentIrp != Irp || !IdexChannelObject.StartPacketBusy)
++        ++bad_state;
++    original_start(Device, Irp);
++}
++static VOID NTAPI hooked_finish(void)
++{ ++finishes; original_finish(); }
++static VOID NTAPI hooked_irq(void)
++{ ++interrupts; original_irq(); }
++static VOID NTAPI hooked_next(void)
++{ ++nexts; original_next(); }
++static bool ide_callbacks_observe_actual_disc_io(void)
++{
++    ANSI_STRING name;
++    OBJECT_ATTRIBUTES oa;
++    IO_STATUS_BLOCK iosb;
++    HANDLE file;
++    LARGE_INTEGER offset = {.QuadPart = 0};
++    PVOID page;
++    NTSTATUS status;
++    ASSERT_NOT_NULL(IdexChannelObject.StartPacketRoutine);
++    ASSERT_NOT_NULL(IdexChannelObject.FinishIoRoutine);
++    ASSERT_NOT_NULL(IdexChannelObject.InterruptRoutine);
++    name.Buffer = "\\Device\\CdRom0\\default.xbe"; name.Length = strlen(name.Buffer);
++    name.MaximumLength = name.Length + 1;
++    oa.RootDirectory = NULL; oa.ObjectName = &name; oa.Attributes = OBJ_CASE_INSENSITIVE;
++    status = NtCreateFile(&file, GENERIC_READ | SYNCHRONIZE, &oa, &iosb, NULL,
++        FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_OPEN,
++        FILE_NO_INTERMEDIATE_BUFFERING | FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE);
++    ASSERT_NTSTATUS(status, STATUS_SUCCESS);
++    page = MmAllocateContiguousMemory(PAGE_SIZE);
++    ASSERT_NOT_NULL(page);
++    original_start = IdexChannelObject.StartPacketRoutine;
++    original_finish = IdexChannelObject.FinishIoRoutine;
++    original_irq = IdexChannelObject.InterruptRoutine;
++    original_next = IdexChannelObject.StartNextPacketRoutine;
++    starts = finishes = interrupts = nexts = bad_state = 0;
++    IdexChannelObject.StartPacketRoutine = hooked_start;
++    IdexChannelObject.FinishIoRoutine = hooked_finish;
++    IdexChannelObject.InterruptRoutine = hooked_irq;
++    IdexChannelObject.StartNextPacketRoutine = hooked_next;
++    status = NtReadFile(file, NULL, NULL, NULL, &iosb, page, 2048, &offset);
++    IdexChannelObject.StartPacketRoutine = original_start;
++    IdexChannelObject.FinishIoRoutine = original_finish;
++    IdexChannelObject.InterruptRoutine = original_irq;
++    IdexChannelObject.StartNextPacketRoutine = original_next;
++    MmFreeContiguousMemory(page); NtClose(file);
++    tap_comment("IDE lifecycle starts=%lu finishes=%lu irqs=%lu next=%lu bad=%lu",
++                starts, finishes, interrupts, nexts, bad_state);
++    ASSERT_NTSTATUS(status, STATUS_SUCCESS);
++    ASSERT_TRUE(starts > 0 && finishes > 0 && interrupts > 0 && nexts > 0);
++    ASSERT_EQ_U32(bad_state, 0);
++    return true;
++}
++DECLARE_GROUP(io_scatter);
++static bool ide_channel_is_live(void)
++{
++    ASSERT_EQ_U32(sizeof(IdexChannelObject), 264);
++    ASSERT_NOT_NULL(IdexChannelObject.StartPacketRoutine);
++    ASSERT_NOT_NULL(IdexChannelObject.StartNextPacketRoutine);
++    ASSERT_NOT_NULL(IdexChannelObject.InterruptRoutine);
++    ASSERT_TRUE(IdexChannelObject.InterruptIrql > DISPATCH_LEVEL);
++    return true;
++}
++static bool pin_overflow_stays_pinned(void)
++{
++    PVOID page = MmAllocateContiguousMemory(PAGE_SIZE);
++    ASSERT_NOT_NULL(page);
++    ULONG pa = MmGetPhysicalAddress(page);
++    /* VOID cannot report overflow: it must retain the page conservatively. */
++    for (ULONG n = 0; n < 0x8000; ++n) MmLockUnlockPhysicalPage(pa + 37, FALSE);
++    for (ULONG n = 0; n < 0x8000; ++n) MmLockUnlockPhysicalPage(pa + 37, TRUE);
++    MmFreeContiguousMemory(page);
++    ASSERT_EQ_U32(MmQueryAllocationSize(page), PAGE_SIZE);
++    PVOID competing = MmAllocateContiguousMemoryEx(PAGE_SIZE, pa, pa + PAGE_SIZE - 1,
++        PAGE_SIZE, PAGE_READWRITE);
++    ASSERT_EQ_PTR(competing, NULL);
++    tap_comment("overflow latch retains one page until reboot (PA=%08lx)", pa);
++    return true;
++}
++bool inline_error_scatter_sync(void);
++bool inline_error_scatter_async(void);
++bool pending_error_scatter_sync(void);
++bool canceled_pending_scatter_async(void);
++bool pending_scatter_reverse_completion(void);
++bool pending_gather_reverse_completion(void);
++int main(void)
++{
++    const test_entry_t tests[] = {
++        {"pin-relocation", locks_block_relocation, NULL},
++        {"detached-prompt", prompt_detached_is_bounded, NULL},
++        {"live-ide-channel", ide_channel_is_live, NULL},
++        {"ide-real-io", ide_callbacks_observe_actual_disc_io, NULL},
++        {"pending-scatter-reverse", pending_scatter_reverse_completion, NULL},
++        {"pending-gather-reverse", pending_gather_reverse_completion, NULL},
++        {"inline-error-sync", inline_error_scatter_sync, NULL},
++        {"inline-error-async", inline_error_scatter_async, NULL},
++        {"pending-error-sync", pending_error_scatter_sync, NULL},
++        {"cancel-pending-async", canceled_pending_scatter_async, NULL},
++        {"pin-overflow-safe", pin_overflow_stays_pinned, NULL}
++    };
++    tap_puts("== clean-room-contracts begin ==\n");
++    tap_version(14); tap_plan(11 + g_group_io_scatter.count);
++    unsigned failures = 0;
++    for (unsigned i = 0; i < 11; ++i) {
++        g_fail_what[0] = 0;
++        if (tests[i].fn()) tap_ok(i + 1, tests[i].name);
++        else { tap_not_ok(i + 1, tests[i].name); tap_comment("%s", g_fail_what); ++failures; }
++    }
++    for (unsigned i = 0; i < g_group_io_scatter.count; ++i) {
++        const test_entry_t *t = &g_group_io_scatter.entries[i];
++        g_fail_what[0] = 0;
++        if (t->fn()) tap_ok(i + 12, t->name);
++        else { tap_not_ok(i + 12, t->name); tap_comment("%s", g_fail_what); ++failures; }
++    }
++    tap_puts(failures ? "== clean-room-contracts end FAIL ==\n" :
++                        "== clean-room-contracts end PASS ==\n");
++    tap_drain(); HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    for (;;) __asm__ __volatile__("hlt");
++}
+diff --git a/tests/xbe/clean-room-contracts/pending.c b/tests/xbe/clean-room-contracts/pending.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..e82b976d36175ca39b90062737d811a7e01c328d
+--- /dev/null
++++ b/tests/xbe/clean-room-contracts/pending.c
+@@ -0,0 +1,241 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++/* A deterministic public title driver holds two requests on one async handle.
++ * No scheduling or filesystem speed assumption can turn these into inline IO. */
++#include "../api-regression/harness.h"
++#include <string.h>
++
++static DRIVER_OBJECT driver;
++static PDEVICE_OBJECT device;
++static PIRP held[2];
++static ULONG lengths[2], calls, bad;
++static bool writing;
++static ULONG error_mode, error_completions;
++static KDPC error_dpc;
++static NTSTATUS expected_status[2];
++static ULONG expected_bytes[2];
++static VOID NTAPI error_complete_dpc(PKDPC dpc, PVOID context, PVOID arg1, PVOID arg2)
++{
++    PIRP irp = arg1;
++    (void)dpc; (void)context; (void)arg2;
++    ++error_completions;
++    irp->IoStatus.Status = STATUS_END_OF_FILE; irp->IoStatus.Information = 0;
++    IofCompleteRequest(irp, 0);
++}
++static PVOID pages;
++static FILE_SEGMENT_ELEMENT segments[2][3];
++static IO_STATUS_BLOCK results[2];
++static HANDLE events[2], apc_gate;
++static ULONG apcs[2], apc_order[2], apc_count;
++static PIO_STATUS_BLOCK apc_iosb[2];
++static const char path[] = "\\Device\\cleanroompending";
++
++static NTSTATUS NTAPI dispatch(PDEVICE_OBJECT dev, PIRP irp)
++{
++    UCHAR *stack = (UCHAR *)irp->Tail.Overlay.CurrentStackLocation;
++    ULONG *raw = (ULONG *)stack;
++    (void)dev;
++    if (stack[0] == 2 && error_mode) {
++        ++calls;
++        if (error_mode == 1) {
++            ++error_completions;
++            irp->IoStatus.Status = STATUS_END_OF_FILE; irp->IoStatus.Information = 0;
++            IofCompleteRequest(irp, 0);
++            return STATUS_END_OF_FILE;
++        }
++        stack[3] |= 1;
++        if (error_mode == 2) KeInsertQueueDpc(&error_dpc, irp, NULL);
++        else held[0] = irp;
++        return STATUS_PENDING;
++    }
++    if (stack[0] == 2 || stack[0] == 3) {
++        ULONG id = raw[3]; /* public read/write byte offset low word */
++        if (id > 1 || held[id] || calls >= 2) {
++            ++bad;
++            irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
++            irp->IoStatus.Information = 0;
++            IofCompleteRequest(irp, 0);
++            return STATUS_INVALID_PARAMETER;
++        }
++        held[id] = irp; lengths[id] = raw[1]; ++calls;
++        if ((stack[0] == 3) != writing || lengths[id] != (id + 1) * PAGE_SIZE)
++            ++bad;
++        stack[3] |= 1; /* SL_PENDING_RETURNED; nxdk omits stack accessor macros */
++        return STATUS_PENDING;
++    }
++    irp->IoStatus.Status = STATUS_SUCCESS;
++    irp->IoStatus.Information = stack[0] == 0 ? FILE_OPENED : 0;
++    IofCompleteRequest(irp, 0);
++    return STATUS_SUCCESS;
++}
++
++static VOID NTAPI completion_apc(PVOID context, PIO_STATUS_BLOCK iosb, ULONG reserved)
++{
++    ULONG id = (ULONG_PTR)context - 1;
++    (void)reserved;
++    if (id > 1 || apc_count >= 2) { ++bad; return; }
++    ++apcs[id]; apc_order[apc_count++] = id; apc_iosb[id] = iosb;
++    if (iosb != &results[id] || iosb->Status != expected_status[id] ||
++        iosb->Information != expected_bytes[id]) ++bad;
++}
++
++static bool setup(void)
++{
++    OBJECT_STRING name = {sizeof(path) - 1, sizeof(path), (PCHAR)path};
++    if (device) return true;
++    for (unsigned i = 0; i < 14; ++i) driver.MajorFunction[i] = dispatch;
++    if (IoCreateDevice(&driver, 0, &name, 0x22, FALSE, &device) != STATUS_SUCCESS)
++        return false;
++    device->Flags &= ~0x10u; /* DO_DEVICE_INITIALIZING */
++    pages = MmAllocateContiguousMemory(6 * PAGE_SIZE);
++    if (!pages) return false;
++    for (unsigned i = 0; i < 2; ++i)
++        if (NtCreateEvent(&events[i], NULL, NotificationEvent, FALSE) != STATUS_SUCCESS)
++            return false;
++    return NtCreateEvent(&apc_gate, NULL, NotificationEvent, FALSE) == STATUS_SUCCESS;
++}
++
++static bool pending_pair(bool write)
++{
++    OBJECT_ATTRIBUTES oa;
++    ANSI_STRING name = {sizeof(path) - 1, sizeof(path), (PCHAR)path};
++    IO_STATUS_BLOCK opened;
++    HANDLE file;
++    LARGE_INTEGER offsets[2], poll = {.QuadPart = 0}, timeout = {.QuadPart = -1000000};
++    NTSTATUS status[2];
++    typedef NTSTATUS (NTAPI *gather_fn)(HANDLE, HANDLE, PIO_APC_ROUTINE, PVOID,
++        PIO_STATUS_BLOCK, PFILE_SEGMENT_ELEMENT, ULONG, PLARGE_INTEGER);
++    ASSERT_TRUE(setup());
++    writing = write; error_mode = 0; calls = bad = apc_count = 0;
++    memset(held, 0, sizeof(held)); memset(apcs, 0, sizeof(apcs));
++    memset(pages, 0xEE, 6 * PAGE_SIZE);
++    oa.RootDirectory = NULL; oa.ObjectName = &name; oa.Attributes = OBJ_CASE_INSENSITIVE;
++    ASSERT_NTSTATUS(NtCreateFile(&file, GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE,
++        &oa, &opened, NULL, FILE_ATTRIBUTE_NORMAL, 0, FILE_OPEN,
++        FILE_NO_INTERMEDIATE_BUFFERING | FILE_NON_DIRECTORY_FILE), STATUS_SUCCESS);
++    for (unsigned i = 0; i < 2; ++i) {
++        NtClearEvent(events[i]);
++        expected_status[i] = STATUS_SUCCESS; expected_bytes[i] = (i + 1) * PAGE_SIZE;
++        results[i].Status = STATUS_PENDING; results[i].Information = 0xABCD;
++        segments[i][0].Buffer = (PUCHAR)pages + (i * 3) * PAGE_SIZE;
++        segments[i][1].Buffer = (PUCHAR)pages + (i * 3 + 2) * PAGE_SIZE;
++        segments[i][2].Buffer = NULL;
++        offsets[i].QuadPart = i;
++        if (write)
++            for (unsigned p = 0; p <= i; ++p)
++                memset(segments[i][p].Buffer, 0x40 + i * 4 + p, PAGE_SIZE);
++        status[i] = write ? ((gather_fn)NtWriteFileGather)(file, events[i], completion_apc,
++            (PVOID)(i + 1), &results[i], segments[i], (i + 1) * PAGE_SIZE, &offsets[i]) :
++            NtReadFileScatter(file, events[i], completion_apc, (PVOID)(i + 1),
++            &results[i], segments[i], (i + 1) * PAGE_SIZE, &offsets[i]);
++        ASSERT_NTSTATUS(status[i], STATUS_PENDING);
++        ASSERT_NOT_NULL(held[i]);
++        ASSERT_NTSTATUS(NtWaitForSingleObject(events[i], FALSE, &poll), STATUS_TIMEOUT);
++        ASSERT_NTSTATUS(results[i].Status, STATUS_PENDING);
++        ASSERT_EQ_U32(results[i].Information, 0xABCD);
++        /* The request must own a capture after dispatch returns. */
++        memset(segments[i], 0, sizeof(segments[i])); offsets[i].QuadPart = 0x7FFFFFFF;
++    }
++    ASSERT_EQ_U32(calls, 2);
++    ASSERT_TRUE(held[0] != held[1] && held[0]->UserBuffer != held[1]->UserBuffer);
++    if (write) memset(pages, 0xEE, 6 * PAGE_SIZE); /* gather already captured input */
++    for (unsigned n = 2; n-- > 0;) {
++        PIRP irp = held[n];
++        for (unsigned p = 0; p <= n; ++p) {
++            PUCHAR buffer = (PUCHAR)irp->UserBuffer + p * PAGE_SIZE;
++            if (write) {
++                for (unsigned b = 0; b < PAGE_SIZE; ++b)
++                    if (buffer[b] != 0x40 + n * 4 + p) ++bad;
++            } else memset(buffer, 0x70 + n * 4 + p, PAGE_SIZE);
++        }
++        /* Complete out of line at DPC level, then allow native completion APCs. */
++        KIRQL old = KeRaiseIrqlToDpcLevel();
++        irp->IoStatus.Status = STATUS_SUCCESS; irp->IoStatus.Information = lengths[n];
++        held[n] = NULL; IofCompleteRequest(irp, 0); KfLowerIrql(old);
++        ASSERT_NTSTATUS(NtWaitForSingleObject(events[n], FALSE, &timeout), STATUS_SUCCESS);
++        /* APC delivery is alertable, independently of the completion event. */
++        NtWaitForSingleObjectEx(apc_gate, UserMode, TRUE, &timeout);
++        ASSERT_NTSTATUS(results[n].Status, STATUS_SUCCESS);
++        ASSERT_EQ_U32(results[n].Information, (n + 1) * PAGE_SIZE);
++        ASSERT_EQ_U32(apcs[n], 1); ASSERT_EQ_PTR(apc_iosb[n], &results[n]);
++        if (n == 1) {
++            ASSERT_NTSTATUS(results[0].Status, STATUS_PENDING);
++            ASSERT_EQ_U32(results[0].Information, 0xABCD);
++            ASSERT_NTSTATUS(NtWaitForSingleObject(events[0], FALSE, &poll), STATUS_TIMEOUT);
++            ASSERT_EQ_U32(apcs[0], 0);
++        }
++        if (!write) {
++            for (unsigned p = 0; p <= n; ++p)
++                for (unsigned b = 0; b < PAGE_SIZE; ++b)
++                    if (((PUCHAR)pages)[(n * 3 + p * 2) * PAGE_SIZE + b] != 0x70 + n * 4 + p)
++                        ++bad;
++            for (unsigned b = 0; b < PAGE_SIZE; ++b)
++                if (((PUCHAR)pages)[(n * 3 + 1) * PAGE_SIZE + b] != 0xEE) ++bad;
++        }
++    }
++    NtClose(file);
++    tap_comment("pending %s returns=%08lx,%08lx completion order=%lu,%lu APCs=%lu,%lu bad=%lu",
++        write ? "gather" : "scatter", status[0], status[1], apc_order[0], apc_order[1],
++        apcs[0], apcs[1], bad);
++    ASSERT_EQ_U32(apc_count, 2); ASSERT_EQ_U32(apc_order[0], 1);
++    ASSERT_EQ_U32(apc_order[1], 0); ASSERT_EQ_U32(bad, 0);
++    return true;
++}
++bool pending_scatter_reverse_completion(void) { return pending_pair(false); }
++bool pending_gather_reverse_completion(void) { return pending_pair(true); }
++
++/* Inline error and native pending synchronous-file error used to skip the
++ * IOSB/event/APC branch. This seeds visible sentinels instead of zeroing them. */
++static bool error_transfer(bool synchronous, ULONG mode)
++{
++    ANSI_STRING name = {sizeof(path) - 1, sizeof(path), (PCHAR)path};
++    OBJECT_ATTRIBUTES oa;
++    IO_STATUS_BLOCK opened;
++    HANDLE file;
++    LARGE_INTEGER offset = {.QuadPart = 0}, poll = {.QuadPart = 0};
++    LARGE_INTEGER timeout = {.QuadPart = -1000000};
++    NTSTATUS status;
++    ASSERT_TRUE(setup());
++    calls = bad = apc_count = error_completions = 0; error_mode = mode;
++    memset(held, 0, sizeof(held)); memset(apcs, 0, sizeof(apcs));
++    expected_status[0] = mode == 3 ? STATUS_CANCELLED : STATUS_END_OF_FILE;
++    expected_bytes[0] = 0;
++    NtClearEvent(events[0]);
++    results[0].Status = STATUS_PENDING; results[0].Information = 0xABCD;
++    memset(pages, 0xEE, PAGE_SIZE);
++    segments[0][0].Buffer = pages; segments[0][1].Buffer = NULL;
++    KeInitializeDpc(&error_dpc, error_complete_dpc, NULL);
++    oa.RootDirectory = NULL; oa.ObjectName = &name; oa.Attributes = OBJ_CASE_INSENSITIVE;
++    ASSERT_NTSTATUS(NtCreateFile(&file, GENERIC_READ | SYNCHRONIZE, &oa, &opened,
++        NULL, FILE_ATTRIBUTE_NORMAL, 0, FILE_OPEN, FILE_NO_INTERMEDIATE_BUFFERING |
++        FILE_NON_DIRECTORY_FILE | (synchronous ? FILE_SYNCHRONOUS_IO_NONALERT : 0)), STATUS_SUCCESS);
++    status = NtReadFileScatter(file, events[0], completion_apc, (PVOID)1,
++        &results[0], segments[0], PAGE_SIZE, &offset);
++    if (mode == 3) {
++        ASSERT_NTSTATUS(status, STATUS_PENDING); ASSERT_NOT_NULL(held[0]);
++        ASSERT_NTSTATUS(NtWaitForSingleObject(events[0], FALSE, &poll), STATUS_TIMEOUT);
++        ASSERT_NTSTATUS(results[0].Status, STATUS_PENDING);
++        ASSERT_EQ_U32(results[0].Information, 0xABCD);
++        /* nxdk exposes the driver's Cancel acknowledgement flag but no
++         * cancellation syscall. Exercise native canceled-IRP completion. */
++        KIRQL old = KeRaiseIrqlToDpcLevel();
++        PIRP irp = held[0]; held[0] = NULL; irp->Cancel = TRUE;
++        irp->IoStatus.Status = STATUS_CANCELLED; irp->IoStatus.Information = 0;
++        ++error_completions; IofCompleteRequest(irp, 0); KfLowerIrql(old);
++    } else ASSERT_NTSTATUS(status, STATUS_END_OF_FILE);
++    ASSERT_NTSTATUS(NtWaitForSingleObject(events[0], FALSE, &timeout), STATUS_SUCCESS);
++    NtWaitForSingleObjectEx(apc_gate, UserMode, TRUE, &timeout);
++    ASSERT_NTSTATUS(results[0].Status, expected_status[0]);
++    ASSERT_EQ_U32(results[0].Information, 0);
++    ASSERT_EQ_U32(apcs[0], 1); ASSERT_EQ_PTR(apc_iosb[0], &results[0]);
++    ASSERT_EQ_U32(calls, 1); ASSERT_EQ_U32(error_completions, 1);
++    ASSERT_EQ_U32(bad, 0);
++    for (unsigned b = 0; b < PAGE_SIZE; ++b) ASSERT_EQ_U32(((PUCHAR)pages)[b], 0xEE);
++    NtClose(file); error_mode = 0;
++    tap_comment("error scatter synchronous=%u mode=%lu status=%08lx IOSB=%08lx bytes=%lu APCs=%lu",
++        synchronous, mode, status, results[0].Status, results[0].Information, apcs[0]);
++    return true;
++}
++bool inline_error_scatter_sync(void) { return error_transfer(true, 1); }
++bool inline_error_scatter_async(void) { return error_transfer(false, 1); }
++bool pending_error_scatter_sync(void) { return error_transfer(true, 2); }
++bool canceled_pending_scatter_async(void) { return error_transfer(false, 3); }
+diff --git a/tests/xbe/clean-room-warm-reboot/Makefile b/tests/xbe/clean-room-warm-reboot/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..eb924cf707fd28712372a6c7388042323483b4ac
+--- /dev/null
++++ b/tests/xbe/clean-room-warm-reboot/Makefile
+@@ -0,0 +1,5 @@
++XBE_TITLE = clean-room-warm-reboot
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /usr/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/clean-room-warm-reboot/main.c b/tests/xbe/clean-room-warm-reboot/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..29b2db59ee66d76fa0f7acdb1ea8537c06708b7b
+--- /dev/null
++++ b/tests/xbe/clean-room-warm-reboot/main.c
+@@ -0,0 +1,107 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * A two-boot guest: retain only the middle page of a three-page allocation,
++ * record actual shutdown callbacks in that page, then validate restored RAM.
++ * Deliberately uses the former loader XZ scratch window (PA 32 MiB).
++ */
++#include <xboxkrnl/xboxkrnl.h>
++#include "../api-regression/tap.h"
++#include <string.h>
++#define DATA_PA 0x02000000UL
++#define PROBE_MAGIC 0x43524D50UL /* independent test sentinel */
++typedef struct { ULONG Magic, Pa, Count, NestedReturned, Order[6]; UCHAR Fill[64]; } PROBE;
++static PROBE *record;
++static HAL_SHUTDOWN_REGISTRATION regs[5];
++static VOID NTAPI notify(PHAL_SHUTDOWN_REGISTRATION Registration)
++{
++    ULONG id = (ULONG)(Registration - regs) + 1;
++    if (record->Count < 6) record->Order[record->Count++] = id;
++    if (id == 1) {
++        HalRegisterShutdownNotification(&regs[4], FALSE);
++        /* A real public return-to-firmware call must unwind to the outer
++         * drain (never resume its noreturn callsite); otherwise stage 2 observes only this first callback. */
++        HalReturnToFirmware(HalQuickRebootRoutine);
++        record->NestedReturned = 1;
++    }
++}
++static VOID stop(void)
++{
++    tap_drain(); HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    for (;;) __asm__ __volatile__("hlt");
++}
++int main(void)
++{
++    ULONG magic = 0, pa = 0;
++    if (LaunchDataPage) {
++        memcpy(&magic, LaunchDataPage->LaunchData, sizeof(magic));
++        memcpy(&pa, LaunchDataPage->LaunchData + sizeof(magic), sizeof(pa));
++    }
++    if (magic == PROBE_MAGIC) {
++        BOOLEAN pass = TRUE;
++        tap_puts("== clean-room-warm-reboot stage 2 ==\n");
++        tap_version(14); tap_plan(5);
++        record = (PROBE *)(0x80000000UL | pa);
++        pass = record->Magic == PROBE_MAGIC && MmGetPhysicalAddress(record) == pa;
++        if (pass) tap_ok(1, "same physical address and contents");
++        else tap_not_ok(1, "same physical address and contents");
++        BOOLEAN order = record->Count == 3 && record->Order[0] == 1 &&
++                        record->Order[1] == 2 && record->Order[2] == 3;
++        if (order) tap_ok(2, "shutdown stable priority, duplicate and pending removal");
++        else tap_not_ok(2, "shutdown stable priority, duplicate and pending removal");
++        pass &= order;
++        BOOLEAN ownership = MmQueryAllocationSize(record) == PAGE_SIZE;
++        if (ownership) tap_ok(3, "restored selected range owns one page");
++        else tap_not_ok(3, "restored selected range owns one page");
++        pass &= ownership;
++        BOOLEAN data = TRUE;
++        for (ULONG i = 0; i < sizeof(record->Fill); ++i) if (record->Fill[i] != 0xA6) data = FALSE;
++        PVOID competing = MmAllocateContiguousMemoryEx(PAGE_SIZE, pa, pa + PAGE_SIZE - 1,
++                                                       PAGE_SIZE, PAGE_READWRITE);
++        data &= competing == NULL;
++        if (competing) MmFreeContiguousMemory(competing);
++        if (data) tap_ok(4, "persistent content survives and competing allocation is refused");
++        else tap_not_ok(4, "persistent content survives and competing allocation is refused");
++        pass &= data;
++        BOOLEAN nested = record->NestedReturned == 0 && order;
++        if (nested) tap_ok(5, "nested noreturn reset unwinds and remaining callbacks run before outer reset");
++        else tap_not_ok(5, "nested noreturn reset unwinds and remaining callbacks run before outer reset");
++        pass &= nested;
++        MmPersistContiguousMemory(record, PAGE_SIZE, FALSE);
++        MmFreeContiguousMemory(record);
++        tap_puts(pass ? "== clean-room-warm-reboot end PASS ==\n" :
++                        "== clean-room-warm-reboot end FAIL ==\n");
++        stop();
++    }
++    tap_puts("== clean-room-warm-reboot stage 1 ==\n");
++    PVOID allocation = MmAllocateContiguousMemoryEx(3 * PAGE_SIZE, DATA_PA,
++        DATA_PA + 3 * PAGE_SIZE - 1, PAGE_SIZE, PAGE_READWRITE);
++    if (!allocation) { tap_puts("== clean-room-warm-reboot setup FAIL ==\n"); stop(); }
++    memset(allocation, 0x37, 3 * PAGE_SIZE);
++    record = (PROBE *)((PUCHAR)allocation + PAGE_SIZE);
++    memset(record, 0, sizeof(*record)); record->Magic = PROBE_MAGIC;
++    record->Pa = DATA_PA + PAGE_SIZE; memset(record->Fill, 0xA6, sizeof(record->Fill));
++    MmPersistContiguousMemory(allocation, 3 * PAGE_SIZE, TRUE);
++    MmPersistContiguousMemory(allocation, PAGE_SIZE, FALSE);
++    MmPersistContiguousMemory((PUCHAR)allocation + 2 * PAGE_SIZE, PAGE_SIZE, FALSE);
++    MmPersistContiguousMemory((PUCHAR)record + 17, 20, TRUE); /* valid partial range */
++    MmPersistContiguousMemory((PVOID)0xFFFFFFF0, 128, TRUE); /* overflow, inert */
++    for (ULONG i = 0; i < 5; ++i) {
++        regs[i].NotificationRoutine = notify;
++        regs[i].Priority = i < 2 ? 100 : 10 - (LONG)i;
++        HalRegisterShutdownNotification(&regs[i], TRUE);
++    }
++    HalRegisterShutdownNotification(&regs[0], TRUE); /* stable duplicate */
++    HalRegisterShutdownNotification(&regs[3], FALSE); /* removed before shutdown */
++    LaunchDataPage = MmAllocateContiguousMemory(PAGE_SIZE);
++    if (!LaunchDataPage) { tap_puts("== clean-room-warm-reboot launch FAIL ==\n"); stop(); }
++    memset(LaunchDataPage, 0, PAGE_SIZE);
++    LaunchDataPage->Header.dwLaunchDataType = 0;
++    strcpy(LaunchDataPage->Header.szLaunchPath, "\\Device\\CdRom0\\default.xbe");
++    magic = PROBE_MAGIC; pa = record->Pa;
++    memcpy(LaunchDataPage->LaunchData, &magic, sizeof(magic));
++    memcpy(LaunchDataPage->LaunchData + sizeof(magic), &pa, sizeof(pa));
++    MmPersistContiguousMemory(LaunchDataPage, PAGE_SIZE, TRUE);
++    tap_puts("== clean-room-warm-reboot resetting ==\n"); tap_drain();
++    HalReturnToFirmware(HalQuickRebootRoutine);
++    tap_puts("== clean-room-warm-reboot reset returned FAIL ==\n"); stop();
++    return 1;
++}

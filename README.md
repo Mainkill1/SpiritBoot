@@ -18,6 +18,12 @@ See [build and launch instructions](docs/BUILD_AND_RUN.md) and
 The [direct XISO suite evidence](docs/provenance/XISO_SUITE_BASELINE.md) records
 Mainkill1's matched qualification suite, complete guest results, and the earlier
 intermittent GPU polling assertion.
+Six independently implemented kernel features now cover shutdown notifications,
+warm-reset memory persistence, page locking, one-request scatter/gather I/O,
+live IDE callbacks and a bounded debugger prompt. See the
+[feature guide](docs/CLEAN_ROOM_FEATURES.md),
+[source review](docs/clean-room-kernel-review.md) and
+[final build and runtime evidence](docs/provenance/CLEAN_ROOM_XEMU_BASELINE.md).
 The build needs no Microsoft BIOS or MCPX ROM. Runtime/game progress is measured
 separately from a successful firmware build.
 
