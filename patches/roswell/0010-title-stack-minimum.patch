@@ -1,0 +1,183 @@
+diff --git a/ntoskrnl/ps/thread.c b/ntoskrnl/ps/thread.c
+index 4beef76bbb0eb1190293b29afaa0e2fce2d59b17..4a0fc703f566277fd827ac2914bd8316b2f83d42 100644
+--- a/ntoskrnl/ps/thread.c
++++ b/ntoskrnl/ps/thread.c
+@@ -678,7 +678,8 @@ PsCreateSystemThread(OUT PHANDLE ThreadHandle,
+  * kernel-stack size.  Xbox titles declare their main-thread stack in the XBE
+  * header (PeStackCommit) and spawn worker threads via PsCreateSystemThreadEx
+  * with an explicit KernelStackSize -- both are routed through here.  StackSize
+- * is rounded up to a page; pass 0 to get the default KERNEL_STACK_SIZE. */
++ * is rounded up to a page and includes at least this kernel's own default
++ * stack capacity.  Tiny nonzero requests must not bypass that minimum. */
+ NTSTATUS
+ NTAPI
+ NxkPsCreateSystemThread(OUT PHANDLE ThreadHandle,
+@@ -695,6 +696,16 @@ NxkPsCreateSystemThread(OUT PHANDLE ThreadHandle,
+     HANDLE Handle = ProcessHandle;
+     PAGED_CODE();
+ 
++    /* Normalize before allocation so creation, StackLimit and deletion all
++     * use the same committed size.  In particular, a one-byte title request
++     * must not produce a single-page kernel stack (PGR2 worker startup).
++     * Check rounding before arithmetic; never wrap a large request to zero. */
++    if (StackSize > (SIZE_T)-1 - (PAGE_SIZE - 1))
++        return STATUS_INVALID_PARAMETER;
++    if (StackSize < KERNEL_STACK_SIZE)
++        StackSize = KERNEL_STACK_SIZE;
++    StackSize = (StackSize + PAGE_SIZE - 1) & ~(SIZE_T)(PAGE_SIZE - 1);
++
+     if (!ProcessHandle)
+     {
+         Handle = NULL;
+diff --git a/tests/host/thread-stack/check.py b/tests/host/thread-stack/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ec994443ed8400ce3457cbbcc38c6b2fe8ef6735
+--- /dev/null
++++ b/tests/host/thread-stack/check.py
+@@ -0,0 +1,74 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the actual Xbox thread creation adapter with a recording allocator.
++
++This checks size propagation and rejection before allocation; native guest
++checks separately establish execution, guard-page and teardown behavior.
++"""
++from pathlib import Path
++import subprocess
++import re
++import sys
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++src = (root / 'ntoskrnl/ps/thread.c').read_text()
++start = src.index('NTSTATUS\nNTAPI\nNxkPsCreateSystemThread(')
++end = src.index('\n}\n', start) + 3
++preamble = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#define IN
++#define OUT
++#define NTAPI
++#define PAGED_CODE() ((void)0)
++#define PAGE_SIZE 4096u
++#define KERNEL_STACK_SIZE STACK_DEFAULT_FROM_SOURCE
++#define STATUS_INVALID_PARAMETER ((int32_t)0xc000000d)
++typedef int32_t NTSTATUS;
++typedef uint32_t SIZE_T;
++typedef uint32_t ACCESS_MASK;
++typedef unsigned char BOOLEAN;
++typedef void *PVOID, *HANDLE, *PEPROCESS, *POBJECT_ATTRIBUTES, *PCLIENT_ID;
++typedef HANDLE *PHANDLE;
++typedef void (*PKSTART_ROUTINE)(PVOID);
++static PEPROCESS PsInitialSystemProcess = (void *)0x100;
++static SIZE_T allocated;
++static unsigned calls;
++static NTSTATUS PspCreateThread(PHANDLE h, ACCESS_MASK a, POBJECT_ATTRIBUTES o,
++ HANDLE process, PEPROCESS target, PCLIENT_ID id, PVOID c, PVOID teb,
++ BOOLEAN suspended, PKSTART_ROUTINE start, PVOID context, SIZE_T size)
++{
++ (void)h;(void)a;(void)o;(void)process;(void)target;(void)id;(void)c;
++ (void)teb;(void)suspended;(void)start;(void)context;
++ allocated=size;calls++;return 0;
++}
++'''
++tests = r'''
++int main(void) {
++ const uint32_t inputs[]={1,0,4095,4096,4097,49152,49153,65536,262144};
++ const uint32_t expected[]={12288,12288,12288,12288,12288,49152,53248,65536,262144};
++ for (unsigned i=0;i<sizeof(inputs)/sizeof(inputs[0]);i++) {
++  calls=0;
++  assert(NxkPsCreateSystemThread(NULL,0,NULL,NULL,NULL,NULL,NULL,inputs[i],0)==0);
++  if (calls!=1 || allocated!=expected[i]) {
++   fprintf(stderr,"request=%u allocated=%u expected=%u calls=%u\n",
++           inputs[i],allocated,expected[i],calls); return 1;
++  }
++ }
++ calls=0;
++ assert(NxkPsCreateSystemThread(NULL,0,NULL,NULL,NULL,NULL,NULL,UINT32_MAX,0)
++        ==STATUS_INVALID_PARAMETER);
++ assert(calls==0);
++ puts("PASS: actual adapter minimum, page rounding, large requests and overflow");
++}
++'''
++header = (root / 'sdk/include/xdk/x86/ke.h').read_text()
++stack_default = re.search(r'#define KERNEL_STACK_SIZE\s+(\d+)', header).group(1)
++preamble = preamble.replace('STACK_DEFAULT_FROM_SOURCE', stack_default)
++(out/'actual-thread.c').write_text(preamble + src[start:end] + tests)
++subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror',str(out/'actual-thread.c'),
++                '-o',str(out/'thread-check')],check=True)
++subprocess.run([str(out/'thread-check')],check=True)
+diff --git a/tests/host/thread-stack/guest.c b/tests/host/thread-stack/guest.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..6bd7d9e623288bd93bc2fbb7f8daa754946eebde
+--- /dev/null
++++ b/tests/host/thread-stack/guest.c
+@@ -0,0 +1,66 @@
++#include <stdint.h>
++#include <stdio.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <hal/debug.h>
++#include <hal/video.h>
++#include <nxdk/mount.h>
++
++static volatile struct {
++    uintptr_t base, limit, esp;
++    uint32_t checksum;
++} observed;
++
++static void NTAPI worker(PVOID argument)
++{
++    volatile unsigned char scratch[6144];
++    PKTHREAD thread = KeGetCurrentThread();
++    observed.base = (uintptr_t)thread->StackBase;
++    observed.limit = (uintptr_t)thread->StackLimit;
++    __asm__ volatile("mov %%esp,%0" : "=r"(observed.esp));
++    for (unsigned i = 0; i < sizeof(scratch); i++) scratch[i] = i;
++    LARGE_INTEGER delay = { .QuadPart = -100000 };
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    uint32_t sum = 0;
++    for (unsigned i = 0; i < sizeof(scratch); i++) sum += scratch[i];
++    observed.checksum = sum;
++    (void)argument;
++}
++
++static void NTAPI system_routine(PKSTART_ROUTINE start, PVOID context)
++{
++    start(context);
++    PsTerminateSystemThread(STATUS_SUCCESS);
++}
++
++int main(void)
++{
++    XVideoSetMode(640, 480, 32, REFRESH_DEFAULT);
++    if (!nxIsDriveMounted('E')) nxMountDrive('E', "\\Device\\Harddisk0\\Partition1");
++    FILE *out = fopen("E:\\stack-result.txt", "wb");
++    if (!out) { debugPrint("FAIL result file\n"); for (;;) Sleep(1000); }
++    const unsigned sizes[] = {0, 65536, 1, 4095, 4096, 4097, 49153};
++    unsigned failures = 0;
++    for (unsigned i = 0; i < sizeof(sizes)/sizeof(sizes[0]); i++) {
++        HANDLE handle = NULL;
++        observed.checksum = 0;
++        fprintf(out,"BEGIN requested=%u\n",sizes[i]); fflush(out);
++        debugPrint("BEGIN requested=%u\n", sizes[i]);
++        NTSTATUS status = PsCreateSystemThreadEx(&handle, 0, sizes[i], 0, NULL,
++            worker, NULL, FALSE, FALSE, system_routine);
++        fprintf(out,"CREATE requested=%u status=%08lx\n",sizes[i],(unsigned long)status);fflush(out);
++        if (!NT_SUCCESS(status)) {failures++;continue;}
++        LARGE_INTEGER timeout = {.QuadPart = -20000000};
++        status = NtWaitForSingleObject(handle, FALSE, &timeout);
++        fprintf(out,"END requested=%u status=%08lx base=%08x limit=%08x esp=%08x sum=%u\n",
++            sizes[i],(unsigned long)status,(unsigned)observed.base,(unsigned)observed.limit,
++            (unsigned)observed.esp,observed.checksum);fflush(out);
++        debugPrint("END requested=%u status=%08lx sum=%u\n",sizes[i],(unsigned long)status,observed.checksum);
++        if (status != STATUS_SUCCESS || observed.checksum != 783360) failures++;
++        if (status != STATUS_SUCCESS) break;
++        NtClose(handle);
++    }
++    fprintf(out,"COMPLETE failures=%u\n",failures);fclose(out);
++    debugPrint("COMPLETE failures=%u\n",failures);
++    for (;;) Sleep(1000);
++}
