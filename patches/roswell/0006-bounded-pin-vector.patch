@@ -1,0 +1,123 @@
+diff --git a/ntoskrnl/xb/mm/api.c b/ntoskrnl/xb/mm/api.c
+index 42fb73611c71f0373b83e3ced1e758509776af65..103b40c3f7945020dcb38a4918803bea72c27b95 100644
+--- a/ntoskrnl/xb/mm/api.c
++++ b/ntoskrnl/xb/mm/api.c
+@@ -77,7 +77,8 @@ MmLockUnlockBufferPages(PVOID Base, SIZE_T Size, BOOLEAN Unlock)
+ {
+ #ifdef NXK_MM_PHYS
+     ULONG_PTR first = (ULONG_PTR)Base & ~(PAGE_SIZE - 1), last, va;
+-    ULONG_PTR translated = 0;
++    ULONG_PTR translated = 0, i;
++    PFN_NUMBER pages[NXK_PIN_BATCH_SMALL_PAGES];
+     BOOLEAN applied = FALSE, sparse;
+     KIRQL irql;
+     if (Size == 0 || Size - 1 > MAXULONG_PTR - (ULONG_PTR)Base) return;
+@@ -90,17 +91,28 @@ MmLockUnlockBufferPages(PVOID Base, SIZE_T Size, BOOLEAN Unlock)
+         ULONG_PTR pa;
+         if (!NxMmIsAddressValid((PVOID)va)) goto out;
+         pa = NxMmGetPhysicalAddress((PVOID)va);
++        if (translated < NXK_PIN_BATCH_SMALL_PAGES)
++            pages[translated] = pa >> PAGE_SHIFT;
+         /* Include the RecordPin that increments scratch and then rejects. */
+         ++translated;
+         if (!NxkPageSupplyRecordPin(pa >> PAGE_SHIFT, Unlock)) goto out;
+         if (va == last) break;
+     }
+     sparse = translated <= NXK_PIN_BATCH_SMALL_PAGES;
+-    for (va = first;; va += PAGE_SIZE) {
+-        PFN_NUMBER page = NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT;
+-        NxkPageSupplyPin(page, Unlock);
+-        if (sparse) NxkPageSupplyClearPinBatchPage(page);
+-        if (va == last) break;
++    if (sparse) {
++        /* The PFN lock keeps these preflight translations stable. Keep
++         * duplicate PFNs: every alias contributes one pin transition. */
++        for (i = 0; i < translated; ++i) {
++            NxkPageSupplyPin(pages[i], Unlock);
++            NxkPageSupplyClearPinBatchPage(pages[i]);
++        }
++    } else {
++        /* Preserve whole-request preflight for oversized requests. */
++        for (va = first;; va += PAGE_SIZE) {
++            NxkPageSupplyPin(
++                NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT, Unlock);
++            if (va == last) break;
++        }
+     }
+     applied = TRUE;
+ out:
+@@ -108,11 +120,10 @@ out:
+         NxkPageSupplyBeginPinBatch(); /* One bulk reset, only at exit. */
+     else if (!applied)
+     {
+-        /* Rejected small prefixes cost at most the bounded page budget of
+-         * extra translations. The PFN lock still stabilizes the mappings. */
+-        for (va = first; translated != 0; va += PAGE_SIZE, --translated)
+-            NxkPageSupplyClearPinBatchPage(
+-                NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT);
++        /* Include an increment-then-reject PFN, but not an invalid VA
++         * that never reached RecordPin. No cleanup translation is needed. */
++        for (i = 0; i < translated; ++i)
++            NxkPageSupplyClearPinBatchPage(pages[i]);
+     }
+ #if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
+     NxkPageSupplyAssertPinBatchEmpty();
+diff --git a/tests/host/kernel-performance/pins.c b/tests/host/kernel-performance/pins.c
+index 0a90f5df3ae1ab63d0066af5b0cebb5c8f9bed62..c5324bebfa381e117765edcfc09c0796c9e1a199 100644
+--- a/tests/host/kernel-performance/pins.c
++++ b/tests/host/kernel-performance/pins.c
+@@ -12,7 +12,7 @@ typedef USHORT *PUSHORT;
+ #define NXK_MM_PHYS
+ static ULONG MmAvailablePages;
+ static unsigned translations, cleared, clears, valid_pages, invalid_at, aliases;
+-static unsigned checks, optimized;
++static unsigned checks, optimized, vector;
+ static BOOLEAN NxkMmRetailShapedMap(void) { return FALSE; }
+ static VOID MiZeroPhysicalPage(PFN_NUMBER p) { (void)p; }
+ static BOOLEAN NxkMmPersistentPage(PFN_NUMBER p) { (void)p;return FALSE; }
+@@ -41,7 +41,8 @@ static void clean(void) {
+ }
+ int main(int argc,char **argv) {
+     optimized=argc>1 && atoi(argv[1]);
+-    unsigned sizes[]={0,1,2,16,32,64,65,128,256,4096};
++    vector=argc>2 && atoi(argv[2]);
++    unsigned sizes[]={0,1,2,16,32,63,64,65,128,256,4096};
+     for(unsigned s=0;s<sizeof(sizes)/sizeof(*sizes);++s) {
+         unsigned n=sizes[s];
+         for(unsigned alias=0;alias<2;++alias) {
+@@ -50,6 +51,7 @@ int main(int argc,char **argv) {
+             CHECK(NxpPins[16]==(alias?n:!!n));clean();
+             printf("pin-work success n=%u alias=%u translations=%u cleared=%u bulk=%u\n",n,alias,translations,cleared,clears);
+             if(optimized) CHECK(cleared==(n>64?65536:2*n));
++            if(vector) CHECK(translations==n*(n<=64?1:2));
+             MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,FALSE);clean();
+             CHECK(NxpPins[16]==2*(alias?n:!!n));
+             MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,TRUE);clean();
+@@ -68,7 +70,7 @@ int main(int argc,char **argv) {
+                 printf("pin-work rejected n=%u prefix=%u alias=%u translations=%u cleared=%u bulk=%u\n",n,prefix,alias,translations,cleared,clears);
+                 if(optimized) {
+                     CHECK(cleared==(prefix>64?65536:2*prefix));
+-                    CHECK(translations==prefix*(prefix<=64?2:1));
++                    CHECK(translations==prefix*(vector?1:(prefix<=64?2:1)));
+                 }
+                 invalid_at=~0U;
+                 MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,FALSE);clean();
+@@ -85,7 +87,7 @@ int main(int argc,char **argv) {
+             CHECK(NxpPins[16]==0);
+             printf("pin-work crossover prefix=%u alias=%u translations=%u cleared=%u bulk=%u\n",prefix,alias,translations,cleared,clears);
+             if(optimized) {
+-                CHECK(translations==prefix*(prefix<=64?2:1));
++                CHECK(translations==prefix*(vector?1:(prefix<=64?2:1)));
+                 CHECK(cleared==(prefix<=64?2*prefix:65536));
+             }
+         }
+diff --git a/tests/host/kernel-performance/pins.py b/tests/host/kernel-performance/pins.py
+index 9cd1a1f90975c7d9a5a5f7c7eadbc024d69c339c..22903744ab54f7e09e1aa22dc12a574a2f91ba06 100644
+--- a/tests/host/kernel-performance/pins.py
++++ b/tests/host/kernel-performance/pins.py
+@@ -16,4 +16,4 @@ body = body.replace('NxpPinBatch[Page] = 0;', '{ NxpPinBatch[Page] = 0; cleared
+ (output / 'pins-actual.inc').write_text(body)
+ diagnostics = ['-DDBG=1', '-DNXK_PIN_BATCH_DIAGNOSTICS'] if '--diagnostics' in sys.argv else []
+ subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra'] + diagnostics + ['-I' + str(here.parent / 'clean-room/include'), '-I' + str(output), '-I' + str(root / 'ntoskrnl/xb/mm'), str(here / 'pins.c'), '-o', str(output / 'pins')], check=True)
+-subprocess.run([str(output / 'pins'), '1' if '--optimized' in sys.argv else '0'], check=True)
++subprocess.run([str(output / 'pins'), '1' if '--optimized' in sys.argv else '0', '1' if '--vector' in sys.argv else '0'], check=True)
