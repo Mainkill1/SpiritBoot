@@ -1,0 +1,223 @@
+diff --git a/tests/host/xdvdfs-directory/check.py b/tests/host/xdvdfs-directory/check.py
+index c30725ee..0fdc2914 100644
+--- a/tests/host/xdvdfs-directory/check.py
++++ b/tests/host/xdvdfs-directory/check.py
+@@ -3,7 +3,7 @@
+ """Exercise the production resolver's fields, bounded names and table ownership.
+ 
+ Directory I/O is injected here; the maintained guest exercises actual XDVDFS.
+-The inherited negative-status differences remain tracked by issue #36.
++Terminal leaf errors follow the original-BIOS controls recorded in issue #36.
+ """
+ from pathlib import Path
+ import subprocess
+@@ -22,6 +22,7 @@ preamble = r'''
+ #include <stdio.h>
+ #include <strings.h>
+ #define _In_
++#define _In_opt_
+ #define _Out_writes_(n)
+ #define _Out_
+ #define TRUE 1
+@@ -31,9 +32,11 @@ preamble = r'''
+ #define STATUS_OBJECT_NAME_INVALID ((int32_t)0xc0000033)
+ #define STATUS_OBJECT_NAME_NOT_FOUND ((int32_t)0xc0000034)
+ #define STATUS_OBJECT_PATH_NOT_FOUND ((int32_t)0xc000003a)
++#define STATUS_NOT_A_DIRECTORY ((int32_t)0xc0000103)
+ #define XDVD_ATTR_DIRECTORY 0x10
+ #define XDVD_TAG 0x58445644
+ #define RtlZeroMemory(p,n) memset(p,0,n)
++#define RtlCopyMemory(p,q,n) memcpy(p,q,n)
+ typedef int32_t NTSTATUS;
+ typedef unsigned char BOOLEAN,UCHAR,*PUCHAR;
+ typedef char CHAR;
+@@ -84,7 +87,7 @@ static void run(const char *text,unsigned length,NTSTATUS expected,unsigned sect
+  UNICODE_STRING path={(USHORT)(length*2),(USHORT)(length*2),input};
+  XDVD_VCB vcb={1,2048};XDVD_FCB fcb;
+  allocations=frees=reads=live=0;
+- NTSTATUS got=XdvdResolvePath(&vcb,&path,&fcb,name);
++ NTSTATUS got=XdvdResolvePath(&vcb,NULL,&path,&fcb,name);
+  assert(got==expected&&reads==expected_reads&&allocations==frees&&live==0);
+  if(got==0){
+   assert(fcb.Vcb==&vcb&&fcb.DataSector==sector);
+@@ -108,9 +111,9 @@ int main(void)
+   run("\\Cache\\Missing",7,0,10,"Cache",1);
+   run("\\Cache\\Resource\\Missing",16,0,20,"Resource",2);
+   TEST("\\Cache\\Missing",STATUS_OBJECT_NAME_NOT_FOUND,0,"",2);
+-  TEST("\\Cache\\Missing\\",STATUS_OBJECT_PATH_NOT_FOUND,0,"",2);
++  TEST("\\Cache\\Missing\\",STATUS_OBJECT_NAME_NOT_FOUND,0,"",2);
+   TEST("\\Cache\\Missing\\Child",STATUS_OBJECT_PATH_NOT_FOUND,0,"",2);
+-  TEST("\\Cache\\Resource\\probe.bin\\",STATUS_OBJECT_PATH_NOT_FOUND,0,"",3);
++  TEST("\\Cache\\Resource\\probe.bin\\",STATUS_NOT_A_DIRECTORY,0,"",3);
+   TEST("\\Cache\\\\Resource",STATUS_OBJECT_NAME_INVALID,0,"",1);
+  }
+  printf("PASS: %u production resolver cases; exact fields, bounds, reads and balanced tables\n",cases);
+diff --git a/tests/xbe/xdvdfs-directory/main.c b/tests/xbe/xdvdfs-directory/main.c
+index d09a62cc..12e9f180 100644
+--- a/tests/xbe/xdvdfs-directory/main.c
++++ b/tests/xbe/xdvdfs-directory/main.c
+@@ -3,6 +3,10 @@
+ #include <stdint.h>
+ #include <string.h>
+ 
++#ifndef STATUS_NOT_A_DIRECTORY
++#define STATUS_NOT_A_DIRECTORY ((NTSTATUS)0xc0000103)
++#endif
++
+ struct summary {
+     ULONG attributes;
+     LONGLONG size;
+@@ -61,10 +65,10 @@ static void negative(char *path, NTSTATUS expected)
+ {
+     NTSTATUS status;
+     HANDLE handle = open_path(path, strlen(path), 1, &status);
+-    tap_comment("NEGATIVE path=%s status=%08x expected_current=%08x", path,
++    tap_comment("NEGATIVE path=%s status=%08x expected=%08x", path,
+         (unsigned)status, (unsigned)expected);
+     if (NT_SUCCESS(status)) NtClose(handle);
+-    regression_require(status == expected, "exact inherited negative status (compatibility issue #36 remains open)");
++    regression_require(status == expected, "exact missing/file/directory rejection status");
+ }
+ 
+ static void read_fixture(void)
+@@ -104,12 +108,9 @@ int main(void)
+     /* No NUL within Length or at Buffer[Length]; an overread names Missing. */
+     directory(bounded_name, length, &bounded);
+     regression_require(same(&results[2], &bounded), "non-NUL length-bounded name resolves only the specified directory");
+-    /* These exact current statuses intentionally expose inherited differences
+-     * from original BIOS: Missing\\ = NAME_NOT_FOUND, file\\ = NOT_A_DIRECTORY.
+-     * Issue #36 owns that repair; #27 must not hide it as compatible.
+-     */
+-    negative("\\??\\D:\\Cache\\Missing\\", STATUS_OBJECT_PATH_NOT_FOUND);
+-    negative("\\??\\D:\\Cache\\Resource\\probe.bin\\", STATUS_OBJECT_PATH_NOT_FOUND);
++    /* Preserve the original-BIOS terminal error controls from issue #36. */
++    negative("\\??\\D:\\Cache\\Missing\\", STATUS_OBJECT_NAME_NOT_FOUND);
++    negative("\\??\\D:\\Cache\\Resource\\probe.bin\\", STATUS_NOT_A_DIRECTORY);
+     negative("\\??\\D:\\Cache\\Missing\\Child", STATUS_OBJECT_PATH_NOT_FOUND);
+     negative("\\??\\D:\\Cache\\\\Resource", STATUS_OBJECT_NAME_INVALID);
+     read_fixture();
+diff --git a/tests/xbe/xdvdfs-related-directory/Makefile b/tests/xbe/xdvdfs-related-directory/Makefile
+new file mode 100644
+index 00000000..3bc1d2e9
+--- /dev/null
++++ b/tests/xbe/xdvdfs-related-directory/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = XDVDFS-RELATED-DIRECTORY
++GEN_XISO = related-directory.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/xdvdfs-related-directory/bin/Cache/Resource/probe.bin b/tests/xbe/xdvdfs-related-directory/bin/Cache/Resource/probe.bin
+new file mode 100644
+index 0000000000000000000000000000000000000000..4f736d9ca075f146cec24dd9d0b39ddc4a3070a0
+GIT binary patch
+literal 18
+ZcmYevEJ{r-$uFwZP0Oq(DJ@Fn0suw!2NVDR
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/xbe/xdvdfs-related-directory/main.c b/tests/xbe/xdvdfs-related-directory/main.c
+new file mode 100644
+index 00000000..62a3bbb4
+--- /dev/null
++++ b/tests/xbe/xdvdfs-related-directory/main.c
+@@ -0,0 +1,97 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <string.h>
++#include "../regression.h"
++
++#ifndef STATUS_NOT_A_DIRECTORY
++#define STATUS_NOT_A_DIRECTORY ((NTSTATUS)0xc0000103)
++#endif
++
++static NTSTATUS open_path(HANDLE root, const char *path, ULONG options,
++                          HANDLE *handle)
++{
++    /* Deliberately not NUL terminated at Length: neither adapter nor driver
++     * may consume the unrelated suffix. */
++    char bounded[128];
++    size_t length = strlen(path);
++    memset(bounded, 'X', sizeof(bounded));
++    memcpy(bounded, path, length);
++    OBJECT_STRING name = {(USHORT)length, sizeof(bounded), bounded};
++    OBJECT_ATTRIBUTES oa = {root, &name, OBJ_CASE_INSENSITIVE};
++    IO_STATUS_BLOCK iosb = {0};
++    *handle = NULL;
++    NTSTATUS status = NtOpenFile(handle, GENERIC_READ | SYNCHRONIZE,
++        &oa, &iosb, FILE_SHARE_READ,
++        options | FILE_SYNCHRONOUS_IO_NONALERT);
++    tap_comment("path=%s status=%08lx", path, (unsigned long)status);
++    return status;
++}
++
++int main(void)
++{
++    const char *directories[] = {
++        "\\??\\D:\\", "\\??\\D:\\Cache", "\\??\\D:\\Cache\\",
++        "\\??\\D:\\Cache\\Resource", "\\??\\D:\\Cache\\Resource\\"
++    };
++    const char *children[] = {
++        "Cache\\Resource\\probe.bin", "Resource\\probe.bin",
++        "Resource\\probe.bin", "probe.bin", "probe.bin"
++    };
++    const struct {
++        const char *path;
++        ULONG options;
++        NTSTATUS expected;
++    } negatives[] = {
++        {"\\??\\D:\\Cache\\Missing\\", FILE_DIRECTORY_FILE,
++         STATUS_OBJECT_NAME_NOT_FOUND},
++        {"\\??\\D:\\Cache\\Resource\\probe.bin\\", FILE_DIRECTORY_FILE,
++         STATUS_NOT_A_DIRECTORY},
++        {"\\??\\D:\\Missing\\probe.bin", FILE_NON_DIRECTORY_FILE,
++         STATUS_OBJECT_PATH_NOT_FOUND},
++        {"\\??\\D:\\Cache\\Resource\\missing.bin", FILE_NON_DIRECTORY_FILE,
++         STATUS_OBJECT_NAME_NOT_FOUND},
++        {"\\??\\D:\\Cache\\Resource\\probe.bin", FILE_DIRECTORY_FILE,
++         STATUS_NOT_A_DIRECTORY},
++        {"\\??\\D:\\Cache\\Resource", FILE_NON_DIRECTORY_FILE,
++         STATUS_FILE_IS_A_DIRECTORY}
++    };
++    regression_begin();
++    for (unsigned i = 0; i < sizeof(directories) / sizeof(directories[0]); ++i) {
++        HANDLE parent = NULL, child = NULL;
++        NTSTATUS status = open_path(NULL, directories[i], FILE_DIRECTORY_FILE,
++                                    &parent);
++        int parent_open = status == STATUS_SUCCESS;
++        regression_check(parent_open, "length-bounded directory opens");
++        FILE_BASIC_INFORMATION info = {0};
++        IO_STATUS_BLOCK iosb = {0};
++        status = parent_open ? NtQueryInformationFile(parent, &iosb, &info,
++            sizeof(info), FileBasicInformation) : STATUS_UNSUCCESSFUL;
++        regression_check(status == STATUS_SUCCESS &&
++                         (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY),
++                         "opened object has directory attributes");
++        status = parent_open ? open_path(parent, children[i],
++            FILE_NON_DIRECTORY_FILE, &child) : STATUS_UNSUCCESSFUL;
++        int child_open = status == STATUS_SUCCESS;
++        regression_check(child_open, "relative child uses exact directory");
++        status = parent_open ? NtClose(parent) : STATUS_UNSUCCESSFUL;
++        regression_check(status == STATUS_SUCCESS,
++                         "parent closes before child read");
++        char data[18] = {0};
++        LARGE_INTEGER offset = {.QuadPart = 0};
++        status = child_open ? NtReadFile(child, NULL, NULL, NULL, &iosb, data,
++            sizeof(data), &offset) : STATUS_UNSUCCESSFUL;
++        regression_check(status == STATUS_SUCCESS &&
++            iosb.Information == sizeof(data) &&
++            memcmp(data, "directory-fixture\n", sizeof(data)) == 0,
++            "child retains exact bytes after parent closes");
++        if (child_open) NtClose(child);
++    }
++    for (unsigned i = 0; i < sizeof(negatives) / sizeof(negatives[0]); ++i) {
++        HANDLE handle;
++        NTSTATUS status = open_path(NULL, negatives[i].path,
++                                    negatives[i].options, &handle);
++        regression_check(status == negatives[i].expected,
++                         "exact missing and file/directory rejection status");
++        if (NT_SUCCESS(status)) NtClose(handle);
++    }
++    regression_finish();
++}
