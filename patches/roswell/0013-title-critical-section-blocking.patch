@@ -1,0 +1,231 @@
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index 4ce9824c5fa91b8ebd910dcb657bb3ec03083f10..53eb75226c07787d5cc613135799183b351b6ab4 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -3032,7 +3032,7 @@ ANSI_STRING XeImageFileName =
+  *   +16  LONG  LockCount
+  *   +20  LONG  RecursionCount
+  *   +24  PVOID OwningThread
+- * Minimal recursive spinlock (PASSIVE_LEVEL only).
++ * Recursive dispatcher-backed critical section (PASSIVE_LEVEL only).
+  */
+ typedef struct _XBE_CS {
+     UCHAR Type;
+@@ -3049,39 +3049,65 @@ typedef struct _XBE_CS {
+ VOID NTAPI XeRtlInitializeCriticalSection(_Out_ PVOID Cs)
+ {
+     XBE_CS *cs = Cs;
+-    RtlZeroMemory(cs, sizeof(*cs));
+-    cs->Size = sizeof(XBE_CS) / sizeof(LONG);  /* match toolchain static init */
+-    cs->WaitListHead.Flink = &cs->WaitListHead;
+-    cs->WaitListHead.Blink = &cs->WaitListHead;
++    KeInitializeEvent((PKEVENT)cs, SynchronizationEvent, FALSE);
++    cs->Size = sizeof(XBE_CS) / sizeof(LONG);
+     cs->LockCount = -1;
++    cs->RecursionCount = 0;
++    cs->OwningThread = NULL;
+ }
+ VOID NTAPI XeRtlEnterCriticalSection(_Inout_ PVOID Cs)
+ {
+     XBE_CS *cs = Cs;
+     PVOID me = KeGetCurrentThread();
+ 
+-    if (cs->OwningThread == me) { cs->RecursionCount++; return; }
+-    while (InterlockedCompareExchangePointer(&cs->OwningThread, me, NULL) != NULL)
+-        ;                               /* preempted while we spin */
++    if (InterlockedIncrement(&cs->LockCount) != 0)
++    {
++        if (cs->OwningThread == me)
++        {
++            cs->RecursionCount++;
++            return;
++        }
++        /* Titles also use static headers. Select auto-reset semantics
++         * before the first wait; a release preceding this wait remains
++         * signaled and is consumed by exactly one successor. */
++        cs->Type = SynchronizationEvent;
++        KeWaitForSingleObject((PKEVENT)cs, Executive, KernelMode,
++                              FALSE, NULL);
++    }
++    cs->OwningThread = me;
+     cs->RecursionCount = 1;
+ }
+ VOID NTAPI XeRtlLeaveCriticalSection(_Inout_ PVOID Cs)
+ {
+     XBE_CS *cs = Cs;
+     if (--cs->RecursionCount == 0)
+-        (void)InterlockedExchangePointer(&cs->OwningThread, NULL);
++    {
++        cs->OwningThread = NULL;
++        if (InterlockedDecrement(&cs->LockCount) >= 0)
++            KeSetEvent((PKEVENT)cs, 0, FALSE);
++    }
++    else
++    {
++        InterlockedDecrement(&cs->LockCount);
++    }
+ }
+ ULONG NTAPI XeRtlTryEnterCriticalSection(_Inout_ PVOID Cs)
+ {
+     XBE_CS *cs = Cs;
+     PVOID me = KeGetCurrentThread();
+ 
+-    if (cs->OwningThread == me) { cs->RecursionCount++; return TRUE; }
+-    if (InterlockedCompareExchangePointer(&cs->OwningThread, me, NULL) == NULL)
++    if (InterlockedCompareExchange(&cs->LockCount, 0, -1) == -1)
+     {
++        cs->OwningThread = me;
+         cs->RecursionCount = 1;
+         return TRUE;
+     }
++    if (cs->OwningThread == me)
++    {
++        InterlockedIncrement(&cs->LockCount);
++        cs->RecursionCount++;
++        return TRUE;
++    }
+     return FALSE;
+ }
+ 
+diff --git a/tests/host/critical-section/check.py b/tests/host/critical-section/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..067216d3c5c1349248d1b8fc9fab981c8689d784
+--- /dev/null
++++ b/tests/host/critical-section/check.py
+@@ -0,0 +1,76 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production critical-section adapter and wake handoff."""
++from pathlib import Path
++import importlib.util,subprocess,sys
++sys.dont_write_bytecode=True
++root=Path(__file__).resolve().parents[3];out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++s=(root/'ntoskrnl/xb/xbe.c').read_text();a=s.index('typedef struct _XBE_CS');b=s.index('/* The AndRegion variants',a);body=s[a:b]
++shim=r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++#include <assert.h>
++#include <stdio.h>
++typedef uint8_t UCHAR;typedef int32_t LONG;typedef uint32_t ULONG;typedef void *PVOID;typedef void VOID;
++typedef struct _LIST_ENTRY {struct _LIST_ENTRY *Flink,*Blink;} LIST_ENTRY;
++typedef struct {UCHAR Type,Absolute,Size,Inserted;LONG SignalState;LIST_ENTRY WaitListHead;} KEVENT,*PKEVENT;
++#define _Inout_
++#define _Out_
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define SynchronizationEvent 1
++#define Executive 0
++#define KernelMode 0
++static PVOID me=(void*)1;static unsigned waits,signals;static void *current_cs;
++static int release_on_increment;static void XeRtlLeaveCriticalSection(void*);
++static PVOID KeGetCurrentThread(void){return me;}
++static LONG InterlockedIncrement(LONG*p){
++ LONG result=++*p;
++ if(release_on_increment){release_on_increment=0;PVOID saved=me;me=(void*)1;XeRtlLeaveCriticalSection(current_cs);me=saved;}
++ return result;
++}
++static LONG InterlockedDecrement(LONG*p){return --*p;}
++static LONG InterlockedCompareExchange(LONG*p,LONG n,LONG old){LONG v=*p;if(v==old)*p=n;return v;}
++static PVOID InterlockedCompareExchangePointer(PVOID*p,PVOID n,PVOID old){PVOID v=*p;if(v==old)*p=n;return v;}
++static PVOID InterlockedExchangePointer(PVOID*p,PVOID n){PVOID v=*p;*p=n;return v;}
++#define RtlZeroMemory(p,n) memset(p,0,n)
++static void KeInitializeEvent(PKEVENT e,int type,int signal){memset(e,0,sizeof(*e));e->Type=type;e->SignalState=signal;e->WaitListHead.Flink=e->WaitListHead.Blink=&e->WaitListHead;}
++static void KeSetEvent(PKEVENT e,int boost,int wait){(void)boost;(void)wait;e->SignalState=1;signals++;}
++static void XeRtlLeaveCriticalSection(void*);
++static void KeWaitForSingleObject(PKEVENT e,int reason,int mode,int alert,void*timeout){
++ (void)reason;(void)mode;(void)alert;(void)timeout;waits++;assert(e->Type==1);
++ if(!e->SignalState){PVOID saved=me;me=(void*)1;XeRtlLeaveCriticalSection(current_cs);me=saved;}
++ assert(e->SignalState==1);e->SignalState=0;
++}
++'''
++main=r'''
++int main(void){
++ XBE_CS cs;current_cs=&cs;XeRtlInitializeCriticalSection(&cs);assert(cs.LockCount==-1&&!cs.RecursionCount&&!cs.OwningThread&&cs.Type==1);
++ XeRtlEnterCriticalSection(&cs);XeRtlEnterCriticalSection(&cs);assert(cs.LockCount==1&&cs.RecursionCount==2);
++ assert(XeRtlTryEnterCriticalSection(&cs));assert(cs.LockCount==2&&cs.RecursionCount==3);
++ XeRtlLeaveCriticalSection(&cs);XeRtlLeaveCriticalSection(&cs);assert(cs.LockCount==0&&cs.RecursionCount==1);
++ me=(void*)2;assert(!XeRtlTryEnterCriticalSection(&cs));assert(cs.LockCount==0&&!waits);
++ XeRtlEnterCriticalSection(&cs);assert(waits==1&&signals==1&&cs.OwningThread==me&&cs.LockCount==0&&cs.RecursionCount==1);
++ XeRtlLeaveCriticalSection(&cs);assert(cs.LockCount==-1&&!cs.OwningThread&&!cs.RecursionCount);
++ assert(XeRtlTryEnterCriticalSection(&cs));XeRtlLeaveCriticalSection(&cs);
++ me=(void*)1;XeRtlInitializeCriticalSection(&cs);cs.Type=0;XeRtlEnterCriticalSection(&cs);
++ me=(void*)2;XeRtlEnterCriticalSection(&cs);assert(cs.Type==1&&waits==2);XeRtlLeaveCriticalSection(&cs);
++ me=(void*)1;XeRtlInitializeCriticalSection(&cs);cs.Type=0;XeRtlEnterCriticalSection(&cs);
++ me=(void*)2;release_on_increment=1;XeRtlEnterCriticalSection(&cs);
++ assert(waits==3&&cs.OwningThread==me&&cs.LockCount==0&&cs.Type==1);XeRtlLeaveCriticalSection(&cs);
++ /* Two already-queued contenders: each release hands off one count. */
++ me=(void*)1;XeRtlInitializeCriticalSection(&cs);XeRtlEnterCriticalSection(&cs);
++ InterlockedIncrement(&cs.LockCount);InterlockedIncrement(&cs.LockCount);
++ XeRtlLeaveCriticalSection(&cs);assert(cs.SignalState==1&&cs.LockCount==1);
++ KeWaitForSingleObject((PKEVENT)&cs,0,0,0,NULL);me=(void*)2;cs.OwningThread=me;cs.RecursionCount=1;
++ XeRtlLeaveCriticalSection(&cs);assert(cs.SignalState==1&&cs.LockCount==0);
++ KeWaitForSingleObject((PKEVENT)&cs,0,0,0,NULL);me=(void*)3;cs.OwningThread=me;cs.RecursionCount=1;
++ XeRtlLeaveCriticalSection(&cs);assert(!cs.SignalState&&cs.LockCount==-1&&!cs.OwningThread);
++ puts("critical section: recursive counts, try-enter, blocking handoff, static header and final release PASS");
++}
++'''
++(out/'critical.c').write_text(shim+body+main)
++subprocess.run(['cc','-std=c11','-O2','-fno-strict-aliasing','-Wall','-Wextra','-Werror','-Wno-unused-function',str(out/'critical.c'),'-o',str(out/'critical')],check=True)
++subprocess.run([str(out/'critical')],check=True)
+diff --git a/tests/xbe/critical-section-contention/Makefile b/tests/xbe/critical-section-contention/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..77d0d9313645d5fef598f840c4e8ee26fe83e175
+--- /dev/null
++++ b/tests/xbe/critical-section-contention/Makefile
+@@ -0,0 +1,5 @@
++NXDK_DIR ?= ../../../nxdk
++XBE_TITLE = critical-section-contention
++GEN_XISO = $(XBE_TITLE).iso
++SRCS = main.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/critical-section-contention/main.c b/tests/xbe/critical-section-contention/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..fbd0dae53b5262dcac93e6123f66a83e85fddc6c
+--- /dev/null
++++ b/tests/xbe/critical-section-contention/main.c
+@@ -0,0 +1,43 @@
++#include <stdio.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <hal/debug.h>
++#include <hal/video.h>
++#include <nxdk/mount.h>
++static RTL_CRITICAL_SECTION cs;
++static HANDLE ready, done;
++static volatile LONG entries;
++static DWORD WINAPI contender(void *unused) {
++ (void)unused;
++ SetEvent(ready);
++ RtlEnterCriticalSection(&cs);
++ InterlockedIncrement(&entries);
++ RtlLeaveCriticalSection(&cs);
++ SetEvent(done);
++ return 0;
++}
++int main(void) {
++ XVideoSetMode(640,480,32,REFRESH_DEFAULT);
++ if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
++ FILE *out=fopen("E:\\critical-result.txt","wb");
++ if(!out){debugPrint("FAIL output\n");for(;;)Sleep(1000);}
++ ready=CreateEvent(NULL,FALSE,FALSE,NULL);done=CreateEvent(NULL,FALSE,FALSE,NULL);
++ fprintf(out,"BEGIN higher-priority contention\n");fflush(out);
++ RtlInitializeCriticalSection(&cs);
++ RtlEnterCriticalSection(&cs);RtlEnterCriticalSection(&cs);
++ HANDLE thread=CreateThread(NULL,0,contender,NULL,CREATE_SUSPENDED,NULL);
++ SetThreadPriority(thread,THREAD_PRIORITY_ABOVE_NORMAL);
++ ResumeThread(thread);
++ /* Worker announces entry, then must block so the owner can resume. */
++ WaitForSingleObject(ready,INFINITE);
++ RtlLeaveCriticalSection(&cs);
++ unsigned failures=cs.RecursionCount!=1||entries!=0;
++ RtlLeaveCriticalSection(&cs);
++ failures+=WaitForSingleObject(done,2000)!=WAIT_OBJECT_0;
++ failures+=WaitForSingleObject(thread,2000)!=WAIT_OBJECT_0;
++ failures+=entries!=1||cs.RecursionCount!=0||cs.OwningThread!=NULL||cs.LockCount!=-1;
++ CloseHandle(thread);
++ fprintf(out,"COMPLETE entries=%ld failures=%u\n",entries,failures);fclose(out);
++ debugPrint("CRITICAL COMPLETE entries=%ld failures=%u\n",entries,failures);
++ for(;;)Sleep(1000);
++}
