@@ -1,0 +1,370 @@
+diff --git a/tests/host/critical-section/check.py b/tests/host/critical-section/check.py
+index 067216d3..6a143a45 100644
+--- a/tests/host/critical-section/check.py
++++ b/tests/host/critical-section/check.py
+@@ -5,7 +5,7 @@ from pathlib import Path
+ import importlib.util,subprocess,sys
+ sys.dont_write_bytecode=True
+ root=Path(__file__).resolve().parents[3];out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
+-s=(root/'ntoskrnl/xb/xbe.c').read_text();a=s.index('typedef struct _XBE_CS');b=s.index('/* The AndRegion variants',a);body=s[a:b]
++s=(root/'ntoskrnl/xb/xbe.c').read_text();a=s.index('typedef struct _XBE_CS');b=s.index('/* Xbox Interlocked',a);body=s[a:b]
+ shim=r'''
+ #include <stdint.h>
+ #include <stddef.h>
+@@ -23,6 +23,9 @@ typedef struct {UCHAR Type,Absolute,Size,Inserted;LONG SignalState;LIST_ENTRY Wa
+ #define SynchronizationEvent 1
+ #define Executive 0
+ #define KernelMode 0
++static int region_depth;
++static void KeEnterCriticalRegion(void){region_depth--;}
++static void KeLeaveCriticalRegion(void){assert(region_depth<0);region_depth++;}
+ static PVOID me=(void*)1;static unsigned waits,signals;static void *current_cs;
+ static int release_on_increment;static void XeRtlLeaveCriticalSection(void*);
+ static PVOID KeGetCurrentThread(void){return me;}
+@@ -68,9 +71,14 @@ int main(void){
+  XeRtlLeaveCriticalSection(&cs);assert(cs.SignalState==1&&cs.LockCount==0);
+  KeWaitForSingleObject((PKEVENT)&cs,0,0,0,NULL);me=(void*)3;cs.OwningThread=me;cs.RecursionCount=1;
+  XeRtlLeaveCriticalSection(&cs);assert(!cs.SignalState&&cs.LockCount==-1&&!cs.OwningThread);
++ me=(void*)1;XeRtlInitializeCriticalSection(&cs);
++ XeRtlEnterCriticalSectionAndRegion(&cs);XeRtlEnterCriticalSectionAndRegion(&cs);
++ assert(region_depth==-2&&cs.RecursionCount==2);
++ XeRtlLeaveCriticalSectionAndRegion(&cs);assert(region_depth==-1&&cs.RecursionCount==1);
++ XeRtlLeaveCriticalSectionAndRegion(&cs);assert(!region_depth&&cs.LockCount==-1&&!cs.OwningThread);
+  puts("critical section: recursive counts, try-enter, blocking handoff, static header and final release PASS");
+ }
+ '''
+ (out/'critical.c').write_text(shim+body+main)
+-subprocess.run(['cc','-std=c11','-O2','-fno-strict-aliasing','-Wall','-Wextra','-Werror','-Wno-unused-function',str(out/'critical.c'),'-o',str(out/'critical')],check=True)
++subprocess.run(['cc','-std=c11','-O2','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-strict-aliasing','-Wall','-Wextra','-Werror','-Wno-unused-function',str(out/'critical.c'),'-o',str(out/'critical')],check=True)
+ subprocess.run([str(out/'critical')],check=True)
+diff --git a/tests/xbe/critical-section-contention/Makefile b/tests/xbe/critical-section-contention/Makefile
+index 77d0d931..aaafb12a 100644
+--- a/tests/xbe/critical-section-contention/Makefile
++++ b/tests/xbe/critical-section-contention/Makefile
+@@ -1,5 +1,14 @@
+-NXDK_DIR ?= ../../../nxdk
+-XBE_TITLE = critical-section-contention
+-GEN_XISO = $(XBE_TITLE).iso
+-SRCS = main.c
++XBE_TITLE = CRITICAL-SECTION-CONTENTION
++GEN_XISO = critical-section-contention.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++ifeq ($(wildcard $(KERNEL_ASM)),)
++$(error KERNEL_ASM must name the tested kernel build's sdk/include/asm/ks386.inc)
++endif
++asm_value = $(shell awk '$$1=="$(1)" {print $$3}' $(KERNEL_ASM))
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++NXDK_CFLAGS += -DNATIVE_PCR_THREAD_OFFSET='($(call asm_value,PcPrcbData)+$(call asm_value,PbCurrentThread))'
++NXDK_CFLAGS += -DNATIVE_STATE_OFFSET=$(call asm_value,ThState) -DNATIVE_WAITING=$(call asm_value,Waiting)
++NXDK_CFLAGS += -DNATIVE_PRIORITY_OFFSET=$(call asm_value,ThPriority)
++NXDK_CFLAGS += -DNATIVE_APC_DISABLE_OFFSET=$(call asm_value,ThKernelApcDisable)
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/critical-section-contention/main.c b/tests/xbe/critical-section-contention/main.c
+index fbd0dae5..466eb196 100644
+--- a/tests/xbe/critical-section-contention/main.c
++++ b/tests/xbe/critical-section-contention/main.c
+@@ -1,43 +1,262 @@
+-#include <stdio.h>
+-#include <windows.h>
+-#include <xboxkrnl/xboxkrnl.h>
+-#include <hal/debug.h>
+-#include <hal/video.h>
+-#include <nxdk/mount.h>
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../regression.h"
++#include <stdint.h>
++#include <string.h>
++
+ static RTL_CRITICAL_SECTION cs;
+-static HANDLE ready, done;
+-static volatile LONG entries;
+-static DWORD WINAPI contender(void *unused) {
+- (void)unused;
+- SetEvent(ready);
+- RtlEnterCriticalSection(&cs);
+- InterlockedIncrement(&entries);
+- RtlLeaveCriticalSection(&cs);
+- SetEvent(done);
+- return 0;
+-}
+-int main(void) {
+- XVideoSetMode(640,480,32,REFRESH_DEFAULT);
+- if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
+- FILE *out=fopen("E:\\critical-result.txt","wb");
+- if(!out){debugPrint("FAIL output\n");for(;;)Sleep(1000);}
+- ready=CreateEvent(NULL,FALSE,FALSE,NULL);done=CreateEvent(NULL,FALSE,FALSE,NULL);
+- fprintf(out,"BEGIN higher-priority contention\n");fflush(out);
+- RtlInitializeCriticalSection(&cs);
+- RtlEnterCriticalSection(&cs);RtlEnterCriticalSection(&cs);
+- HANDLE thread=CreateThread(NULL,0,contender,NULL,CREATE_SUSPENDED,NULL);
+- SetThreadPriority(thread,THREAD_PRIORITY_ABOVE_NORMAL);
+- ResumeThread(thread);
+- /* Worker announces entry, then must block so the owner can resume. */
+- WaitForSingleObject(ready,INFINITE);
+- RtlLeaveCriticalSection(&cs);
+- unsigned failures=cs.RecursionCount!=1||entries!=0;
+- RtlLeaveCriticalSection(&cs);
+- failures+=WaitForSingleObject(done,2000)!=WAIT_OBJECT_0;
+- failures+=WaitForSingleObject(thread,2000)!=WAIT_OBJECT_0;
+- failures+=entries!=1||cs.RecursionCount!=0||cs.OwningThread!=NULL||cs.LockCount!=-1;
+- CloseHandle(thread);
+- fprintf(out,"COMPLETE entries=%ld failures=%u\n",entries,failures);fclose(out);
+- debugPrint("CRITICAL COMPLETE entries=%ld failures=%u\n",entries,failures);
+- for(;;)Sleep(1000);
++static volatile LONG owners, violations, total_entries;
++static uintptr_t owner_thread;
++static unsigned owner_priority;
++static volatile struct waiter {
++    HANDLE started, go;
++    uintptr_t native_thread;
++    unsigned priority, iterations, phased;
++    LONG failed_try, entries, wait_status;
++} waiters[4];
++
++static uintptr_t native_thread(void)
++{
++    uintptr_t thread;
++    __asm__ __volatile__("movl %%fs:%c1,%0" : "=r"(thread)
++                         : "i"(NATIVE_PCR_THREAD_OFFSET));
++    return thread;
++}
++
++static void sleep_ms(unsigned ms)
++{
++    LARGE_INTEGER delay = {.QuadPart = -(LONGLONG)ms * 10000};
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++}
++
++static void mark(int valid)
++{
++    if (!valid) InterlockedIncrement(&violations);
++}
++
++static void NTAPI worker(PVOID context)
++{
++    volatile struct waiter *w = context;
++    w->native_thread = native_thread();
++    KeSetPriorityThread((PKTHREAD)w->native_thread, owner_priority + 4);
++    w->priority = *(volatile UCHAR *)(w->native_thread + NATIVE_PRIORITY_OFFSET);
++    if (w->phased) {
++        /* Native dispatcher protocol test, not an instrumented full RtlEnter:
++         * reserve once, pause on a separate event, then consume a retained
++         * release signal with the actual wait and production handoff tail.
++         */
++        mark(InterlockedIncrement(&cs.LockCount) == 1);
++        NtSetEvent(w->started, NULL);
++        LARGE_INTEGER timeout = {.QuadPart = -20000000};
++        mark(NtWaitForSingleObject(w->go, FALSE, &timeout) == STATUS_SUCCESS);
++        cs.Synchronization.Event.Type = SynchronizationEvent;
++        w->wait_status = KeWaitForSingleObject(&cs, Executive, KernelMode, FALSE, &timeout);
++        mark(w->wait_status == STATUS_SUCCESS);
++        cs.OwningThread = (PVOID)w->native_thread;
++        cs.RecursionCount = 1;
++        mark(InterlockedIncrement(&owners) == 1);
++        InterlockedIncrement(&total_entries);
++        InterlockedDecrement(&owners);
++        RtlLeaveCriticalSection(&cs);
++        w->entries = 1;
++        return;
++    }
++    w->failed_try = !RtlTryEnterCriticalSection(&cs);
++    NtSetEvent(w->started, NULL);
++    for (unsigned i = 0; i < w->iterations; ++i) {
++        RtlEnterCriticalSection(&cs);
++        mark(InterlockedIncrement(&owners) == 1);
++        mark(cs.OwningThread == (PVOID)w->native_thread && cs.RecursionCount == 1);
++        mark(RtlTryEnterCriticalSection(&cs));
++        RtlEnterCriticalSection(&cs);
++        mark(cs.RecursionCount == 3 && cs.OwningThread == (PVOID)w->native_thread);
++        RtlLeaveCriticalSection(&cs);
++        RtlLeaveCriticalSection(&cs);
++        mark(cs.RecursionCount == 1);
++        /* Let other live contenders run while this owner still holds it. */
++        sleep_ms(1);
++        InterlockedIncrement(&total_entries);
++        InterlockedDecrement(&owners);
++        RtlLeaveCriticalSection(&cs);
++        w->entries++;
++    }
++}
++
++static void NTAPI startup(PKSTART_ROUTINE start, PVOID context)
++{
++    start(context);
++    PsTerminateSystemThread(STATUS_SUCCESS);
++}
++
++static void initialize(int static_type)
++{
++    if (static_type < 0) RtlInitializeCriticalSection(&cs);
++    else {
++        /* Exact static-header fields, including the historical Type=0 case. */
++        memset(&cs, 0, sizeof(cs));
++        cs.Synchronization.Event.Type = static_type;
++        cs.Synchronization.Event.Size = 4;
++        cs.Synchronization.Event.WaitListHead.Flink = &cs.Synchronization.Event.WaitListHead;
++        cs.Synchronization.Event.WaitListHead.Blink = &cs.Synchronization.Event.WaitListHead;
++        cs.LockCount = -1;
++    }
++    owners = violations = total_entries = 0;
++    memset((void *)waiters, 0, sizeof(waiters));
++}
++
++static HANDLE spawn(unsigned i, unsigned iterations, unsigned phased)
++{
++    volatile struct waiter *w = &waiters[i];
++    w->iterations = iterations; w->phased = phased;
++    regression_require(NtCreateEvent((PHANDLE)&w->started, NULL, NotificationEvent, FALSE)
++                       == STATUS_SUCCESS, "create contender phase event");
++    if (phased)
++        regression_require(NtCreateEvent((PHANDLE)&w->go, NULL, NotificationEvent, FALSE)
++                           == STATUS_SUCCESS, "create controlled pre-wait gate");
++    HANDLE thread = NULL;
++    regression_require(PsCreateSystemThreadEx(&thread, 0, 0, 0, NULL, worker, (PVOID)w,
++                       FALSE, FALSE, startup) == STATUS_SUCCESS && thread, "create live contender");
++    return thread;
++}
++
++static void observe_waiting(unsigned i)
++{
++    volatile struct waiter *w = &waiters[i];
++    LARGE_INTEGER timeout = {.QuadPart = -20000000};
++    regression_require(NtWaitForSingleObject(w->started, FALSE, &timeout) == STATUS_SUCCESS,
++                       "contender announces phase within finite deadline");
++    int blocked = 0;
++    for (unsigned n = 0; n < 100; ++n) {
++        if (w->native_thread && *(volatile UCHAR *)(w->native_thread + NATIVE_STATE_OFFSET)
++                               == NATIVE_WAITING) { blocked = 1; break; }
++        sleep_ms(1);
++    }
++    regression_require(blocked, "contender reaches native Waiting before owner release");
++    regression_require(w->priority > owner_priority, "waiting contender has higher priority than original owner");
++}
++
++static void join_close(HANDLE thread, unsigned i)
++{
++    LARGE_INTEGER timeout = {.QuadPart = -30000000};
++    regression_require(NtWaitForSingleObject(thread, FALSE, &timeout) == STATUS_SUCCESS,
++                       "contender finishes all handoffs before finite deadline");
++    regression_require(NtClose(thread) == STATUS_SUCCESS, "close contender thread handle");
++    regression_require(NtClose(waiters[i].started) == STATUS_SUCCESS, "close contender phase event");
++    if (waiters[i].go)
++        regression_require(NtClose(waiters[i].go) == STATUS_SUCCESS, "close pre-wait gate");
++}
++
++static void final_state(void)
++{
++    regression_require(!violations && !owners, "no overlapping owner or recursive ownership violation");
++    regression_require(cs.LockCount == -1 && !cs.RecursionCount && !cs.OwningThread,
++                       "final critical section is unowned with balanced counts");
++    regression_require(cs.Synchronization.Event.SignalState == 0,
++                       "no unconsumed successor signal remains");
++}
++
++static void contention(unsigned count, unsigned iterations, int static_type)
++{
++    initialize(static_type);
++    RtlEnterCriticalSection(&cs); RtlEnterCriticalSection(&cs);
++    owners = 1;
++    tap_comment("CONTENTION BEGIN workers=%u iterations=%u static_type=%d", count, iterations, static_type);
++    HANDLE threads[4];
++    for (unsigned i = 0; i < count; ++i) threads[i] = spawn(i, iterations, 0);
++    for (unsigned i = 0; i < count; ++i) observe_waiting(i);
++    regression_require(cs.LockCount == (LONG)(count + 1) && cs.RecursionCount == 2,
++                       "all real contenders are reserved behind recursive owner");
++    RtlLeaveCriticalSection(&cs);
++    regression_require(cs.RecursionCount == 1 && total_entries == 0,
++                       "partial recursive release does not hand off ownership");
++    owners = 0;
++    RtlLeaveCriticalSection(&cs);
++    for (unsigned i = 0; i < count; ++i) {
++        join_close(threads[i], i);
++        regression_require(waiters[i].failed_try && waiters[i].entries == (LONG)iterations,
++                           "failed other-owner try and every repeated entry accounted");
++    }
++    regression_require(total_entries == (LONG)(count * iterations), "exactly all expected entries completed");
++    final_state();
++    regression_require(RtlTryEnterCriticalSection(&cs), "try-enter succeeds after all contenders finish");
++    regression_require(cs.RecursionCount == 1 && cs.OwningThread == (PVOID)owner_thread,
++                       "successful try-enter has the correct native owner");
++    RtlLeaveCriticalSection(&cs);
++    final_state();
++}
++
++static void release_before_wait(void)
++{
++    initialize(0);
++    RtlEnterCriticalSection(&cs); owners = 1;
++    HANDLE thread = spawn(0, 1, 1);
++    observe_waiting(0);
++    regression_require(cs.LockCount == 1 && cs.Synchronization.Event.SignalState == 0,
++                       "successor reservation precedes native CS wait");
++    owners = 0; RtlLeaveCriticalSection(&cs);
++    regression_require(cs.LockCount == 0 && !cs.OwningThread &&
++                       cs.Synchronization.Event.SignalState == 1,
++                       "production owner release retains the signal before successor waits");
++    regression_require(NtSetEvent(waiters[0].go, NULL) == STATUS_SUCCESS,
++                       "allow native successor wait only after owner release");
++    join_close(thread, 0);
++    regression_require(waiters[0].wait_status == STATUS_SUCCESS && waiters[0].entries == 1,
++                       "native successor consumes retained signal exactly once");
++    final_state();
++}
++
++static volatile LONG kernel_calls, normal_calls;
++static void NTAPI kernel_apc(PKAPC apc, PKNORMAL_ROUTINE *routine, PVOID *context,
++                            PVOID *a, PVOID *b)
++{
++    (void)apc; (void)routine; (void)context; (void)a; (void)b;
++    InterlockedIncrement(&kernel_calls);
++}
++static void NTAPI normal_apc(PVOID context, PVOID a, PVOID b)
++{
++    (void)context; (void)a; (void)b;
++    InterlockedIncrement(&normal_calls);
++}
++static SHORT region_depth(void)
++{
++    return *(volatile SHORT *)(owner_thread + NATIVE_APC_DISABLE_OFFSET);
++}
++
++static void regions(void)
++{
++    initialize(-1);
++    SHORT before = region_depth();
++    regression_require(before == 0, "kernel APC delivery initially enabled");
++    RtlEnterCriticalSectionAndRegion(&cs);
++    RtlEnterCriticalSectionAndRegion(&cs);
++    regression_require(region_depth() == before - 2 && cs.RecursionCount == 2,
++                       "recursive AndRegion entries disable kernel APCs twice");
++    KAPC apc;
++    KeInitializeApc(&apc, KeGetCurrentThread(), kernel_apc, NULL, normal_apc, KernelMode, NULL);
++    regression_require(KeInsertQueueApc(&apc, NULL, NULL, 0), "queue normal kernel APC during critical region");
++    sleep_ms(10);
++    regression_require(!kernel_calls && !normal_calls && apc.Inserted,
++                       "normal kernel APC stays queued while regions are active");
++    RtlLeaveCriticalSectionAndRegion(&cs);
++    regression_require(region_depth() == before - 1 && !normal_calls && cs.RecursionCount == 1,
++                       "partial recursive leave preserves APC exclusion");
++    RtlLeaveCriticalSectionAndRegion(&cs);
++    for (unsigned i = 0; i < 100 && !normal_calls; ++i) sleep_ms(1);
++    regression_require(region_depth() == before && kernel_calls == 1 && normal_calls == 1 && !apc.Inserted,
++                       "balanced final exit delivers queued APC exactly once");
++    final_state();
++}
++
++int main(void)
++{
++    regression_begin();
++    owner_thread = native_thread();
++    owner_priority = *(volatile UCHAR *)(owner_thread + NATIVE_PRIORITY_OFFSET);
++    regression_require(owner_priority <= 27, "owner priority leaves room for higher-priority contender");
++    contention(1, 1, -1);
++    contention(4, 8, -1);
++    contention(4, 8, 0);
++    contention(4, 8, 1);
++    release_before_wait();
++    regions();
++    regression_finish();
+ }
