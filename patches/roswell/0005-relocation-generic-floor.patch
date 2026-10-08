@@ -1,0 +1,57 @@
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index 42cff1dd14ee87c4c60d3223c59cebe622ccb0b6..8728f8ce59c0ba51c0ceb4a5b13de6310c2c9329 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -371,7 +371,9 @@ NxkPageSupplyTakeAnyOutside(
+         NxpUnlink(Pfn);
+         return Pfn;
+     }
+-    for (Pfn = NxpSpillHint; Pfn <= NxpHighestPfn; Pfn++)
++    for (Pfn = NxpSpillHint < NXP_GENERIC_FLOOR_PFN ?
++                   NXP_GENERIC_FLOOR_PFN : NxpSpillHint;
++         Pfn <= NxpHighestPfn; Pfn++)
+     {
+         if (!(NxpLinks[Pfn] & NXP_FREE)) continue;
+         if (Pfn >= LowPfn && Pfn <= HighPfn) continue;
+diff --git a/tests/host/relocation/check-destinations.py b/tests/host/relocation/check-destinations.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..a8d2deec7701d2d7c6886e8c92d332a6b1364035
+--- /dev/null
++++ b/tests/host/relocation/check-destinations.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise actual destination selection with a returned low pin-only frame."""
++from pathlib import Path
++import subprocess
++import sys
++root=Path(__file__).resolve().parents[3];out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++s=(root/'ntoskrnl/xb/mm/pagesupply.c').read_text();s=s[s.index('PFN_NUMBER\nNxkPageSupplyTakeAnyOutside('):];s=s[:s.index('\n}\n')+3]
++shim=r'''
++#include <stdint.h>
++#include <assert.h>
++#include <stdio.h>
++typedef uint32_t PFN_NUMBER;
++#define IN
++#define NXP_FREE 0x80000000u
++#define NXP_GENERIC_FLOOR_PFN 16u
++#define NXP_NEXT(e) ((e)&0x7fffu)
++#define MI_ASSERT_PFN_LOCK_HELD() ((void)0)
++static uint32_t NxpLinks[256];
++static uint32_t NxpFreeHeadKernel,NxpFreeHeadTitle,NxpSpillHint,NxpHighestPfn=255;
++static void NxpUnlink(unsigned p) {assert(NxpLinks[p]&NXP_FREE);NxpLinks[p]=0;}
++'''
++main=r'''
++int main(void){
++ NxpSpillHint=1;NxpFreeHeadTitle=1;
++ NxpLinks[1]=NXP_FREE|128;NxpLinks[128]=NXP_FREE;
++ unsigned chosen=NxkPageSupplyTakeAnyOutside(20,30);
++ if(chosen!=128 || !(NxpLinks[1]&NXP_FREE)){
++  fprintf(stderr,"FAIL selected PFN %u; pin-only PFN 1 must remain free\n",chosen);return 1;
++ }
++ puts("generic destination selection PASS");
++}
++'''
++(out/'destinations.c').write_text(shim+s+main)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',str(out/'destinations.c'),'-o',str(out/'destinations')],check=True)
++subprocess.run([str(out/'destinations')],check=True)

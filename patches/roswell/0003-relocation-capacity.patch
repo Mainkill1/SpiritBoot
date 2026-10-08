@@ -1,0 +1,117 @@
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index 75faf2a2b5d7c76eea67ed6d09cbcd6abacc5d93..6efa43927280dc16d4f8f78ccee17677c061b0f9 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -509,7 +509,7 @@ NxkPageSupplyTakeRunRelocate(
+     Base = (HighPfn - RunPages + 1) & ~(AlignPages - 1);
+     while (Base >= LowPfn)
+     {
+-        PFN_NUMBER Failed = 0, FreeInWindow = 0, Movable = 0;
++        PFN_NUMBER Failed = 0, FreeGenericInWindow = 0, Movable = 0;
+         BOOLEAN Fits = TRUE;
+ 
+         for (i = RunPages; i-- > 0;)
+@@ -517,7 +517,10 @@ NxkPageSupplyTakeRunRelocate(
+             PFN_NUMBER Page = Base + i;
+ 
+             if (NxpLinks[Page] & NXP_FREE)
+-                FreeInWindow++;
++            {
++                if (Page >= NXP_GENERIC_FLOOR_PFN)
++                    FreeGenericInWindow++;
++            }
+             else if (NxpLinks[Page] != 0 && NxpPins[Page] == 0)
+                 Movable++;
+             else
+@@ -532,7 +535,11 @@ NxkPageSupplyTakeRunRelocate(
+          * pages?  (Exact under the PFN lock.)  If not, a window lower
+          * down may need fewer relocations -- step down one alignment
+          * unit and keep scanning. */
+-        if (Fits && NxpGenericAvail - FreeInWindow < Movable)
++        /* Only generic free pages are eligible relocation destinations.
++         * Low pin-only pages in this window are absent from the global
++         * generic count and must not be subtracted from it. */
++        if (Fits && (NxpGenericAvail < FreeGenericInWindow ||
++                     NxpGenericAvail - FreeGenericInWindow < Movable))
+         {
+             Fits = FALSE;
+             if (Base < AlignPages) break;
+diff --git a/tests/host/relocation/check-capacity.py b/tests/host/relocation/check-capacity.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..4b1ce8daf001d332cf54a220949f850a1500799c
+--- /dev/null
++++ b/tests/host/relocation/check-capacity.py
+@@ -0,0 +1,73 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production relocation scan up to its first mutation.
++
++The privileged page-move body is replaced with an admission marker. This
++checks candidate selection and preflight; it does not execute relocation asm.
++"""
++import ctypes as C
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++s = (root / 'ntoskrnl/xb/mm/pagesupply.c').read_text()
++s = s[s.index('PFN_NUMBER\nNxkPageSupplyTakeRunRelocate('):]
++prefix = s[:s.index('        if (Fits)\n        {')]
++tail = s[s.index('        if (Failed < RunPages)'):]
++tail = tail[:tail.index('\n}\n') + 3]
++shim = r'''
++#include <stdint.h>
++#include <assert.h>
++#include <string.h>
++typedef uint32_t PFN_NUMBER;
++typedef int BOOLEAN;
++#define IN
++#define TRUE 1
++#define FALSE 0
++#define ASSERT assert
++#define MI_ASSERT_PFN_LOCK_HELD() ((void)0)
++#define DPRINT1(...) ((void)0)
++#define NXP_FREE 0x80000000u
++#define NXP_GENERIC_FLOOR_PFN 16u
++static uint32_t links[256];
++static uint32_t *NxpLinks=links;
++static uint16_t NxpPins[256];
++static PFN_NUMBER NxpHighestPfn=255, NxpGenericAvail;
++static unsigned admitted;
++'''
++wrapper = r'''
++unsigned scenario(unsigned generic, unsigned inside, unsigned lowfree,
++                  unsigned movable) {
++ memset(links,0,sizeof(links));memset(NxpPins,0,sizeof(NxpPins));
++ unsigned base=NXP_GENERIC_FLOOR_PFN-lowfree, count=lowfree+inside+movable;
++ for(unsigned i=0;i<lowfree+inside;i++)links[base+i]=NXP_FREE;
++ for(unsigned i=lowfree+inside;i<count;i++)links[base+i]=1;
++ for(unsigned i=0;i<generic-inside;i++)links[128+i]=NXP_FREE;
++ NxpGenericAvail=generic;admitted=0;
++ unsigned result=NxkPageSupplyTakeRunRelocate(count,base,base+count-1,1);
++ assert((result!=0)==(admitted!=0));
++ return result!=0;
++}
++'''
++(out/'capacity.c').write_text(shim + prefix +
++ '        if (Fits) { ++admitted; return Base; }\n' + tail + wrapper)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-shared','-fPIC',
++               str(out/'capacity.c'),'-o',str(out/'capacity.so')],check=True)
++f=C.CDLL(str(out/'capacity.so')).scenario
++f.argtypes=[C.c_uint]*4;f.restype=C.c_uint
++checks=0;failures=[]
++for generic in range(17):
++ for inside in range(generic+1):
++  for lowfree in range(7):
++   for movable in range(17):
++    if inside+lowfree+movable==0:continue
++    actual=f(generic,inside,lowfree,movable)
++    expected=generic-inside>=movable
++    checks+=1
++    if actual!=expected:failures.append((generic,inside,lowfree,movable,actual))
++print(f'{checks} production preflight cases; {len(failures)} mismatches')
++if failures:print('first mismatches (generic, inside-generic, pin-only, movable, admitted):', failures[:5])
++sys.exit(bool(failures))
