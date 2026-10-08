@@ -47,9 +47,10 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = ed249b492625b946532af4486bbe38c81870e6db
+            test "$actual_tree" = 86fbea9abdbd4d740eaad66a5060e4b814866809
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/pool-size/check.py" "$output/pool-size" >"$output/pool-size.log" 2>&1
             "$GUEST_SOURCE/tests/host/clean-room/run.sh" "$output/clean-room" >"$output/clean-room.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/kernel-performance/check.py" "$GUEST_SOURCE" "$output/optimization" --optimized >"$output/optimization.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/kernel-performance/pins.py" "$GUEST_SOURCE" "$output/pins" --optimized --vector >"$output/pins.log" 2>&1
@@ -81,7 +82,7 @@ jobs:
         run: |
           nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
-          for guest in api-regression clean-room-contracts clean-room-warm-reboot kernel-performance; do
+          for guest in api-regression clean-room-contracts clean-room-warm-reboot kernel-performance $(python3 -c 'import json; print(" ".join(json.load(open("sources/native-regressions.json"))))'); do
             docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
               -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
               -w "$guest_source/tests/xbe/$guest" \
@@ -95,10 +96,11 @@ jobs:
             -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -ec '
             Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
             python3 -c "import time; time.sleep(1)"
-            for guest in api-regression clean-room-contracts clean-room-warm-reboot kernel-performance; do
+            for guest in api-regression clean-room-contracts clean-room-warm-reboot kernel-performance $(python3 -c "import json; print(\" \".join(json.load(open(\"sources/native-regressions.json\"))))"); do
               case "$guest" in
                 api-regression) iso=nxkrnl-api-regression.iso; capture=open-xbe ;;
-                *) iso=$guest.iso; capture=$guest ;;
+                clean-room-contracts|clean-room-warm-reboot|kernel-performance) iso=$guest.iso; capture=$guest ;;
+                *) iso=$(python3 -c "import json,sys; print(json.load(open(\"sources/native-regressions.json\"))[sys.argv[1]][\"iso\"])" "$guest"); capture=$guest ;;
               esac
               DISPLAY=:99 python3 scripts/run-firmware.py \
                 --xemu artifacts/squashfs-root/usr/bin/xemu \
@@ -114,6 +116,16 @@ jobs:
               assert result['status'] == 'passed' and result['tap']['plan'] == plan, result
               assert result['tap']['ok'] == plan, result
               assert result['tap']['todo'] == 0 and result['tap']['skipped'] == 0, result
+          PY
+          python3 - <<'PY'
+          import json
+          variant = "${{ matrix.variant }}"
+          for guest, contract in json.load(open('sources/native-regressions.json')).items():
+              result = json.load(open(f'artifacts/{guest}-{variant}/run.json'))
+              assert result['status'] == 'passed', result
+              tap = result['tap']
+              assert tap['plan'] == tap['ok'] == contract['checks'], result
+              assert tap['failed'] == tap['todo'] == tap['skipped'] == 0, result
           PY
           python3 - <<'PY'
           from pathlib import Path
@@ -133,5 +145,6 @@ jobs:
             artifacts/clean-room-contracts-${{ matrix.variant }}/
             artifacts/clean-room-warm-reboot-${{ matrix.variant }}/
             artifacts/kernel-performance-${{ matrix.variant }}/
+            artifacts/pool-size-limit-${{ matrix.variant }}/
             artifacts/kernel-host-${{ matrix.variant }}/
             LICENSE
