@@ -1,0 +1,66 @@
+diff --git a/drivers/filesystems/xdvdfs/xdvdfs.c b/drivers/filesystems/xdvdfs/xdvdfs.c
+index f9a8afb2ef6e489ecf1eb2b837f1699023162cae..328f1e5d71736f79896d0c108d72393ee8368569 100644
+--- a/drivers/filesystems/xdvdfs/xdvdfs.c
++++ b/drivers/filesystems/xdvdfs/xdvdfs.c
+@@ -450,7 +450,10 @@ XdvdResolvePath(_In_ PXDVD_VCB Vcb,
+             sector = d->DataSector;
+             size = d->DataSize;
+             ++p; /* skip '\' */
+-            continue;
++            if (p < end)
++                continue;
++            /* A terminal separator names this directory, not an empty
++             * child. Preserve its entry for the terminal snapshot below. */
+         }
+ 
+         /* Terminal segment.  Snapshot and we're done. */
+diff --git a/tests/xbe/xdvdfs-directory/Makefile b/tests/xbe/xdvdfs-directory/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..cdca8befa3f24e787777c027103ba96167e53e29
+--- /dev/null
++++ b/tests/xbe/xdvdfs-directory/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = XDVDFS-DIRECTORY
++GEN_XISO = directory.iso
++SRCS = $(CURDIR)/main.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/xdvdfs-directory/bin/Cache/Resource/probe.bin b/tests/xbe/xdvdfs-directory/bin/Cache/Resource/probe.bin
+new file mode 100644
+index 0000000000000000000000000000000000000000..4f736d9ca075f146cec24dd9d0b39ddc4a3070a0
+GIT binary patch
+literal 18
+ZcmYevEJ{r-$uFwZP0Oq(DJ@Fn0suw!2NVDR
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/xbe/xdvdfs-directory/main.c b/tests/xbe/xdvdfs-directory/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..4abdb2bc4d0c6f0c8aede13eef5faf5b5787cc80
+--- /dev/null
++++ b/tests/xbe/xdvdfs-directory/main.c
+@@ -0,0 +1,22 @@
++#include <stdio.h>
++#include <string.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <hal/video.h>
++#include <nxdk/mount.h>
++int main(void) {
++ XVideoSetMode(640,480,32,REFRESH_DEFAULT);
++ if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
++ FILE *out=fopen("E:\\directory-result.txt","wb");if(!out)for(;;)Sleep(1000);
++ const char *paths[]={"\\??\\D:\\", "\\??\\D:\\Cache", "\\??\\D:\\Cache\\", "\\??\\D:\\Cache\\Resource", "\\??\\D:\\Cache\\Resource\\", "\\??\\D:\\Cache\\Missing\\", "\\??\\D:\\Cache\\Resource\\probe.bin\\"};
++ unsigned failures=0;
++ for(unsigned i=0;i<sizeof(paths)/sizeof(paths[0]);i++){
++  OBJECT_STRING name={(USHORT)strlen(paths[i]),(USHORT)(strlen(paths[i])+1),(PCHAR)paths[i]};
++  OBJECT_ATTRIBUTES oa={NULL,&name,OBJ_CASE_INSENSITIVE};IO_STATUS_BLOCK iosb={0};HANDLE h=NULL;
++  NTSTATUS s=NtOpenFile(&h,FILE_LIST_DIRECTORY|SYNCHRONIZE,&oa,&iosb,FILE_SHARE_READ,FILE_DIRECTORY_FILE|FILE_SYNCHRONOUS_IO_NONALERT);
++  unsigned bad=i<5?!NT_SUCCESS(s):NT_SUCCESS(s);failures+=bad;
++  fprintf(out,"%s path=%s status=%08lx\n",bad?"FAIL":"PASS",paths[i],s);fflush(out);
++  if(NT_SUCCESS(s))NtClose(h);
++ }
++ fprintf(out,"COMPLETE checks=7 failures=%u\n",failures);fclose(out);for(;;)Sleep(1000);
++}
