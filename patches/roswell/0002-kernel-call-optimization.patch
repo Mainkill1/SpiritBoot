@@ -1,0 +1,1300 @@
+diff --git a/ntoskrnl/xb/crypto.c b/ntoskrnl/xb/crypto.c
+index 608852eb..2d9471f6 100644
+--- a/ntoskrnl/xb/crypto.c
++++ b/ntoskrnl/xb/crypto.c
+@@ -42,7 +42,10 @@ XcpShaLoad(SHA_CTX *Ctx, const XC_SHA_CONTEXT *Xc)
+ {
+     RtlCopyMemory(Ctx->State, Xc->State, sizeof(Ctx->State));
+     RtlCopyMemory(Ctx->Count, Xc->Count, sizeof(Ctx->Count));
+-    RtlCopyMemory(Ctx->Buffer, Xc->Buffer, sizeof(Ctx->Buffer));
++    /* Update fills the remainder before each transform. Final fills padding
++     * and length, then clears the whole buffer before its full-context store.
++     * Inactive caller bytes remain untouched by the partial Update store. */
++    RtlCopyMemory(Ctx->Buffer, Xc->Buffer, Ctx->Count[1] & 63);
+ }
+ 
+ /*
+@@ -416,11 +419,16 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
+                 BnMulMod(Tmp, Acc, Val, Modulus, Scratch, Words);
+             RtlCopyMemory(Acc, Tmp, Words * sizeof(ULONG));
+         }
+-        if (Odd)
+-            BnMontMul(Tmp, Val, Val, Modulus, MInv, Words);
+-        else
+-            BnMulMod(Tmp, Val, Val, Modulus, Scratch, Words);
+-        RtlCopyMemory(Val, Tmp, Words * sizeof(ULONG));
++        /* Val is only consumed by a later exponent bit. Conversion below
++         * overwrites it on the odd path; the even result consumes Acc only. */
++        if (i + 1 < ExpBits)
++        {
++            if (Odd)
++                BnMontMul(Tmp, Val, Val, Modulus, MInv, Words);
++            else
++                BnMulMod(Tmp, Val, Val, Modulus, Scratch, Words);
++            RtlCopyMemory(Val, Tmp, Words * sizeof(ULONG));
++        }
+     }
+ 
+     if (Odd)
+@@ -906,7 +914,7 @@ DesStoreRound(PUCHAR Table, const UCHAR *Subkey)
+ static VOID
+ DesLoadKey(DES_KEY *Key, const UCHAR *Table)
+ {
+-    ULONG r, k, b, Shift, Six;
++    ULONG r, k, Shift, Six;
+     ULONG Word[2];
+ 
+     for (r = 0; r < 16; r++)
+@@ -924,8 +932,11 @@ DesLoadKey(DES_KEY *Key, const UCHAR *Table)
+             Shift = DES_KEY_SHIFT(k);
+             Six = (Word[k & 1] >> Shift) |
+                   (Shift > 26 ? (Word[k & 1] << (32 - Shift)) : 0);
+-            for (b = 0; b < 6; b++)
+-                Value |= (UCHAR)(((Six >> b) & 1) << (5 - b));
++            /* Reverse exactly the low six bits with fixed masks/shifts.
++             * Each input bit b contributes only output bit 5-b. */
++            Value = (UCHAR)(((Six & 0x01) << 5) | ((Six & 0x02) << 3) |
++                            ((Six & 0x04) << 1) | ((Six & 0x08) >> 1) |
++                            ((Six & 0x10) >> 3) | ((Six & 0x20) >> 5));
+             Key->Round[r][k] = Value;
+         }
+     }
+diff --git a/ntoskrnl/xb/mm/api.c b/ntoskrnl/xb/mm/api.c
+index b524116f..42fb7361 100644
+--- a/ntoskrnl/xb/mm/api.c
++++ b/ntoskrnl/xb/mm/api.c
+@@ -77,23 +77,46 @@ MmLockUnlockBufferPages(PVOID Base, SIZE_T Size, BOOLEAN Unlock)
+ {
+ #ifdef NXK_MM_PHYS
+     ULONG_PTR first = (ULONG_PTR)Base & ~(PAGE_SIZE - 1), last, va;
++    ULONG_PTR translated = 0;
++    BOOLEAN applied = FALSE, sparse;
+     KIRQL irql;
+     if (Size == 0 || Size - 1 > MAXULONG_PTR - (ULONG_PTR)Base) return;
+     last = ((ULONG_PTR)Base + Size - 1) & ~(PAGE_SIZE - 1);
+     irql = MiAcquirePfnLock();
+-    NxkPageSupplyBeginPinBatch();
++#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
++    NxkPageSupplyAssertPinBatchEmpty();
++#endif
+     for (va = first;; va += PAGE_SIZE) {
+         ULONG_PTR pa;
+         if (!NxMmIsAddressValid((PVOID)va)) goto out;
+         pa = NxMmGetPhysicalAddress((PVOID)va);
++        /* Include the RecordPin that increments scratch and then rejects. */
++        ++translated;
+         if (!NxkPageSupplyRecordPin(pa >> PAGE_SHIFT, Unlock)) goto out;
+         if (va == last) break;
+     }
++    sparse = translated <= NXK_PIN_BATCH_SMALL_PAGES;
+     for (va = first;; va += PAGE_SIZE) {
+-        NxkPageSupplyPin(NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT, Unlock);
++        PFN_NUMBER page = NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT;
++        NxkPageSupplyPin(page, Unlock);
++        if (sparse) NxkPageSupplyClearPinBatchPage(page);
+         if (va == last) break;
+     }
++    applied = TRUE;
+ out:
++    if (translated > NXK_PIN_BATCH_SMALL_PAGES)
++        NxkPageSupplyBeginPinBatch(); /* One bulk reset, only at exit. */
++    else if (!applied)
++    {
++        /* Rejected small prefixes cost at most the bounded page budget of
++         * extra translations. The PFN lock still stabilizes the mappings. */
++        for (va = first; translated != 0; va += PAGE_SIZE, --translated)
++            NxkPageSupplyClearPinBatchPage(
++                NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT);
++    }
++#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
++    NxkPageSupplyAssertPinBatchEmpty();
++#endif
+     MiReleasePfnLock(irql);
+ #endif
+ }
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index e2ba3ee8..37ff7ea1 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -216,4 +216,10 @@ VOID NxkMmDetachRestored(ULONG_PTR Pa, SIZE_T Size);
+ BOOLEAN NxkMmAdoptRestored(PVOID Alias, SIZE_T Size);
+ 
+ VOID NxkPageSupplyBeginPinBatch(VOID);
++/* Initial tuning candidate, not a measured optimal crossover. */
++#define NXK_PIN_BATCH_SMALL_PAGES 64
++VOID NxkPageSupplyClearPinBatchPage(PFN_NUMBER Page);
++#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
++VOID NxkPageSupplyAssertPinBatchEmpty(VOID);
++#endif
+ BOOLEAN NxkPageSupplyRecordPin(PFN_NUMBER Page, BOOLEAN Unlock);
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index 07a89c1d..75faf2a2 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -286,12 +286,31 @@ VOID NxkPageSupplyPin(PFN_NUMBER Page, BOOLEAN Unlock)
+ }
+ 
+ /* Buffer preflight counts aliases of the same PFN before any mutation.
+- * Overflowed PFNs remain pinned regardless of subsequent locks/unlocks. */
++ * Initialization zeroes scratch. The sole caller clears it at every exit,
++ * under the same PFN lock, so no entry reset is necessary. Small successful
++ * batches clear in the apply pass after all multiplicities were checked;
++ * large batches use this single bulk reset at exit. */
+ VOID NxkPageSupplyBeginPinBatch(VOID)
+ {
+     MI_ASSERT_PFN_LOCK_HELD();
+     RtlZeroMemory(NxpPinBatch, (NxpHighestPfn + 1) * sizeof(USHORT));
+ }
++VOID NxkPageSupplyClearPinBatchPage(PFN_NUMBER Page)
++{
++    MI_ASSERT_PFN_LOCK_HELD();
++    /* A translated invalid PFN also reaches rejected-prefix cleanup. */
++    if (Page > 0 && Page <= NxpHighestPfn)
++        NxpPinBatch[Page] = 0;
++}
++#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
++VOID NxkPageSupplyAssertPinBatchEmpty(VOID)
++{
++    PFN_NUMBER Page;
++    MI_ASSERT_PFN_LOCK_HELD();
++    for (Page = 0; Page <= NxpHighestPfn; ++Page)
++        ASSERT(NxpPinBatch[Page] == 0);
++}
++#endif
+ BOOLEAN NxkPageSupplyRecordPin(PFN_NUMBER Page, BOOLEAN Unlock)
+ {
+     MI_ASSERT_PFN_LOCK_HELD();
+diff --git a/ntoskrnl/xb/mm/poolpages.c b/ntoskrnl/xb/mm/poolpages.c
+index 2d3988ca..1e0d5915 100644
+--- a/ntoskrnl/xb/mm/poolpages.c
++++ b/ntoskrnl/xb/mm/poolpages.c
+@@ -111,11 +111,16 @@ static BOOLEAN NxppLockInit;
+ /* HELPERS ******************************************************************/
+ 
+ static BOOLEAN
+-NxppTestRange(ULONG Start, ULONG Count)
++NxppTestRange(ULONG Start, ULONG Count, PULONG Next)
+ {
+     for (ULONG i = Start; i < Start + Count; i++)
+     {
+-        if (NxppUsedMap[i >> 5] & (1UL << (i & 31))) return FALSE;
++        if (NxppUsedMap[i >> 5] & (1UL << (i & 31)))
++        {
++            /* Every intervening candidate still covers this occupied bit. */
++            *Next = i + 1;
++            return FALSE;
++        }
+     }
+     return TRUE;
+ }
+@@ -165,9 +170,9 @@ NxPoolPagesAlloc(
+ 
+     /* First fit from the rotating hint, then wrap once. */
+     Start = (ULONG)-1;
+-    for (ULONG Probe = NxppScanHint; Probe + Count <= NXPP_PAGES; Probe++)
++    for (ULONG Probe = NxppScanHint, Next; Probe + Count <= NXPP_PAGES; Probe = Next)
+     {
+-        if (NxppTestRange(Probe, Count))
++        if (NxppTestRange(Probe, Count, &Next))
+         {
+             Start = Probe;
+             break;
+@@ -175,10 +180,10 @@ NxPoolPagesAlloc(
+     }
+     if (Start == (ULONG)-1)
+     {
+-        for (ULONG Probe = 0;
+-             Probe < NxppScanHint && Probe + Count <= NXPP_PAGES; Probe++)
++        for (ULONG Probe = 0, Next;
++             Probe < NxppScanHint && Probe + Count <= NXPP_PAGES; Probe = Next)
+         {
+-            if (NxppTestRange(Probe, Count))
++            if (NxppTestRange(Probe, Count, &Next))
+             {
+                 Start = Probe;
+                 break;
+diff --git a/ntoskrnl/xb/mm/sysva.c b/ntoskrnl/xb/mm/sysva.c
+index 03b89480..3345ef45 100644
+--- a/ntoskrnl/xb/mm/sysva.c
++++ b/ntoskrnl/xb/mm/sysva.c
+@@ -73,7 +73,18 @@ NxpSysVaFindHoleLocked(ULONG Pages)
+         BOOLEAN Free;
+ 
+         if (!(Pde[Va >> 22] & 1))
+-            Free = TRUE;                       /* whole 4 MB unbacked */
++        {
++            ULONG Span = 1024 - ((Va >> PAGE_SHIFT) & 1023);
++            ULONG Remaining = (NXK_SYSMEM_LIMIT - Va) >> PAGE_SHIFT;
++            if (Span > Remaining) Span = Remaining;
++            if (Run == 0) RunStart = Va;
++            /* Pages==0 historically finds no hole, including empty PTs. */
++            if (Pages != 0 && Pages > Run && Pages - Run <= Span)
++                return RunStart;
++            Run += Span;
++            Va += (ULONG_PTR)Span << PAGE_SHIFT;
++            continue;
++        }
+         else
+             Free = (Pte[Va >> PAGE_SHIFT] == 0);
+ 
+diff --git a/ntoskrnl/xb/obcreate.c b/ntoskrnl/xb/obcreate.c
+index da0acb49..4c32ce3e 100644
+--- a/ntoskrnl/xb/obcreate.c
++++ b/ntoskrnl/xb/obcreate.c
+@@ -139,6 +139,25 @@ XobRememberType(PVOID Type)
+     PXB_TITLE_TYPE Known;
+     PLIST_ENTRY Entry;
+     KIRQL OldIrql;
++    ULONG ObservedCount;
++
++    /* Types are never removed. Check under the registry lock before paying
++     * for a duplicate node; do not initialize the lazy list on OOM. */
++    KeAcquireSpinLock(&XobTitleTypeLock, &OldIrql);
++    ObservedCount = XobTitleTypeCount;
++    if (XobTitleTypeCount != 0)
++    {
++        for (Entry = XobTitleTypes.Flink; Entry != &XobTitleTypes;
++             Entry = Entry->Flink)
++        {
++            if (CONTAINING_RECORD(Entry, XB_TITLE_TYPE, Link)->Type == Type)
++            {
++                KeReleaseSpinLock(&XobTitleTypeLock, OldIrql);
++                return;
++            }
++        }
++    }
++    KeReleaseSpinLock(&XobTitleTypeLock, OldIrql);
+ 
+     Known = ExAllocatePoolWithTag(NonPagedPool, sizeof(*Known), 'TObX');
+     if (Known == NULL)
+@@ -148,14 +167,21 @@ XobRememberType(PVOID Type)
+     KeAcquireSpinLock(&XobTitleTypeLock, &OldIrql);
+     if (XobTitleTypeCount == 0)
+         InitializeListHead(&XobTitleTypes);
+-    for (Entry = XobTitleTypes.Flink; Entry != &XobTitleTypes;
+-         Entry = Entry->Flink)
++    /* Each registration retains a distinct pool node forever. The 32-bit
++     * address space cannot hold 2^32 such nodes, so the count cannot wrap.
++     * An unchanged count therefore proves the first unknown lookup remains
++     * unknown; concurrent/reentrant insertion still requires a full recheck. */
++    if (XobTitleTypeCount != ObservedCount)
+     {
+-        if (CONTAINING_RECORD(Entry, XB_TITLE_TYPE, Link)->Type == Type)
++        for (Entry = XobTitleTypes.Flink; Entry != &XobTitleTypes;
++             Entry = Entry->Flink)
+         {
+-            KeReleaseSpinLock(&XobTitleTypeLock, OldIrql);
+-            ExFreePool(Known);
+-            return;
++            if (CONTAINING_RECORD(Entry, XB_TITLE_TYPE, Link)->Type == Type)
++            {
++                KeReleaseSpinLock(&XobTitleTypeLock, OldIrql);
++                ExFreePool(Known);
++                return;
++            }
+         }
+     }
+     InsertTailList(&XobTitleTypes, &Known->Link);
+diff --git a/tests/host/kernel-performance/README.md b/tests/host/kernel-performance/README.md
+new file mode 100644
+index 00000000..a7413a32
+--- /dev/null
++++ b/tests/host/kernel-performance/README.md
+@@ -0,0 +1,57 @@
++# Actual-source optimization checks
++
++The fixtures accept a public source root. They extract named production
++functions or the exact allocator search region, add host-only counters, and
++compile with `cc -std=c11 -O2 -g -shared -fPIC -DSARCH_XBOX -Wall -Wextra
++-Wno-multichar -Wno-unused-function`. Pin supply/API code is compiled with
++`cc -std=c11 -O2 -Wall -Wextra` and the existing minimal host headers.
++No operation counter or alternate implementation is shipped in the kernel.
++
++```sh
++python3 tests/host/kernel-performance/check.py SOURCE_ROOT OUTPUT
++python3 tests/host/kernel-performance/check.py CANDIDATE OUTPUT --optimized --compare BASELINE
++python3 tests/host/kernel-performance/pins.py BASELINE OUTPUT
++python3 tests/host/kernel-performance/pins.py CANDIDATE OUTPUT --optimized
++python3 tests/host/kernel-performance/pins.py CANDIDATE OUTPUT --optimized --diagnostics
++```
++
++`--optimized` asserts bounded work as well as correctness. It is expected to
++fail against the public baseline. Full pin-scratch invariant scans are opt-in
++with `DBG && NXK_PIN_BATCH_DIAGNOSTICS`; ordinary checked and release builds do
++not run them. The fixture independently checks every scratch slot at every
++exit, including increment-then-reject, invalid PFNs and sparse/bulk boundaries.
++
++Independent scan oracles enumerate first-fit candidate order (including
++wrapped candidates extending across the hint). Python `pow`, `hashlib.sha1`,
++FIPS DES and public three-key EDE known answers supply crypto oracles. Entire
++SHA caller contexts and DES/CBC outputs/feedback/tails are hashed after every
++call and compared across source roots, covering artificial count carry and
++overlapping caller buffers where an independent mathematical oracle cannot
++describe the complete caller state. The fixed PRNG seed is `0x7807`.
++Words 512 is covered with bounded exponents; full-width highbit/dense
++exponents use Words 1/2/32. These fixtures do not model real page tables,
++IRQL timing, allocator backing rollback or native callbacks: the existing
++public API guest remains required for those contracts.
++
++`work.json` retains measured operation arrays for both source roots.
++Slots have family-dependent meanings:
++
++| Slot | Meaning |
++|---|---|
++| 0 | pool bitmap reads / system PDE reads / registry comparisons / big-integer multiply calls |
++| 1 | system PTE reads / big-integer squares (`A == B`) |
++| 2 | DES six-bit loop iterations |
++| 3 | `RtlCopyMemory` bytes |
++| 4 | `RtlZeroMemory` bytes |
++| 5 / 6 | pool allocation attempts / frees |
++| 7 / 8 | SHA compression calls / SHA load bytes |
++| 9 | decoded DES six-bit groups |
++| 10 | pool candidate probes |
++| 11 / 12 | big-integer 64-bit products / Montgomery factor products |
++| 13 | bit-reduction steps |
++
++Pin logs retain each success/rejection size, alias mode, translation count,
++scalar/bulk cleared bytes and bulk clear count. These are source work counts,
++not throughput or emulated cycle measurements. The initial 64-page pin
++budget remains a tuning candidate until paired guest timings establish its
++crossover, especially added translations on small rejected prefixes.
+diff --git a/tests/host/kernel-performance/check.py b/tests/host/kernel-performance/check.py
+new file mode 100644
+index 00000000..0e5391b8
+--- /dev/null
++++ b/tests/host/kernel-performance/check.py
+@@ -0,0 +1,452 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Compile exact production bodies; independent oracles plus work counters.
++
++Usage: check.py SOURCE_ROOT OUTPUT [--optimized] [--compare OTHER_SOURCE_ROOT]
++Counters are injected only into extracted host translation units, never shipped.
++"""
++import argparse
++import ctypes as C
++import hashlib
++import json
++from pathlib import Path
++import random
++import re
++import subprocess
++import sys
++
++sys.set_int_max_str_digits(0)
++
++HERE = Path(__file__).resolve().parent
++U = C.c_uint32
++B = C.c_ubyte
++P = C.c_void_p
++checks = 0
++
++
++def check(value, description):
++    global checks
++    checks += 1
++    assert value, description
++
++
++def function(text, name):
++    """Named, brace-balanced production function, failing on missing markers."""
++    hit = re.search(r'\b' + name + r'\s*\([^;]*?\)\s*\{', text)
++    assert hit, name
++    start = text.rfind('\n\n', 0, hit.start()) + 2
++    brace = text.index('{', hit.start())
++    depth = 1
++    end = brace + 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[start:end] + '\n'
++
++
++SHIM = r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++#include <stdlib.h>
++#include <assert.h>
++typedef uint32_t ULONG, *PULONG, PFN_NUMBER, PFN_COUNT;
++typedef uint16_t USHORT, *PUSHORT;
++typedef uint8_t UCHAR, *PUCHAR, BOOLEAN, KIRQL;
++typedef uint64_t ULONGLONG;
++typedef uintptr_t ULONG_PTR;
++typedef size_t SIZE_T;
++typedef void VOID, *PVOID;
++typedef int INT;
++#define NTAPI
++#define IN
++#define _In_
++#define _Out_
++#define _Inout_
++#define _In_reads_(n)
++#define _In_reads_bytes_(n)
++#define _Out_writes_(n)
++#define _Inout_updates_(n)
++#define C_ASSERT(x) _Static_assert(x, #x)
++#define FIELD_OFFSET(t,f) offsetof(t,f)
++#define TRUE 1
++#define FALSE 0
++#define NonPagedPool 0
++#define PAGE_SIZE 4096UL
++#define PAGE_SHIFT 12
++#define ASSERT assert
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++uint64_t counters[16];
++static ULONG fail_alloc;
++static VOID *copy_memory(VOID *d, const VOID *s, SIZE_T n) {
++ counters[3]+=n;return memcpy(d,s,n);
++}
++static VOID zero_memory(VOID *p, SIZE_T n) { counters[4]+=n;memset(p,0,n); }
++#define RtlCopyMemory copy_memory
++#define RtlZeroMemory zero_memory
++static VOID *ExAllocatePoolWithTag(ULONG p,SIZE_T n,ULONG t) {
++ (void)p;(void)t;++counters[5];return fail_alloc ? NULL : malloc(n);
++}
++static VOID ExFreePool(VOID *p) { ++counters[6];free(p); }
++VOID reset_counters(VOID) { memset(counters,0,sizeof(counters)); }
++VOID set_oom(ULONG v) { fail_alloc=v; }
++'''
++
++
++def build(root, output):
++    root, output = Path(root), Path(output)
++    output.mkdir(parents=True, exist_ok=True)
++    crypto = (root / 'ntoskrnl/xb/crypto.c').read_text()
++    sha = (root / 'sdk/lib/cryptlib/sha1.c').read_text().replace('#include "sha1.h"', '')
++    sha = sha.replace('static void SHA1Transform(ULONG State[5], UCHAR Buffer[64])\n{',
++                      'static void SHA1Transform(ULONG State[5], UCHAR Buffer[64])\n{\n ++counters[7];')
++    prefix = crypto[crypto.index('typedef struct _XC_SHA_CONTEXT'):crypto.index('/* RC4 key schedule.')]
++    # Skip unrelated resumed-HMAC routines, retaining exact Xc wrapper bodies.
++    prefix = prefix[:prefix.index('/*\n * HMAC-SHA1 resumed')] + ''.join(
++        function(crypto, n) for n in ['XcpSHAInit', 'XcpSHAUpdate', 'XcpSHAFinal'])
++    prefix = prefix.replace('XcpShaLoad(SHA_CTX *Ctx, const XC_SHA_CONTEXT *Xc)\n{',
++                            'XcpShaLoad(SHA_CTX *Ctx, const XC_SHA_CONTEXT *Xc)\n{\n uint64_t before=counters[3];')
++    prefix = prefix.replace('\n}\n', '\n}\n', 1)
++    load = function(prefix, 'XcpShaLoad')
++    load_counted = load[:-2] + ' counters[8]+=counters[3]-before;\n}\n'
++    prefix = prefix.replace(load, load_counted)
++    bn = crypto[crypto.index('#define BN_MAX_WORDS'):crypto.index('/* --- RSA public-key')]
++    bn = bn.replace('Carry += (ULONGLONG)A[j] * B[i]', '++counters[11]; Carry += (ULONGLONG)A[j] * B[i]')
++    bn = bn.replace('Factor = T[0] * MInv;', '++counters[12]; Factor = T[0] * MInv;')
++    bn = bn.replace('Carry = ((ULONGLONG)Factor * M[0]', '++counters[11]; Carry = ((ULONGLONG)Factor * M[0]')
++    bn = bn.replace('Carry += (ULONGLONG)Factor * M[j]', '++counters[11]; Carry += (ULONGLONG)Factor * M[j]')
++    bn = bn.replace('BnDoubleMod(Result, (Value[i / 32]', '++counters[13], BnDoubleMod(Result, (Value[i / 32]')
++    for name in ['BnMontMul', 'BnMulMod']:
++        f = function(bn, name)
++        bn = bn.replace(f, f.replace('{', '{\n ++counters[0]; counters[1]+=(A==B);', 1))
++    des = crypto[crypto.index('#define DES_TABLE_BYTES'):crypto.index('/* --- the crypto vector')]
++    f = function(des, 'DesLoadKey')
++    f = f.replace('Value |= (UCHAR)', '++counters[2], Value |= (UCHAR)')
++    f = f.replace('Key->Round[r][k] = Value;', '++counters[9]; Key->Round[r][k] = Value;')
++    des = des.replace(function(des, 'DesLoadKey'), f)
++    exports = '\n'.join('extern __typeof__(' + name + ') host_' + name + ' __attribute__((alias("' + name + '")));'
++        for name in ['XcpSHAInit', 'XcpSHAUpdate', 'XcpSHAFinal', 'XcpModExp', 'XcpKeyTable', 'XcpBlockCrypt', 'XcpBlockCryptCBC'])
++    crypto_unit = SHIM + '\ntypedef struct { UCHAR Buffer[64]; ULONG State[5],Count[2]; } SHA_CTX, *PSHA_CTX;\n' + sha + prefix + bn + des + exports + '\nVOID decode_table(PUCHAR out, const UCHAR *table) { DES_KEY k; DesLoadKey(&k,table);memcpy(out,&k,sizeof(k)); }\n'
++
++    pool = (root / 'ntoskrnl/xb/mm/poolpages.c').read_text()
++    pool_range = function(pool, 'NxppTestRange')
++    pool_range = pool_range.replace('NxppUsedMap[i >> 5]', 'read_map(i >> 5)')
++    search = pool[pool.index('    /* First fit from the rotating hint'):pool.index('    /* Back the run;')]
++    search = search[:search.index('    if (Start == (ULONG)-1)\n    {\n        KeReleaseSpinLock')]
++    search = search.replace('if (NxppTestRange', 'if ((++counters[10], NxppTestRange')
++    # Added instrumentation wraps only condition evaluation.
++    search = search.replace('Count))', 'Count)))').replace('&Next))', '&Next)))')
++    pool_unit = SHIM + r'''
++#define NXPP_PAGES 4096
++static ULONG NxppScanHint, NxppUsedMap[128];
++static ULONG read_map(ULONG i) { ++counters[0];return NxppUsedMap[i]; }
++VOID set_map(ULONG i,ULONG v) { NxppUsedMap[i]=v; }
++''' + pool_range + '\nULONG pool_find(ULONG Count,ULONG Hint) { ULONG Start; NxppScanHint=Hint;\n' + search + '\nreturn Start; }\n'
++
++    sysva = function((root / 'ntoskrnl/xb/mm/sysva.c').read_text(), 'NxpSysVaFindHoleLocked')
++    sysva = sysva.replace('Pde[Va >> 22]', '(++counters[0], Pde[Va >> 22])').replace('Pte[Va >> PAGE_SHIFT]', '(++counters[1], Pte[Va >> PAGE_SHIFT])')
++    sys_unit = SHIM + r'''
++static ULONG pdes[1024], ptes[1048576];
++#define NXK_PDE_BASE pdes
++#define NXK_PTE_BASE ptes
++#define NXK_SYSMEM_BASE 0xD0000000UL
++#define NXK_SYSMEM_LIMIT 0xD4000000UL
++VOID set_pde(ULONG i,ULONG v) { pdes[0xD0000000UL/0x400000+i]=v; }
++VOID set_pte(ULONG i,ULONG v) { ptes[0xD0000000UL/4096+i]=v; }
++''' + sysva + '\nULONG_PTR sys_find(ULONG n) { return NxpSysVaFindHoleLocked(n); }\n'
++
++    ob = (root / 'ntoskrnl/xb/obcreate.c').read_text()
++    remember = function(ob, 'XobRememberType')
++    remember = remember.replace('CONTAINING_RECORD(Entry, XB_TITLE_TYPE, Link)->Type == Type', '(++counters[0], CONTAINING_RECORD(Entry, XB_TITLE_TYPE, Link)->Type == Type)')
++    registry_unit = SHIM + r'''
++typedef struct _LIST_ENTRY { struct _LIST_ENTRY *Flink,*Blink; } LIST_ENTRY,*PLIST_ENTRY;
++typedef struct { LIST_ENTRY Link; PVOID Type; } XB_TITLE_TYPE,*PXB_TITLE_TYPE;
++#define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p)-offsetof(t,f)))
++static LIST_ENTRY XobTitleTypes;
++static ULONG XobTitleTypeCount, XobTitleTypeLock, locked, race;
++static VOID InitializeListHead(PLIST_ENTRY h) { h->Flink=h->Blink=h; }
++static VOID InsertTailList(PLIST_ENTRY h,PLIST_ENTRY e) {
++ e->Flink=h;e->Blink=h->Blink;h->Blink->Flink=e;h->Blink=e;
++}
++static VOID KeAcquireSpinLock(ULONG *l,KIRQL *i) { (void)l;*i=0;assert(!locked);locked=1; }
++static VOID KeReleaseSpinLock(ULONG *l,KIRQL i) { (void)l;(void)i;assert(locked);locked=0; }
++static VOID XobRememberType(PVOID Type);
++static VOID *registry_alloc(ULONG p,SIZE_T n,ULONG t) {
++ assert(!locked);
++ if(race) { race=0;XobRememberType((PVOID)(uintptr_t)999); }
++ return ExAllocatePoolWithTag(p,n,t);
++}
++#define ExAllocatePoolWithTag registry_alloc
++''' + remember + r'''
++VOID registry_reset(VOID) {
++ if(XobTitleTypeCount) { PLIST_ENTRY e=XobTitleTypes.Flink;
++ while(e!=&XobTitleTypes) { PLIST_ENTRY next=e->Flink;free(e);e=next; } }
++ XobTitleTypeCount=0;memset(&XobTitleTypes,0,sizeof(XobTitleTypes));
++}
++ULONG remember_type(ULONG t,ULONG r) { race=r;XobRememberType((PVOID)(uintptr_t)t);return XobTitleTypeCount; }
++'''
++    units = dict(crypto=crypto_unit, pool=pool_unit, sysva=sys_unit, registry=registry_unit)
++    libs = {}
++    for name, unit in units.items():
++        src, so = output / (name + '.c'), output / (name + '.so')
++        src.write_text(unit)
++        command = ['cc', '-std=c11', '-O2', '-g', '-shared', '-fPIC', '-DSARCH_XBOX', '-Wall', '-Wextra', '-Wno-multichar', '-Wno-unused-function', str(src), '-o', str(so)]
++        subprocess.run(command, check=True)
++        lib = libs[name] = C.CDLL(str(so.resolve()))
++        lib.counters = (C.c_uint64 * 16).in_dll(lib, 'counters')
++    for name in ['XcpSHAInit', 'XcpSHAUpdate', 'XcpSHAFinal', 'XcpKeyTable', 'XcpBlockCrypt', 'XcpBlockCryptCBC']:
++        getattr(libs['crypto'], 'host_' + name).restype = None
++    libs['crypto'].host_XcpModExp.restype = U
++    libs['pool'].pool_find.restype = U
++    libs['sysva'].sys_find.restype = C.c_size_t
++    return libs
++
++
++def run(libs, optimized):
++    rng = random.Random(0x7807)
++    work = {}
++    pool = libs['pool']
++    patterns = [[1] * 4096, [i % 2 for i in range(4096)], [int(i % 256 == 255) for i in range(4096)], [0] * 4096]
++    patterns += [[int(rng.random() < .2) for _ in range(4096)] for _ in range(4)]
++    for pi, bits in enumerate(patterns):
++        for i in range(128):
++            pool.set_map(i, sum(bits[i * 32 + j] << j for j in range(32)))
++        for count in [1, 2, 4, 16, 256, 1024, 4096, 4097, 0]:
++            for hint in [0, 1, 15, 255, 2048, 4095]:
++                starts = list(range(hint, 4096 - count + 1)) + list(range(0, min(hint, 4096 - count + 1)))
++                expected = next((i for i in starts if not any(bits[i:i + count])), 0xffffffff)
++                pool.reset_counters()
++                got = pool.pool_find(count, hint)
++                check(got == expected, f'pool first fit pattern={pi} count={count} hint={hint}: {got}/{expected}')
++                if (pi, count, hint) == (2, 256, 0):
++                    work['pool'] = list(pool.counters)
++                    if optimized:
++                        check(pool.counters[0] == 4096, 'pool conflict skip must read 4096 bits')
++
++    sys = libs['sysva']
++    for pattern in range(5):
++        pdes = [int(pattern == 1 or (pattern > 1 and i % 2 == 0)) for i in range(16)]
++        bits = [int(pdes[i // 1024] and (pattern == 1 or (pattern == 2 and i % 71 == 0) or (pattern == 3 and i < 700) or (pattern == 4 and i % 1024 > 1000))) for i in range(16384)]
++        for i, v in enumerate(pdes):
++            sys.set_pde(i, v)
++        for i, v in enumerate(bits):
++            sys.set_pte(i, v)
++        for count in [0, 1, 16, 1024, 1025, 4096, 16384, 16385]:
++            expected = next((0xD0000000 + i * 4096 for i in range(16385 - count) if count and not any(bits[i:i + count])), 0)
++            sys.reset_counters()
++            check(sys.sys_find(count) == expected, f'sys first fit pattern={pattern} count={count}')
++            if (pattern, count) == (0, 4096):
++                work['sysva'] = list(sys.counters)
++                if optimized:
++                    check(sys.counters[0] == 4, 'sys absent span must read four PDEs')
++
++    reg = libs['registry']
++    for n in [1, 8, 64]:
++        reg.registry_reset()
++        reg.reset_counters()
++        for i in range(1, n + 1):
++            check(reg.remember_type(i, 0) == i, 'registry insertion')
++        work['registry-cold' + str(n)] = list(reg.counters)
++        reg.reset_counters()
++        for i in range(1, n + 1):
++            check(reg.remember_type(i, 0) == n, 'registry duplicate')
++        work['registry' + str(n)] = list(reg.counters)
++        if optimized:
++            check(reg.counters[5] == 0 and reg.counters[6] == 0, 'known registry no allocation')
++    reg.registry_reset()
++    reg.set_oom(1)
++    check(reg.remember_type(1, 0) == 0, 'lazy registry silent OOM')
++    reg.set_oom(0)
++    check(reg.remember_type(1, 0) == 1, 'registry recovery after OOM')
++    reg.registry_reset()
++    check(reg.remember_type(999, 1) == 1, 'registry controlled duplicate allocation race')
++    check(reg.counters[6] >= 1, 'registry duplicate race frees redundant node')
++    reg.registry_reset()
++    check(reg.remember_type(1000, 1) == 2, 'registry concurrent different type insertion')
++    reg.registry_reset()
++
++    crypto = libs['crypto']
++    mod = crypto.host_XcpModExp
++    for words in [1, 2, 32, 64, 512]:
++        exps = [0, 1, 2, 3, 65537, 1 << 31, (1 << 32) - 1]
++        for exponent in exps:
++            for modulus in [0, 1, 2, 17, (1 << (words * 32)) - 59, (1 << (words * 32)) - 60]:
++                # Large-word dense/highbit even cases remain bounded by using
++                # a small numeric modulus; exercise full-width with exponents <=3.
++                if words >= 64 and exponent > 3 and modulus > 17:
++                    continue
++                base = (1 << (words * 32 - 1)) + 123
++                arr = lambda value: (U * words)(*((value >> (32 * i)) & 0xffffffff for i in range(words)))
++                for alias in ['none', 'base', 'exp', 'mod']:
++                    a, e, m = arr(base), arr(exponent), arr(modulus)
++                    out = dict(base=a, exp=e, mod=m).get(alias, arr(0xA5))
++                    old = bytes(out)
++                    crypto.reset_counters()
++                    status = mod(out, a, e, m, words)
++                    check(status == bool(modulus), 'modexp zero modulus status')
++                    got = int.from_bytes(bytes(out), 'little')
++                    if modulus:
++                        # Baseline even modulus exponent zero returns one even
++                        # for modulus one (odd conversion yields zero).
++                        check(got == pow(base, exponent, modulus), f'modexp pow W={words} E={exponent} Mbits={modulus.bit_length()} alias={alias}')
++                    else:
++                        check(bytes(out) == old, 'modexp rejected output untouched')
++                    if (words, exponent, modulus, alias) == (1, 3, 17, 'none'):
++                        work['modexp'] = list(crypto.counters)
++                        if optimized:
++                            check(crypto.counters[1] == 1, 'only one useful square for exponent three')
++                    if (words, exponent, modulus, alias) == (1, 3, 2, 'none'):
++                        work['modexp-even'] = list(crypto.counters)
++    a = (U * 513)(*([0xA5] * 513)); e = (U * 513)(3); m = (U * 513)(17)
++    for words in [0, 513]:
++        check(mod(a, a, e, m, words) == 0 and a[0] == 0xA5, 'modexp word bound rejection')
++    crypto.set_oom(1)
++    check(mod(a, a, e, m, 1) == 0 and a[0] == 0xA5, 'modexp allocation failure output')
++    crypto.set_oom(0)
++    # Multiword top-bit and dense exponents, plus full-width random operands.
++    for words in [1, 2, 32]:
++        for exponent in [1 << (words * 32 - 1), (1 << (words * 32)) - 1]:
++            for modulus in [17, 18]:
++                arr = lambda value: (U * words)(*((value >> (32 * i)) & 0xffffffff for i in range(words)))
++                a, e, m, out = arr(5), arr(exponent), arr(modulus), arr(0)
++                check(mod(out,a,e,m,words)==1 and int.from_bytes(bytes(out),'little')==pow(5,exponent,modulus), 'modexp multiword highbit/dense independent oracle')
++        for _ in range(4):
++            modulus=rng.getrandbits(words*32) | 2
++            base=rng.getrandbits(words*32)
++            exponent=rng.choice([0,1,2,3,65537])
++            a,e,m,out=arr(base),arr(exponent),arr(modulus),arr(0)
++            check(mod(out,a,e,m,words)==1 and int.from_bytes(bytes(out),'little')==pow(base,exponent,modulus),'modexp random independent oracle')
++
++    data = bytes(rng.randrange(256) for _ in range(1048576 + 64))
++    sha_records = []
++    for remainder in range(64):
++        for length in [0, 1, 55, 56, 63, 64, 65, 4096, 1048576]:
++            for offset in range(4):
++                context = (B * 128)(*([0xCC] * 128))
++                ptr = C.byref(context, offset)
++                digest = (B * 20)()
++                crypto.host_XcpSHAInit(ptr)
++                message = data[:remainder + length]
++                first = C.create_string_buffer(message[:remainder])
++                crypto.host_XcpSHAUpdate(ptr, first, remainder)
++                crypto.reset_counters()
++                body = C.create_string_buffer(message[remainder:])
++                crypto.host_XcpSHAUpdate(ptr, body, length)
++                if (remainder, length, offset) == (0, 1, 0):
++                    work['sha'] = list(crypto.counters)
++                    if optimized:
++                        check(crypto.counters[8] == 28, 'empty live SHA prefix loads 28 bytes')
++                if (remainder, length, offset) == (63, 1, 0):
++                    work['sha63'] = list(crypto.counters)
++                sha_records.append(bytes(context))
++                crypto.host_XcpSHAFinal(ptr, digest)
++                check(bytes(digest) == hashlib.sha1(message).digest(), f'SHA independent digest r={remainder} l={length} o={offset}')
++                check(bytes(context)[offset:offset + 24] == b'\xcc' * 24, 'SHA reserved canary')
++                check(bytes(context)[offset + 52:offset + 116] == bytes(64), 'SHA final full buffer reset')
++                check(bytes(context)[:offset] == b'\xcc' * offset and bytes(context)[offset + 116:] == b'\xcc' * (12 - offset), 'SHA outside canaries')
++                sha_records.append(bytes(context))
++
++    # Streamed splits, count carry, input/context and digest/context aliases.
++    # The independent digest covers valid stream counts; synthetic carry and
++    # overlapping final output retain complete baseline state as the oracle.
++    for offset in range(4):
++        context = (B * 132)(*([0xCC] * 132))
++        ptr = C.byref(context, offset)
++        crypto.host_XcpSHAInit(ptr)
++        cursor = 0
++        while cursor < 4096:
++            length = min(rng.randrange(1, 131), 4096 - cursor)
++            part = C.create_string_buffer(data[cursor:cursor + length])
++            crypto.host_XcpSHAUpdate(ptr, part, length)
++            sha_records.append(bytes(context))
++            cursor += length
++        digest = (B * 20)()
++        crypto.host_XcpSHAFinal(ptr, digest)
++        check(bytes(digest) == hashlib.sha1(data[:4096]).digest(), 'SHA random split independent oracle')
++        for carry in [False, True]:
++            for input_at in [0, 24, 44, 52, 68]:
++                for length in [0, 1, 16, 55, 64]:
++                    # Largest input alias reaches offset+68+64 (up to135).
++                    context = (B * 136)(*([0xCC] * 136))
++                    ptr = C.byref(context, offset)
++                    crypto.host_XcpSHAInit(ptr)
++                    count = 0xfffffff0 if carry else 16
++                    raw = count.to_bytes(4, 'little')
++                    for i, value in enumerate(raw):
++                        context[offset + 48 + i] = value
++                    crypto.host_XcpSHAUpdate(ptr, C.byref(context, offset + input_at), length)
++                    if carry and length >= 16:
++                        check(int.from_bytes(bytes(context)[offset + 44:offset + 48], 'little') >= 1, 'SHA count carry')
++                    sha_records.append(bytes(context))
++                    for output_at in [0, 24, 44, 52, 96]:
++                        clone = (B * 136).from_buffer_copy(context)
++                        crypto.host_XcpSHAFinal(C.byref(clone, offset), C.byref(clone, offset + output_at))
++                        sha_records.append(bytes(clone))
++
++    des_records = []
++    # Independent FIPS DES and published three-key EDE known answers.
++    for cipher, key, plain, expected in [
++        (0, '133457799BBCDFF1', '0123456789ABCDEF', '85E813540F0AB405'),
++        (1, '0123456789ABCDEF23456789ABCDEF01456789ABCDEF0123', 'FEDCBA9876543210', '0737F6C53750D4A4')]:
++        table = (B * 384)(); keybuf = C.create_string_buffer(bytes.fromhex(key))
++        crypto.host_XcpKeyTable(cipher, table, keybuf)
++        out = (B * 8)(); inp = C.create_string_buffer(bytes.fromhex(plain))
++        crypto.reset_counters()
++        crypto.host_XcpBlockCrypt(cipher, out, inp, table, 1)
++        check(bytes(out) == bytes.fromhex(expected), 'DES independent known answer')
++        work['des' + str(cipher)] = list(crypto.counters)
++        if optimized:
++            check(crypto.counters[2] == 0, 'DES reversal has no per-bit iterations')
++    for six in range(64):
++        # One packed slot for every schedule round/S-box; wrap bit positions
++        # are encoded independently rather than copying the decoder.
++        for box in range(8):
++            table = bytearray(128)
++            shift = ((box // 2) * 8 + (6 if box % 2 else 2)) % 32
++            word = sum(((six >> b) & 1) << ((shift + b) % 32) for b in range(6))
++            for round in range(16):
++                at = round * 8 + (box % 2) * 4
++                table[at:at + 4] = word.to_bytes(4, 'little')
++            # Expose exact decoder output for exhaustive bit equivalence.
++            tablebuf = C.create_string_buffer(bytes(table)); decoded = (B * 128)()
++            crypto.decode_table(decoded, tablebuf)
++            check(all(decoded[r * 8 + box] == int(f'{six:06b}'[::-1], 2) for r in range(16)), 'DES exhaustive reverse6')
++    for cipher in [0, 1, 2, 0xffffffff]:
++        for op in [0, 1, 2]:
++            for offset in range(4):
++                table = (B * 388)(*([0xA7] * 388))
++                key = C.create_string_buffer(bytes(range(24)))
++                crypto.host_XcpKeyTable(U(cipher), C.byref(table, offset), key)
++                table[offset + 7] ^= 0x91  # public table remains mutable
++                for length in list(range(16)) + [64, 4096]:
++                    for inplace in [False, True]:
++                        inp = C.create_string_buffer(b'\xa9' * offset + data[:length] + b'\xcc' * 8)
++                        out = inp if inplace else C.create_string_buffer(b'\xa9' * offset + b'\xcc' * (length + 8))
++                        fb = C.create_string_buffer(b'\x19' * 8)
++                        crypto.host_XcpBlockCryptCBC(U(cipher), length, C.byref(out,offset), C.byref(inp,offset), C.byref(table, offset), op, fb)
++                        check(out.raw[offset + length // 8 * 8:] == (data[length // 8 * 8:length] + b'\xcc' * 8 + b'\x00' if inplace else b'\xcc' * (length % 8 + 8) + b'\x00'), 'DES CBC untouched tails')
++                        check(out.raw[:offset] == b'\xa9' * offset, 'DES leading canary')
++                        des_records.append(out.raw + fb.raw)
++    work['state_hashes'] = dict(sha=hashlib.sha256(b''.join(sha_records)).hexdigest(), des=hashlib.sha256(b''.join(des_records)).hexdigest())
++    return work
++
++
++def main():
++    parser = argparse.ArgumentParser()
++    parser.add_argument('source_root')
++    parser.add_argument('output')
++    parser.add_argument('--optimized', action='store_true')
++    parser.add_argument('--compare')
++    args = parser.parse_args()
++    libs = build(args.source_root, Path(args.output) / 'candidate')
++    actual = run(libs, args.optimized)
++    if args.compare:
++        other = run(build(args.compare, Path(args.output) / 'baseline'), False)
++        check(actual['state_hashes'] == other['state_hashes'], 'whole SHA contexts and DES CBC baseline differential')
++        actual = dict(candidate=actual, baseline=other)
++    (Path(args.output) / 'work.json').write_text(json.dumps(actual, indent=2) + '\n')
++    print(f'kernel optimization oracle checks: {checks}/{checks} passed')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/host/kernel-performance/pins.c b/tests/host/kernel-performance/pins.c
+new file mode 100644
+index 00000000..0a90f5df
+--- /dev/null
++++ b/tests/host/kernel-performance/pins.c
+@@ -0,0 +1,117 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <ntoskrnl.h>
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++typedef USHORT *PUSHORT;
++#define ASSERT assert
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define MI_ASSERT_PFN_LOCK_HELD() ((void)0)
++#define MAXUSHORT 0xffff
++#define MAXULONG_PTR UINTPTR_MAX
++#define NXK_MM_PHYS
++static ULONG MmAvailablePages;
++static unsigned translations, cleared, clears, valid_pages, invalid_at, aliases;
++static unsigned checks, optimized;
++static BOOLEAN NxkMmRetailShapedMap(void) { return FALSE; }
++static VOID MiZeroPhysicalPage(PFN_NUMBER p) { (void)p; }
++static BOOLEAN NxkMmPersistentPage(PFN_NUMBER p) { (void)p;return FALSE; }
++static BOOLEAN NxMmIsAddressValid(PVOID p) {
++    ULONG_PTR i=((ULONG_PTR)p-0x1000)/PAGE_SIZE;
++    return i<valid_pages && i!=invalid_at;
++}
++static ULONG_PTR NxMmGetPhysicalAddress(PVOID p) {
++    ULONG_PTR i=((ULONG_PTR)p-0x1000)/PAGE_SIZE;
++    ++translations;
++    return (aliases?16:16+i)*PAGE_SIZE;
++}
++static void counted_zero(void *p,size_t n) { cleared+=(unsigned)n;++clears;memset(p,0,n); }
++#undef RtlZeroMemory
++#define RtlZeroMemory counted_zero
++#include "pins-actual.inc"
++#define CHECK(c) do{++checks;if(!(c)){fprintf(stderr,"FAIL %u: %s\n",checks,#c);exit(1);}}while(0)
++static UCHAR metadata[32768*(sizeof(ULONG)+2*sizeof(USHORT))];
++static void init(unsigned n,unsigned alias) {
++    NxkPageSupplyInitialize(32767,metadata);
++    valid_pages=n;invalid_at=~0U;aliases=alias;
++    translations=cleared=clears=0;
++}
++static void clean(void) {
++    if(optimized) for(unsigned i=0;i<=NxpHighestPfn;++i) CHECK(NxpPinBatch[i]==0);
++}
++int main(int argc,char **argv) {
++    optimized=argc>1 && atoi(argv[1]);
++    unsigned sizes[]={0,1,2,16,32,64,65,128,256,4096};
++    for(unsigned s=0;s<sizeof(sizes)/sizeof(*sizes);++s) {
++        unsigned n=sizes[s];
++        for(unsigned alias=0;alias<2;++alias) {
++            init(n,alias);
++            MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,FALSE);
++            CHECK(NxpPins[16]==(alias?n:!!n));clean();
++            printf("pin-work success n=%u alias=%u translations=%u cleared=%u bulk=%u\n",n,alias,translations,cleared,clears);
++            if(optimized) CHECK(cleared==(n>64?65536:2*n));
++            MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,FALSE);clean();
++            CHECK(NxpPins[16]==2*(alias?n:!!n));
++            MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,TRUE);clean();
++            MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,TRUE);clean();
++            CHECK(NxpPins[16]==0);
++            /* Underflow after RecordPin increments then rejects is inert. */
++            MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,TRUE);clean();
++            CHECK(NxpPins[16]==0);
++            if(!n) continue;
++            unsigned positions[]={0,n/2,n-1};
++            for(unsigned p=0;p<3;++p) {
++                init(n,alias);invalid_at=positions[p];
++                MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,FALSE);clean();
++                CHECK(NxpPins[16]==0);
++                unsigned prefix=positions[p];
++                printf("pin-work rejected n=%u prefix=%u alias=%u translations=%u cleared=%u bulk=%u\n",n,prefix,alias,translations,cleared,clears);
++                if(optimized) {
++                    CHECK(cleared==(prefix>64?65536:2*prefix));
++                    CHECK(translations==prefix*(prefix<=64?2:1));
++                }
++                invalid_at=~0U;
++                MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,FALSE);clean();
++                CHECK(NxpPins[16]==(alias?n:1));
++            }
++        }
++    }
++    /* Explicit rejection crossovers, independent of first/middle/last. */
++    unsigned prefixes[]={32,64,65,128};
++    for(unsigned alias=0;alias<2;++alias) {
++        for(unsigned i=0;i<4;++i) {
++            unsigned prefix=prefixes[i];init(4096,alias);invalid_at=prefix;
++            MmLockUnlockBufferPages((PVOID)0x1000,4096*PAGE_SIZE,FALSE);clean();
++            CHECK(NxpPins[16]==0);
++            printf("pin-work crossover prefix=%u alias=%u translations=%u cleared=%u bulk=%u\n",prefix,alias,translations,cleared,clears);
++            if(optimized) {
++                CHECK(translations==prefix*(prefix<=64?2:1));
++                CHECK(cleared==(prefix<=64?2*prefix:65536));
++            }
++        }
++    }
++    init(2,0);MmLockUnlockBufferPages((PVOID)0x1001,PAGE_SIZE,FALSE);clean();
++    CHECK(NxpPins[16]==1&&NxpPins[17]==1);
++    MmLockUnlockBufferPages((PVOID)0x1001,PAGE_SIZE,TRUE);clean();
++    CHECK(NxpPins[16]==0&&NxpPins[17]==0);
++    init(2,1);MmLockUnlockPhysicalPage(16*PAGE_SIZE,FALSE);
++    MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,TRUE);
++    CHECK(NxpPins[16]==1);clean();
++    MmLockUnlockBufferPages((PVOID)(UINTPTR_MAX-1),PAGE_SIZE,FALSE);clean();
++    CHECK(NxpPins[16]==1);
++    /* A translated invalid PFN must never index scratch. */
++    init(4096,0);NxpHighestPfn=16;
++    MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,FALSE);clean();
++    CHECK(NxpPins[16]==0);NxpHighestPfn=32767;
++    init(2,1);NxpPins[16]=NXP_PIN_LIMIT-1;
++    MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,FALSE);clean();
++    CHECK((NxpPins[16]&NXP_PIN_OVERFLOW)!=0);
++    NxkPageSupplyReturn(16);
++    MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,TRUE);clean();
++    CHECK(NxkPageSupplyIsPinned(16)&&!NxkPageSupplyIsFree(16));
++    init(2,1);MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,FALSE);
++    NxkPageSupplyReturn(16);
++    MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,TRUE);clean();
++    CHECK(NxkPageSupplyIsFree(16));
++    printf("pin optimization checks: %u/%u passed\n",checks,checks);
++}
+diff --git a/tests/host/kernel-performance/pins.py b/tests/host/kernel-performance/pins.py
+new file mode 100644
+index 00000000..9cd1a1f9
+--- /dev/null
++++ b/tests/host/kernel-performance/pins.py
+@@ -0,0 +1,19 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++from pathlib import Path
++import subprocess
++import sys
++root, output = map(Path, sys.argv[1:3])
++here = Path(__file__).resolve().parent
++output.mkdir(parents=True, exist_ok=True)
++supply = (root / 'ntoskrnl/xb/mm/pagesupply.c').read_text()
++api = (root / 'ntoskrnl/xb/mm/api.c').read_text()
++body = supply[:supply.index('/*\n * Frame ownership:')] + '\n#endif\n'
++body += supply[supply.index('BOOLEAN\nNxkPageSupplyIsFree'):supply.index('BOOLEAN\nNxkPageSupplyTakeSpecific')]
++body += api[api.index('/* LOCK / UNLOCK '):api.index('/* QUERIES ')]
++# Count real scalar stores without altering production sources.
++body = body.replace('NxpPinBatch[Page] = 0;', '{ NxpPinBatch[Page] = 0; cleared += sizeof(USHORT); }')
++(output / 'pins-actual.inc').write_text(body)
++diagnostics = ['-DDBG=1', '-DNXK_PIN_BATCH_DIAGNOSTICS'] if '--diagnostics' in sys.argv else []
++subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra'] + diagnostics + ['-I' + str(here.parent / 'clean-room/include'), '-I' + str(output), '-I' + str(root / 'ntoskrnl/xb/mm'), str(here / 'pins.c'), '-o', str(output / 'pins')], check=True)
++subprocess.run([str(output / 'pins'), '1' if '--optimized' in sys.argv else '0'], check=True)
+diff --git a/tests/xbe/kernel-performance/Makefile b/tests/xbe/kernel-performance/Makefile
+new file mode 100644
+index 00000000..c20f34aa
+--- /dev/null
++++ b/tests/xbe/kernel-performance/Makefile
+@@ -0,0 +1,5 @@
++XBE_TITLE = kernel-performance
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /usr/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/kernel-performance/README.md b/tests/xbe/kernel-performance/README.md
+new file mode 100644
+index 00000000..7732380f
+--- /dev/null
++++ b/tests/xbe/kernel-performance/README.md
+@@ -0,0 +1,63 @@
++# Public Xbox kernel performance guest
++
++Build once with the public nxdk checkout, preserve the resulting ISO hash, and
++use the same ISO for both BIOS variants. There are no new ordinals or counters.
++
++```sh
++make -C tests/xbe/kernel-performance NXDK_DIR=/path/to/public/nxdk
++tools/run-xemu --flash /path/to/variant.bin --dvd /path/to/kernel-performance.iso --mem 128 --serial file:/path/to/raw.log
++```
++
++The controller owns sequential builds and direct xemu scheduling. Use its
++established direct-driver environment and capture raw serial and process
++logs. Do not call `tools/api-regression-run` for the paired benchmark: that
++script rebuilds artifacts and deletes its temporary raw logs. The guest
++programs COM1 directly through the existing TAP emitter and issues SMC power
++off after its terminal summary. No HTTP runner is used.
++
++Each line is machine-readable:
++
++```text
++# PERF-META version=1 clock=KeQueryPerformanceCounter frequency=... samples=3
++# PERF workload=pin-64 sample=0 iterations=100 ticks=... correct=1 checksum=...
++# PERF-SUMMARY workloads=... failures=0
++== kernel-performance end PASS ==
++```
++
++TAP includes a known-answer record and one record per workload. Tick values
++are raw differences of the monotonic public 64-bit performance counter;
++frequency is emitted once. Empty-loop/counter overhead is recorded as the
++`empty` workload, without subtracting noise from samples. No timestamps,
++absolute VAs or PFNs are included in checksums. All workloads have fixed
++buffers, seeds, order and repetition counts; allocations are freed between
++cases. Three samples are retained per workload except `object-cold-64`,
++which inserts each new type once and has one genuinely cold sample.
++
++Pin success uses a committed 16-MiB buffer, acquired/released every iteration.
++Rejected prefixes 0/32/64/65 end at a verified reserved but uncommitted guard
++page. Registry warm types are established before measurement and callbacks
++check allocate/delete/free counts. The pool-fragmentation setup fills at most
++4096 single-page allocations, frees pages with public page-index phase 0/1
++modulo 4, verifies a four-page probe fails, then times failed four-page searches.
++The setup and complete cleanup are outside timing. System-VA samples
++include real backing zeroing and per-page zero checks: search-only PDE savings
++can be hidden by unchanged backing work. Page tables persist after first use,
++so the first sample is colder than later samples; no claim of pristine search
++state is made. SHA includes two deterministic hash passes to check reset;
++DES includes encrypt/decrypt round trips. Their times include these checks.
++
++Host tests provide exact first-fit and full caller-state proofs. Run the
++existing `api-regression` guest as well for public RSA, mutable vectors,
++unaligned crypto and object/memory lifecycle regressions. The benchmark is
++representative work, not a complete replacement for that suite. Runtime must
++be measured by the controller; the repetition matrix targets at most 90
++seconds and may need a lower matched repetition count before freezing the
++single ISO if the actual emulator exceeds that bound.
++
++Run at least seven paired baseline/candidate trials, alternating execution
++order, under identical xemu settings and the existing 128-MiB configuration.
++Preserve every raw sample. Report medians, min/max variation and paired
++differences. Claim a timing improvement only beyond observed per-variant
++variation and with a consistent sign in at least six of seven pairs; otherwise
++report only verified work reduction. No gameplay or throughput claim follows
++from these kernel microbenchmarks.
+diff --git a/tests/xbe/kernel-performance/main.c b/tests/xbe/kernel-performance/main.c
+new file mode 100644
+index 00000000..d4c07110
+--- /dev/null
++++ b/tests/xbe/kernel-performance/main.c
+@@ -0,0 +1,248 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * One immutable public-ABI guest for paired baseline/candidate measurements.
++ */
++#include <xboxkrnl/xboxkrnl.h>
++#include "../api-regression/tap.h"
++#include <stdbool.h>
++#include <stdint.h>
++#include <string.h>
++
++#define SAMPLES 3
++#define PIN_BYTES (4096 * PAGE_SIZE)
++static PUCHAR pin_buffer;
++static SIZE_T pin_size;
++static PUCHAR reject_buffer;
++static SIZE_T reject_size;
++static UCHAR data[1048576], table[384], out[4096];
++static OBJECT_TYPE types[128];
++static ULONG allocations, frees, deletes;
++static volatile ULONG empty_sink;
++static ULONG checksum;
++static bool correct;
++static PVOID fragments[4096];
++
++static void mix(ULONG value) { checksum=(checksum^value)*16777619U; }
++static void require(bool value) { if(!value) correct=false; }
++static PVOID NTAPI object_allocate(SIZE_T size,ULONG tag) {
++    ++allocations;return ExAllocatePoolWithTag(size,tag);
++}
++static VOID NTAPI object_free(PVOID value) { ++frees;ExFreePool(value); }
++static VOID NTAPI object_delete(PVOID value) { (void)value;++deletes; }
++static bool create(ULONG type) {
++    PVOID obj=NULL;
++    NTSTATUS status=ObCreateObject(&types[type],NULL,4,&obj);
++    if(status!=STATUS_SUCCESS || !obj) return false;
++    *(PULONG)obj=0x12345678;
++    mix(*(PULONG)obj);
++    ObfDereferenceObject(obj);
++    return true;
++}
++
++typedef enum { EMPTY,PIN,PIN_REJECT,POOL,SYSVA,OBJECT,MODEXP,SHA,DES } KIND;
++typedef struct { const char *name;KIND kind;ULONG size,arg,iterations; } WORK;
++static const WORK workloads[]={
++    {"empty",EMPTY,0,0,1000},
++    {"pin-1",PIN,1,0,1000}, {"pin-16",PIN,16,0,500},
++    {"pin-64",PIN,64,0,100}, {"pin-65",PIN,65,0,100},
++    {"pin-256",PIN,256,0,32}, {"pin-4096",PIN,4096,0,4},
++    {"pin-reject-0",PIN_REJECT,0,0,500},
++    {"pin-reject-32",PIN_REJECT,32,0,100},
++    {"pin-reject-64",PIN_REJECT,64,0,100},
++    {"pin-reject-65",PIN_REJECT,65,0,100},
++    {"pool-1",POOL,1,0,64}, {"pool-16",POOL,16,0,16},
++    {"pool-256",POOL,256,0,4}, {"pool-1024",POOL,1024,0,1},
++    {"pool-fragmented-fail-4",POOL,4,1,16},
++    {"sysva-1",SYSVA,1,0,32}, {"sysva-16",SYSVA,16,0,8},
++    {"sysva-1024",SYSVA,1024,0,1}, {"sysva-1025",SYSVA,1025,0,1},
++    {"sysva-4096",SYSVA,4096,0,1},
++    {"object-cold-64",OBJECT,64,64,1},
++    {"object-warm-1",OBJECT,1,0,1000},
++    {"object-warm-8",OBJECT,8,0,128},
++    {"object-warm-64",OBJECT,64,0,16},
++    {"modexp-1-e1-odd",MODEXP,1,1,64},
++    {"modexp-1-e65537-odd",MODEXP,1,65537,32},
++    {"modexp-2-e3-even",MODEXP,2,3,8},
++    {"modexp-32-e3-odd",MODEXP,32,3,2},
++    {"modexp-64-e65537-odd",MODEXP,64,65537,1},
++    {"modexp-512-e1-odd",MODEXP,512,1,1},
++    {"sha-0",SHA,0,0,512}, {"sha-1",SHA,1,0,512},
++    {"sha-63",SHA,63,0,256}, {"sha-65",SHA,65,0,256},
++    {"sha-4096",SHA,4096,0,8}, {"sha-1MiB",SHA,1048576,0,1},
++    {"des-block",DES,8,0,128}, {"des3-block",DES,8,1,64},
++    {"des-cbc-4096",DES,4096,0,2}, {"des3-cbc-4096",DES,4096,1,1}
++};
++
++static void one(const WORK *w) {
++    ULONG bytes=w->size*PAGE_SIZE;
++    switch(w->kind) {
++    case EMPTY: ++empty_sink;break;
++    case PIN:
++        MmLockUnlockBufferPages(pin_buffer,bytes,FALSE);
++        MmLockUnlockBufferPages(pin_buffer,bytes,TRUE);
++        require(pin_buffer[0]==0x61 && pin_buffer[bytes-1]==0x61);
++        mix(bytes);break;
++    case PIN_REJECT: {
++        PUCHAR first=reject_buffer+(65-w->size)*PAGE_SIZE;
++        MmLockUnlockBufferPages(first,(w->size+1)*PAGE_SIZE,FALSE);
++        require(reject_buffer[0]==0x53 && reject_buffer[65*PAGE_SIZE-1]==0x53);
++        mix(w->size);break;
++    }
++    case POOL: {
++        PUCHAR p=ExAllocatePool(bytes);
++        if(w->arg) {
++            require(p==NULL);mix(p==NULL);
++            if(p) ExFreePool(p);
++            break;
++        }
++        require(p!=NULL);
++        if(p) {
++            require(ExQueryPoolBlockSize(p)==bytes);
++            p[0]=0x37;p[bytes-1]=0x62;
++            mix(p[0]+p[bytes-1]);ExFreePool(p);
++        }
++        break;
++    }
++    case SYSVA: {
++        PUCHAR p=MmAllocateSystemMemory(bytes,PAGE_READWRITE);
++        require(p!=NULL);
++        if(p) {
++            /* Inspect each freshly zeroed page before writing. */
++            for(ULONG i=0;i<bytes;i+=PAGE_SIZE) require(p[i]==0);
++            require(p[bytes-1]==0);p[0]=0x39;p[bytes-1]=0x6B;
++            mix(p[0]+p[bytes-1]);
++            require(MmFreeSystemMemory(p,bytes)==w->size);
++        }
++        break;
++    }
++    case OBJECT: {
++        ULONG before_alloc=allocations,before_free=frees,before_delete=deletes;
++        for(ULONG i=0;i<w->size;++i) require(create(w->arg+i));
++        require(allocations-before_alloc==w->size);
++        require(frees-before_free==w->size && deletes-before_delete==w->size);
++        break;
++    }
++    case MODEXP: {
++        ULONG base[512]={0},exp[512]={0},mod[512]={0},result[512];
++        base[0]=5;exp[0]=w->arg;
++        mod[0]=(w->size==2)?18:17;
++        memset(result,0xCC,w->size*sizeof(ULONG));
++        require(XcModExp(result,base,exp,mod,w->size)==1);
++        ULONG expected=(w->arg==1 || w->arg==65537)?5:6;
++        if(w->size==2) expected=17; /* 5^3 mod18 */
++        require(result[0]==expected);
++        for(ULONG i=1;i<w->size;++i) require(result[i]==0);
++        mix(result[0]);break;
++    }
++    case SHA: {
++        UCHAR context[116],digest[20],again[20];
++        memset(context,0xCC,sizeof(context));
++        XcSHAInit(context);XcSHAUpdate(context,data,w->size);XcSHAFinal(context,digest);
++        /* Reset semantics and fixed-data second computation are checked;
++         * public independent known answers are checked once before timing. */
++        XcSHAUpdate(context,data,w->size);XcSHAFinal(context,again);
++        require(memcmp(digest,again,20)==0);
++        for(ULONG i=0;i<24;++i) require(context[i]==0xCC);
++        for(ULONG i=52;i<116;++i) require(context[i]==0);
++        for(ULONG i=0;i<20;++i) mix(digest[i]);
++        break;
++    }
++    case DES: {
++        UCHAR feedback[8]={0},plain[4096];
++        if(w->size==8) {
++            XcBlockCrypt(w->arg,out,data,table,1);
++            XcBlockCrypt(w->arg,plain,out,table,0);
++        } else {
++            XcBlockCryptCBC(w->arg,w->size,out,data,table,1,feedback);
++            memset(feedback,0,8);
++            XcBlockCryptCBC(w->arg,w->size,plain,out,table,0,feedback);
++        }
++        require(memcmp(plain,data,w->size)==0);
++        for(ULONG i=0;i<8;++i) mix(out[i]);
++        break;
++    }
++    }
++}
++
++static bool known_answers(void) {
++    static const UCHAR sha[20]={0xa9,0x99,0x3e,0x36,0x47,0x06,0x81,0x6a,0xba,0x3e,
++        0x25,0x71,0x78,0x50,0xc2,0x6c,0x9c,0xd0,0xd8,0x9d};
++    static const UCHAR key[8]={0x13,0x34,0x57,0x79,0x9b,0xbc,0xdf,0xf1};
++    static const UCHAR input[8]={0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef};
++    static const UCHAR des[8]={0x85,0xe8,0x13,0x54,0x0f,0x0a,0xb4,0x05};
++    UCHAR ctx[116],digest[20],schedule[128],cipher[8];
++    XcSHAInit(ctx);XcSHAUpdate(ctx,(PUCHAR)"abc",3);XcSHAFinal(ctx,digest);
++    XcKeyTable(0,schedule,(PUCHAR)key);
++    XcBlockCrypt(0,cipher,(PUCHAR)input,schedule,1);
++    return memcmp(digest,sha,20)==0 && memcmp(cipher,des,8)==0;
++}
++
++int main(void) {
++    const ULONG count=sizeof(workloads)/sizeof(workloads[0]);
++    ULONG failures=0;
++    tap_puts("== kernel-performance begin ==\n");tap_version(14);tap_plan(count+1);
++    ULONGLONG frequency=KeQueryPerformanceFrequency();
++    tap_comment("PERF-META version=1 clock=KeQueryPerformanceCounter frequency=%llu samples=%u",frequency,SAMPLES);
++    bool kats=known_answers();
++    if(kats) tap_ok(1,"public-known-answers"); else {tap_not_ok(1,"public-known-answers");++failures;}
++    for(ULONG i=0;i<sizeof(data);++i) data[i]=(UCHAR)((i*29+7)&255);
++    for(ULONG i=0;i<128;++i) {
++        types[i].AllocateProcedure=object_allocate;types[i].FreeProcedure=object_free;
++        types[i].DeleteProcedure=object_delete;types[i].PoolTag='fPeK';
++    }
++    pin_size=PIN_BYTES;
++    NTSTATUS status=NtAllocateVirtualMemory((PVOID *)&pin_buffer,0,&pin_size,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
++    bool ready=status==STATUS_SUCCESS && pin_buffer;
++    if(ready) memset(pin_buffer,0x61,pin_size);
++    reject_size=66*PAGE_SIZE;
++    status=NtAllocateVirtualMemory((PVOID *)&reject_buffer,0,&reject_size,MEM_RESERVE,PAGE_READWRITE);
++    if(status==STATUS_SUCCESS && reject_buffer) {
++        SIZE_T commit_size=65*PAGE_SIZE;
++        PVOID commit_base=reject_buffer;
++        status=NtAllocateVirtualMemory(&commit_base,0,&commit_size,MEM_COMMIT,PAGE_READWRITE);
++        if(status==STATUS_SUCCESS) memset(reject_buffer,0x53,commit_size);
++        else ready=false;
++        if(MmIsAddressValid(reject_buffer+65*PAGE_SIZE)) ready=false;
++    } else ready=false;
++    /* Establish the warm registry before any measured warm workload. */
++    checksum=2166136261U;
++    for(ULONG i=0;i<64;++i) if(!create(i)) ready=false;
++    for(ULONG j=0;j<count;++j) {
++        const WORK *w=&workloads[j];bool all=ready;
++        ULONG fragment_count=0;
++        if(w->kind==POOL && w->arg) {
++            /* Fill the bounded 16-MiB window before releasing groups of two.
++             * Classification uses public VA alignment only; no window base,
++             * PFN or returned address contributes to the semantic checksum. */
++            for(;fragment_count<4096;++fragment_count) {
++                fragments[fragment_count]=ExAllocatePool(PAGE_SIZE);
++                if(!fragments[fragment_count]) break;
++            }
++            for(ULONG i=0;i<fragment_count;++i) {
++                if((((ULONG_PTR)fragments[i]/PAGE_SIZE)&3)<2) {
++                    ExFreePool(fragments[i]);fragments[i]=NULL;
++                }
++            }
++            PVOID probe=ExAllocatePool(4*PAGE_SIZE);
++            if(probe) {ExFreePool(probe);all=false;}
++        }
++        if(w->kind==DES) XcKeyTable(w->arg,table,data);
++        ULONG samples=(w->kind==OBJECT && w->arg==64)?1:SAMPLES;
++        for(ULONG sample=0;sample<samples;++sample) {
++            correct=all;checksum=2166136261U;
++            ULONGLONG start=KeQueryPerformanceCounter();
++            if(all) for(ULONG i=0;i<w->iterations;++i) one(w);
++            ULONGLONG end=KeQueryPerformanceCounter();
++            require(end>=start);all=all && correct;
++            tap_comment("PERF workload=%s sample=%lu iterations=%lu ticks=%llu correct=%u checksum=%08lx",
++                w->name,sample,w->iterations,end-start,correct?1:0,checksum);
++        }
++        for(ULONG i=0;i<fragment_count;++i) if(fragments[i]) {ExFreePool(fragments[i]);fragments[i]=NULL;}
++        if(all) tap_ok(j+2,w->name);else {tap_not_ok(j+2,w->name);++failures;}
++    }
++    if(pin_buffer) {SIZE_T bytes=0;NtFreeVirtualMemory((PVOID *)&pin_buffer,&bytes,MEM_RELEASE);}
++    if(reject_buffer) {SIZE_T bytes=0;NtFreeVirtualMemory((PVOID *)&reject_buffer,&bytes,MEM_RELEASE);}
++    tap_comment("PERF-SUMMARY workloads=%lu failures=%lu",count,failures);
++    tap_puts(failures?"== kernel-performance end FAIL ==\n":"== kernel-performance end PASS ==\n");
++    tap_drain();HalWriteSMBusValue(0x20,0x02,FALSE,0x80);
++    for(;;) __asm__ __volatile__("hlt");
++}
