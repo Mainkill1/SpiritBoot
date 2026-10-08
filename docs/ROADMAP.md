@@ -2,6 +2,12 @@
 
 The roadmap is ordered to maximize observability and reduce black-screen debugging.
 
+The current Roswell integration provides a reproducible release flash and verified
+open-XBE execution in xemu, plus checked builds and retained serial diagnostics.
+See [the reproduced baseline](provenance/OPEN_FIRMWARE_BASELINE.md). Conker is the
+first retail target; its gameplay remains unverified. The phases below describe
+the broader compatibility and hardware work, not completed acceptance claims.
+
 ## M0 — Research bootstrap
 
 Acceptance:

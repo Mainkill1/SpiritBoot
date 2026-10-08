@@ -1,0 +1,19 @@
+# Ubuntu 24.04, pinned to the multi-platform image manifest used for validation.
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+# An optional CA bundle supports managed environments without retaining their
+# certificate in the image. Ordinary environments need no build secret.
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then \
+      echo 'Acquire::https::CaInfo "/run/secrets/proxy_ca";' > /tmp/apt-ca.conf; \
+    else touch /tmp/apt-ca.conf; fi; \
+    apt-get -c /tmp/apt-ca.conf update && \
+    DEBIAN_FRONTEND=noninteractive apt-get -c /tmp/apt-ca.conf install -y --no-install-recommends \
+      binutils-mingw-w64-i686 gcc-mingw-w64-i686 g++-mingw-w64-i686 \
+      gcc-multilib g++-multilib cmake ninja-build flex bison lz4 xz-utils \
+      git make python3 curl ca-certificates ccache qemu-utils \
+      xvfb xauth libgl1 libegl1 libpulse0 libsamplerate0 libslirp0 && \
+    rm -rf /var/lib/apt/lists/* /tmp/apt-ca.conf
+# xemu's AppImage intentionally leaves USB passthrough to the host runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends libusb-1.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /work

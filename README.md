@@ -4,7 +4,22 @@
 
 The long-term goal is not merely to display a boot screen. The goal is to replace enough of the proprietary boot and kernel stack that an original Xbox title can be initialized, loaded, and run without requiring a Microsoft BIOS image in the SpiritBoot source tree.
 
-> **Status:** bootstrap / research framework. No game-boot compatibility is claimed yet.
+> **Status:** open-firmware build and emulator integration. Retail game compatibility is not yet verified.
+
+## Build and run
+
+SpiritBoot's initial executable path uses the pinned GPL-2.0 Roswell loader and
+Xbox kernel with the Mainkill1 xemu fork. The tooling builds release/checked flash
+images, records provenance, captures boot diagnostics, and grades an open test XBE.
+Conker: Live & Reloaded is the first retail target.
+
+See [build and launch instructions](docs/BUILD_AND_RUN.md) and
+[reproduced baseline evidence](docs/provenance/OPEN_FIRMWARE_BASELINE.md).
+The [direct XISO suite evidence](docs/provenance/XISO_SUITE_BASELINE.md) records
+Mainkill1's matched qualification suite, complete guest results, and the earlier
+intermittent GPU polling assertion.
+The build needs no Microsoft BIOS or MCPX ROM. Runtime/game progress is measured
+separately from a successful firmware build.
 
 ## Project goals
 
@@ -127,7 +142,9 @@ Trace hooks span every layer.
 
 ## Reference projects
 
-SpiritBoot is being built from scratch, but existing open projects contain years of useful Xbox hardware and software research. They are **references, test partners, and potential sources only where licenses and provenance permit**.
+SpiritBoot integrates the open Roswell loader/kernel rather than recreating the
+entire runtime. Existing open projects are references, test partners, and licensed
+implementation foundations with recorded provenance.
 
 | Project | Why it matters |
 | --- | --- |
@@ -195,12 +212,12 @@ Implementation should be driven by **usage and tests**, not an attempt to rewrit
 
 ### Phase 0 — Bootstrap
 
-- [ ] Select project license.
-- [ ] Add freestanding x86 toolchain/build system.
+- [x] Select GPL-2.0 as the umbrella license; preserve upstream per-file licenses.
+- [x] Add open x86 firmware build tooling.
 - [ ] Produce a deterministic binary artifact.
 - [ ] Add map/symbol outputs.
-- [ ] Add an emulator launch/test wrapper.
-- [ ] Add serial/debug trace output.
+- [x] Add an emulator launch/test wrapper.
+- [x] Capture upstream loader/kernel serial diagnostics.
 
 ### Phase 1 — First execution
 

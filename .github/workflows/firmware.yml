@@ -1,0 +1,89 @@
+name: Open firmware
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests/host -v
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [release, debug]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned open kernel
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          lock = json.load(open('sources/firmware-lock.json'))['repositories']['roswell']
+          subprocess.run(['git', 'init', '.reference/roswell'], check=True)
+          subprocess.run(['git', '-C', '.reference/roswell', 'remote', 'add', 'origin', lock['url']], check=True)
+          subprocess.run(['git', '-C', '.reference/roswell', 'fetch', '--depth=1', 'origin', lock['revision']], check=True)
+          subprocess.run(['git', '-C', '.reference/roswell', 'checkout', '--detach', 'FETCH_HEAD'], check=True)
+          PY
+      - name: Build toolchain
+        run: docker build -f tools/Dockerfile.firmware -t spiritboot-toolchain .
+      - name: Build flash
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+            spiritboot-toolchain python3 scripts/build-firmware.py \
+            --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }} \
+            --variant ${{ matrix.variant }}
+      - name: Verify clean release rebuild
+        if: matrix.variant == 'release'
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+            spiritboot-toolchain python3 scripts/build-firmware.py \
+            --source .reference/roswell --output artifacts/firmware-repeat
+          cmp artifacts/firmware-release/flash.bin artifacts/firmware-repeat/flash.bin
+      - name: Prepare pinned open runtime fixtures
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          fixtures = json.load(open('sources/firmware-lock.json'))['fixtures']
+          for name, url, digest in (
+              ('xemu.AppImage', fixtures['xemu_linux']['url'], fixtures['xemu_linux']['sha256']),
+              ('xbox_hdd.qcow2', fixtures['hdd_url'], fixtures['hdd_sha256']),
+          ):
+              path = pathlib.Path('artifacts') / name
+              urllib.request.urlretrieve(url, path)
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == digest, name
+          pathlib.Path('artifacts/xemu.AppImage').chmod(0o755)
+          PY
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+            -w /work/artifacts spiritboot-toolchain ./xemu.AppImage --appimage-extract
+          nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
+          docker run --rm -v "$PWD:/work" \
+            -w /work/.reference/roswell/tests/xbe/api-regression \
+            "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
+      - name: Run open API regression XBE
+        run: |
+          docker run --rm -v "$PWD:/work" \
+            -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -c '
+            Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
+            python3 -c "import time; time.sleep(1)"
+            DISPLAY=:99 exec python3 scripts/run-firmware.py \
+              --xemu artifacts/squashfs-root/usr/bin/xemu \
+              --flash artifacts/firmware-${{ matrix.variant }}/flash.bin \
+              --hdd artifacts/xbox_hdd.qcow2 \
+              --dvd .reference/roswell/tests/xbe/api-regression/nxkrnl-api-regression.iso \
+              --output artifacts/open-xbe-${{ matrix.variant }} --timeout 240 --expect-tap'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spiritboot-${{ matrix.variant }}
+          path: |
+            artifacts/firmware-${{ matrix.variant }}/flash.bin
+            artifacts/firmware-${{ matrix.variant }}/build.json
+            artifacts/firmware-${{ matrix.variant }}/build.log
+            artifacts/open-xbe-${{ matrix.variant }}/
+            LICENSE
