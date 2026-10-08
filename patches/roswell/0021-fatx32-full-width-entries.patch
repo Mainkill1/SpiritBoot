@@ -1,0 +1,286 @@
+diff --git a/drivers/filesystems/vfatfs/fat.c b/drivers/filesystems/vfatfs/fat.c
+index 3949eb15..39f5ade2 100644
+--- a/drivers/filesystems/vfatfs/fat.c
++++ b/drivers/filesystems/vfatfs/fat.c
+@@ -29,6 +29,15 @@
+ 
+ /* FUNCTIONS ****************************************************************/
+ 
++/* FATX32 uses all 32 entry bits; only DOS FAT32 reserves the upper nibble. */
++static
++ULONG
++FAT32EntryMask(
++    PDEVICE_EXTENSION DeviceExt)
++{
++    return DeviceExt->FatInfo.FatType == FATX32 ? 0xffffffff : 0x0fffffff;
++}
++
+ /*
+  * FUNCTION: Retrieve the next FAT32 cluster from the FAT table via a physical
+  *           disk read
+@@ -46,6 +55,7 @@ FAT32GetNextCluster(
+     PVOID Context = NULL;
+     LARGE_INTEGER Offset;
+ 
++    ULONG EntryMask = FAT32EntryMask(DeviceExt);
+     ChunkSize = CACHEPAGESIZE(DeviceExt);
+     FATOffset = CurrentCluster * sizeof(ULONG);
+     Offset.QuadPart = ROUND_DOWN(FATOffset, ChunkSize);
+@@ -63,8 +73,8 @@ FAT32GetNextCluster(
+     }
+     _SEH2_END;
+ 
+-    CurrentCluster = (*(PULONG)((char*)BaseAddress + (FATOffset % ChunkSize))) & 0x0fffffff;
+-    if (CurrentCluster >= 0xffffff8 && CurrentCluster <= 0xfffffff)
++    CurrentCluster = (*(PULONG)((char*)BaseAddress + (FATOffset % ChunkSize))) & EntryMask;
++    if (CurrentCluster >= EntryMask - 7)
+         CurrentCluster = 0xffffffff;
+ 
+     if (CurrentCluster == 0)
+@@ -348,6 +358,7 @@ FAT32FindAndMarkAvailableCluster(
+     PULONG Block;
+     PULONG BlockEnd;
+ 
++    ULONG EntryMask = FAT32EntryMask(DeviceExt);
+     ChunkSize = CACHEPAGESIZE(DeviceExt);
+     FatLength = (DeviceExt->FatInfo.NumberOfClusters + 2);
+     *Cluster = 0;
+@@ -374,11 +385,11 @@ FAT32FindAndMarkAvailableCluster(
+             /* Now process the whole block */
+             while (Block < BlockEnd && i < FatLength)
+             {
+-                if ((*Block & 0x0fffffff) == 0)
++                if ((*Block & EntryMask) == 0)
+                 {
+                     DPRINT("Found available cluster 0x%x\n", i);
+                     DeviceExt->LastAvailableCluster = *Cluster = i;
+-                    *Block = 0x0fffffff;
++                    *Block = EntryMask;
+                     CcSetDirtyPinnedData(Context, NULL);
+                     CcUnpinData(Context);
+                     if (DeviceExt->AvailableClustersValid)
+@@ -525,6 +536,7 @@ FAT32CountAvailableClusters(
+     LARGE_INTEGER Offset;
+     ULONG FatLength;
+ 
++    ULONG EntryMask = FAT32EntryMask(DeviceExt);
+     ChunkSize = CACHEPAGESIZE(DeviceExt);
+     FatLength = (DeviceExt->FatInfo.NumberOfClusters + 2);
+ 
+@@ -547,7 +559,7 @@ FAT32CountAvailableClusters(
+         /* Now process the whole block */
+         while (Block < BlockEnd && i < FatLength)
+         {
+-            if ((*Block & 0x0fffffff) == 0)
++            if ((*Block & EntryMask) == 0)
+                 ulCount++;
+             Block++;
+             i++;
+@@ -713,6 +725,7 @@ FAT32WriteCluster(
+     LARGE_INTEGER Offset;
+     PULONG Cluster;
+ 
++    ULONG EntryMask = FAT32EntryMask(DeviceExt);
+     ChunkSize = CACHEPAGESIZE(DeviceExt);
+ 
+     FATOffset = (ClusterToWrite * 4);
+@@ -730,8 +743,8 @@ FAT32WriteCluster(
+     DPRINT("Writing 0x%x for offset 0x%x 0x%x\n", NewValue, FATOffset,
+            ClusterToWrite);
+     Cluster = ((PULONG)((char*)BaseAddress + (FATOffset % ChunkSize)));
+-    *OldValue = *Cluster & 0x0fffffff;
+-    *Cluster = (*Cluster & 0xf0000000) | (NewValue & 0x0fffffff);
++    *OldValue = *Cluster & EntryMask;
++    *Cluster = (*Cluster & ~EntryMask) | (NewValue & EntryMask);
+ 
+     CcSetDirtyPinnedData(Context, NULL);
+     CcUnpinData(Context);
+diff --git a/tests/host/fatx/check-fatx32.py b/tests/host/fatx/check-fatx32.py
+new file mode 100644
+index 00000000..1d480941
+--- /dev/null
++++ b/tests/host/fatx/check-fatx32.py
+@@ -0,0 +1,183 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production FAT entry routines against literal disk words.
++
++The cache adapter provides a bounded in-memory FAT block; allocation, traversal,
++free-space accounting and writes use the unmodified production function bodies.
++Run: python3 check-fatx32.py OUTPUT_DIR [SOURCE_ROOT]
++"""
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = (Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else
++        Path(__file__).resolve().parents[3])
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    'extract', root / 'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++text = (root / 'drivers/filesystems/vfatfs/fat.c').read_text()
++names = ['FAT32GetNextCluster', 'FAT32FindAndMarkAvailableCluster',
++         'FAT32CountAvailableClusters', 'FAT32WriteCluster',
++         'FAT16GetNextCluster', 'FAT16WriteCluster']
++if 'FAT32EntryMask(' in text:
++    names.insert(0, 'FAT32EntryMask')
++body = '\n'.join(extract.function(text, name) for name in names)
++shim = r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <assert.h>
++#include <string.h>
++typedef uint32_t ULONG, *PULONG;
++typedef uint16_t USHORT, *PUSHORT;
++typedef int32_t LONG, *PLONG, NTSTATUS;
++typedef uintptr_t ULONG_PTR;
++typedef void *PVOID;
++typedef struct { int64_t QuadPart; } LARGE_INTEGER;
++typedef struct {
++    struct { ULONG FatType, BytesPerCluster, NumberOfClusters; } FatInfo;
++    ULONG LastAvailableCluster, AvailableClusters;
++    int AvailableClustersValid;
++    PVOID FATFileObject;
++} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
++#define FAT32 3
++#define FATX16 4
++#define FATX32 5
++#define TRUE 1
++#define FALSE 0
++#define STATUS_SUCCESS 0
++#define STATUS_UNSUCCESSFUL ((NTSTATUS)0xc0000001)
++#define STATUS_FILE_CORRUPT_ERROR ((NTSTATUS)0xc0000102)
++#define STATUS_DISK_FULL ((NTSTATUS)0xc000007f)
++#define VFAT_BREAK_ON_CORRUPTION 1
++#define MAP_WAIT 1
++#define PIN_WAIT 1
++#define _SEH2_TRY if (1)
++#define _SEH2_EXCEPT(x) else if (0)
++#define _SEH2_YIELD(x) x
++#define _SEH2_END
++#define _SEH2_GetExceptionCode() STATUS_UNSUCCESSFUL
++#define NT_ASSERT(x) assert(x)
++#define ASSERT(x) assert(x)
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define ROUND_DOWN(n, a) ((n) & ~((a) - 1))
++#define CACHEPAGESIZE(d) 16384u
++static struct { ULONG Flags; } global;
++#define VfatGlobalData (&global)
++static ULONG fat[4096];
++static unsigned pins, dirty, checks, failures;
++static int CcMapData(PVOID file, LARGE_INTEGER *offset, ULONG length,
++                     int wait, PVOID *context, PVOID *base) {
++    (void)file; (void)wait;
++    assert(offset->QuadPart == 0 && length == sizeof(fat));
++    assert(pins == 0);
++    ++pins; *base = fat; *context = fat;
++    return TRUE;
++}
++#define CcPinRead CcMapData
++static void CcUnpinData(PVOID context) {
++    assert(context == fat && pins == 1); --pins;
++}
++static void CcSetDirtyPinnedData(PVOID context, PVOID timestamp) {
++    assert(context == fat && pins == 1 && timestamp == NULL); ++dirty;
++}
++static void InterlockedDecrement(PLONG value) { --*value; }
++static void check(int pass, const char *name) {
++    ++checks;
++    if (!pass) { fprintf(stderr, "FAIL: %s\n", name); ++failures; }
++}
++static DEVICE_EXTENSION setup(ULONG type) {
++    memset(fat, 0, sizeof(fat)); pins = dirty = 0;
++    DEVICE_EXTENSION d = { .FatInfo = { type, 16384, 4 },
++        .LastAvailableCluster = 2, .AvailableClusters = 4,
++        .AvailableClustersValid = TRUE, .FATFileObject = fat };
++    return d;
++}
++'''
++main = r'''
++int main(void) {
++    ULONG cluster, next, old;
++    DEVICE_EXTENSION d = setup(FATX32);
++    check(FAT32FindAndMarkAvailableCluster(&d, &cluster) == STATUS_SUCCESS,
++          "FATX32 allocation succeeds");
++    check(cluster == 2 && fat[2] == 0xffffffffu,
++          "FATX32 allocation stores full-width end marker");
++    check(d.AvailableClusters == 3 && dirty == 1 && !pins,
++          "allocation updates count and releases dirty cache pin");
++    check(FAT32WriteCluster(&d, 2, 0xffffffffu, &old) == STATUS_SUCCESS,
++          "FATX32 end write succeeds");
++    check(old == 0xffffffffu && fat[2] == 0xffffffffu,
++          "FATX32 old and new end markers retain all bits");
++    fat[2] = 0;
++    FAT32WriteCluster(&d, 2, 0xffffffffu, &old);
++    check(old == 0 && fat[2] == 0xffffffffu,
++          "FATX32 end write fixes a zero-upper-nibble entry");
++    fat[2] = 0xf0000003u;
++    FAT32GetNextCluster(&d, 2, &next);
++    check(next == 0xf0000003u, "FATX32 traversal retains high cluster bits");
++    fat[2] = 0x0fffffffu;
++    FAT32GetNextCluster(&d, 2, &next);
++    check(next == 0x0fffffffu, "DOS end marker is not a FATX32 end marker");
++    fat[2] = 0xfffffff8u;
++    FAT32GetNextCluster(&d, 2, &next);
++    check(next == 0xffffffffu, "FATX32 end-range traversal normalizes EOF");
++    fat[2] = 0xf0000000u; fat[3] = 0xffffffffu;
++    FAT32CountAvailableClusters(&d);
++    check(d.AvailableClustersValid && d.AvailableClusters == 2,
++          "FATX32 high-bit occupied entry is not counted free");
++    FAT32FindAndMarkAvailableCluster(&d, &cluster);
++    check(cluster == 4 && fat[2] == 0xf0000000u,
++          "FATX32 allocator skips high-bit occupied entry");
++    FAT32WriteCluster(&d, 4, 0xf0000003u, &old);
++    check(old == 0xffffffffu && fat[4] == 0xf0000003u,
++          "FATX32 link write preserves high bits and old marker");
++    FAT32WriteCluster(&d, 4, 0, &old);
++    check(old == 0xf0000003u && fat[4] == 0,
++          "FATX32 release clears full entry");
++    fat[2] = 0;
++    check(FAT32GetNextCluster(&d, 2, &next) == STATUS_FILE_CORRUPT_ERROR,
++          "FATX32 free entry remains a traversal error");
++    check(!pins, "FATX32 paths leave no cache pin");
++
++    d = setup(FAT32);
++    fat[2] = 0xa0000003u;
++    FAT32GetNextCluster(&d, 2, &next);
++    check(next == 3, "DOS FAT32 traversal masks reserved upper nibble");
++    FAT32WriteCluster(&d, 2, 0xffffffffu, &old);
++    check(old == 3 && fat[2] == 0xafffffffu,
++          "DOS FAT32 write preserves reserved nibble");
++    FAT32GetNextCluster(&d, 2, &next);
++    check(next == 0xffffffffu, "DOS FAT32 EOF still normalizes");
++    fat[2] = 0xa0000000u;
++    FAT32CountAvailableClusters(&d);
++    check(d.AvailableClusters == 4, "DOS FAT32 reserved-only entry is free");
++    FAT32FindAndMarkAvailableCluster(&d, &cluster);
++    check(cluster == 2 && fat[2] == 0x0fffffffu,
++          "DOS FAT32 allocation retains existing marker behavior");
++    FAT32WriteCluster(&d, 2, 0, &old);
++    check(old == 0x0fffffffu && fat[2] == 0,
++          "DOS FAT32 release retains existing behavior");
++
++    d = setup(FATX16);
++    ((PUSHORT)fat)[2] = 3;
++    FAT16WriteCluster(&d, 2, 0xffffffffu, &old);
++    check(old == 3 && ((PUSHORT)fat)[2] == 0xffffu,
++          "FATX16 write keeps 16-bit marker");
++    FAT16GetNextCluster(&d, 2, &next);
++    check(next == 0xffffffffu, "FATX16 EOF traversal unchanged");
++    check(!pins, "control paths leave no cache pin");
++    printf("FAT entry production paths: %u checks, %u failures\n", checks, failures);
++    return failures != 0;
++}
++'''
++source = out / 'fatx32.c'
++source.write_text(shim + body + main)
++subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
++                str(source), '-o', str(out / 'fatx32')], check=True)
++subprocess.run([str(out / 'fatx32')], check=True)
