@@ -155,7 +155,7 @@ and apply the patch in an isolated clone, and build the BIOS. Existing licensing
 and per-file notices are retained. No Microsoft BIOS, MCPX, game, SDK or EEPROM
 binary is distributed. The earlier v0.1.0 baseline and its images remain unchanged.
 
-[Evidence directory](../evidence/clean-room-2026-10-07/) retains exact build/capture
+[Archived evidence directory](https://github.com/Mainkill1/SpiritBoot/tree/a88247760c91de599a14342158561373b072dfce/docs/evidence/clean-room-2026-10-07) retains exact build/capture
 manifests, build and raw emulator/TAP logs, guest identities, source separation,
 and host results. Large HDD snapshots and extracted raw disks remain ignored
 local artifacts. Paths in manifests refer to the original captures.
@@ -172,3 +172,24 @@ the exact binaries tracked in Git. The earlier baseline remains unchanged.
 Publication identity and download hashes are retained in the evidence directory.
 The publication/evidence-only commits skip redundant CI; source CI runs against
 `0894900`, which contains the exact validated implementation and build tooling.
+
+
+## Main integration qualification — 2026-10-08
+
+The unchanged original PR head `a88247760c91de599a14342158561373b072dfce`
+passed [exact-head CI](https://github.com/Mainkill1/SpiritBoot/actions/runs/37773461840).
+Both builds reconstruct the same reviewed kernel tree and patch identity above.
+Each variant passes 626 API cases plus the six existing TODOs, 23 contracts,
+and five warm-reset checks. CI also verifies a second clean release build.
+This closes the historical pending-CI observation; it does not rewrite that
+observation or add a new gameplay/performance claim.
+
+The fresh release flash matches the historical release hash above. The fresh
+checked flash has SHA-256
+`6c917a8bb0258a435f6584a3a7618d44f7a81d756b8f25cb7bbb68e3b8eeab43`.
+Checked diagnostics contain build paths, so checked-image byte reproducibility
+is not claimed. The fresh checked image passed its own native guest checks.
+Historical binaries and raw build/guest evidence remain at their immutable
+publication references; main contains source, build tooling, regression tests
+and these concise provenance instructions. Later title fixes on PR #29 are
+separate changes and are not credited to this earlier kernel baseline.

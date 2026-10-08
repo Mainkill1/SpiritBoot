@@ -28,7 +28,7 @@ The [complete kernel-call audit and optimization report](docs/optimization/2026-
 assesses all 337 callable exports and 34 data exports. Seven shared paths now
 do less work; matched measurements show six small pin-workload gains, with
 other timings inconclusive. [Optimized BIOS images](bios/optimized-xemu/README.md)
-passed both complete XISO variants; [raw evidence](docs/evidence/optimization-2026-10-07/README.md)
+passed both complete XISO variants; [raw evidence](https://github.com/Mainkill1/SpiritBoot/blob/9bd0d975346603ecb28e3d54bba87d6fe982551c/docs/evidence/optimization-2026-10-07/README.md)
 records builds, source identity, measurements and limits.
 The build needs no Microsoft BIOS or MCPX ROM. Runtime/game progress is measured
 separately from a successful firmware build.
