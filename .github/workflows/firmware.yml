@@ -47,7 +47,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 336fdbbf8f8e72b89e2605729687451bf7307055
+            test "$actual_tree" = 866e393d0950f8c2444693b4893e9403f5405546
             python3 "$GUEST_SOURCE/tests/host/xdvdfs/check.py" "$output/xdvdfs" >"$output/xdvdfs.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-lifetime/check.py" "$output/dma-lifetime" >"$output/dma-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-stack/check.py" "$output/thread-stack" >"$output/thread-stack.log" 2>&1
@@ -160,4 +160,5 @@ jobs:
             artifacts/xdvdfs-directory-${{ matrix.variant }}/
             artifacts/io-apc-order-${{ matrix.variant }}/
             artifacts/thread-stack-${{ matrix.variant }}/
+            artifacts/relocation-alias-${{ matrix.variant }}/
             LICENSE
