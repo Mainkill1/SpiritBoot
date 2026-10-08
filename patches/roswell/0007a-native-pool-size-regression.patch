@@ -1,0 +1,128 @@
+diff --git a/tests/xbe/pool-size-limit/Makefile b/tests/xbe/pool-size-limit/Makefile
+index 26c984df9e9e5a950321449d7f23293e1bd0160e..22d96904c3a7b98d6b5d9e6cdec4f65c3b8820dc 100644
+--- a/tests/xbe/pool-size-limit/Makefile
++++ b/tests/xbe/pool-size-limit/Makefile
+@@ -1,6 +1,6 @@
+ XBE_TITLE = POOL-SIZE-LIMIT
+ GEN_XISO = pool.iso
+-SRCS = $(CURDIR)/main.c
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/pool-size-limit/main.c b/tests/xbe/pool-size-limit/main.c
+index 8d03b17405fbe7cae8839dda94ade5e5ffdf8623..9500cb850183ccad5c7a6e8b78d920c404dcbfc7 100644
+--- a/tests/xbe/pool-size-limit/main.c
++++ b/tests/xbe/pool-size-limit/main.c
+@@ -1,30 +1,37 @@
+-#include <stdio.h>
++/* SPDX-License-Identifier: GPL-2.0-or-later */
+ #include <stdint.h>
+-#include <windows.h>
+-#include <xboxkrnl/xboxkrnl.h>
+-#include <hal/video.h>
+-#include <nxdk/mount.h>
++#include "../regression.h"
++
+ static PVOID blocks[160];
+-int main(void){
+- XVideoSetMode(640,480,32,REFRESH_DEFAULT);
+- if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
+- FILE *out=fopen("E:\\pool-result.txt","wb");if(!out)for(;;)Sleep(1000);
+- unsigned bad=0;const unsigned sizes[]={2041,4096,4097};
+- for(unsigned i=0;i<160;i++){
+-  unsigned n=sizes[i%3];blocks[i]=ExAllocatePool(n);
+-  if(!blocks[i]){bad++;fprintf(out,"FAIL allocation %u\n",i);continue;}
+-  ((volatile uint8_t*)blocks[i])[0]=(uint8_t)i;
+-  ((volatile uint8_t*)blocks[i])[n-1]=(uint8_t)(i^0x5a);
+- }
+- for(unsigned i=0;i<160;i++)if(blocks[i]){
+-  unsigned n=sizes[i%3],expected=(n+4095)&~4095u,actual=ExQueryPoolBlockSize(blocks[i]);
+-  unsigned failed=actual!=expected||((volatile uint8_t*)blocks[i])[0]!=(uint8_t)i||((volatile uint8_t*)blocks[i])[n-1]!=(uint8_t)(i^0x5a);
+-  bad+=failed;if(failed)fprintf(out,"FAIL size i=%u actual=%u expected=%u\n",i,actual,expected);
+- }
+- for(unsigned i=0;i<160;i++)if(blocks[i])ExFreePool(blocks[i]);
+- PVOID small=ExAllocatePool(2040);if(!small||ExQueryPoolBlockSize(small)!=2040)bad++;if(small)ExFreePool(small);
+- for(unsigned i=0;i<160;i++){
+-  PVOID p=ExAllocatePool(4097);if(!p){bad++;continue;}if(ExQueryPoolBlockSize(p)!=8192)bad++;ExFreePool(p);
+- }
+- fprintf(out,"COMPLETE checks=321 failures=%u\n",bad);fclose(out);for(;;)Sleep(1000);
++
++int main(void)
++{
++    const unsigned sizes[] = {2041, 4096, 4097};
++    regression_begin();
++    for (unsigned i = 0; i < 160; ++i) {
++        unsigned n = sizes[i % 3];
++        blocks[i] = ExAllocatePool(n);
++        regression_require(blocks[i] != NULL, "allocate simultaneous pool run");
++        ((volatile uint8_t *)blocks[i])[0] = (uint8_t)i;
++        ((volatile uint8_t *)blocks[i])[n - 1] = (uint8_t)(i ^ 0x5a);
++    }
++    for (unsigned i = 0; i < 160; ++i) {
++        unsigned n = sizes[i % 3], expected = (n + 4095) & ~4095u;
++        regression_check(ExQueryPoolBlockSize(blocks[i]) == expected &&
++            ((volatile uint8_t *)blocks[i])[0] == (uint8_t)i &&
++            ((volatile uint8_t *)blocks[i])[n - 1] == (uint8_t)(i ^ 0x5a),
++            "live size and boundary bytes beyond 128 allocations");
++    }
++    for (unsigned i = 0; i < 160; ++i) ExFreePool(blocks[i]);
++    PVOID small = ExAllocatePool(2040);
++    regression_check(small && ExQueryPoolBlockSize(small) == 2040,
++                     "2040-byte bucket boundary");
++    if (small) ExFreePool(small);
++    for (unsigned i = 0; i < 160; ++i) {
++        PVOID p = ExAllocatePool(4097);
++        regression_check(p && ExQueryPoolBlockSize(p) == 8192,
++                         "free and reuse two-page run");
++        if (p) ExFreePool(p);
++    }
++    regression_finish();
+ }
+diff --git a/tests/xbe/regression.h b/tests/xbe/regression.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5c619a3802b16cc6509d3ea384780368c216f7a
+--- /dev/null
++++ b/tests/xbe/regression.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include "api-regression/tap.h"
++#include <xboxkrnl/xboxkrnl.h>
++
++static unsigned regression_checks, regression_failures;
++
++static void regression_begin(void)
++{
++    tap_version(14);
++}
++
++static void regression_check(int passed, const char *description)
++{
++    ++regression_checks;
++    if (passed) {
++        tap_ok(regression_checks, description);
++    } else {
++        ++regression_failures;
++        tap_not_ok(regression_checks, description);
++    }
++}
++
++static void regression_finish(void) __attribute__((noreturn));
++static void regression_finish(void)
++{
++    LARGE_INTEGER delay = { .QuadPart = -5000000 };
++    tap_comment("checks=%u failures=%u", regression_checks, regression_failures);
++    tap_plan(regression_checks);
++    tap_drain();
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    /* A failed shutdown remains a timeout, never a passing capture. */
++    for (;;) __asm__ __volatile__("hlt");
++}
++
++static inline void regression_require(int passed, const char *description)
++{
++    regression_check(passed, description);
++    if (!passed) regression_finish();
++}
