@@ -1,0 +1,398 @@
+diff --git a/tests/host/thread-wait/check.py b/tests/host/thread-wait/check.py
+new file mode 100644
+index 00000000..da52c1ee
+--- /dev/null
++++ b/tests/host/thread-wait/check.py
+@@ -0,0 +1,156 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Execute the production adapter with injected reference/allocator failures.
++
++The real dispatcher and suspension lifetime are covered by the native guest.
++This fixture extracts the maintained function rather than copying its policy.
++"""
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++source = (root / 'ntoskrnl/ob/obwait.c').read_text()
++start = source.index('NTSTATUS\nNTAPI\nNxkWaitForMultipleObjectsMode(')
++end = source.index('\n}\n', start) + 3
++preamble = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++#define IN
++#define OPTIONAL
++#define NTAPI
++#define MAXIMUM_WAIT_OBJECTS 64
++#define THREAD_WAIT_OBJECTS 3
++#define SYNCHRONIZE 0x100000
++#define NonPagedPool 0
++#define TAG_WAIT 0x57414954
++#define STATUS_INVALID_PARAMETER ((int32_t)0xc000000d)
++#define STATUS_INSUFFICIENT_RESOURCES ((int32_t)0xc000009a)
++#define STATUS_INVALID_HANDLE ((int32_t)0xc0000008)
++#define NT_SUCCESS(s) ((s)>=0)
++typedef int32_t NTSTATUS;
++typedef uint32_t ULONG;
++typedef uintptr_t ULONG_PTR;
++typedef void *PVOID, *HANDLE;
++typedef HANDLE *PHANDLE;
++typedef unsigned char BOOLEAN;
++typedef enum {WaitAll,WaitAny} WAIT_TYPE;
++typedef enum {KernelMode,UserMode} KPROCESSOR_MODE;
++enum {UserRequest=6};
++typedef int64_t *PLARGE_INTEGER;
++typedef struct {uintptr_t words[6];} KWAIT_BLOCK, *PKWAIT_BLOCK;
++typedef struct {PVOID DefaultObject;} TYPE;
++typedef struct {TYPE *Type;} HEADER;
++typedef struct {HEADER header; uintptr_t waitable; unsigned refs;} OBJECT;
++static OBJECT objects[64];
++static TYPE types[64];
++#define OBJECT_TO_OBJECT_HEADER(p) (&((OBJECT *)(p))->header)
++#define IsPointerOffset(p) ((uintptr_t)(p)<4096)
++static unsigned ref_calls,alloc_calls,free_calls,dispatch_calls,live;
++static int fail_index,fail_alloc;
++static ULONG expected_count;
++static WAIT_TYPE expected_type;
++static KPROCESSOR_MODE expected_mode;
++static BOOLEAN expected_alertable;
++static PLARGE_INTEGER expected_timeout;
++static NTSTATUS dispatch_status;
++static NTSTATUS ObReferenceObjectByHandle(HANDLE h,ULONG access,PVOID type,
++ KPROCESSOR_MODE mode,PVOID *result,PVOID info)
++{
++ unsigned i=ref_calls++;
++ assert(access==SYNCHRONIZE&&type==NULL&&mode==KernelMode&&info==NULL);
++ if ((int)i==fail_index) return STATUS_INVALID_HANDLE;
++ assert(h==&objects[i]);objects[i].refs++;*result=h;return 0;
++}
++static void ObDereferenceObject(PVOID p)
++{
++ OBJECT *object=p;assert(object->refs==1);object->refs--;
++}
++static __attribute__((unused)) PVOID ExAllocatePoolWithTag(int pool,size_t size,int tag)
++{
++ alloc_calls++;assert(pool==NonPagedPool&&tag==TAG_WAIT);
++ assert(size==expected_count*sizeof(KWAIT_BLOCK));
++ /* Every object must already be referenced when allocation is attempted. */
++ for(unsigned i=0;i<expected_count;i++)assert(objects[i].refs==1);
++ if(fail_alloc)return NULL;
++ live++;return calloc(1,size);
++}
++static __attribute__((unused)) void ExFreePoolWithTag(PVOID p,int tag)
++{
++ assert(p&&tag==TAG_WAIT&&live==1);free_calls++;live--;free(p);
++}
++static NTSTATUS KeWaitForMultipleObjects(ULONG count,PVOID *waitables,
++ WAIT_TYPE type,int reason,KPROCESSOR_MODE mode,BOOLEAN alertable,
++ PLARGE_INTEGER timeout,PKWAIT_BLOCK blocks)
++{
++ dispatch_calls++;
++ assert(count==expected_count&&type==expected_type&&reason==UserRequest);
++ assert(mode==expected_mode&&alertable==expected_alertable);
++ assert(timeout==expected_timeout);
++ assert((count>THREAD_WAIT_OBJECTS)==(blocks!=NULL));
++ for(unsigned i=0;i<count;i++){
++  assert(objects[i].refs==1&&waitables[i]==&objects[i].waitable);
++  if(blocks)blocks[i].words[0]=i;
++ }
++ return dispatch_status;
++}
++'''
++tests = r'''
++static unsigned cases;
++static void run(ULONG count,WAIT_TYPE type,KPROCESSOR_MODE mode,
++ BOOLEAN alertable,int bad,int fail,NTSTATUS result,PLARGE_INTEGER timeout)
++{
++ HANDLE handles[64];
++ ref_calls=alloc_calls=free_calls=dispatch_calls=live=0;
++ fail_index=bad;fail_alloc=fail;expected_count=count;expected_type=type;
++ expected_mode=mode;expected_alertable=alertable;expected_timeout=timeout;
++ dispatch_status=result;
++ for(unsigned i=0;i<64;i++){
++  assert(objects[i].refs==0);handles[i]=&objects[i];
++  objects[i].header.Type=&types[i];
++  types[i].DefaultObject=i&1?(PVOID)offsetof(OBJECT,waitable):&objects[i].waitable;
++ }
++ NTSTATUS got=NxkWaitForMultipleObjectsMode(count,handles,type,mode,alertable,timeout);
++ int invalid=count==0||count>64||(type!=WaitAll&&type!=WaitAny);
++ NTSTATUS expected=invalid?STATUS_INVALID_PARAMETER:
++  bad>=0?STATUS_INVALID_HANDLE:fail&&count>3?STATUS_INSUFFICIENT_RESOURCES:result;
++ assert(got==expected);
++ assert(ref_calls==(invalid?0:bad>=0?(unsigned)bad+1:count));
++ unsigned allocation=!invalid&&bad<0&&count>3;
++ assert(alloc_calls==allocation);
++ assert(free_calls==(allocation&&!fail));
++ assert(dispatch_calls==(!invalid&&bad<0&&!(fail&&count>3)));
++ assert(live==0);for(unsigned i=0;i<64;i++)assert(objects[i].refs==0);
++ cases++;
++}
++int main(void)
++{
++ int64_t finite=-500000,zero=0;
++ const unsigned counts[]={1,3,4,5,64};
++ const NTSTATUS results[]={0,2,0x102,0xc0,(int32_t)0xc0000001};
++ for(unsigned c=0;c<5;c++){
++  for(unsigned t=0;t<2;t++)for(unsigned m=0;m<2;m++)
++   for(unsigned a=0;a<2;a++)for(unsigned r=0;r<5;r++)
++    run(counts[c],t,m,a,-1,0,results[r],r%3==0?NULL:r%3==1?&zero:&finite);
++  run(counts[c],WaitAny,KernelMode,0,-1,1,0,&finite);
++  run(counts[c],WaitAll,UserMode,1,0,0,0,&finite);
++  run(counts[c],WaitAll,UserMode,1,counts[c]/2,0,0,&finite);
++  run(counts[c],WaitAll,UserMode,1,counts[c]-1,0,0,&finite);
++ }
++ run(0,WaitAll,KernelMode,0,-1,0,0,NULL);
++ run(65,WaitAll,KernelMode,0,-1,0,0,NULL);
++ run(4,(WAIT_TYPE)2,KernelMode,0,-1,0,0,NULL);
++ printf("PASS: %u production adapter cases; references/pool balanced\n",cases);
++}
++'''
++(out / 'actual-wait.c').write_text(preamble.replace('#include <string.h>',
++    '#include <string.h>\n#include <stddef.h>') + source[start:end] + tests)
++subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
++                '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
++                str(out / 'actual-wait.c'), '-o', str(out / 'wait-check')], check=True)
++subprocess.run([str(out / 'wait-check')], check=True)
+diff --git a/tests/xbe/thread-wait/Makefile b/tests/xbe/thread-wait/Makefile
+index e6f02f7b..e0025795 100644
+--- a/tests/xbe/thread-wait/Makefile
++++ b/tests/xbe/thread-wait/Makefile
+@@ -1,6 +1,13 @@
+-XBE_TITLE = WAIT-PROBE
+-GEN_XISO = wait.iso
+-SRCS = $(CURDIR)/main.c
++XBE_TITLE = THREAD-WAIT
++GEN_XISO = thread-wait.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++ifeq ($(wildcard $(KERNEL_ASM)),)
++$(error KERNEL_ASM must name the tested kernel build's sdk/include/asm/ks386.inc)
++endif
++asm_value = $(shell awk '$$1=="$(1)" {print $$3}' $(KERNEL_ASM))
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++NXDK_CFLAGS += -DNATIVE_PCR_THREAD_OFFSET='($(call asm_value,PcPrcbData)+$(call asm_value,PbCurrentThread))'
++NXDK_CFLAGS += -DNATIVE_THREAD_STATE_OFFSET=$(call asm_value,ThState)
++NXDK_CFLAGS += -DNATIVE_WAITING=$(call asm_value,Waiting)
+ include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/thread-wait/main.c b/tests/xbe/thread-wait/main.c
+index b367d8fe..a0c1e2f6 100644
+--- a/tests/xbe/thread-wait/main.c
++++ b/tests/xbe/thread-wait/main.c
+@@ -1,39 +1,172 @@
+-#include <stdio.h>
+-#include <windows.h>
+-#include <xboxkrnl/xboxkrnl.h>
+-#include <hal/debug.h>
+-#include <hal/video.h>
+-#include <nxdk/mount.h>
+-static HANDLE handles[64];
+-int main(void) {
+- XVideoSetMode(640,480,32,REFRESH_DEFAULT);
+- if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
+- FILE *out=fopen("E:\\wait-result.txt","wb");
+- if(!out){debugPrint("FAIL result\n");for(;;)Sleep(1000);}
+- const unsigned counts[]={3,4,5,64};unsigned checks=0,failures=0;
+- for(unsigned c=0;c<4;c++) {
+-  unsigned n=counts[c],created=0;NTSTATUS status=0;
+-  fprintf(out,"BEGIN count=%u\n",n);fflush(out);
+-  for(unsigned i=0;i<n;i++) {
+-   status=NtCreateEvent(&handles[i],NULL,NotificationEvent,i==n-1);
+-   if(!NT_SUCCESS(status))break;created++;
+-  }
+-  if(created!=n){fprintf(out,"FAIL create=%u status=%08lx\n",created,(unsigned long)status);failures++;break;}
+-  LARGE_INTEGER zero={.QuadPart=0};
+-  status=NtWaitForMultipleObjectsEx(n,handles,WaitAny,KernelMode,FALSE,&zero);
+-  checks++;failures+=status!=(NTSTATUS)(STATUS_WAIT_0+n-1);
+-  fprintf(out,"ANY count=%u status=%08lx\n",n,(unsigned long)status);fflush(out);
+-  for(unsigned i=0;i<n;i++)NtSetEvent(handles[i],NULL);
+-  status=NtWaitForMultipleObjectsEx(n,handles,WaitAll,KernelMode,FALSE,&zero);
+-  checks++;failures+=status!=STATUS_SUCCESS;
+-  fprintf(out,"ALL count=%u status=%08lx\n",n,(unsigned long)status);fflush(out);
+-  for(unsigned i=0;i<n;i++)NtClearEvent(handles[i]);
+-  status=NtWaitForMultipleObjectsEx(n,handles,WaitAny,KernelMode,FALSE,&zero);
+-  checks++;failures+=status!=STATUS_TIMEOUT;
+-  fprintf(out,"TIMEOUT count=%u status=%08lx\n",n,(unsigned long)status);fflush(out);
+-  for(unsigned i=0;i<n;i++)NtClose(handles[i]);
+- }
+- fprintf(out,"COMPLETE checks=%u failures=%u\n",checks,failures);fclose(out);
+- debugPrint("WAIT COMPLETE checks=%u failures=%u\n",checks,failures);
+- for(;;)Sleep(1000);
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../regression.h"
++#include <stdint.h>
++#include <string.h>
++
++static HANDLE events[64];
++static volatile struct {
++    uintptr_t native_thread;
++    unsigned count, kind;
++    NTSTATUS status;
++    ULONGLONG elapsed;
++    LONG done, apc_calls, calls_at_return;
++} trial;
++
++static void sleep_ms(unsigned ms)
++{
++    LARGE_INTEGER delay = { .QuadPart = -(LONGLONG)ms * 10000 };
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++}
++
++static void NTAPI apc(PVOID a, PVOID b, PVOID c)
++{
++    (void)a; (void)b; (void)c;
++    InterlockedIncrement(&trial.apc_calls);
++}
++
++static void NTAPI worker(PVOID argument)
++{
++    uintptr_t thread;
++    (void)argument;
++    /* The public ordinal returns an Xbox shadow. The tested build's native
++     * offsets let this regression observe actual dispatcher suspension.
++     */
++    __asm__ __volatile__("movl %%fs:%c1,%0" : "=r"(thread)
++                         : "i"(NATIVE_PCR_THREAD_OFFSET));
++    trial.native_thread = thread;
++    LARGE_INTEGER timeout = { .QuadPart = trial.kind == 2 ? -2000000 : -20000000 };
++    ULONGLONG start = KeQueryInterruptTime();
++    trial.status = NtWaitForMultipleObjectsEx(trial.count, events,
++        trial.kind == 1 ? WaitAll : WaitAny,
++        trial.kind == 3 ? UserMode : KernelMode, trial.kind == 3, &timeout);
++    trial.elapsed = KeQueryInterruptTime() - start;
++    trial.calls_at_return = trial.apc_calls;
++    InterlockedExchange(&trial.done, 1);
++}
++
++static void NTAPI startup(PKSTART_ROUTINE start, PVOID context)
++{
++    start(context);
++    PsTerminateSystemThread(STATUS_SUCCESS);
++}
++
++static int is_blocked(void)
++{
++    uintptr_t thread = trial.native_thread;
++    return thread && !trial.done &&
++        *(volatile unsigned char *)(thread + NATIVE_THREAD_STATE_OFFSET) == NATIVE_WAITING;
++}
++
++static void blocking_trial(unsigned count, unsigned kind)
++{
++    HANDLE thread = NULL;
++    memset((void *)&trial, 0, sizeof(trial));
++    trial.count = count; trial.kind = kind;
++    int cleared = 1;
++    for (unsigned i = 0; i < count; ++i)
++        cleared &= NtClearEvent(events[i]) == STATUS_SUCCESS;
++    regression_require(cleared, "clear every event before blocking trial");
++    NTSTATUS status = PsCreateSystemThreadEx(&thread, 0, 0, 0, NULL, worker, NULL,
++                                            FALSE, FALSE, startup);
++    regression_require(status == STATUS_SUCCESS && thread, "create wait worker");
++    int blocked = 0;
++    /* A state handshake before signaling or queueing, not a presumed delay. */
++    for (unsigned i = 0; i < 100 && !trial.done; ++i) {
++        if (is_blocked()) { blocked = 1; break; }
++        sleep_ms(1);
++    }
++    regression_require(blocked, "worker is in native Waiting before completion action");
++    if (kind == 0) {
++        regression_require(NtSetEvent(events[count - 1], NULL) == STATUS_SUCCESS,
++                           "release delayed WaitAny through last event");
++    } else if (kind == 1) {
++        int signaled = 1;
++        for (unsigned i = 0; i + 1 < count; ++i)
++            signaled &= NtSetEvent(events[i], NULL) == STATUS_SUCCESS;
++        regression_require(signaled, "signal all except final WaitAll event");
++        sleep_ms(10);
++        regression_require(is_blocked(), "WaitAll remains blocked with final event unset");
++        regression_require(NtSetEvent(events[count - 1], NULL) == STATUS_SUCCESS,
++                           "release delayed WaitAll through final event");
++    } else if (kind == 3) {
++        regression_require(NtQueueApcThread(thread, apc, NULL, NULL, NULL) == STATUS_SUCCESS,
++                           "queue APC to blocked alertable UserMode waiter");
++    }
++    LARGE_INTEGER timeout = { .QuadPart = -30000000 };
++    regression_require(NtWaitForSingleObject(thread, FALSE, &timeout) == STATUS_SUCCESS,
++                       "wait worker joins within finite deadline");
++    NTSTATUS expected = kind == 0 ? (NTSTATUS)(STATUS_WAIT_0 + count - 1) :
++        kind == 1 ? STATUS_SUCCESS : kind == 2 ? STATUS_TIMEOUT : STATUS_USER_APC;
++    tap_comment("WAIT count=%u kind=%u status=%08x elapsed_100ns=%llu apcs=%ld",
++        count, kind, (unsigned)trial.status, trial.elapsed, (long)trial.apc_calls);
++    regression_require(trial.done && trial.status == expected, "blocking wait returns expected status");
++    if (kind == 2)
++        regression_require(trial.elapsed >= 2000000, "finite timeout waits its nonzero interval");
++    if (kind == 3)
++        regression_require(trial.apc_calls == 1 && trial.calls_at_return == 1,
++                           "APC runs exactly once before alertable wait returns");
++    regression_require(NtClose(thread) == STATUS_SUCCESS, "close joined wait-worker handle");
++}
++
++static void immediate(unsigned count)
++{
++    LARGE_INTEGER zero = { .QuadPart = 0 };
++    for (unsigned i = 0; i < count; ++i)
++        regression_require(NtClearEvent(events[i]) == STATUS_SUCCESS, "clear poll event");
++    regression_require(NtSetEvent(events[count - 1], NULL) == STATUS_SUCCESS, "signal final poll event");
++    regression_require(NtWaitForMultipleObjectsEx(count, events, WaitAny, KernelMode, FALSE, &zero)
++                       == (NTSTATUS)(STATUS_WAIT_0 + count - 1), "immediate WaitAny returns final index");
++    for (unsigned i = 0; i < count; ++i)
++        regression_require(NtSetEvent(events[i], NULL) == STATUS_SUCCESS, "signal WaitAll poll event");
++    regression_require(NtWaitForMultipleObjectsEx(count, events, WaitAll, KernelMode, FALSE, &zero)
++                       == STATUS_SUCCESS, "immediate WaitAll succeeds");
++    for (unsigned i = 0; i < count; ++i)
++        regression_require(NtClearEvent(events[i]) == STATUS_SUCCESS, "clear timeout poll event");
++    regression_require(NtWaitForMultipleObjectsEx(count, events, WaitAny, KernelMode, FALSE, &zero)
++                       == STATUS_TIMEOUT, "immediate unsignaled poll times out");
++}
++
++static int statistics(MM_STATISTICS *mm, PS_STATISTICS *ps)
++{
++    memset(mm, 0, sizeof(*mm)); mm->Length = sizeof(*mm);
++    memset(ps, 0, sizeof(*ps)); ps->Length = sizeof(*ps);
++    return MmQueryStatistics(mm) == STATUS_SUCCESS && PsQueryStatistics(ps) == STATUS_SUCCESS;
++}
++
++int main(void)
++{
++    static const unsigned poll_counts[] = {3, 4, 5, 64};
++    static const unsigned blocking_counts[] = {3, 4, 64};
++    regression_begin();
++    for (unsigned i = 0; i < 64; ++i)
++        regression_require(NtCreateEvent(&events[i], NULL, NotificationEvent, FALSE) == STATUS_SUCCESS,
++                           "create distinct wait event");
++    for (unsigned i = 0; i < 4; ++i) immediate(poll_counts[i]);
++    /* Warm dispatcher, stack and pool caches before bounded churn. */
++    for (unsigned i = 0; i < 3; ++i)
++        for (unsigned k = 0; k < 4; ++k) blocking_trial(blocking_counts[i], k);
++    sleep_ms(100);
++    MM_STATISTICS before, after; PS_STATISTICS ps_before, ps_after;
++    regression_require(statistics(&before, &ps_before), "query warmed accounting");
++    for (unsigned round = 0; round < 3; ++round)
++        for (unsigned i = 0; i < 3; ++i)
++            for (unsigned k = 0; k < 4; ++k) blocking_trial(blocking_counts[i], k);
++    int settled = 0;
++    for (unsigned i = 0; i < 50; ++i) {
++        sleep_ms(100);
++        if (!statistics(&after, &ps_after)) break;
++        if (ps_after.HandleCount == ps_before.HandleCount &&
++            ps_after.ThreadCount == ps_before.ThreadCount &&
++            after.StackPagesCommitted <= before.StackPagesCommitted &&
++            after.PoolPagesCommitted <= before.PoolPagesCommitted) { settled = 1; break; }
++    }
++    tap_comment("WAIT-CLEANUP pool=%lu/%lu stack=%lu/%lu threads=%lu/%lu handles=%lu/%lu",
++        (unsigned long)before.PoolPagesCommitted, (unsigned long)after.PoolPagesCommitted,
++        (unsigned long)before.StackPagesCommitted, (unsigned long)after.StackPagesCommitted,
++        (unsigned long)ps_before.ThreadCount, (unsigned long)ps_after.ThreadCount,
++        (unsigned long)ps_before.HandleCount, (unsigned long)ps_after.HandleCount);
++    regression_require(settled, "repeated waits restore warmed pool, stack, thread and handle accounting");
++    for (unsigned i = 0; i < 64; ++i)
++        regression_require(NtClose(events[i]) == STATUS_SUCCESS, "close wait event");
++    regression_finish();
+ }
