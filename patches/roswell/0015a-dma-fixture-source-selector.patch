@@ -1,0 +1,13 @@
+diff --git a/tests/host/dma-lifetime/check.py b/tests/host/dma-lifetime/check.py
+index 06e935c2..a3dcda72 100644
+--- a/tests/host/dma-lifetime/check.py
++++ b/tests/host/dma-lifetime/check.py
+@@ -10,7 +10,7 @@ import importlib.util
+ import subprocess
+ import sys
+ 
+-root = Path(__file__).resolve().parents[3]
++root = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else Path(__file__).resolve().parents[3]
+ out = Path(sys.argv[1]).resolve()
+ out.mkdir(parents=True, exist_ok=True)
+ sys.dont_write_bytecode = True
