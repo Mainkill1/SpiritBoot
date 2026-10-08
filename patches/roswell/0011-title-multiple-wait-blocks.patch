@@ -1,0 +1,111 @@
+diff --git a/ntoskrnl/ob/obwait.c b/ntoskrnl/ob/obwait.c
+index f7badc11e7621707621de7d91c60b3298ff74cbb..47ca76d2455fca4ee00847009d6aaa1b39b64c9d 100644
+--- a/ntoskrnl/ob/obwait.c
++++ b/ntoskrnl/ob/obwait.c
+@@ -502,8 +502,8 @@ NxkWaitForSingleObjectMode(IN HANDLE Handle,
+  * the ring-0 title), making the wait non-alertable and stranding APCs.  USBD
+  * device threads do thousands of these per second.
+  *
+- * Resolution + dispatch mirrors KeWaitForMultipleObjects, allocating thread
+- * wait blocks on the stack since count <= MAXIMUM_WAIT_OBJECTS (64).
++ * As in NtWaitForMultipleObjects, counts above the thread's embedded capacity
++ * need nonpaged wait blocks that remain valid until the wait completes.
+  */
+ NTSTATUS
+ NTAPI
+@@ -516,6 +516,7 @@ NxkWaitForMultipleObjectsMode(IN ULONG Count,
+ {
+     PVOID Objects[MAXIMUM_WAIT_OBJECTS];
+     PVOID Waitables[MAXIMUM_WAIT_OBJECTS];
++    PKWAIT_BLOCK WaitBlockArray = NULL;
+     NTSTATUS Status;
+     ULONG i;
+ 
+@@ -547,6 +548,18 @@ NxkWaitForMultipleObjectsMode(IN ULONG Count,
+         }
+     }
+ 
++    if (Count > THREAD_WAIT_OBJECTS)
++    {
++        WaitBlockArray = ExAllocatePoolWithTag(NonPagedPool,
++                                              Count * sizeof(KWAIT_BLOCK),
++                                              TAG_WAIT);
++        if (!WaitBlockArray)
++        {
++            Status = STATUS_INSUFFICIENT_RESOURCES;
++            goto Cleanup;
++        }
++    }
++
+     Status = KeWaitForMultipleObjects(Count,
+                                       Waitables,
+                                       WaitType,
+@@ -554,8 +567,10 @@ NxkWaitForMultipleObjectsMode(IN ULONG Count,
+                                       WaitMode,
+                                       Alertable,
+                                       Timeout,
+-                                      NULL);
++                                      WaitBlockArray);
+ 
++Cleanup:
++    if (WaitBlockArray) ExFreePoolWithTag(WaitBlockArray, TAG_WAIT);
+     for (i = 0; i < Count; i++)
+         ObDereferenceObject(Objects[i]);
+     return Status;
+diff --git a/tests/xbe/thread-wait/Makefile b/tests/xbe/thread-wait/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..e6f02f7b45b01017e5da375a17d41194d729aa85
+--- /dev/null
++++ b/tests/xbe/thread-wait/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = WAIT-PROBE
++GEN_XISO = wait.iso
++SRCS = $(CURDIR)/main.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/thread-wait/main.c b/tests/xbe/thread-wait/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..b367d8feec0e6d9ff910dd46e6ed68fc2b87bfae
+--- /dev/null
++++ b/tests/xbe/thread-wait/main.c
+@@ -0,0 +1,39 @@
++#include <stdio.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <hal/debug.h>
++#include <hal/video.h>
++#include <nxdk/mount.h>
++static HANDLE handles[64];
++int main(void) {
++ XVideoSetMode(640,480,32,REFRESH_DEFAULT);
++ if(!nxIsDriveMounted('E'))nxMountDrive('E',"\\Device\\Harddisk0\\Partition1");
++ FILE *out=fopen("E:\\wait-result.txt","wb");
++ if(!out){debugPrint("FAIL result\n");for(;;)Sleep(1000);}
++ const unsigned counts[]={3,4,5,64};unsigned checks=0,failures=0;
++ for(unsigned c=0;c<4;c++) {
++  unsigned n=counts[c],created=0;NTSTATUS status=0;
++  fprintf(out,"BEGIN count=%u\n",n);fflush(out);
++  for(unsigned i=0;i<n;i++) {
++   status=NtCreateEvent(&handles[i],NULL,NotificationEvent,i==n-1);
++   if(!NT_SUCCESS(status))break;created++;
++  }
++  if(created!=n){fprintf(out,"FAIL create=%u status=%08lx\n",created,(unsigned long)status);failures++;break;}
++  LARGE_INTEGER zero={.QuadPart=0};
++  status=NtWaitForMultipleObjectsEx(n,handles,WaitAny,KernelMode,FALSE,&zero);
++  checks++;failures+=status!=(NTSTATUS)(STATUS_WAIT_0+n-1);
++  fprintf(out,"ANY count=%u status=%08lx\n",n,(unsigned long)status);fflush(out);
++  for(unsigned i=0;i<n;i++)NtSetEvent(handles[i],NULL);
++  status=NtWaitForMultipleObjectsEx(n,handles,WaitAll,KernelMode,FALSE,&zero);
++  checks++;failures+=status!=STATUS_SUCCESS;
++  fprintf(out,"ALL count=%u status=%08lx\n",n,(unsigned long)status);fflush(out);
++  for(unsigned i=0;i<n;i++)NtClearEvent(handles[i]);
++  status=NtWaitForMultipleObjectsEx(n,handles,WaitAny,KernelMode,FALSE,&zero);
++  checks++;failures+=status!=STATUS_TIMEOUT;
++  fprintf(out,"TIMEOUT count=%u status=%08lx\n",n,(unsigned long)status);fflush(out);
++  for(unsigned i=0;i<n;i++)NtClose(handles[i]);
++ }
++ fprintf(out,"COMPLETE checks=%u failures=%u\n",checks,failures);fclose(out);
++ debugPrint("WAIT COMPLETE checks=%u failures=%u\n",checks,failures);
++ for(;;)Sleep(1000);
++}
