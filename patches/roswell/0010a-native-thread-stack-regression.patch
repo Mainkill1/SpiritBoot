@@ -1,0 +1,162 @@
+diff --git a/tests/host/thread-stack/check.py b/tests/host/thread-stack/check.py
+index ec994443..5820fdf6 100644
+--- a/tests/host/thread-stack/check.py
++++ b/tests/host/thread-stack/check.py
+@@ -3,7 +3,8 @@
+ """Exercise the actual Xbox thread creation adapter with a recording allocator.
+ 
+ This checks size propagation and rejection before allocation; native guest
+-checks separately establish execution, guard-page and teardown behavior.
++checks are stubbed; the maintained thread-stack guest separately checks native
++execution, mapped extent, an unmapped guard page and warmed-cache accounting.
+ """
+ from pathlib import Path
+ import subprocess
+@@ -49,13 +50,14 @@ static NTSTATUS PspCreateThread(PHANDLE h, ACCESS_MASK a, POBJECT_ATTRIBUTES o,
+ tests = r'''
+ int main(void) {
+  const uint32_t inputs[]={1,0,4095,4096,4097,49152,49153,65536,262144};
+- const uint32_t expected[]={12288,12288,12288,12288,12288,49152,53248,65536,262144};
+  for (unsigned i=0;i<sizeof(inputs)/sizeof(inputs[0]);i++) {
++  uint64_t minimum=inputs[i]<KERNEL_STACK_SIZE?KERNEL_STACK_SIZE:inputs[i];
++  uint32_t expected=(uint32_t)((minimum+PAGE_SIZE-1)/PAGE_SIZE*PAGE_SIZE);
+   calls=0;
+   assert(NxkPsCreateSystemThread(NULL,0,NULL,NULL,NULL,NULL,NULL,inputs[i],0)==0);
+-  if (calls!=1 || allocated!=expected[i]) {
++  if (calls!=1 || allocated!=expected) {
+    fprintf(stderr,"request=%u allocated=%u expected=%u calls=%u\n",
+-           inputs[i],allocated,expected[i],calls); return 1;
++           inputs[i],allocated,expected,calls); return 1;
+   }
+  }
+  calls=0;
+diff --git a/tests/xbe/thread-stack/Makefile b/tests/xbe/thread-stack/Makefile
+new file mode 100644
+index 00000000..e22cbdef
+--- /dev/null
++++ b/tests/xbe/thread-stack/Makefile
+@@ -0,0 +1,14 @@
++XBE_TITLE = THREAD-STACK
++GEN_XISO = thread-stack.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++ifeq ($(wildcard $(KERNEL_ASM)),)
++$(error KERNEL_ASM must name the tested kernel build's sdk/include/asm/ks386.inc)
++endif
++asm_value = $(shell awk '$$1=="$(1)" {print $$3}' $(KERNEL_ASM))
++STACK_DEFAULT := $(shell sed -n 's/^\#define KERNEL_STACK_SIZE[[:space:]]*\([0-9][0-9]*\).*/\1/p' $(CURDIR)/../../../sdk/include/xdk/x86/ke.h)
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror -DDEFAULT_KERNEL_STACK_BYTES=$(STACK_DEFAULT)
++NXDK_CFLAGS += -DNATIVE_PCR_THREAD_OFFSET='($(call asm_value,PcPrcbData)+$(call asm_value,PbCurrentThread))'
++NXDK_CFLAGS += -DNATIVE_STACK_BASE_OFFSET=$(call asm_value,ThStackBase)
++NXDK_CFLAGS += -DNATIVE_STACK_LIMIT_OFFSET=$(call asm_value,ThStackLimit)
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/thread-stack/main.c b/tests/xbe/thread-stack/main.c
+new file mode 100644
+index 00000000..fd63be7d
+--- /dev/null
++++ b/tests/xbe/thread-stack/main.c
+@@ -0,0 +1,104 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../regression.h"
++#include <stdint.h>
++#include <string.h>
++
++#ifndef DEFAULT_KERNEL_STACK_BYTES
++#error Build with the selected kernel's default stack size
++#endif
++
++static volatile struct {
++    uintptr_t base,limit,esp;
++    uint32_t checksum;
++    int committed,guard_unmapped;
++} observed;
++
++static void NTAPI worker(PVOID argument)
++{
++    volatile unsigned char scratch[6144];
++    /* The public ordinal returns an Xbox shadow, not the native KTHREAD.
++     * Build-generated offsets keep this kernel regression on the real stack.
++     */
++    uintptr_t thread;
++    __asm__ __volatile__("movl %%fs:%c1,%0" : "=r"(thread)
++                         : "i"(NATIVE_PCR_THREAD_OFFSET));
++    observed.base=*(volatile uintptr_t *)(thread+NATIVE_STACK_BASE_OFFSET);
++    observed.limit=*(volatile uintptr_t *)(thread+NATIVE_STACK_LIMIT_OFFSET);
++    __asm__ __volatile__("mov %%esp,%0" : "=r"(observed.esp));
++    observed.committed=1;
++    for(uintptr_t p=observed.limit;p<observed.base;p+=4096)
++        observed.committed&=MmIsAddressValid((void *)p);
++    observed.guard_unmapped=!MmIsAddressValid((void *)(observed.limit-1));
++    for(unsigned i=0;i<sizeof(scratch);++i)scratch[i]=(unsigned char)i;
++    LARGE_INTEGER delay={.QuadPart=-100000};
++    KeDelayExecutionThread(KernelMode,FALSE,&delay);
++    uint32_t sum=0;
++    for(unsigned i=0;i<sizeof(scratch);++i)sum+=scratch[i];
++    observed.checksum=sum;
++    (void)argument;
++}
++
++static void NTAPI startup(PKSTART_ROUTINE start,PVOID context)
++{
++    start(context);
++    PsTerminateSystemThread(STATUS_SUCCESS);
++}
++
++static void create_join(unsigned size)
++{
++    HANDLE thread=NULL;
++    memset((void *)&observed,0,sizeof(observed));
++    NTSTATUS status=PsCreateSystemThreadEx(&thread,0,size,0,NULL,worker,NULL,
++                                          FALSE,FALSE,startup);
++    regression_require(status==STATUS_SUCCESS&&thread!=NULL,"create explicit-stack thread");
++    LARGE_INTEGER timeout={.QuadPart=-20000000};
++    status=NtWaitForSingleObject(thread,FALSE,&timeout);
++    regression_require(status==STATUS_SUCCESS,"thread completes before finite timeout");
++    unsigned minimum=size<DEFAULT_KERNEL_STACK_BYTES?DEFAULT_KERNEL_STACK_BYTES:size;
++    unsigned expected=((minimum+4095)/4096)*4096;
++    tap_comment("STACK requested=%u expected=%u base=%08x limit=%08x esp=%08x",
++        size,expected,(unsigned)observed.base,(unsigned)observed.limit,(unsigned)observed.esp);
++    regression_require(observed.base-observed.limit==expected,"reported extent equals normalized capacity");
++    regression_require(observed.limit<=observed.esp&&observed.esp<observed.base,
++                       "live ESP is inside the committed extent");
++    regression_require(observed.committed,"each reported stack page is mapped");
++    regression_require(observed.guard_unmapped,"page immediately below StackLimit is unmapped");
++    regression_require(observed.checksum==783360,"6144-byte scratch survives suspension");
++    regression_require(NtClose(thread)==STATUS_SUCCESS,"close joined thread handle");
++}
++
++static void statistics(MM_STATISTICS *mm,PS_STATISTICS *ps)
++{
++    memset(mm,0,sizeof(*mm));mm->Length=sizeof(*mm);
++    memset(ps,0,sizeof(*ps));ps->Length=sizeof(*ps);
++    regression_require(MmQueryStatistics(mm)==STATUS_SUCCESS,"query memory accounting");
++    regression_require(PsQueryStatistics(ps)==STATUS_SUCCESS,"query thread and handle accounting");
++}
++
++int main(void)
++{
++    static const unsigned sizes[]={0,65536,49153,1,4095,4096,4097,12289};
++    regression_begin();
++    for(unsigned i=0;i<sizeof(sizes)/sizeof(sizes[0]);++i)create_join(sizes[i]);
++    /* Warm the intentional default-stack cache before checking bounded churn. */
++    LARGE_INTEGER delay={.QuadPart=-1000000};
++    KeDelayExecutionThread(KernelMode,FALSE,&delay);
++    MM_STATISTICS before,after;PS_STATISTICS ps_before,ps_after;
++    statistics(&before,&ps_before);
++    for(unsigned i=0;i<32;++i)create_join(i&1?1:4097);
++    int settled=0;
++    for(unsigned i=0;i<50;++i) {
++        KeDelayExecutionThread(KernelMode,FALSE,&delay);
++        memset(&after,0,sizeof(after));after.Length=sizeof(after);
++        memset(&ps_after,0,sizeof(ps_after));ps_after.Length=sizeof(ps_after);
++        if(MmQueryStatistics(&after)!=STATUS_SUCCESS||PsQueryStatistics(&ps_after)!=STATUS_SUCCESS)break;
++        if(ps_after.ThreadCount==ps_before.ThreadCount&&ps_after.HandleCount==ps_before.HandleCount&&
++           after.StackPagesCommitted<=before.StackPagesCommitted) {settled=1;break;}
++    }
++    tap_comment("STACK-CLEANUP before_stack=%lu after_stack=%lu before_threads=%lu after_threads=%lu before_handles=%lu after_handles=%lu",
++        (unsigned long)before.StackPagesCommitted,(unsigned long)after.StackPagesCommitted,
++        (unsigned long)ps_before.ThreadCount,(unsigned long)ps_after.ThreadCount,
++        (unsigned long)ps_before.HandleCount,(unsigned long)ps_after.HandleCount);
++    regression_require(settled,"bounded churn restores thread, handle and warmed stack accounting");
++    regression_finish();
++}

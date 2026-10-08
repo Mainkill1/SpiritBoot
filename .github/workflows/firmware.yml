@@ -47,11 +47,12 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 3fd0764d751109c25ff76dc02392bee9fa33f7f2
+            test "$actual_tree" = 70006dd53c676cdfdeb65eeb14005fef386b31be
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-unwind.py" "$output/cache-pin-unwind" >"$output/cache-pin-unwind.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-writeback.py" "$output/cache-writeback" >"$output/cache-writeback.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/thread-stack/check.py" "$output/thread-stack" >"$output/thread-stack.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/zero-alias/check.py" "$output/zero-alias" >"$output/zero-alias.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/pool-size/check.py" "$output/pool-size" >"$output/pool-size.log" 2>&1
             "$GUEST_SOURCE/tests/host/clean-room/run.sh" "$output/clean-room" >"$output/clean-room.log" 2>&1
@@ -85,8 +86,10 @@ jobs:
         run: |
           nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
+          kernel_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["build_directory"])')
           for guest in api-regression clean-room-contracts clean-room-warm-reboot kernel-performance $(python3 -c 'import json; print(" ".join(json.load(open("sources/native-regressions.json"))))'); do
             docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+              -e KERNEL_ASM="$kernel_build/sdk/include/asm/ks386.inc" \
               -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
               -w "$guest_source/tests/xbe/$guest" \
               "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
@@ -150,5 +153,6 @@ jobs:
             artifacts/kernel-performance-${{ matrix.variant }}/
             artifacts/pool-size-limit-${{ matrix.variant }}/
             artifacts/zero-reuse-${{ matrix.variant }}/
+            artifacts/thread-stack-${{ matrix.variant }}/
             artifacts/kernel-host-${{ matrix.variant }}/
             LICENSE
