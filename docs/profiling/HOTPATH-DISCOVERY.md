@@ -75,3 +75,50 @@ Later independent slices add phase/module attribution, kernel call/work/wait
 timers and bounded histograms, realistic stress guests, frequency/cost
 correlation, and paired uninstrumented performance qualification. The existing
 pinned benchmark analyzer and its historical evidence contract are preserved.
+
+## Sampled host CPU attribution (Linux)
+
+For cost discovery, use xemu's existing `-perfmap` independently of the TB
+plugin. Attach Linux perf to the exact owned process and retain its PID, event,
+frequency, clock, sampling window, lost-sample count, executable/BIOS identities
+and `/tmp/perf-PID.map`. No firmware change is required. Example sampling and
+export commands (operator access and perf permissions must already be available):
+
+```sh
+perf record -e cycles:u -F 97 --clockid mono -p PID -o perf.data
+perf script -G --ns -F comm,pid,tid,time,period,ip,sym,dso -i perf.data > samples.txt
+python3 tools/kernel_cpu_samples.py --samples samples.txt --pid PID \
+  --kernel /path/to/exact-build/ntoskrnl/xboxkrnl.unstripped.exe \
+  --host-executable /recorded/absolute/path/to/xemu \
+  --output /path/to/new/cpu-report.json
+```
+
+Stop sampling with SIGINT when the bounded diagnostic ends; retain perf's
+recording log. Use the actual numeric PID in both commands. Keep the matching
+map available when exporting. The analyzer accepts only this explicit leaf
+export, at most one million rows, and rejects malformed records, foreign PIDs,
+foreign guest-map PIDs, zero periods, and empty windows. Existing reports are
+never overwritten. `--start-ns` and `--end-ns` select an inclusive window in the
+recorded monotonic clock; they do not take wall-clock UTC or guest time.
+
+`--host-executable` matches the exact absolute DSO path from the recorder.
+Without it, the compatibility default recognizes basename `xemu` only. Supply
+the recorded path for `qemu-system-i386` or a renamed binary; a different module
+with the same basename must not be charged to the selected executable.
+
+Shares use each sample's event **period**, not equal weighting of sampled
+rows. Categories separate mapped kernel instruction PCs, other guest code,
+xemu host work, libraries, and unresolved samples. An unresolved symbol in a
+known library still belongs to that library. QEMU's map associates a generated
+host instruction span with its guest PC: an optional perf symbol offset is a
+host-code offset and must not be added to the guest address.
+
+Kernel symbol intervals remain estimates from the exact PE. This report does
+not attribute host helpers or library work to guest callers, measure blocking,
+count function calls, or identify frame-critical cost. Direct kernel JIT share
+is **not total kernel cost**. Plain perf maps do not prove code-generation
+identity across host address reuse; use generation-aware JIT evidence when
+that affects the investigation. Input hashes identify supplied files, not the
+correctness of the recorder's PID, event, clock, BIOS pairing, or scene. Retain
+and review that evidence separately. Sampling runs are discovery runs, not
+release-performance comparisons; no profiler is loaded in ordinary runs.
