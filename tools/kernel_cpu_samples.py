@@ -32,6 +32,8 @@ def parse_samples(lines, expected_pid, max_samples=1000000):
         if not match or len(line) > 16384:
             raise ValueError(f'malformed sample on line {number}')
         comm, pid, tid, seconds, fraction, period, ip, symbol, dso = match.groups()
+        if not symbol.strip() or not dso.strip():
+            raise ValueError(f'malformed sample on line {number}')
         pid, tid, period, ip = int(pid), int(tid), int(period), int(ip, 16)
         if pid != expected_pid or tid < 1 or not 0 < period < 2**64 or ip >= 2**64:
             raise ValueError(f'invalid sample identity/period on line {number}')
@@ -57,8 +59,8 @@ def parse_samples(lines, expected_pid, max_samples=1000000):
 def rank_samples(rows, symbols, start_ns=None, end_ns=None):
     if any(x is not None and (type(x) is not int or x < 0) for x in (start_ns, end_ns)):
         raise ValueError('invalid monotonic window')
-    if start_ns is not None and end_ns is not None and end_ns <= start_ns:
-        raise ValueError('reversed or empty monotonic window')
+    if start_ns is not None and end_ns is not None and end_ns < start_ns:
+        raise ValueError('reversed monotonic window')
     selected = [x for x in rows if (start_ns is None or x['time_ns'] >= start_ns) and
                 (end_ns is None or x['time_ns'] <= end_ns)]
     if not selected:

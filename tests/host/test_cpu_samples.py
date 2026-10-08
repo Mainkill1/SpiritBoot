@@ -80,6 +80,12 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual(result['weighted_period'], 100)
         self.assertEqual(rows[0]['time_ns'], 1000000001)
 
+    def test_equal_inclusive_bounds_can_select_one_timestamp(self):
+        rows = self.rows(self.sample())
+        result = self.cpu.rank_samples(rows, self.symbols(), 1000000001, 1000000001)
+        self.assertEqual(result['samples'], 1)
+        self.assertEqual(result['weighted_period'], 100)
+
     def test_mixed_process_stale_map_and_guest_overflow_are_rejected(self):
         for line in (self.sample(pid=8), self.sample(dso='/tmp/perf-8.map'),
                      self.sample(symbol='guest-0x100000000')):
@@ -88,7 +94,8 @@ class AttributionTests(unittest.TestCase):
 
     def test_malformed_zero_period_and_sample_budget_are_rejected(self):
         for line in ('bad', self.sample(period=0), self.sample(timestamp='nan'),
-                     self.sample(timestamp='1.0000000001')):
+                     self.sample(timestamp='1.0000000001'), self.sample(symbol=''),
+                     self.sample(dso=''), self.sample(symbol='  '), self.sample(dso='  ')):
             with self.subTest(line=line), self.assertRaises(ValueError):
                 self.rows(line)
         with self.assertRaises(ValueError):
