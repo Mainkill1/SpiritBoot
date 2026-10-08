@@ -1,0 +1,91 @@
+diff --git a/drivers/filesystems/xdvdfs/xdvdfs.c b/drivers/filesystems/xdvdfs/xdvdfs.c
+--- a/drivers/filesystems/xdvdfs/xdvdfs.c
++++ b/drivers/filesystems/xdvdfs/xdvdfs.c
+@@ -879,6 +879,12 @@
+      * see the right CurrentByteOffset (titles using Xapi do this). */
+     fo->CurrentByteOffset.QuadPart = fileOff + userLen;
+ 
++    if (!(fo->Flags & FO_SYNCHRONOUS_IO))
++    {
++        IoMarkIrpPending(Irp);
++        XdvdCompleteRequest(Irp, STATUS_SUCCESS, userLen);
++        return STATUS_PENDING;
++    }
+     return XdvdCompleteRequest(Irp, STATUS_SUCCESS, userLen);
+ }
+ 
+diff --git a/tests/host/xdvdfs-read-completion/check.py b/tests/host/xdvdfs-read-completion/check.py
+new file mode 100755
+--- /dev/null
++++ b/tests/host/xdvdfs-read-completion/check.py
+@@ -0,0 +1,70 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production optical read dispatch and completion ordering."""
++from pathlib import Path
++import sys,importlib.util,subprocess
++root=Path(sys.argv[2]).resolve() if len(sys.argv)>2 else Path(__file__).resolve().parents[3];out=Path(sys.argv[1]);out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');e=importlib.util.module_from_spec(spec);spec.loader.exec_module(e)
++s=(root/'drivers/filesystems/xdvdfs/xdvdfs.c').read_text()
++shim=r'''
++#include <stdint.h>
++#include <assert.h>
++#include <string.h>
++#include <stdio.h>
++#define _In_
++#define _Inout_
++#define NTAPI
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define STATUS_SUCCESS 0
++#define STATUS_PENDING 0x103
++#define STATUS_INVALID_DEVICE_REQUEST ((int32_t)0xc0000010)
++#define STATUS_INSUFFICIENT_RESOURCES ((int32_t)0xc000009a)
++#define STATUS_END_OF_FILE ((int32_t)0xc0000011)
++#define NT_SUCCESS(s) ((s)>=0)
++#define IO_NO_INCREMENT 0
++#define NormalPagePriority 0
++#define FO_SYNCHRONOUS_IO 2
++#define XDVD_SECTOR_SHIFT 11
++#define TRUE 1
++#define FALSE 0
++typedef uint64_t ULONGLONG;typedef uint32_t ULONG;typedef uintptr_t ULONG_PTR;
++typedef int32_t NTSTATUS;typedef void *PVOID,*PDEVICE_OBJECT;
++typedef struct {int64_t QuadPart;} LARGE_INTEGER;
++typedef struct {PDEVICE_OBJECT TargetDevice;} VCB;
++typedef struct {VCB *Vcb;int IsDirectory;ULONG DataSize,DataSector;} FCB,*PXDVD_FCB;
++typedef struct {void *FsContext;LARGE_INTEGER CurrentByteOffset;ULONG Flags;} FO,*PFILE_OBJECT;
++typedef struct {PFILE_OBJECT FileObject;struct {struct {LARGE_INTEGER ByteOffset;ULONG Length;} Read;} Parameters;} STACK,*PIO_STACK_LOCATION;
++typedef struct {STACK Stack;struct {NTSTATUS Status;ULONG_PTR Information;} IoStatus;void *MdlAddress;int PendingReturned,Completed;} IRP,*PIRP;
++static unsigned completions,pendingCalls;static NTSTATUS readStatus;static ULONG supplied;static unsigned char buffer[4096];
++static PIO_STACK_LOCATION IoGetCurrentIrpStackLocation(PIRP p){return &p->Stack;}
++static void *MmGetSystemAddressForMdlSafe(void *p,int priority){(void)priority;return p;}
++void IoMarkIrpPending(PIRP p){assert(!p->Completed);p->PendingReturned=1;pendingCalls++;}
++static void IoCompleteRequest(PIRP p,int boost){(void)boost;assert(!p->Completed);p->Completed=1;completions++;}
++static NTSTATUS XdvdReadIntoBuffer(PDEVICE_OBJECT d,ULONGLONG off,ULONG length,PVOID p,ULONG *got){
++ (void)d;(void)off;memset(p,0x5a,length);*got=supplied;return readStatus;
++}
++'''
++func=e.function(s,'XdvdCompleteRequest')+e.function(s[s.rfind('\n\n',0,s.index('XdvdDispatchRead(_In_')):],'XdvdDispatchRead')
++tests=r'''
++static unsigned cases,failures;
++static void run(int sync,ULONG len,ULONG offset,NTSTATUS backend,ULONG got,NTSTATUS expected,int pending){
++ VCB v={0};FCB f={&v,0,4096,100};FO fo={&f,{0},sync?FO_SYNCHRONOUS_IO:0};
++ IRP irp={0};irp.Stack.FileObject=&fo;irp.Stack.Parameters.Read.Length=len;irp.Stack.Parameters.Read.ByteOffset.QuadPart=offset;irp.MdlAddress=buffer;
++ completions=pendingCalls=0;readStatus=backend;supplied=got;
++ NTSTATUS status=XdvdDispatchRead(NULL,&irp);
++ if(status!=expected || pendingCalls!=(unsigned)pending || completions!=1){printf("FAIL sync=%d len=%u offset=%u status=%x pending=%u completed=%u\n",sync,len,offset,(unsigned)status,pendingCalls,completions);failures++;}cases++;
++ if(got==len && offset<4096 && len){assert(irp.IoStatus.Status==STATUS_SUCCESS);assert(irp.IoStatus.Information==len);assert(buffer[0]==0x5a);assert(fo.CurrentByteOffset.QuadPart==offset+len);}
++}
++int main(void){
++ run(1,512,0,0,512,STATUS_SUCCESS,0);
++ run(0,512,0,0,512,STATUS_PENDING,1);
++ run(1,0,0,0,0,STATUS_SUCCESS,0);run(0,0,0,0,0,STATUS_SUCCESS,0);
++ run(1,512,4096,0,0,STATUS_END_OF_FILE,0);run(0,512,4096,0,0,STATUS_END_OF_FILE,0);
++ run(0,512,0,STATUS_INSUFFICIENT_RESOURCES,0,STATUS_INSUFFICIENT_RESOURCES,0);
++ run(0,512,0,0,256,STATUS_END_OF_FILE,0);
++ printf("%u production read-completion cases, %u failures\n",cases,failures);return failures?1:0;
++}
++'''
++(out/'read.c').write_text(shim+func+tests)
++subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(out/'read.c'),'-o',str(out/'read')],check=True)
++subprocess.run([str(out/'read')],check=True)
