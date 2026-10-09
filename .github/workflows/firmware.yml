@@ -18,6 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         variant: [release, debug]
+        memory_mib: [64, 128]
     steps:
       - uses: actions/checkout@v4
       - name: Fetch pinned open kernel
@@ -36,18 +37,18 @@ jobs:
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             spiritboot-toolchain python3 scripts/build-firmware.py \
-            --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }} \
-            --variant ${{ matrix.variant }}
+            --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
+            --variant ${{ matrix.variant }} --memory-mib ${{ matrix.memory_mib }}
       - name: Check the built source identity and actual kernel work
         run: |
-          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
+          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-            -e GUEST_SOURCE="$guest_source" -e VARIANT=${{ matrix.variant }} \
+            -e GUEST_SOURCE="$guest_source" -e VARIANT=${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
             spiritboot-toolchain sh -ec '
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = c8173a4cd32a9130f32b018bacfafa3506febea3
+            test "$actual_tree" = 65fb8c399fc4478438f4e4e1983b8ac3557791ed
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-unwind.py" "$output/cache-pin-unwind" >"$output/cache-pin-unwind.log" 2>&1
@@ -80,7 +81,7 @@ jobs:
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             spiritboot-toolchain python3 scripts/build-firmware.py \
-            --source .reference/roswell --output artifacts/firmware-repeat
+            --source .reference/roswell --output artifacts/firmware-repeat --memory-mib ${{ matrix.memory_mib }}
           cmp artifacts/firmware-release/flash.bin artifacts/firmware-repeat/flash.bin
       - name: Prepare pinned open runtime fixtures
         run: |
@@ -101,8 +102,8 @@ jobs:
       - name: Build guests from the tested patched source
         run: |
           nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
-          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
-          kernel_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["build_directory"])')
+          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
+          kernel_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["build_directory"])')
           for guest in api-regression clean-room-contracts clean-room-warm-reboot kernel-performance $(python3 -c 'import json; print(" ".join(json.load(open("sources/native-regressions.json"))))'); do
             docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
               -e KERNEL_ASM="$kernel_build/sdk/include/asm/ks386.inc" \
@@ -112,10 +113,10 @@ jobs:
           done
       - name: Run API, contracts, warm reboot, and performance correctness guests
         run: |
-          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
+          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           docker run --rm -v "$PWD:/work" \
-            -e GUEST_SOURCE="$guest_source" -e VARIANT=${{ matrix.variant }} \
-            -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -ec '
+            -e GUEST_SOURCE="$guest_source" -e VARIANT=${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
+            -e MEMORY_MIB=${{ matrix.memory_mib }} -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -ec '
             Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
             python3 -c "import time; time.sleep(1)"
             for guest in api-regression clean-room-contracts clean-room-warm-reboot kernel-performance $(python3 -c "import json; print(\" \".join(json.load(open(\"sources/native-regressions.json\"))))"); do
@@ -129,19 +130,19 @@ jobs:
                 --flash "artifacts/firmware-$VARIANT/flash.bin" \
                 --hdd artifacts/xbox_hdd.qcow2 \
                 --dvd "$GUEST_SOURCE/tests/xbe/$guest/$iso" \
-                --output "artifacts/$capture-$VARIANT" --timeout 240 --expect-tap
+                --memory-mib "$MEMORY_MIB" --output "artifacts/$capture-$VARIANT" --timeout 240 --expect-tap
             done'
           python3 - <<'PY'
           import json
           for guest, plan in (('clean-room-contracts', 23), ('clean-room-warm-reboot', 5)):
-              result = json.load(open(f'artifacts/{guest}-${{ matrix.variant }}/run.json'))
+              result = json.load(open(f'artifacts/{guest}-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/run.json'))
               assert result['status'] == 'passed' and result['tap']['plan'] == plan, result
               assert result['tap']['ok'] == plan, result
               assert result['tap']['todo'] == 0 and result['tap']['skipped'] == 0, result
           PY
           python3 - <<'PY'
           import json
-          variant = "${{ matrix.variant }}"
+          variant = "${{ matrix.variant }}-${{ matrix.memory_mib }}mib"
           for guest, contract in json.load(open('sources/native-regressions.json')).items():
               result = json.load(open(f'artifacts/{guest}-{variant}/run.json'))
               assert result['status'] == 'passed', result
@@ -152,28 +153,28 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           from tools.kernel_performance import capture
-          result = capture(Path('artifacts/kernel-performance-${{ matrix.variant }}'), {})
+          result = capture(Path('artifacts/kernel-performance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib'), {})
           assert len(result['workloads']) == 41, result
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: spiritboot-${{ matrix.variant }}
+          name: spiritboot-${{ matrix.variant }}-${{ matrix.memory_mib }}mib
           path: |
-            artifacts/firmware-${{ matrix.variant }}/flash.bin
-            artifacts/firmware-${{ matrix.variant }}/build.json
-            artifacts/firmware-${{ matrix.variant }}/build.log
-            artifacts/open-xbe-${{ matrix.variant }}/
-            artifacts/clean-room-contracts-${{ matrix.variant }}/
-            artifacts/clean-room-warm-reboot-${{ matrix.variant }}/
-            artifacts/kernel-performance-${{ matrix.variant }}/
-            artifacts/pool-size-limit-${{ matrix.variant }}/
-            artifacts/zero-reuse-${{ matrix.variant }}/
-            artifacts/thread-stack-${{ matrix.variant }}/
-            artifacts/thread-wait-${{ matrix.variant }}/
-            artifacts/xdvdfs-directory-${{ matrix.variant }}/
-            artifacts/xdvdfs-related-directory-${{ matrix.variant }}/
-            artifacts/critical-section-contention-${{ matrix.variant }}/
-            artifacts/io-apc-order-${{ matrix.variant }}/
-            artifacts/kernel-host-${{ matrix.variant }}/
+            artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/flash.bin
+            artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json
+            artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.log
+            artifacts/open-xbe-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/clean-room-contracts-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/clean-room-warm-reboot-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/kernel-performance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/pool-size-limit-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/zero-reuse-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/thread-stack-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/thread-wait-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/xdvdfs-directory-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/xdvdfs-related-directory-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/critical-section-contention-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/io-apc-order-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/kernel-host-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             LICENSE
