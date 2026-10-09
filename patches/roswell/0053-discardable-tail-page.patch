@@ -1,3 +1,36 @@
+diff --git a/boot/nxldr/gen-flash-bin.py b/boot/nxldr/gen-flash-bin.py
+index 8c8b33ae..dbf3c548 100755
+--- a/boot/nxldr/gen-flash-bin.py
++++ b/boot/nxldr/gen-flash-bin.py
+@@ -101,8 +101,8 @@ def prepare_kernel_image(kernel: bytes, image_max: int) -> bytes:
+         _, end, size, _ = section_ranges[last]
+         end += size
+         require(end <= image_size, 'discardable section outside mapped image')
+-        if last + 1 < len(section_ranges):
+-            end = (end + 4095) & ~4095
++        # Runtime donates the final discardable padding page as well.
++        end = (end + 4095) & ~4095
+         donated += max(0, (end // 4096) - ((start + 4095) // 4096))
+         i = last + 1
+     require(donated + workspace <= capacity, 'warm persistence staging capacity exceeded')
+diff --git a/ntoskrnl/mm/ARM3/sysldr.c b/ntoskrnl/mm/ARM3/sysldr.c
+index a3b99dba..9612b055 100644
+--- a/ntoskrnl/mm/ARM3/sysldr.c
++++ b/ntoskrnl/mm/ARM3/sysldr.c
+@@ -1668,6 +1668,13 @@ MiFindInitializationCode(OUT PVOID *StartVa,
+                     }
+                 }
+ 
++#ifdef SARCH_XBOX
++                /* The loader owns complete mapped image pages. Include the
++                 * final discardable section's padding page; the image bound
++                 * below prevents donation beyond the loaded allocation. */
++                InitEnd = ALIGN_UP_BY(InitEnd, PAGE_SIZE);
++#endif
++
+                 /* Make sure we don't let the init section go past the image */
+                 ImageEnd = DllBase + LdrEntry->SizeOfImage;
+                 if (InitEnd > ImageEnd) InitEnd = ALIGN_UP_BY(ImageEnd, PAGE_SIZE);
 diff --git a/tests/host/boot-image/check.py b/tests/host/boot-image/check.py
 index 5b819de3..8552efb6 100644
 --- a/tests/host/boot-image/check.py
