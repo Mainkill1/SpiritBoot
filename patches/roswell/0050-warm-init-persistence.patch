@@ -638,7 +638,7 @@ index 51ecc22a..78a45e13 100644
          with tempfile.TemporaryDirectory() as tmp:
              tmp = Path(tmp)
 diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
-index 25fc90c4..82f24abc 100644
+index 25fc90c4..01004e89 100644
 --- a/tests/host/boot-layout/check.py
 +++ b/tests/host/boot-layout/check.py
 @@ -46,6 +46,10 @@ init_source = (root/'ntoskrnl/xb/mm/init.c').read_text()
@@ -699,7 +699,7 @@ index 25fc90c4..82f24abc 100644
  shim += '\nstatic void reclaim_boot_pts(void) {\n' + cluster + '\n}\n'
  shim += '\nstatic void clear_user_maps(void) {MMPTE *StartPde,*EndPde;\n' + user_clear + '\n}\n'
  shim += '\n' + ram_global + '\n' + hal + '\n' + loader_types
-@@ -219,12 +237,61 @@ int main(void) {
+@@ -219,12 +237,73 @@ int main(void) {
   memset(returned,0,sizeof(returned));reclaim_boot_pts();
   for(unsigned p=ptpa/PAGE_SIZE;p<ptpa/PAGE_SIZE+22;p++)check(!returned[p],"64 keeps bootstrap PTs reserved after PSE paint;128 behavior unchanged");
   memset(PmSelected,0,sizeof(PmSelected));PmSet(PmSelected,0x1000,TRUE);NxkMmPublishPersistence(TRUE);
@@ -737,6 +737,18 @@ index 25fc90c4..82f24abc 100644
 +  check(PmDescriptor(&lb,0x1ff)->MemoryType==LoaderFree&&PmDescriptor(&lb,0x201)->MemoryType==LoaderFree,"split preserves both adjacent free spans");
 +  memset(returned,0,sizeof(returned));KeLoaderBlock=&lb;MiInitializePfnDatabase(&lb);
 +  check(!returned[0x200]&&returned[0x1ff]&&returned[0x201],"production PFN walk preserves stash and admits neighboring free pages");
++  /* Run the actual restore/return body with valid writable identity PDEs. */
++  ULONG *recursive=mmap((void *)0xc0000000,0x400000,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
++  if(recursive==MAP_FAILED){perror("mmap recursive facade");return 2;}
++  ULONG *pdes=(ULONG *)0xc0300000;
++  for(unsigned i=0;i<16;i++)pdes[0x200+i]=(i<<22)|0x83;
++  memset((void *)0x80200000,0xa6,PAGE_SIZE);memset((void *)0x83466000,0x5a,PAGE_SIZE);
++  NxkMmRestoreInitPages(0x3466000,1);NxkMmFinishWarmRestore();
++  check(!memcmp((void *)0x80200000,(void *)0x83466000,PAGE_SIZE),"actual restore copies every byte through validated identity alias");
++  check(returned[0x200]==1&&!returned[0x3466]&&PmBit(PmRestored,0x3466)&&!slot->StageCount,"staging returned exactly once, title page stays reserved, handoff drained");
++  NxkMmRestoreInitPages(0x3466000,1);
++  check(returned[0x200]==1,"repeated restore cannot return the temporary page twice");
++  munmap(recursive,0x400000);
 + }
 +#endif
 +#if XBOX_RAM_MIB == 64
@@ -762,7 +774,7 @@ index 25fc90c4..82f24abc 100644
   printf("%dMiB: %d checks, %d failures\n",XBOX_RAM_MIB,checks,failures);return failures!=0;
  }
  '''
-@@ -239,7 +306,7 @@ for capacity in (128, 64):
+@@ -239,7 +318,7 @@ for capacity in (128, 64):
      failures += subprocess.run([str(exe)]).returncode != 0
  invalid = subprocess.run(['cc', '-x', 'c', '-fsyntax-only', '-DXBOX_RAM_MIB=72',
                            '-I'+str(root/'boot/nxldr'), '-'],
