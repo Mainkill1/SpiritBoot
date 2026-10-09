@@ -1,0 +1,83 @@
+diff --git a/tests/host/rom-kernel/test-image.py b/tests/host/rom-kernel/test-image.py
+new file mode 100644
+index 00000000..e4224dd1
+--- /dev/null
++++ b/tests/host/rom-kernel/test-image.py
+@@ -0,0 +1,77 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the actual image builder against independently owned PE bytes."""
++from pathlib import Path
++import importlib.util
++import struct
++import unittest
++import zlib
++
++root = Path(__file__).resolve().parents[3]
++spec = importlib.util.spec_from_file_location('builder', root/'boot/nxldr/gen-flash-bin.py')
++builder = importlib.util.module_from_spec(spec); spec.loader.exec_module(builder)
++
++def image():
++    raw = bytearray(0x5400)
++    raw[:2] = b'MZ'; struct.pack_into('<I',raw,0x3c,0x80)
++    raw[0x80:0x84] = b'PE\0\0'; struct.pack_into('<HH',raw,0x84,0x14c,4)
++    struct.pack_into('<H',raw,0x94,224)
++    opt=0x98; struct.pack_into('<H',raw,opt,0x10b)
++    struct.pack_into('<I',raw,opt+16,0x1000)
++    struct.pack_into('<II',raw,opt+28,0x84000000,4096)
++    struct.pack_into('<II',raw,opt+56,0x6000,0x400)
++    for i,(name,rva,size,offset,flags) in enumerate([
++        (b'.text',0x1000,0x2000,0x400,0x60000020),
++        (b'.data',0x3000,0x1000,0x2400,0xc0000040),
++        (b'.rdata',0x4000,0x1000,0x3400,0x40000040),
++        (b'INIT',0x5000,0x1000,0x4400,0xe2000020)]):
++        sh=0x178+i*40;raw[sh:sh+len(name)]=name
++        struct.pack_into('<IIII',raw,sh+8,size,rva,size,offset)
++        struct.pack_into('<I',raw,sh+36,flags)
++        raw[offset:offset+size]=bytes([(i+1)*37])*size
++    return bytes(raw)
++
++class RomImage(unittest.TestCase):
++    def prepare(self,raw=None,**kwargs):
++        self.assertTrue(callable(getattr(builder,'prepare_rom_kernel_image',None)),
++                        'ROM-backed image preparation is not implemented')
++        return builder.prepare_rom_kernel_image(raw or image(),0x100000,0x80000,**kwargs)
++    def test_rom_bytes_replace_ram_copy_and_keep_original_addresses(self):
++        prepared,rom_start,rom=self.prepare(retain_pages={0x1000})
++        self.assertEqual(rom_start%4096,0)
++        self.assertEqual(rom_start+len(rom),0x7f000)
++        self.assertEqual(prepared[0x1000:0x2000],bytes([37])*4096)
++        self.assertEqual(prepared[0x2000:0x3000],bytes(4096))
++        self.assertEqual(prepared[0x4000:0x5000],bytes(4096))
++        self.assertEqual(prepared[0x3000:0x4000],bytes([74])*4096)
++        self.assertEqual(prepared[0x5000:0x6000],bytes([148])*4096)
++        magic,version,count,flash=struct.unpack_from('<IIII',prepared,0x800)
++        self.assertEqual((magic,version,count,flash),(0x5052584e,1,2,0x80000))
++        for i,(rva,want) in enumerate([(0x2000,37),(0x4000,111)]):
++            actual,pages,physical,crc=struct.unpack_from('<IIII',prepared,0x810+i*16)
++            self.assertEqual((actual,pages,physical),(rva,1,0xff000000+rom_start+i*4096))
++            data=rom[i*4096:(i+1)*4096]
++            self.assertEqual(data,bytes([want])*4096)
++            self.assertEqual(crc,zlib.crc32(data))
++        self.assertEqual(struct.unpack_from('<I',prepared,0x98+16)[0],0x1000)
++    def test_no_eligible_pages_rejected(self):
++        raw=bytearray(image())
++        struct.pack_into('<I',raw,0x178+36,0xe0000020)
++        struct.pack_into('<I',raw,0x178+2*40+36,0xc0000040)
++        with self.assertRaisesRegex(ValueError,'immutable'):
++            self.prepare(bytes(raw))
++    def test_small_rom_cannot_wrap_placement(self):
++        self.assertTrue(callable(getattr(builder,'prepare_rom_kernel_image',None)),
++                        'ROM-backed image preparation is not implemented')
++        with self.assertRaises(ValueError):
++            builder.prepare_rom_kernel_image(image(),0x100000,4096)
++    def test_headers_must_leave_table_space(self):
++        raw=bytearray(image());struct.pack_into('<I',raw,0x98+60,0xc00)
++        with self.assertRaisesRegex(ValueError,'header'):
++            self.prepare(bytes(raw))
++    def test_legacy_builder_stays_ram_resident(self):
++        prepared=builder.prepare_kernel_image(image(),0x100000)
++        self.assertEqual(prepared[0x2000:0x3000],bytes([37])*4096)
++        self.assertEqual(prepared[0x800:0x900],bytes(256))
++
++if __name__ == '__main__': unittest.main()
