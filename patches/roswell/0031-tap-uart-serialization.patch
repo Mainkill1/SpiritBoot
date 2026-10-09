@@ -1,0 +1,273 @@
+diff --git a/tests/host/tap-uart/README.md b/tests/host/tap-uart/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..bd7497ebef5ccb4b3884407f3e085e361f25e157
+--- /dev/null
++++ b/tests/host/tap-uart/README.md
+@@ -0,0 +1,28 @@
++# Guest TAP UART serialization
++
++Run `python3 tests/host/tap-uart/check.py OUTPUT_DIRECTORY`.
++The fixture compiles the actual TAP emitter and kernel serial print/lock bodies.
++Only privileged port/interrupt operations and single-CPU scheduling use a host
++facade. It injects the real kernel print body after TAP byte two, verifies a
++complete record plus complete debug messages, preserves both enabled/disabled
++entry interrupt states, and exercises first initialization with a queued byte
++in both default and configured FIFO modes. It also compiles the actual i386
++UART and EFLAGS instructions and saves their disassembly for review; privileged
++execution still requires a fresh native receipt.
++
++The transport preserves the existing FIFO configuration rather than resetting
++it. This avoids losing queued kernel output and adds no transmitter-drain loop.
++Saving/restoring flags around each emission prevents ordinary kernel thread or
++interrupt output from splitting a record on the Xbox's single CPU. Formatting
++remains outside that interval. This does not introduce a shared kernel API or
++claim serialization against an NMI/bugcheck or a multiprocessor target.
++
++UART THRE polling was already unbounded. A stalled transmitter can now keep
++interrupts disabled during an emission; no additional polling loop is added.
++Normal formatted records contain at most 255 bytes (roughly 22 ms of healthy
++115200-baud 8N1 wire time). Raw markers retain their existing string length.
++This is guest test transport: kernel-performance records are emitted after the
++timed workload and production kernel runtime code is unchanged. Thread/timer
++qualification must still use new native receipts because output can defer
++interrupt delivery. The historical split-record capture remains failed, with
++its original bytes and parser result intact.
+diff --git a/tests/host/tap-uart/check.py b/tests/host/tap-uart/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c7b079ea679ba09437626ccf8c6fc77d34f963e2
+--- /dev/null
++++ b/tests/host/tap-uart/check.py
+@@ -0,0 +1,177 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Run the actual TAP emitter and kernel serial print body against a UART.
++
++Privileged port/interrupt operations and scheduling use a single-CPU host
++facade. Formatting, UART setup, emission, and kernel print/lock control flow
++are production source. This catches byte interleaving, destructive first
++initialization and interrupt-state corruption, not a parser limitation.
++"""
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++
++
++def definition(source, name):
++    start = source.index(name + '(')
++    # Include return type/storage class lines back to the prior definition.
++    start = source.rfind('\n\n', 0, start) + 2
++    opening = source.index('{', start)
++    end, depth = opening + 1, 1
++    while depth:
++        depth += (source[end] == '{') - (source[end] == '}')
++        end += 1
++    return source[start:end]
++
++
++raw_tap = (root/'tests/xbe/api-regression/tap.c').read_text()
++tap = raw_tap
++for name in ('outb', 'inb', 'tap_irq_save', 'tap_irq_restore'):
++    if name + '(' in tap:
++        tap = tap.replace(definition(tap, name), '')
++kd = (root/'ntoskrnl/kd/kdio.c').read_text()
++kd = '\n'.join(definition(kd, name) for name in
++               ('KdbpAcquireLock', 'KdbpReleaseLock', 'KdpSerialPrint'))
++shim = r'''
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++typedef unsigned char KIRQL;
++typedef unsigned KSPIN_LOCK, *PKSPIN_LOCK, ULONG;
++typedef const char *PCCH;
++#define VOID void
++#define NTAPI
++#define _In_
++#define TRUE 1
++#define HIGH_LEVEL 31
++#define IF_BIT 0x200u
++static unsigned flags, irql;
++static KSPIN_LOCK KdpSerialSpinLock;
++static unsigned SerialPortInfo;
++static char wire[8192], fifo[32];
++static unsigned wire_n, fifo_n, lcr, fcr, ier, dll, dlh, mcr;
++static unsigned tap_bytes, inject_at, log_pending, in_kernel;
++static unsigned failures, checks;
++static void scheduled_log(void);
++static void flush(void) {
++    memcpy(wire+wire_n,fifo,fifo_n);wire_n+=fifo_n;wire[wire_n]=0;fifo_n=0;
++}
++static void outb(unsigned short port,unsigned char value) {
++    switch(port) {
++    case 0x3fb:lcr=value;break;
++    case 0x3f9:if(lcr&0x80)dlh=value;else ier=value;break;
++    case 0x3fa:
++        if((value&4)||((value^fcr)&1))fifo_n=0;
++        fcr=value;break;
++    case 0x3fc:mcr=value;break;
++    case 0x3f8:
++        if(lcr&0x80){dll=value;break;}
++        fifo[fifo_n++]=(char)value;
++        if(!in_kernel && ++tap_bytes==inject_at) {log_pending=1;scheduled_log();}
++        break;
++    }
++}
++static unsigned char inb(unsigned short port) {
++    if(port==0x3fd) {flush();return 0x60;}
++    return 0;
++}
++unsigned tap_irq_save(void) {unsigned old=flags;flags&=~IF_BIT;return old;}
++void tap_irq_restore(unsigned old) {flags=old;scheduled_log();}
++static int KeTestSpinLock(PKSPIN_LOCK lock) {return *lock==0;}
++static void KeRaiseIrql(KIRQL next,KIRQL *old) {*old=irql;irql=next;}
++static int KeTryToAcquireSpinLockAtDpcLevel(PKSPIN_LOCK lock) {
++    if(*lock)return 0;*lock=1;return 1;
++}
++static void KeLowerIrql(KIRQL old) {irql=old;scheduled_log();}
++static void KiReleaseSpinLock(PKSPIN_LOCK lock) {*lock=0;}
++static void KdPortPutByteEx(unsigned *info,char c) {
++    (void)info;while(!(inb(0x3fd)&0x20)){}outb(0x3f8,(unsigned char)c);
++}
++'''
++schedule = r'''
++static void scheduled_log(void) {
++    if(!log_pending || !(flags&IF_BIT) || irql==HIGH_LEVEL || in_kernel)return;
++    log_pending=0;in_kernel=1;
++    const char *a="XBE entry thread returned\n",*b="title thread returned\n";
++    KdpSerialPrint(a,(ULONG)strlen(a));KdpSerialPrint(b,(ULONG)strlen(b));
++    in_kernel=0;
++}
++'''
++cases = r'''
++static void check(int good,const char *what) {
++    checks++;if(!good){failures++;printf("FAIL: %s\n",what);}
++}
++static void reset(unsigned initial_flags,unsigned initial_fifo) {
++    wire_n=fifo_n=tap_bytes=log_pending=in_kernel=irql=KdpSerialSpinLock=0;
++    wire[0]=0;flags=initial_flags;lcr=3;fcr=initial_fifo;dll=1;dlh=ier=0;mcr=0;
++}
++int main(void) {
++    unsigned initial_flags=0x246;reset(initial_flags,0);inject_at=2;
++    tap_ok(6,"create distinct wait event");tap_drain();
++    check(!strcmp(wire,"ok 6 - create distinct wait event\nXBE entry thread returned\r\ntitle thread returned\r\n"),
++          "startup debug messages cannot split actual TAP record6");
++    check(flags==initial_flags,"caller EFLAGS restored including IF and arithmetic flags");
++    for(unsigned bit=0;bit<2;bit++) {
++        initial_flags=bit?0x246:0x46;reset(initial_flags,bit?0xc1:0);inject_at=2;
++        tap_not_ok(7,"diagnostic");tap_drain();
++        check(strstr(wire,"not ok 7 - diagnostic\n")!=NULL,"complete record with either entry interrupt state");
++        check(flags==initial_flags,"initially-disabled interrupts remain disabled");
++        if(!bit)check(log_pending&&strstr(wire,"XBE entry")==NULL,"interrupt work remains deferred at disabled entry");
++    }
++    reset(0x246,0xc1);inject_at=0;fifo[0]='Q';fifo_n=1;
++    /* Exercise real first-init control flow again with queued UART data.
++     * Separate child processes below cover its function-local init state. */
++    tap_puts("marker\n");tap_drain();
++    check(!strcmp(wire,"Qmarker\n"),"kernel-configured FIFO queued byte survives emission");
++    check(flags==0x246,"raw marker restores exact interrupt flags");
++    tap_puts("");check(flags==0x246,"empty emission restores exact interrupt flags");
++    tap_comment("value=%u",17);tap_drain();
++    check(strstr(wire,"# value=17\n")!=NULL,"formatted comment stays unchanged");
++    printf("TAP UART: %u/%u checks passed\n",checks-failures,checks);
++    return failures!=0;
++}
++'''
++first_init = r'''
++int main(int argc,char **argv) {
++    (void)argc;unsigned fifo_enabled=(unsigned)(argv[1][0]-'0');
++    reset(0x246,fifo_enabled?0xc1:0);inject_at=0;fifo[0]='Q';fifo_n=1;
++    tap_puts("first\n");tap_drain();
++    check(!strcmp(wire,"Qfirst\n"),"first init preserves queued transmitter bytes");
++    check(lcr==3&&dll==1&&dlh==0&&ier==0&&mcr==0xb,"real UART baud/framing/control setup retained");
++    check(flags==0x246,"first initialization restores exact EFLAGS");
++    printf("TAP first init FIFO=%u: %u/%u checks passed\n",fifo_enabled,checks-failures,checks);
++    return failures!=0;
++}
++'''
++shared = shim + kd + schedule + tap + cases[:cases.index('int main(void)')]
++failures = 0
++for name, main, args in (('transport', cases[cases.index('int main(void)'):], [[]]),
++                         ('initialization', first_init, [['0'], ['1']])):
++    source = out/f'{name}.c'
++    source.write_text(shared+main)
++    exe = out/name
++    subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',
++                    '-Wno-misleading-indentation', '-I'+str(root/'tests/xbe/api-regression'),
++                    str(source),'-o',str(exe)],check=True)
++    for arg in args:
++        failures += subprocess.run([str(exe),*arg]).returncode != 0
++
++# Compile the real privileged instructions for their actual i386 target too.
++# Host execution above substitutes only those instructions; this object keeps
++# the actual instructions and constraints for code review/native qualification.
++probe = '\n'.join(line for line in raw_tap.splitlines() if line.startswith('#define '))
++for name in ('outb','inb','tap_irq_save','tap_irq_restore','com_init','com_putc','com_puts'):
++    if name + '(' in raw_tap:
++        probe += '\n' + definition(raw_tap,name)
++probe += '\nvoid tap_write_probe(const char *s) {com_puts(s);}\n'
++(out/'i386.c').write_text(probe)
++subprocess.run(['cc','-m32','-O2','-ffreestanding','-fno-pic','-Wall','-Wextra',
++                '-Werror','-c',str(out/'i386.c'),'-o',str(out/'i386.o')],check=True)
++with (out/'i386.asm').open('w') as assembly:
++    subprocess.run(['objdump','-dr',str(out/'i386.o')],stdout=assembly,check=True)
++print('actual i386 UART/interrupt object compiled; privileged execution awaits native CI')
++sys.exit(bool(failures))
+diff --git a/tests/xbe/api-regression/tap.c b/tests/xbe/api-regression/tap.c
+index 4b71759a116da452bd3415e3b366cbb687b5732f..009bb8a8830628d841948a31ee334b71be3c981e 100644
+--- a/tests/xbe/api-regression/tap.c
++++ b/tests/xbe/api-regression/tap.c
+@@ -15,7 +15,6 @@
+ #define COM1_DLL (COM1 + 0)
+ #define COM1_IER (COM1 + 1)
+ #define COM1_DLH (COM1 + 1)
+-#define COM1_FCR (COM1 + 2)
+ #define COM1_LCR (COM1 + 3)
+ #define COM1_MCR (COM1 + 4)
+ #define COM1_LSR (COM1 + 5)
+@@ -37,6 +36,21 @@ static inline unsigned char inb(unsigned short port)
+     return ret;
+ }
+ 
++/* Xbox is single-CPU: prevent a scheduled kernel/debug writer from entering
++ * between bytes. Restore the caller's full flags, including an already-clear
++ * IF. Formatting stays outside this span; no kernel-private lock is borrowed. */
++static inline unsigned int tap_irq_save(void)
++{
++    unsigned int flags;
++    __asm__ __volatile__("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
++    return flags;
++}
++
++static inline void tap_irq_restore(unsigned int flags)
++{
++    __asm__ __volatile__("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
++}
++
+ static void com_init(void)
+ {
+     static int initialized = 0;
+@@ -47,7 +61,9 @@ static void com_init(void)
+     outb(COM1_DLL, 0x01);             /* 115200 baud (1.8432 MHz / 16 / 1) */
+     outb(COM1_DLH, 0x00);
+     outb(COM1_LCR, LCR_8N1);          /* DLAB=0, 8N1 */
+-    outb(COM1_FCR, 0xC7);             /* FIFOs enable + clear, 14-byte trigger */
++    /* Retain the existing FIFO mode and queued bytes. THRE polling works
++     * with either the reset/default UART or a kernel-configured FIFO; changing
++     * FIFO enable or clearing it could discard the preceding debug message. */
+     outb(COM1_MCR, 0x0B);             /* DTR + RTS + OUT2 */
+ }
+ 
+@@ -64,8 +80,10 @@ void tap_drain(void)
+ 
+ static void com_puts(const char *s)
+ {
++    unsigned int flags = tap_irq_save();
+     com_init();
+     while (*s) com_putc(*s++);
++    tap_irq_restore(flags);
+ }
+ 
+ static void com_vprintf(const char *fmt, va_list ap)
