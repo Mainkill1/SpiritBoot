@@ -53,7 +53,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 4287d54cdc156057c8d3c5bda59948f2412429da
+            test "$actual_tree" = 45f25e7462f7867f1615ccadbdc7b3e8f0f3f460
             python3 "$GUEST_SOURCE/tests/host/warm-stage/check.py" >"$output/warm-stage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/reset-frame/check.py" "$output/reset-frame" >"$output/reset-frame.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fault-information/check.py" "$output/fault-information" >"$output/fault-information.log" 2>&1
@@ -64,6 +64,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/fatx/check-overwrite.py" "$output/fatx-overwrite" >"$output/fatx-overwrite.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-directory-slots.py" "$output/fatx-directory-slots" >"$output/fatx-directory-slots.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-image/check.py" >"$output/boot-image.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/discardable-sections/check.py" "$output/discardable-sections" >"$output/discardable-sections.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check.py" "$output/boot-layout" >"$output/boot-layout.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check-image-bounds.py" "$output/image-bounds" >"$output/image-bounds.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
