@@ -1,3 +1,24 @@
+diff --git a/boot/nxldr/CMakeLists.txt b/boot/nxldr/CMakeLists.txt
+index cb59905e..6ede3020 100644
+--- a/boot/nxldr/CMakeLists.txt
++++ b/boot/nxldr/CMakeLists.txt
+@@ -66,6 +66,8 @@ set(NXLDR_HEADERS
+     ${NXLDR_SRC_DIR}/pe.h
+     ${NXLDR_SRC_DIR}/paging.h
+     ${NXLDR_SRC_DIR}/boot-layout.h
++    ${NXLDR_SRC_DIR}/warm-handoff.h
++    ${NXLDR_SRC_DIR}/warm-stage.h
+ )
+ 
+ # startup.S -- the reset path + .low_rom prologue (assembly entry).
+@@ -141,6 +143,7 @@ if(SARCH STREQUAL "xbox")
+         DEPENDS ntoskrnl nxldr
+                 $<TARGET_FILE:ntoskrnl> ${_startup_bin}
+                 ${NXLDR_SRC_DIR}/gen-flash-bin.py
++                ${NXLDR_SRC_DIR}/warm-handoff.h
+         COMMENT "Assembling Xbox flash image (gen-flash-bin.py)"
+         VERBATIM)
+     add_custom_target(flash ALL DEPENDS ${_flash_bin})
 diff --git a/boot/nxldr/gen-flash-bin.py b/boot/nxldr/gen-flash-bin.py
 index 472984c9..cab684ee 100755
 --- a/boot/nxldr/gen-flash-bin.py
@@ -853,21 +874,34 @@ index 00000000..6274c456
 +    puts("warm staging planner: PASS");
 +}
 diff --git a/tests/xbe/clean-room-warm-reboot/main.c b/tests/xbe/clean-room-warm-reboot/main.c
-index 29b2db59..5e3214e9 100644
+index 29b2db59..87eb4398 100644
 --- a/tests/xbe/clean-room-warm-reboot/main.c
 +++ b/tests/xbe/clean-room-warm-reboot/main.c
-@@ -6,7 +6,10 @@
+@@ -1,12 +1,21 @@
+ /* SPDX-License-Identifier: GPL-2.0-or-later
+- * A two-boot guest: retain only the middle page of a three-page allocation,
++ * A two-boot guest: retain the middle page(s) of a bounded allocation,
+  * record actual shutdown callbacks in that page, then validate restored RAM.
+- * Deliberately uses the former loader XZ scratch window (PA 32 MiB).
++ * Default: former loader scratch at PA 32 MiB. Override DATA_PA and
++ * PERSIST_PAGES to select exact-build owned INIT pages.
+  */
  #include <xboxkrnl/xboxkrnl.h>
  #include "../api-regression/tap.h"
  #include <string.h>
 +#ifndef DATA_PA
  #define DATA_PA 0x02000000UL
 +#endif
++#ifndef PERSIST_PAGES
++#define PERSIST_PAGES 1
++#endif
++#define PERSIST_BYTES (PERSIST_PAGES * PAGE_SIZE)
++#define ALLOCATION_BYTES ((PERSIST_PAGES + 2) * PAGE_SIZE)
 +#define CONTROL_PA 0x039fe000UL
  #define PROBE_MAGIC 0x43524D50UL /* independent test sentinel */
  typedef struct { ULONG Magic, Pa, Count, NestedReturned, Order[6]; UCHAR Fill[64]; } PROBE;
  static PROBE *record;
-@@ -38,7 +41,7 @@ int main(void)
+@@ -38,7 +47,7 @@ int main(void)
      if (magic == PROBE_MAGIC) {
          BOOLEAN pass = TRUE;
          tap_puts("== clean-room-warm-reboot stage 2 ==\n");
@@ -876,11 +910,31 @@ index 29b2db59..5e3214e9 100644
          record = (PROBE *)(0x80000000UL | pa);
          pass = record->Magic == PROBE_MAGIC && MmGetPhysicalAddress(record) == pa;
          if (pass) tap_ok(1, "same physical address and contents");
-@@ -66,7 +69,23 @@ int main(void)
+@@ -48,12 +57,14 @@ int main(void)
+         if (order) tap_ok(2, "shutdown stable priority, duplicate and pending removal");
+         else tap_not_ok(2, "shutdown stable priority, duplicate and pending removal");
+         pass &= order;
+-        BOOLEAN ownership = MmQueryAllocationSize(record) == PAGE_SIZE;
+-        if (ownership) tap_ok(3, "restored selected range owns one page");
+-        else tap_not_ok(3, "restored selected range owns one page");
++        BOOLEAN ownership = MmQueryAllocationSize(record) == PERSIST_BYTES;
++        if (ownership) tap_ok(3, "restored selected range owns exactly the requested pages");
++        else tap_not_ok(3, "restored selected range owns exactly the requested pages");
+         pass &= ownership;
+         BOOLEAN data = TRUE;
+         for (ULONG i = 0; i < sizeof(record->Fill); ++i) if (record->Fill[i] != 0xA6) data = FALSE;
++        for (ULONG i = sizeof(*record); i < PERSIST_BYTES; ++i)
++            if (((PUCHAR)record)[i] != 0xA6) data = FALSE;
+         PVOID competing = MmAllocateContiguousMemoryEx(PAGE_SIZE, pa, pa + PAGE_SIZE - 1,
+                                                        PAGE_SIZE, PAGE_READWRITE);
+         data &= competing == NULL;
+@@ -65,23 +76,40 @@ int main(void)
+         if (nested) tap_ok(5, "nested noreturn reset unwinds and remaining callbacks run before outer reset");
          else tap_not_ok(5, "nested noreturn reset unwinds and remaining callbacks run before outer reset");
          pass &= nested;
-         MmPersistContiguousMemory(record, PAGE_SIZE, FALSE);
+-        MmPersistContiguousMemory(record, PAGE_SIZE, FALSE);
 -        MmFreeContiguousMemory(record);
++        MmPersistContiguousMemory(record, PERSIST_BYTES, FALSE);
 +        if (ownership) MmFreeContiguousMemory(record);
 +        PUCHAR control = (PUCHAR)(0x80000000UL | CONTROL_PA);
 +        BOOLEAN control_data = TRUE;
@@ -901,7 +955,28 @@ index 29b2db59..5e3214e9 100644
          tap_puts(pass ? "== clean-room-warm-reboot end PASS ==\n" :
                          "== clean-room-warm-reboot end FAIL ==\n");
          stop();
-@@ -91,6 +110,11 @@ int main(void)
+     }
+     tap_puts("== clean-room-warm-reboot stage 1 ==\n");
+-    PVOID allocation = MmAllocateContiguousMemoryEx(3 * PAGE_SIZE, DATA_PA,
+-        DATA_PA + 3 * PAGE_SIZE - 1, PAGE_SIZE, PAGE_READWRITE);
++    PVOID allocation = MmAllocateContiguousMemoryEx(ALLOCATION_BYTES, DATA_PA,
++        DATA_PA + ALLOCATION_BYTES - 1, PAGE_SIZE, PAGE_READWRITE);
+     if (!allocation) { tap_puts("== clean-room-warm-reboot setup FAIL ==\n"); stop(); }
+-    memset(allocation, 0x37, 3 * PAGE_SIZE);
++    memset(allocation, 0x37, ALLOCATION_BYTES);
+     record = (PROBE *)((PUCHAR)allocation + PAGE_SIZE);
++    memset(record, 0xA6, PERSIST_BYTES);
+     memset(record, 0, sizeof(*record)); record->Magic = PROBE_MAGIC;
+     record->Pa = DATA_PA + PAGE_SIZE; memset(record->Fill, 0xA6, sizeof(record->Fill));
+-    MmPersistContiguousMemory(allocation, 3 * PAGE_SIZE, TRUE);
++    MmPersistContiguousMemory(allocation, ALLOCATION_BYTES, TRUE);
+     MmPersistContiguousMemory(allocation, PAGE_SIZE, FALSE);
+-    MmPersistContiguousMemory((PUCHAR)allocation + 2 * PAGE_SIZE, PAGE_SIZE, FALSE);
++    MmPersistContiguousMemory((PUCHAR)allocation + (PERSIST_PAGES + 1) * PAGE_SIZE, PAGE_SIZE, FALSE);
+     MmPersistContiguousMemory((PUCHAR)record + 17, 20, TRUE); /* valid partial range */
+     MmPersistContiguousMemory((PVOID)0xFFFFFFF0, 128, TRUE); /* overflow, inert */
+     for (ULONG i = 0; i < 5; ++i) {
+@@ -91,6 +119,11 @@ int main(void)
      }
      HalRegisterShutdownNotification(&regs[0], TRUE); /* stable duplicate */
      HalRegisterShutdownNotification(&regs[3], FALSE); /* removed before shutdown */
