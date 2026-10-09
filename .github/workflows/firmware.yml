@@ -53,7 +53,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = f97234832347cd5cee20536147d2b60a129e07ee
+            test "$actual_tree" = f3c06be8806ded4ce0d3004c3233c8ffca6ab9a4
             python3 "$GUEST_SOURCE/tests/host/reset-frame/check.py" "$output/reset-frame" >"$output/reset-frame.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fault-information/check.py" "$output/fault-information" >"$output/fault-information.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/mdl-pins/check.py" "$output/mdl-pins" >"$output/mdl-pins.log" 2>&1
@@ -62,6 +62,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/contig-retry/check.py" "$output/contig-retry" >"$output/contig-retry.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-overwrite.py" "$output/fatx-overwrite" >"$output/fatx-overwrite.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-directory-slots.py" "$output/fatx-directory-slots" >"$output/fatx-directory-slots.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/boot-image/check.py" >"$output/boot-image.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check.py" "$output/boot-layout" >"$output/boot-layout.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check-image-bounds.py" "$output/image-bounds" >"$output/image-bounds.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
