@@ -1,19 +1,19 @@
-From f31ee4543c2c35471a8c36cb97ba2f7414d2d890 Mon Sep 17 00:00:00 2001
+From e55678981203fa1f1645ef4f9cdaaeb5ce5a852e Mon Sep 17 00:00:00 2001
 From: Codex <codex@openai.com>
 Date: Fri, 9 Oct 2026 06:53:02 -0700
 Subject: [PATCH] fix(xbox): retire bootvid before donating framebuffer pages
 
 ---
- drivers/base/bootvid/i386/xbox/bootvid.c      |  31 +++++
- ntoskrnl/ex/init.c                            |   8 ++
- ntoskrnl/inbv/inbv.c                          | 103 +++++++++++++++--
+ drivers/base/bootvid/i386/xbox/bootvid.c      |  31 ++++
+ ntoskrnl/ex/init.c                            |   8 +
+ ntoskrnl/inbv/inbv.c                          | 103 ++++++++++++-
  ntoskrnl/include/internal/inbv.h              |   3 +
- ntoskrnl/xb/mm/init.c                         |  37 +++---
+ ntoskrnl/xb/mm/init.c                         |  54 +++++--
  sdk/include/reactos/drivers/bootvid/bootvid.h |   3 +
- tests/host/bootvid-lifetime/README.md         |  20 ++++
- tests/host/bootvid-lifetime/check.py          |  30 +++++
- tests/host/bootvid-lifetime/fixture.c         | 109 ++++++++++++++++++
- 9 files changed, 321 insertions(+), 23 deletions(-)
+ tests/host/bootvid-lifetime/README.md         |  23 +++
+ tests/host/bootvid-lifetime/check.py          |  33 +++++
+ tests/host/bootvid-lifetime/fixture.c         | 138 ++++++++++++++++++
+ 9 files changed, 373 insertions(+), 23 deletions(-)
  create mode 100644 tests/host/bootvid-lifetime/README.md
  create mode 100644 tests/host/bootvid-lifetime/check.py
  create mode 100644 tests/host/bootvid-lifetime/fixture.c
@@ -388,7 +388,7 @@ index 03bff604..8b5baa41 100644
  INBV_DISPLAY_STATE
  NTAPI
 diff --git a/ntoskrnl/xb/mm/init.c b/ntoskrnl/xb/mm/init.c
-index e5d08082..438148c3 100644
+index e5d08082..27b5898b 100644
 --- a/ntoskrnl/xb/mm/init.c
 +++ b/ntoskrnl/xb/mm/init.c
 @@ -132,6 +132,8 @@ NxpIsLoaderTypeTransientReclaimable(TYPE_OF_MEMORY Type)
@@ -439,7 +439,7 @@ index e5d08082..438148c3 100644
                  "keep PA %08lx-%08lx (%lu KB) reserved for GPU\n",
                  (ULONG)(Desc->BasePage << PAGE_SHIFT),
                  (ULONG)((Desc->BasePage + Desc->PageCount) << PAGE_SHIFT),
-@@ -218,6 +212,17 @@ NxpSplitNv2aReserve(VOID)
+@@ -218,6 +212,34 @@ NxpSplitNv2aReserve(VOID)
              (ULONG)NXK_KSEG0_RAM_SIZE);
  }
  
@@ -451,6 +451,23 @@ index e5d08082..438148c3 100644
 +    ULONG Pages = NxkBootFramebufferPages;
 +
 +    NxkBootFramebufferPages = 0;
++#ifdef NXK_MM_PHYS
++    if (Pages)
++    {
++        extern RTL_BITMAP MiPfnBitMap;
++        KIRQL OldIrql = MiAcquirePfnLock();
++
++        /* Phase 1 excluded the still-permanent reservation from the RAM
++         * bitmap. Publish it before the supply can hand a page to an MDL
++         * probe. PHYS already initialized links/pins for every PFN and
++         * maps all MMPFN slots to its shared zero frame; no per-page ARM3
++         * state is built or consumed on this path. */
++        ASSERT(MiPfnBitMap.Buffer != NULL);
++        RtlSetBits(&MiPfnBitMap,
++                   (ULONG)(NxkBootFramebufferPa >> PAGE_SHIFT), Pages);
++        MiReleasePfnLock(OldIrql);
++    }
++#endif
 +    if (Pages) NxkMmDonateHeapPages(NxkBootFramebufferPa, Pages);
 +}
 +
@@ -473,10 +490,10 @@ index 76a81c09..867bb091 100644
  NTAPI
 diff --git a/tests/host/bootvid-lifetime/README.md b/tests/host/bootvid-lifetime/README.md
 new file mode 100644
-index 00000000..bd38fd03
+index 00000000..e5c2f65d
 --- /dev/null
 +++ b/tests/host/bootvid-lifetime/README.md
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,23 @@
 +# Xbox boot framebuffer lifetime fixture
 +
 +Run `python3 tests/host/bootvid-lifetime/check.py <output-directory>`.
@@ -488,21 +505,24 @@ index 00000000..bd38fd03
 +hook retires the driver between a caller's initial check and dispatch. Drawing
 +uses a small synthetic framebuffer and verifies that reused bytes remain unchanged.
 +
-+The twelve checks cover the initial reservation, retained hardware padding, boot
++The fifteen checks cover the initial reservation, retained hardware padding, boot
 +writes, one-time deferred donation, terminal initialization/ownership, retired
 +primitive writes, and queued bitmap/buffer/reset dispatch, enable, and ownership-loss notification.
-+The donation harness runs the production PHYS page-return loop; the supply and PFN
-+lock remain shims. The reserved range and retained padding are the same for the
++The donation harness runs the production PHYS page-return loop, page supply
++initialization/return/list insertion, and `MiGetPfnEntry` lookup. It verifies full
++64/128 MiB links/pin metadata initialization, then observes PFN visibility at each
++return before the page becomes available, including exclusion of hardware padding.
++Bitmap operations, PFN locking, and persistence policy remain host shims. The reserved range and retained padding are the same for the
 +64 MiB and 128 MiB build layouts. This is a source lifetime
 +regression, not native display or title qualification. A legacy source baseline can
 +be supplied as the optional second argument; missing new lifecycle functions use
 +explicit no-op compatibility hooks so baseline behavior remains observable.
 diff --git a/tests/host/bootvid-lifetime/check.py b/tests/host/bootvid-lifetime/check.py
 new file mode 100644
-index 00000000..56b17a13
+index 00000000..0c2ecac7
 --- /dev/null
 +++ b/tests/host/bootvid-lifetime/check.py
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,33 @@
 +#!/usr/bin/env python3
 +"""Compile actual Xbox bootvid, Inbv dispatch and reservation bodies."""
 +import pathlib, re, subprocess, sys
@@ -525,25 +545,28 @@ index 00000000..56b17a13
 +for path, sig, fallback in [(vid, 'VOID VidReleaseFramebuffer(VOID)', '{ FrameBufferRetired = TRUE; }'), (inbv, 'VOID InbvRetireBootDriver(VOID)', '{ InbvBootDriverInstalled = FALSE; }'), (mm, 'VOID NxkMmReleaseBootFramebuffer(VOID)', '{}')]:
 +    bodies += '\n' + sig + '\n' + (body(path, sig.split('(')[0].split()[-1]) or fallback)
 +bodies += '\n' + extract(inbv, ['BOOLEAN InbvResetDisplay(VOID)', 'VOID InbvBitBlt(PUCHAR Buffer, ULONG X, ULONG Y)', 'VOID InbvBufferToScreenBlt(PUCHAR Buffer, ULONG X, ULONG Y, ULONG Width, ULONG Height, ULONG Stride)', 'VOID InbvAcquireDisplayOwnership(VOID)', 'VOID InbvEnableBootDriver(BOOLEAN Enable)', 'VOID InbvNotifyDisplayOwnershipLost(INBV_RESET_DISPLAY_PARAMETERS Callback)'])
++bodies += '\n' + extract('ntoskrnl/include/internal/mm.h', ['PMMPFN MiGetPfnEntry(PFN_NUMBER Pfn)'])
++bodies += '\n' + extract('ntoskrnl/xb/mm/pagesupply.c', ['PULONG NxpHeadFor(PFN_NUMBER Page)', 'VOID NxpPushHead(PFN_NUMBER Page)', 'VOID NxkPageSupplyInitialize(PFN_NUMBER HighestPfn, PVOID LinksArray)', 'VOID NxkPageSupplyReturn(PFN_NUMBER Page)'])
 +bodies += '\n' + extract('ntoskrnl/xb/mm/contig.c', ['VOID NxkMmDonateHeapPages(ULONG_PTR Pa, ULONG Pages)'])
 +bodies += '\n' + extract(mm, ['VOID NxpSplitNv2aReserve(VOID)'])
 +fixture = pathlib.Path(__file__).with_name('fixture.c').read_text()
 +macros = '\n'.join(line for line in (root / vid).read_text().splitlines() if line.startswith(('#define BB_OFFSET', '#define FB_OFFSET')))
++macros += '\n' + '\n'.join(line for line in (root / 'ntoskrnl/xb/mm/pagesupply.c').read_text().splitlines() if line.startswith(('#define NXP_FREE ', '#define NXP_PFN_MASK ', '#define NXP_PREV_SHIFT ', '#define NXP_NEXT(', '#define NXP_GENERIC_FLOOR_PFN ', '#define NXP_PIN_LIMIT ', '#define NXP_PIN_OVERFLOW ', '#define NXP_RETURN_PENDING ')))
 +fixture = fixture.replace('/* PRODUCTION MACROS */', macros)
 +source = out / 'check.c'; source.write_text(fixture.replace('/* PRODUCTION BODIES */', bodies))
 +subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', str(source), '-o', str(out/'check')], check=True)
 +raise SystemExit(subprocess.run([str(out/'check')]).returncode)
 diff --git a/tests/host/bootvid-lifetime/fixture.c b/tests/host/bootvid-lifetime/fixture.c
 new file mode 100644
-index 00000000..e80bcc6e
+index 00000000..41eda77a
 --- /dev/null
 +++ b/tests/host/bootvid-lifetime/fixture.c
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,138 @@
 +#include <stdint.h>
 +#include <stdio.h>
 +#include <string.h>
 +#include <stdlib.h>
-+typedef int KIRQL; typedef uint16_t USHORT; typedef int32_t LONG; typedef void VOID; typedef int BOOLEAN; typedef uint32_t ULONG; typedef uintptr_t ULONG_PTR; typedef uint8_t UCHAR; typedef UCHAR *PUCHAR; typedef ULONG *PULONG; typedef void *PVOID;
++typedef uint32_t PFN_NUMBER; typedef int KIRQL; typedef uint16_t USHORT; typedef int32_t LONG; typedef void VOID; typedef int BOOLEAN; typedef uint32_t ULONG; typedef uintptr_t ULONG_PTR; typedef uint8_t UCHAR; typedef UCHAR *PUCHAR; typedef ULONG *PULONG; typedef USHORT *PUSHORT; typedef void *PVOID;
 +#define TRUE 1
 +#define FALSE 0
 +#define NTAPI
@@ -566,6 +589,9 @@ index 00000000..e80bcc6e
 +#define NV2A_RAMDAC_FP_VVALID_END 8
 +#define MmNonCached 0
 +#define DPRINT1(...) ((void)0)
++#define UNREFERENCED_PARAMETER(x) ((void)(x))
++#define NXK_HIGH_ZONE_BASE 0x4000000
++#define NXK_HIGH_ZONE_LIMIT 0x8000000
 +#define RtlCopyMemory(p,q,n) memcpy(p,q,n)
 +#define RtlZeroMemory(p,n) memset(p,0,n)
 +#define InitializePalette() InitPaletteWithTable(palette, 2)
@@ -607,9 +633,29 @@ index 00000000..e80bcc6e
 +#define READ_REGISTER_ULONG(p) readreg(p)
 +static UCHAR NvGetBytesPerPixel(ULONG_PTR p,ULONG w){(void)p;(void)w;return 4;}
 +static void MmUnmapIoSpace(PVOID p, ULONG n){if(p==(PVOID)0x10000)return;if(p!=(PVOID)FrameBufferStart || n!=NV2A_VIDEO_MEMORY_SIZE)abort();unmaps++;}
-+static KIRQL MiAcquirePfnLock(void){if(held||FrameBufferStart)abort();return 0;}
-+static void MiReleasePfnLock(KIRQL irql){(void)irql;}
-+static void NxkPageSupplyReturn(ULONG_PTR pfn){if(pfn<0x3c00||pfn>=0x3ff0)abort();donated++;}
++static int pfnheld;
++static unsigned invisible_returns;
++typedef struct { ULONG unused; } MMPFN,*PMMPFN;
++static MMPFN pfns[0x8000];
++static PMMPFN MmPfnDatabase=pfns;
++static PFN_NUMBER MmHighestPhysicalPage=0x3fff;
++typedef struct {ULONG SizeOfBitMap; PULONG Buffer;} RTL_BITMAP;
++static ULONG bitmap[0x8000/32];
++RTL_BITMAP MiPfnBitMap={0x4000,bitmap};
++static BOOLEAN RtlTestBit(RTL_BITMAP *b,ULONG n){return n<b->SizeOfBitMap && !!(b->Buffer[n/32]&(1u<<(n%32)));}
++static void RtlSetBits(RTL_BITMAP *b,ULONG first,ULONG count){if(!pfnheld)abort();for(ULONG i=first;i<first+count;i++){if(i>=b->SizeOfBitMap)abort();b->Buffer[i/32]|=1u<<(i%32);}}
++PMMPFN MiGetPfnEntry(PFN_NUMBER);
++static ULONG supply_metadata[0x8000*2];
++static PULONG NxpLinks;
++static PUSHORT NxpPins,NxpPinBatch;
++static PFN_NUMBER NxpHighestPfn,NxpKernelLowPfn,NxpKernelHighPfn,NxpSpillHint,NxpGenericAvail;
++static ULONG NxpFreeHeadKernel,NxpFreeHeadTitle;
++#define MmAvailablePages donated
++#define MI_ASSERT_PFN_LOCK_HELD() ASSERT(pfnheld)
++static BOOLEAN NxkMmRetailShapedMap(void){return MmHighestPhysicalPage==0x3fff;}
++static BOOLEAN NxkMmPersistentPage(PFN_NUMBER pfn){invisible_returns+=MiGetPfnEntry(pfn)==NULL;return FALSE;}
++static KIRQL MiAcquirePfnLock(void){if(held||FrameBufferStart||pfnheld)abort();pfnheld=1;return 0;}
++static void MiReleasePfnLock(KIRQL irql){(void)irql;if(!pfnheld)abort();pfnheld=0;}
 +void NxkMmDonateHeapPages(ULONG_PTR,ULONG);
 +static struct {ULONG Left,Top,Right,Bottom;} VidpScrollRegion={0,0,3,2};
 +
@@ -629,12 +675,18 @@ index 00000000..e80bcc6e
 +int main(void){
 + MEMORY_ALLOCATION_DESCRIPTOR d={.MemoryType=LoaderFirmwarePermanent,.BasePage=0x3c00,.PageCount=0x400};
 + loader.MemoryDescriptorListHead.Flink=loader.MemoryDescriptorListHead.Blink=&d.ListEntry;d.ListEntry.Flink=d.ListEntry.Blink=&loader.MemoryDescriptorListHead;
-+ init();CachedPalette[1]=0xffffffffu;NxpSplitNv2aReserve();
++ init();CachedPalette[1]=0xffffffffu;
++ memset(supply_metadata,0xa5,sizeof(supply_metadata));NxkPageSupplyInitialize(0x7fff,supply_metadata);
++ check(NxpLinks[0x7fff]==0 && NxpPins[0x7fff]==0 && NxpPinBatch[0x7fff]==0,"full 128 MiB supply metadata initialized");
++ memset(supply_metadata,0xa5,sizeof(supply_metadata));NxkPageSupplyInitialize(0x3fff,supply_metadata);
++ check(NxpLinks[0x3fff]==0 && NxpPins[0x3fff]==0 && NxpPinBatch[0x3fff]==0,"full 64 MiB supply metadata initialized");
++ NxpSplitNv2aReserve();
 + check(d.MemoryType==LoaderFirmwarePermanent,"framebuffer excluded from initial supply");
 + check(d.PageCount==0x3f0 && NxkExtraDescriptors[0].BasePage==0x3ff0,"hardware padding retained");
 + VidSolidColorFill(0,0,0,0,1);check(*(ULONG*)ram==CachedPalette[1],"boot drawing remains available");
 + InbvRetireBootDriver();NxkMmReleaseBootFramebuffer();NxkMmReleaseBootFramebuffer();
 + check(donated==0x3f0 && unmaps==1,"deferred donation once after retirement");
++ check(invisible_returns==0 && MiGetPfnEntry(0x3c00)!=NULL && MiGetPfnEntry(0x3fef)!=NULL && MiGetPfnEntry(0x3ff0)==NULL,"PFN visibility published before donation, padding excluded");
 + check(!VidInitialize(FALSE) && maps==0,"retired initialization cannot remap");
 + memset(ram,0x5a,sizeof(ram));memcpy(saved,ram,sizeof(ram));
 + InbvAcquireDisplayOwnership();check(InbvDisplayState!=INBV_DISPLAY_STATE_OWNED,"ownership cannot reacquire retired driver");
@@ -645,6 +697,6 @@ index 00000000..e80bcc6e
 + init();retire_on_acquire=1;check(!InbvResetDisplay() && draws==0,"reset participates in barrier");
 + init();retire_on_acquire=1;InbvEnableBootDriver(TRUE);check(InbvDisplayState==INBV_DISPLAY_STATE_LOST,"queued enable cannot revive ownership");
 + init();retire_on_acquire=1;InbvNotifyDisplayOwnershipLost((INBV_RESET_DISPLAY_PARAMETERS)1);check(InbvResetDisplayParameters==NULL,"queued ownership loss cannot restore callback");
-+ (void)FrameBufferHeight;(void)NxkBootFramebufferPa;(void)NxkBootFramebufferPages;(void)MmUnmapIoSpace;(void)NxkMmDonateHeapPages;(void)FrameBufferRetired;(void)InbvBootDriverRetired;
++ (void)RtlSetBits;(void)FrameBufferHeight;(void)NxkBootFramebufferPa;(void)NxkBootFramebufferPages;(void)MmUnmapIoSpace;(void)NxkMmDonateHeapPages;(void)FrameBufferRetired;(void)InbvBootDriverRetired;
 + return failures?1:0;
 +}
