@@ -67,6 +67,25 @@ elif '--build' in sys.argv:
                                "--lock", str(self.lock)], env=dict(self.env, **env),
                               capture_output=True, text=True)
 
+    def test_rom_residency_is_explicit_and_uses_larger_release_rom(self):
+        result=subprocess.run([sys.executable,str(ROOT/'scripts/build-firmware.py'),
+            '--source',str(self.source),'--output',str(self.output),'--lock',str(self.lock),
+            '--rom-resident'],env=dict(self.env,FLASH_SIZE='524288'),capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        manifest=json.loads((self.output/'build.json').read_text())
+        self.assertTrue(manifest['rom_resident'])
+        self.assertEqual(manifest['flash_size'],524288)
+        configure=next(c for c in manifest['commands'] if '-G' in c)
+        self.assertIn('-DNXK_ROM_KERNEL=ON',configure)
+        self.assertIn('-DDBG=0',configure)
+
+    def test_debug_rom_residency_rejected_before_output_changes(self):
+        from tools.firmware import build_firmware
+        self.output.mkdir();image=self.output/'flash.bin';image.write_bytes(b'previous image')
+        with self.assertRaisesRegex(ValueError,'release'):
+            build_firmware(self.source,self.output,variant='debug',lock_path=self.lock,rom_resident=True)
+        self.assertEqual(image.read_bytes(),b'previous image')
+
     def test_build_records_image_hash_and_revision(self):
         result = self.build()
         self.assertEqual(result.returncode, 0, result.stderr)
