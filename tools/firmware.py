@@ -89,12 +89,14 @@ def patch_inputs(patches):
 
 
 def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
-                   media_policy="emulator-file-media"):
+                   media_policy="emulator-file-media", metadata_counters=False):
     source, output = Path(source).resolve(), Path(output).resolve()
     if variant not in ("release", "debug"):
         raise ValueError("variant must be release or debug")
     if media_policy not in ("strict", "emulator-file-media"):
         raise ValueError("invalid media policy")
+    if not isinstance(metadata_counters, bool):
+        raise ValueError("metadata counters must be a boolean")
     if output == source or source.is_relative_to(output) or output.is_relative_to(source):
         raise ValueError("source and output directories must not overlap")
     output.mkdir(parents=True, exist_ok=True)
@@ -102,6 +104,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
     published.unlink(missing_ok=True)
     manifest = {"schema": 1, "status": "failed", "variant": variant,
                 "media_policy": media_policy,
+                "metadata_counters": metadata_counters,
                 "source": str(source), "source_directory": str(source), "output_directory": str(output),
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "commands": []}
@@ -168,7 +171,9 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                  f"-DCMAKE_TOOLCHAIN_FILE={actual_source / 'toolchain-gcc.cmake'}",
                  "-DCMAKE_BUILD_TYPE=Release", f"-DDBG={int(variant == 'debug')}", "-DKDBG=FALSE",
                  "-DXBOX_EMULATOR_FILE_MEDIA=" +
-                 ("ON" if media_policy == "emulator-file-media" else "OFF")])
+                 ("ON" if media_policy == "emulator-file-media" else "OFF"),
+                 "-DNXK_METADATA_COUNTERS=" +
+                 ("ON" if metadata_counters else "OFF")])
             run(["cmake", "--build", str(build), "--clean-first", "--target", "flash", "--parallel", "4"])
         image = build / "flash.bin"
         if image.stat().st_size != FLASH_SIZES[variant]:

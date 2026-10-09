@@ -3,6 +3,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      metadata_counters:
+        description: Enable aggregate metadata diagnostics (not a performance build)
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -37,7 +42,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             spiritboot-toolchain python3 scripts/build-firmware.py \
             --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }} \
-            --variant ${{ matrix.variant }}
+            --variant ${{ matrix.variant }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
       - name: Check the built source identity and actual kernel work
         run: |
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}/build.json"))["source_directory"])')
@@ -47,7 +52,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 2525d930c85041db0f1741b4c890e53dbaa007c2
+            test "$actual_tree" = f97884b782e679b5e523671a48b96ddf792c7f05
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-unwind.py" "$output/cache-pin-unwind" >"$output/cache-pin-unwind.log" 2>&1
@@ -57,6 +62,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/cache/check-shrink.py" "$output/cache-shrink" >"$output/cache-shrink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-fatx32.py" "$output/fatx32" >"$output/fatx32.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-chain-walk.py" "$output/fat-chain-walk" >"$output/fat-chain-walk.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/metadata/check.py" "$output/metadata" >"$output/metadata.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-lifetime/check.py" "$output/dma-lifetime" >"$output/dma-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/io-apc-order/check.py" "$output/io-apc-order" >"$output/io-apc-order.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/critical-section/check.py" "$output/critical-section" >"$output/critical-section.log" 2>&1
@@ -81,7 +87,7 @@ jobs:
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             spiritboot-toolchain python3 scripts/build-firmware.py \
-            --source .reference/roswell --output artifacts/firmware-repeat
+            --source .reference/roswell --output artifacts/firmware-repeat ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
           cmp artifacts/firmware-release/flash.bin artifacts/firmware-repeat/flash.bin
       - name: Prepare pinned open runtime fixtures
         run: |

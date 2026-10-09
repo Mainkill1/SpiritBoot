@@ -19,10 +19,12 @@ def main():
                         default="emulator-file-media",
                         help="loaded media compatibility; default: emulator-file-media")
     parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
+    parser.add_argument("--metadata-counters", action="store_true",
+                        help="enable aggregate directory-update diagnostics; not a performance build")
     args = parser.parse_args()
     try:
         result = build_firmware(args.source, args.output, args.variant, args.lock,
-                                args.media_policy)
+                                args.media_policy, args.metadata_counters)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"build failed: {error}", file=sys.stderr)
         return 1
