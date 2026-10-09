@@ -1,0 +1,328 @@
+diff --git a/tests/host/zero-reuse/README.md b/tests/host/zero-reuse/README.md
+new file mode 100644
+index 00000000..80a2f621
+--- /dev/null
++++ b/tests/host/zero-reuse/README.md
+@@ -0,0 +1,24 @@
++# Deterministic dirty-page reuse fixture
++
++`check.py OUTPUT` compiles the actual `tests/xbe/zero-reuse/main.c` with bounded
++allocation, physical-address, IRQL and TAP adapters. It verifies all 54 original
++checks, dirty/sentinel bytes, complete pool-fallback cleanup, and original IRQL
++restoration before reporting on success and injected failures. Entry IRQL 0 and 1
++are tested. The adapter injects a page returned by a finishing thread during the
++unguarded free/reallocate interval, or defers that return until the new guard
++ends. `--guest OLD_MAIN --expect-old` demonstrates that this interleaving breaks
++only the old exact-PFN assertion; byte and sentinel checks still pass.
++
++The guest warms the system-VA page table before the controlled allocation tests.
++One guard covers each iteration from initial allocation through cleanup; there
++are no TAP calls or optional debugger calls inside it. The guest rejects the
++nonpaged-pool fallback before any partial free or physical-address lookup.
++The normal path is `MmAllocateSystemMemory` → `NxkSysVaAllocate` → spinlock/PFN
++allocation/zeroing, and `MmFreeSystemMemory` → `NxkSysVaFree`. Those paths do not
++wait. The public allocation API may internally log if the aperture allocation
++fails; that inherited diagnostic remains unchanged. The test records failure,
++cleans up and restores IRQL before its own fatal reporting.
++
++This host fixture models the interference contract. It does not replace native
++64/128 MiB release/debug guest execution, prove which PFN the old failing native
++run used, or claim a runtime allocator repair.
+diff --git a/tests/host/zero-reuse/check.py b/tests/host/zero-reuse/check.py
+new file mode 100644
+index 00000000..0212a63d
+--- /dev/null
++++ b/tests/host/zero-reuse/check.py
+@@ -0,0 +1,146 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Compile the real zero-reuse guest against deterministic kernel/TAP adapters.
++
++The adapter injects a thread-return PFN between unguarded free/reallocate calls.
++It validates the guest's IRQL/report ordering, not a copied guest algorithm.
++"""
++import argparse
++from pathlib import Path
++import subprocess
++
++ROOT = Path(__file__).resolve().parents[3]
++p = argparse.ArgumentParser()
++p.add_argument('output', type=Path)
++p.add_argument('--guest', type=Path, default=ROOT / 'tests/xbe/zero-reuse/main.c')
++p.add_argument('--expect-old', action='store_true')
++a = p.parse_args()
++a.output.mkdir(parents=True, exist_ok=True)
++guest = a.guest.read_text().replace('#include "../regression.h"', '').replace('int main(void)', 'static int guest_main(void)')
++head = r'''
++#define _GNU_SOURCE
++#include <assert.h>
++#include <setjmp.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++#define PAGE_READWRITE 4
++static unsigned irql, original, checks, failures, allocations, raises, lowers;
++static unsigned scenario, frees, deferred, thread_returns, pool_frees;
++static unsigned fault, fault_seen, active[4], physical[4], next_pfn, old_test;
++static unsigned guarded_allocations, guarded_phys, guarded_frees, iteration_phys;
++static unsigned char *arena;
++static jmp_buf done;
++static unsigned char *page_at(unsigned i) { return arena + i * 4096; }
++static unsigned index_of(void *p) {
++    assert((uintptr_t)p >= (uintptr_t)arena && (uintptr_t)p < (uintptr_t)arena + 16384);
++    assert(((uintptr_t)p & 4095) == 0);
++    return ((unsigned char *)p - arena) / 4096;
++}
++static unsigned char *pool;
++static void thread_return(void) { ++thread_returns; next_pfn = 777; }
++static unsigned char KeRaiseIrqlToDpcLevel(void) {
++    unsigned char old = irql; assert(irql <= 2); irql = 2; ++raises; return old;
++}
++static void KfLowerIrql(unsigned char old) {
++    assert(irql == 2 && old == original); irql = old; ++lowers;
++    if (deferred) { deferred = 0; thread_return(); }
++}
++static void *MmAllocateSystemMemory(unsigned size, unsigned prot) {
++    assert(prot == PAGE_READWRITE); ++allocations;
++    if (size == 12288) {
++        assert(!active[0] && !active[1] && !active[2]);
++        if (allocations != 1) {
++            ++scenario; frees = iteration_phys = 0;
++            if (!old_test) assert(irql == 2);
++            if (irql == 2) ++guarded_allocations;
++            if (fault == 1 && !fault_seen) { ++fault_seen; return NULL; }
++            if (fault == 4 && !fault_seen) { ++fault_seen; return pool; }
++        }
++        for(unsigned i=0;i<3;++i) { active[i]=1; physical[i]=100+i; }
++        memset(arena,0,12288); return arena;
++    }
++    assert(size == 4096 && !active[1] && frees == 1);
++    if (!old_test) assert(irql == 2);
++    if (irql == 2) ++guarded_allocations;
++    if (fault == 5 && !fault_seen) { ++fault_seen; return pool; }
++    if (fault == 3 && !fault_seen) { ++fault_seen; return NULL; }
++    active[1]=1; physical[1]=next_pfn;
++    memset(page_at(1),0,4096); return page_at(1);
++}
++static unsigned MmFreeSystemMemory(void *p,unsigned size) {
++    if (p == pool) { assert(size == (fault == 5 ? 4096u : 12288u));
++        assert(irql == 2); ++pool_frees; return size / 4096; }
++    unsigned idx=index_of(p), count=size/4096;
++    if (scenario && !old_test) assert(irql == 2);
++    if (scenario && irql == 2) ++guarded_frees;
++    assert(size==count*4096 && idx+count<=3);
++    for(unsigned i=idx;i<idx+count;++i) assert(active[i]);
++    if (scenario && size==4096 && idx==1 && frees==0) {
++        assert(iteration_phys == 1);
++        for (unsigned i=0;i<4096;++i) {
++            assert(page_at(0)[i]==0x31 && page_at(1)[i]==0xa7 && page_at(2)[i]==0x73);
++        }
++        if (fault==2 && !fault_seen) { ++fault_seen; return 0; }
++        next_pfn=physical[1];
++        if (irql < 2) thread_return(); else deferred=1;
++    }
++    for(unsigned i=idx;i<idx+count;++i) active[i]=0;
++    ++frees; return count;
++}
++static unsigned MmGetPhysicalAddress(void *p) {
++    unsigned i=index_of(p); assert(active[i]);
++    if (!old_test) assert(irql == 2);
++    ++iteration_phys;
++    assert(i == 1 && iteration_phys <= 2);
++    if (irql == 2) ++guarded_phys;
++    return physical[i]*4096;
++}
++static void tap_comment(const char *fmt, ...) { assert(irql==original); (void)fmt; }
++static void regression_begin(void) { assert(irql==original); }
++static void regression_check(int pass,const char *desc) {
++    assert(irql==original); ++checks; if (!pass) { ++failures; fprintf(stderr,"not ok %u %s\n",checks,desc); }
++}
++static void regression_finish(void) __attribute__((noreturn));
++static void regression_finish(void) { assert(irql==original); longjmp(done,1); }
++static void regression_require(int pass,const char *desc) {
++    regression_check(pass,desc); if(!pass) regression_finish();
++}
++'''
++tail = r'''
++int main(int argc,char **argv) {
++    assert(argc==4); fault=strtoul(argv[1],NULL,0); original=irql=strtoul(argv[2],NULL,0);
++    unsigned old=old_test=strtoul(argv[3],NULL,0);
++    arena=mmap((void *)0xd0000000,16384,PROT_READ|PROT_WRITE,
++               MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
++    assert(arena==(void *)0xd0000000);
++    pool=aligned_alloc(4096,12288); assert(pool); memset(pool,0,12288);
++    if(!setjmp(done)) guest_main();
++    assert(irql==original && raises==lowers);
++    if(!fault) {
++        assert(checks==54);
++        assert(failures==(old ? 4 : 0));
++        assert(raises==(old ? 0 : 4));
++        assert(thread_returns==4);
++        assert(guarded_allocations==(old ? 0 : 8));
++        assert(guarded_phys==(old ? 0 : 8));
++        assert(guarded_frees==(old ? 0 : 16));
++    } else {
++        assert(fault_seen==1 && failures==1 && raises==1 && lowers==1);
++        assert(!active[0] && !active[1] && !active[2]);
++        if(fault==4 || fault==5) assert(pool_frees==1);
++    }
++    printf("PASS fault=%u original_irql=%u checks=%u failures=%u raises=%u lowers=%u returns=%u\n",
++           fault,original,checks,failures,raises,lowers,thread_returns);
++    free(pool); munmap(arena,16384); return 0;
++}
++'''
++source=a.output/'fixture.c'
++source.write_text(head+'\n'+guest+'\n'+tail)
++binary=a.output/'fixture'
++subprocess.run(['cc','-std=gnu11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function',str(source),'-o',str(binary)],check=True)
++for level in [0,1]:
++    for fault in ([0] if a.expect_old else range(6)):
++        subprocess.run([str(binary),str(fault),str(level),str(int(a.expect_old))],check=True)
+diff --git a/tests/xbe/zero-reuse/main.c b/tests/xbe/zero-reuse/main.c
+index ae8d292d..34ffea6f 100644
+--- a/tests/xbe/zero-reuse/main.c
++++ b/tests/xbe/zero-reuse/main.c
+@@ -5,11 +5,9 @@
+ 
+ #define PAGE 4096
+ 
+-/* Optional debugger boundaries. Ordinary CI uses unmodified allocation. */
++/* Optional whole-iteration debugger boundaries; no reporting while guarded. */
+ __attribute__((noinline)) void zero_begin(unsigned scenario, unsigned phase)
+ { __asm__ __volatile__("" :: "r"(scenario), "r"(phase) : "memory"); }
+-__attribute__((noinline)) void zero_owned(unsigned scenario, unsigned pfn)
+-{ __asm__ __volatile__("" :: "r"(scenario), "r"(pfn) : "memory"); }
+ __attribute__((noinline)) void zero_done(unsigned scenario)
+ { __asm__ __volatile__("" :: "r"(scenario) : "memory"); }
+ 
+@@ -19,39 +17,100 @@ static int filled(const unsigned char *data, unsigned char expected)
+     return 1;
+ }
+ 
++/* The test uses SpiritBoot's system-VA aperture, not the pool fallback.
++ * Partial frees of an ordinary pool allocation are not valid. */
++static int system_pages(const void *base, unsigned bytes)
++{
++    uintptr_t address = (uintptr_t)base;
++    return address >= 0xd0000000u && address < 0xd4000000u &&
++           !(address & (PAGE - 1)) && bytes <= 0xd4000000u - address;
++}
++
++typedef struct ZeroResult {
++    int allocated, new_zero[3], exact, recycled_zero, left, right;
++    unsigned middle_freed, left_freed, recycled_freed, right_freed;
++    unsigned original_physical, recycled_physical;
++    int recycled;
++} ZeroResult;
++
++static ZeroResult exercise_reuse(void)
++{
++    ZeroResult result = { 0 };
++    unsigned char *pages, *reused;
++    unsigned physical;
++    unsigned char old_irql = KeRaiseIrqlToDpcLevel();
++
++    /* UP kernel: exclude thread teardown and DPC page returns for one
++     * bounded iteration. The warmed system-VA/PFN path uses spinlocks,
++     * not pageable or waiting services. Record only; never emit TAP here. */
++    pages = MmAllocateSystemMemory(3 * PAGE, PAGE_READWRITE);
++    if (!pages) goto done;
++    if (!system_pages(pages, 3 * PAGE)) {
++        MmFreeSystemMemory(pages, 3 * PAGE);
++        goto done;
++    }
++    result.allocated = 1;
++    for (unsigned i = 0; i < 3; ++i)
++        result.new_zero[i] = filled(pages + i * PAGE, 0);
++    physical = MmGetPhysicalAddress(pages + PAGE);
++    result.original_physical = physical;
++    memset(pages, 0x31, PAGE);
++    memset(pages + PAGE, 0xa7, PAGE);
++    memset(pages + 2 * PAGE, 0x73, PAGE);
++    result.middle_freed = MmFreeSystemMemory(pages + PAGE, PAGE);
++    if (result.middle_freed != 1) {
++        MmFreeSystemMemory(pages, 3 * PAGE);
++        goto done;
++    }
++    reused = MmAllocateSystemMemory(PAGE, PAGE_READWRITE);
++    if (reused && system_pages(reused, PAGE)) {
++        result.recycled = 1;
++        result.recycled_physical = MmGetPhysicalAddress(reused);
++        result.exact = result.recycled_physical == physical;
++        result.recycled_zero = filled(reused, 0);
++        result.left = filled(pages, 0x31);
++        result.right = filled(pages + 2 * PAGE, 0x73);
++    }
++    /* Even failure/fallback paths leave the guard before fatal reporting.
++     * Free a fallback only at its original base and complete object size. */
++    result.left_freed = MmFreeSystemMemory(pages, PAGE);
++    if (reused) result.recycled_freed = MmFreeSystemMemory(reused, PAGE);
++    result.right_freed = MmFreeSystemMemory(pages + 2 * PAGE, PAGE);
++done:
++    KfLowerIrql(old_irql);
++    return result;
++}
++
+ int main(void)
+ {
+     regression_begin();
+-    /* Materialize the system-VA page table before controlled data allocations. */
+-    void *warm=MmAllocateSystemMemory(3*PAGE,PAGE_READWRITE);
+-    regression_require(warm!=NULL,"prepare system allocation page table");
+-    regression_require(MmFreeSystemMemory(warm,3*PAGE)==3,
++    /* Materialize the system-VA page table before controlled allocations. */
++    void *warm = MmAllocateSystemMemory(3 * PAGE, PAGE_READWRITE);
++    int prepared = warm && system_pages(warm, 3 * PAGE);
++    unsigned warm_freed = warm ? MmFreeSystemMemory(warm, 3 * PAGE) : 0;
++    regression_require(prepared, "prepare system allocation page table");
++    regression_require(warm_freed == 3,
+                        "release page-table preparation allocation");
+-    for(unsigned scenario=0;scenario<4;++scenario) {
+-        zero_begin(scenario,0);
+-        unsigned char *pages=MmAllocateSystemMemory(3*PAGE,PAGE_READWRITE);
+-        regression_require(pages!=NULL,"allocate three writable pages");
+-        regression_check(filled(pages,0),"new left page contains 4096 zero bytes");
+-        regression_check(filled(pages+PAGE,0),"new middle page contains 4096 zero bytes");
+-        regression_check(filled(pages+2*PAGE,0),"new right page contains 4096 zero bytes");
+-        unsigned physical=MmGetPhysicalAddress(pages+PAGE);
+-        zero_owned(scenario,physical/PAGE);
+-        memset(pages,0x31,PAGE);
+-        memset(pages+PAGE,0xa7,PAGE);
+-        memset(pages+2*PAGE,0x73,PAGE);
+-        regression_require(MmFreeSystemMemory(pages+PAGE,PAGE)==1,
++    for (unsigned scenario = 0; scenario < 4; ++scenario) {
++        zero_begin(scenario, 0);
++        ZeroResult result = exercise_reuse();
++        tap_comment("scenario=%u original_pfn=%x recycled_pfn=%x",
++                    scenario, result.original_physical / PAGE,
++                    result.recycled_physical / PAGE);
++        regression_require(result.allocated, "allocate three writable pages");
++        regression_check(result.new_zero[0], "new left page contains 4096 zero bytes");
++        regression_check(result.new_zero[1], "new middle page contains 4096 zero bytes");
++        regression_check(result.new_zero[2], "new right page contains 4096 zero bytes");
++        regression_require(result.middle_freed == 1,
+                            "release only dirty middle page");
+-        zero_begin(scenario,1);
+-        unsigned char *reused=MmAllocateSystemMemory(PAGE,PAGE_READWRITE);
+-        regression_require(reused!=NULL,"allocate recycled middle page");
+-        regression_check(MmGetPhysicalAddress(reused)==physical,
+-                         "actual physical middle page is reused");
+-        regression_check(filled(reused,0),"dirty recycled page contains 4096 zero bytes");
+-        regression_check(filled(pages,0x31),"all left neighbor sentinel bytes survive");
+-        regression_check(filled(pages+2*PAGE,0x73),"all right neighbor sentinel bytes survive");
+-        regression_check(MmFreeSystemMemory(pages,PAGE)==1,"release left page");
+-        regression_check(MmFreeSystemMemory(reused,PAGE)==1,"release recycled page");
+-        regression_check(MmFreeSystemMemory(pages+2*PAGE,PAGE)==1,"release right page");
++        regression_require(result.recycled, "allocate recycled middle page");
++        regression_check(result.exact, "actual physical middle page is reused");
++        regression_check(result.recycled_zero, "dirty recycled page contains 4096 zero bytes");
++        regression_check(result.left, "all left neighbor sentinel bytes survive");
++        regression_check(result.right, "all right neighbor sentinel bytes survive");
++        regression_check(result.left_freed == 1, "release left page");
++        regression_check(result.recycled_freed == 1, "release recycled page");
++        regression_check(result.right_freed == 1, "release right page");
+         zero_done(scenario);
+     }
+     regression_finish();
