@@ -1,0 +1,91 @@
+From 401bc20d9eb9168b2d143474a4d6c0fc44901e7b Mon Sep 17 00:00:00 2001
+From: Mainkill1 <Mainkill1@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 09:48:01 -0700
+Subject: [PATCH] MM: treat internal probe sentinel as missing trap information
+
+---
+ ntoskrnl/xb/mm/fault.c                |  5 ++++-
+ tests/host/fault-information/cases.c  |  7 +++++++
+ tests/host/fault-information/check.py | 13 +++++++++++++
+ tests/host/fault-information/shim.h   | 17 +++++++++++++++++
+ 4 files changed, 41 insertions(+), 1 deletion(-)
+ create mode 100644 tests/host/fault-information/cases.c
+ create mode 100644 tests/host/fault-information/check.py
+ create mode 100644 tests/host/fault-information/shim.h
+
+diff --git a/ntoskrnl/xb/mm/fault.c b/ntoskrnl/xb/mm/fault.c
+index 7a264eb0..5e3faa48 100644
+--- a/ntoskrnl/xb/mm/fault.c
++++ b/ntoskrnl/xb/mm/fault.c
+@@ -45,9 +45,12 @@ MmAccessFault(
+             return STATUS_SUCCESS;
+     }
+ 
++    /* Internal unlocked probes pass this sentinel, not a trap frame. */
+     DPRINT1("va=%p code=%lx ip=%p -- no fault is legitimate here\n",
+             Address, FaultCode,
+-            TrapInformation ? (PVOID)((PKTRAP_FRAME)TrapInformation)->Eip
++            TrapInformation &&
++                TrapInformation != (PVOID)(ULONG_PTR)0xBADBADA3BADBADA3ULL
++                    ? (PVOID)((PKTRAP_FRAME)TrapInformation)->Eip
+                             : NULL);
+ 
+ #if DBG && defined(NXK_MM_POOLPAGES)
+diff --git a/tests/host/fault-information/cases.c b/tests/host/fault-information/cases.c
+new file mode 100644
+index 00000000..2e7049eb
+--- /dev/null
++++ b/tests/host/fault-information/cases.c
+@@ -0,0 +1,7 @@
++int main(void){
++ assert(MmAccessFault(0,(void*)0x10000,0,(void*)(uintptr_t)0xBADBADA3BADBADA3ULL)==STATUS_ACCESS_VIOLATION);assert(logs==1&&logged_ip==NULL);
++ assert(MmAccessFault(1,(void*)0x10000,0,NULL)==STATUS_ACCESS_VIOLATION);assert(logs==2&&logged_ip==NULL);
++ KTRAP_FRAME t={0x123456};assert(MmAccessFault(0,(void*)0x10000,0,&t)==STATUS_ACCESS_VIOLATION);assert(logs==3&&logged_ip==(void*)0x123456);
++ sync_pde=1;assert(MmAccessFault(0,(void*)0x81000000,0,(void*)(uintptr_t)0xBADBADA3BADBADA3ULL)==STATUS_SUCCESS);assert(logs==3);
++ puts("PASS synthetic sentinel, NULL, real trap, and successful PDE sync diagnostics");return 0;
++}
+diff --git a/tests/host/fault-information/check.py b/tests/host/fault-information/check.py
+new file mode 100644
+index 00000000..5ef6b0a4
+--- /dev/null
++++ b/tests/host/fault-information/check.py
+@@ -0,0 +1,13 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Compile the production custom fault entry with diagnostic evaluation enabled."""
++import importlib.util,subprocess,sys
++from pathlib import Path
++sys.dont_write_bytecode=True
++here=Path(__file__).resolve().parent;root=here.parents[2]
++out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
++body=m.function((root/'ntoskrnl/xb/mm/fault.c').read_text(),'MmAccessFault')
++(out/'fault.c').write_text((here/'shim.h').read_text()+body+(here/'cases.c').read_text())
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',str(out/'fault.c'),'-o',str(out/'fault')],check=True)
++subprocess.run([str(out/'fault')],check=True)
+diff --git a/tests/host/fault-information/shim.h b/tests/host/fault-information/shim.h
+new file mode 100644
+index 00000000..7c6bf387
+--- /dev/null
++++ b/tests/host/fault-information/shim.h
+@@ -0,0 +1,17 @@
++#include <stdint.h>
++#include <stdio.h>
++#include <stdarg.h>
++#include <assert.h>
++typedef unsigned ULONG;typedef uintptr_t ULONG_PTR;typedef void *PVOID;typedef int NTSTATUS,KPROCESSOR_MODE,BOOLEAN;
++typedef struct {uintptr_t Eip;} KTRAP_FRAME,*PKTRAP_FRAME;
++#define IN
++#define NTAPI
++#define UNREFERENCED_PARAMETER(p) ((void)(p))
++#define STATUS_SUCCESS 0
++#define STATUS_ACCESS_VIOLATION (-5)
++#define DBG 1
++#define MmSystemRangeStart ((void*)0x80000000)
++static int sync_pde,logs;static void *logged_ip;
++static int Mmi386MakeKernelPageTableGlobal(void*a){(void)a;return sync_pde;}
++static void log_fault(const char*f,void*a,unsigned code,void*ip){(void)f;(void)a;(void)code;logs++;logged_ip=ip;}
++#define DPRINT1 log_fault
+-- 
+2.47.3
+
