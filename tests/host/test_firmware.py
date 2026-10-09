@@ -79,6 +79,24 @@ elif '--build' in sys.argv:
         self.assertEqual(manifest["patches"], [])
         self.assertTrue((self.output / "build.log").exists())
 
+    def test_metadata_diagnostic_is_explicit_and_recorded(self):
+        default = self.build()
+        self.assertEqual(default.returncode, 0, default.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertFalse(manifest["metadata_counters"])
+        configure = next(c for c in manifest["commands"] if "-G" in c)
+        self.assertIn("-DNXK_METADATA_COUNTERS=OFF", configure)
+        enabled = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/build-firmware.py"),
+             "--source", str(self.source), "--output", str(self.output),
+             "--lock", str(self.lock), "--metadata-counters"],
+            env=self.env, capture_output=True, text=True)
+        self.assertEqual(enabled.returncode, 0, enabled.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertTrue(manifest["metadata_counters"])
+        configure = next(c for c in manifest["commands"] if "-G" in c)
+        self.assertIn("-DNXK_METADATA_COUNTERS=ON", configure)
+
     def test_default_build_records_file_media_policy(self):
         result = self.build()
         self.assertEqual(result.returncode, 0, result.stderr)
