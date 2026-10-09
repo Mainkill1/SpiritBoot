@@ -1,0 +1,219 @@
+diff --git a/ntoskrnl/mm/ARM3/mminit.c b/ntoskrnl/mm/ARM3/mminit.c
+index da35b4722c2eda08d4c697d5cdd3aa5211014bab..8d1a0884d0df62a780fe369ca9a039d552d3b8e3 100644
+--- a/ntoskrnl/mm/ARM3/mminit.c
++++ b/ntoskrnl/mm/ARM3/mminit.c
+@@ -2577,21 +2577,28 @@ MmArmInitSystem(IN ULONG Phase,
+         {
+             /* Set small system */
+             MmSystemSize = MmSmallSystem;
++#ifndef SARCH_XBOX
+             MmMaximumDeadKernelStacks = 0;
++#endif
+         }
+         else if (MmNumberOfPhysicalPages <= ((19 * _1MB) / PAGE_SIZE))
+         {
+             /* Set small system and add 100 pages for the cache */
+             MmSystemSize = MmSmallSystem;
+             MmSystemCacheWsMinimum += 100;
++#ifndef SARCH_XBOX
+             MmMaximumDeadKernelStacks = 2;
++#endif
+         }
+         else
+         {
+             /* Set medium system and add 400 pages for the cache */
+             MmSystemSize = MmMediumSystem;
+             MmSystemCacheWsMinimum += 400;
++#ifndef SARCH_XBOX
++            /* Xbox retains the zero-retention policy initialized in procsup.c. */
+             MmMaximumDeadKernelStacks = 5;
++#endif
+         }
+ 
+         /* Check for less than 24MB */
+diff --git a/tests/host/dead-stack-policy/README.md b/tests/host/dead-stack-policy/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..5f5fee64f031d8dd31f7f180ffaea9fadb283090
+--- /dev/null
++++ b/tests/host/dead-stack-policy/README.md
+@@ -0,0 +1,18 @@
++# Initialized dead-stack reclamation regression
++
++Run `python3 tests/host/dead-stack-policy/check.py OUTPUT_DIRECTORY`.
++
++The fixture extracts the owned global initializer, the actual memory-size
++initialization block from `MmArmInitSystem`, and `MmDeleteKernelStackEx`.
++It executes them together with recording page-supply and system-PTE primitives.
++Eight distinct live stacks are deleted for default, explicit 12 KiB and
++nondefault 64 KiB requests. Assertions cover returned backing pages, cleared
++ownership, invalidated mappings, released PTE counts, cache depth and committed
++stack accounting. No separate copy of the production policy or deletion branch
++is used. A later Xbox overwrite of the global limit makes reclamation fail.
++
++Xbox 64/128 MiB and generic 13/19 MiB boundary cases are included. Generic
++retention remains zero, two or five, and cache sizing/system classification
++side effects are checked independently. The host fixture simulates low-level
++frame operations; it does not simulate thread termination or prove scheduler
++timing. Native public thread lifecycle observations provide that separate check.
+diff --git a/tests/host/dead-stack-policy/cases.c b/tests/host/dead-stack-policy/cases.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..3633a86111c8d8b48f4881848ed1f8745019c1f7
+--- /dev/null
++++ b/tests/host/dead-stack-policy/cases.c
+@@ -0,0 +1,55 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++static int run(unsigned ram_pages, unsigned size, unsigned want_cached)
++{
++    unsigned pages = size ? BYTES_TO_PAGES(size) : 3;
++    memset(ptes, 0, sizeof(ptes)); memset(returned, 0, sizeof(returned));
++    memset(owners, 0, sizeof(owners));
++    MmDeadStackSListHead = (SLIST_HEADER){0};
++    MmNumberOfPhysicalPages = ram_pages; MmSystemCacheWsMinimum = 17;
++    initialize_policy();
++    NxkMmStackPages = 8 * pages; released_ptes = invalidated = 0;
++    for (unsigned i = 0; i < 8; ++i) {
++        for (unsigned j = 1; j <= pages; ++j) {
++            unsigned frame = i * 32 + j;
++            ptes[i][j].u.Hard.Valid = 1;
++            ptes[i][j].u.Hard.PageFrameNumber = frame;
++            owners[frame] = 1;
++        }
++    }
++    for (unsigned i = 0; i < 8; ++i)
++        MmDeleteKernelStackEx(memory[i] + (pages + 1) * PAGE_SIZE, 0, size);
++    unsigned returned_pages = 0;
++    for (unsigned p = 0; p < 256; ++p) returned_pages += returned[p];
++    unsigned want_returned = (8 - want_cached) * pages;
++    if (MmDeadStackSListHead.Depth != want_cached || returned_pages != want_returned ||
++        NxkMmStackPages != (LONG)(want_cached * pages) || invalidated != want_returned ||
++        released_ptes != (8 - want_cached) * (pages + 1)) {
++        fprintf(stderr, "FAIL ram_pages=%u requested=%u effective_limit=%u cached=%u returned=%u stack_pages=%d want_cached=%u want_returned=%u\n",
++                ram_pages, size, MmMaximumDeadKernelStacks, MmDeadStackSListHead.Depth,
++                returned_pages, NxkMmStackPages, want_cached, want_returned);
++        return 1;
++    }
++    /* Check the generic sizing side effects also survive the Xbox exclusion. */
++    unsigned want_ws = ram_pages <= 3328 ? 17 : ram_pages <= 4864 ? 117 : 417;
++    assert(MmSystemCacheWsMinimum == want_ws);
++    assert(MmSystemSize == (ram_pages <= 4864 ? MmSmallSystem : MmMediumSystem));
++    printf("PASS ram_pages=%u requested=%u effective_limit=%u cached=%u returned=%u stack_pages=%d\n",
++           ram_pages, size, MmMaximumDeadKernelStacks, MmDeadStackSListHead.Depth, returned_pages, NxkMmStackPages);
++    return 0;
++}
++int main(void)
++{
++    int failures = 0;
++    const unsigned pages[] = {3328, 3329, 4864, 4865, 16384, 32768};
++    for (unsigned i = 0; i < sizeof(pages) / sizeof(pages[0]); ++i) {
++#ifdef SARCH_XBOX
++        unsigned cached = 0;
++#else
++        unsigned cached = pages[i] <= 3328 ? 0 : pages[i] <= 4864 ? 2 : 5;
++#endif
++        failures += run(pages[i], 0, cached);
++        failures += run(pages[i], 12288, cached);
++        failures += run(pages[i], 65536, 0);
++    }
++    return failures ? 1 : 0;
++}
+diff --git a/tests/host/dead-stack-policy/check.py b/tests/host/dead-stack-policy/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..bb88166df613f25cc3ba37e580b33ba8f878f1e3
+--- /dev/null
++++ b/tests/host/dead-stack-policy/check.py
+@@ -0,0 +1,38 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Run the actual memory-size initialization and stack deletion code together."""
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++proc = (root / 'ntoskrnl/mm/ARM3/procsup.c').read_text()
++init = (root / 'ntoskrnl/mm/ARM3/mminit.c').read_text()
++# Keep the real target-specific global initializer and real initialization
++# branch: testing deletion against a separately copied policy misses #125.
++globals_start = proc.index('#ifdef SARCH_XBOX', proc.index('/* GLOBALS'))
++globals_end = proc.index('ULONG MmRotatingUniprocessorNumber', globals_start)
++init_start = init.index('        /* Check how many pages the system has */')
++init_end = init.index('        /* Check for less than 24MB */', init_start)
++delete_start = proc.index('VOID\nNTAPI\nMmDeleteKernelStackEx(')
++delete_end = proc.index('\n}\n', delete_start) + 3
++source = ((root / 'tests/host/dead-stack-policy/shim.c').read_text()
++          + proc[globals_start:globals_end]
++          + '\nstatic void initialize_policy(void) {\n'
++          + init[init_start:init_end] + '\n}\n'
++          + proc[delete_start:delete_end]
++          + (root / 'tests/host/dead-stack-policy/cases.c').read_text())
++(out / 'actual-policy-delete.c').write_text(source)
++failures = []
++for target, flags in [('xbox', ['-DSARCH_XBOX']), ('generic', [])]:
++    binary = out / target
++    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
++                    '-Wno-unused-variable', '-DNXK_MM_PHYS', *flags,
++                    str(out / 'actual-policy-delete.c'), '-o', str(binary)], check=True)
++    result = subprocess.run([str(binary)])
++    if result.returncode:
++        failures.append(target)
++if failures:
++    raise SystemExit('FAIL: actual initialized stack reclamation: ' + ', '.join(failures))
+diff --git a/tests/host/dead-stack-policy/shim.c b/tests/host/dead-stack-policy/shim.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..e11aa240b868c34cce2593dd25e1351d1e0fd749
+--- /dev/null
++++ b/tests/host/dead-stack-policy/shim.c
+@@ -0,0 +1,51 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#define IN
++#define NTAPI
++#define VOID void
++#define ASSERT assert
++#define PAGE_SIZE 4096u
++#define KERNEL_STACK_SIZE 12288u
++#define _1MB 1048576u
++#define BYTES_TO_PAGES(n) (((n) + PAGE_SIZE - 1) / PAGE_SIZE)
++#define PFN_FROM_PTE(p) ((p)->u.Hard.PageFrameNumber)
++#define SystemPteSpace 0
++typedef void *PVOID;
++typedef unsigned char BOOLEAN, KIRQL;
++typedef uint32_t ULONG, SIZE_T, PFN_NUMBER, PFN_COUNT;
++typedef int32_t LONG;
++typedef void *PMMPFN;
++typedef struct { union { struct { ULONG Valid, PageFrameNumber; } Hard; uint64_t Long; } u; } MMPTE, *PMMPTE;
++typedef struct _SLIST_ENTRY { struct _SLIST_ENTRY *Next; } SLIST_ENTRY, *PSLIST_ENTRY;
++typedef struct { PSLIST_ENTRY Head; unsigned Depth; } SLIST_HEADER;
++enum { MmSmallSystem, MmMediumSystem };
++static ULONG MmNumberOfPhysicalPages, MmSystemSize, MmSystemCacheWsMinimum;
++static ULONG MmLargeStackSize = 65536;
++static volatile LONG NxkMmStackPages;
++static unsigned char memory[8][17 * PAGE_SIZE];
++static MMPTE ptes[8][17];
++static unsigned returned[256], owners[256], released_ptes, invalidated, locked;
++static unsigned ExQueryDepthSList(SLIST_HEADER *h) { return h->Depth; }
++static void InterlockedPushEntrySList(SLIST_HEADER *h, PSLIST_ENTRY p)
++{ p->Next = h->Head; h->Head = p; ++h->Depth; }
++static LONG InterlockedExchangeAdd(volatile LONG *p, LONG n)
++{ LONG old = *p; *p += n; return old; }
++static PMMPTE MiAddressToPte(PVOID p)
++{
++    uintptr_t address = (uintptr_t)p;
++    for (unsigned i = 0; i < 8; ++i)
++        if (address > (uintptr_t)memory[i] && address <= (uintptr_t)(memory[i] + sizeof(memory[i])))
++            return ptes[i] + (address - (uintptr_t)memory[i]) / PAGE_SIZE;
++    assert(0); return NULL;
++}
++static PVOID MiPteToAddress(PMMPTE p) { return p; }
++static KIRQL MiAcquirePfnLock(void) { assert(!locked); locked = 1; return 0; }
++static void MiReleasePfnLock(KIRQL old) { (void)old; assert(locked); locked = 0; }
++static void KeInvalidateTlbEntry(PVOID p) { (void)p; assert(locked); ++invalidated; }
++static void NxkPageSupplySetOwner(PFN_NUMBER p, ULONG owner) { assert(locked); owners[p] = owner; }
++static void NxkPageSupplyReturn(PFN_NUMBER p) { assert(locked && !owners[p] && !returned[p]); ++returned[p]; }
++static void MiReleaseSystemPtes(PMMPTE p, unsigned count, unsigned space)
++{ assert(!locked && p->u.Hard.Valid == 0 && space == 0); released_ptes += count; }
