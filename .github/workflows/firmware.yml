@@ -53,7 +53,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = d8aeed99b1b19b9c1955777d9319e2438b8c0956
+            test "$actual_tree" = 8c64ac3cd1dfe5ac7bace0bda67b0c4fc8fc25ec
             python3 "$GUEST_SOURCE/tests/host/warm-stage/check.py" >"$output/warm-stage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/reset-frame/check.py" "$output/reset-frame" >"$output/reset-frame.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fault-information/check.py" "$output/fault-information" >"$output/fault-information.log" 2>&1
@@ -154,7 +154,7 @@ jobs:
             done'
           python3 - <<'PY'
           import json
-          for guest, plan in (('clean-room-contracts', 23), ('clean-room-warm-reboot', 5)):
+          for guest, plan in (('clean-room-contracts', 23), ('clean-room-warm-reboot', 7)):
               result = json.load(open(f'artifacts/{guest}-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/run.json'))
               assert result['status'] == 'passed' and result['tap']['plan'] == plan, result
               assert result['tap']['ok'] == plan, result

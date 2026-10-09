@@ -783,6 +783,38 @@ index 25fc90c4..01004e89 100644
                           capture_output=True)
  print('unsupported capacity rejected:', invalid.returncode != 0)
  failures += invalid.returncode == 0
+diff --git a/tests/host/clean-room/include/ntoskrnl.h b/tests/host/clean-room/include/ntoskrnl.h
+index b6ff9514..f80c9abe 100644
+--- a/tests/host/clean-room/include/ntoskrnl.h
++++ b/tests/host/clean-room/include/ntoskrnl.h
+@@ -28,7 +28,7 @@ typedef ULONG *PULONG;
+ #define RtlZeroMemory(p,n) memset(p,0,n)
+ #define KeMemoryBarrier() __sync_synchronize()
+ typedef struct _LIST_ENTRY { struct _LIST_ENTRY *Flink, *Blink; } LIST_ENTRY, *PLIST_ENTRY;
+-typedef enum { LoaderFree, LoaderFirmwarePermanent, LoaderMemoryData } TYPE_OF_MEMORY;
++typedef enum { LoaderFree, LoaderFirmwarePermanent, LoaderMemoryData, LoaderSystemCode } TYPE_OF_MEMORY;
+ typedef struct { LIST_ENTRY ListEntry; TYPE_OF_MEMORY MemoryType; PFN_NUMBER BasePage, PageCount; } MEMORY_ALLOCATION_DESCRIPTOR, *PMEMORY_ALLOCATION_DESCRIPTOR;
+ typedef struct { LIST_ENTRY MemoryDescriptorListHead; } LOADER_PARAMETER_BLOCK, *PLOADER_PARAMETER_BLOCK;
+ extern UCHAR __ImageBase[];
+diff --git a/tests/host/clean-room/persistence.c b/tests/host/clean-room/persistence.c
+index 1406e6b4..0659b293 100644
+--- a/tests/host/clean-room/persistence.c
++++ b/tests/host/clean-room/persistence.c
+@@ -3,7 +3,14 @@
+ #include <stdlib.h>
+ #include <sys/mman.h>
+ #include "ntoskrnl.h"
++#define CODE_SEG(x)
++#define DATA_SEG(x)
++#define MEMORY_MANAGEMENT 0
++#define KeBugCheckEx(...) abort()
+ UCHAR __ImageBase[1];
++/* This facade exercises unstaged bookkeeping; layout checks execute restore. */
++VOID NxkMmDonateHeapPages(ULONG_PTR pa, ULONG count)
++{ (void)pa; (void)count; abort(); }
+ static bool pinned;
+ static unsigned returned;
+ void NxkPageSupplyReturn(PFN_NUMBER page) { (void)page; ++returned; }
 diff --git a/tests/host/warm-stage/check.py b/tests/host/warm-stage/check.py
 new file mode 100644
 index 00000000..5aea6658
