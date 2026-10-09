@@ -1,0 +1,650 @@
+From f31ee4543c2c35471a8c36cb97ba2f7414d2d890 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Fri, 9 Oct 2026 06:53:02 -0700
+Subject: [PATCH] fix(xbox): retire bootvid before donating framebuffer pages
+
+---
+ drivers/base/bootvid/i386/xbox/bootvid.c      |  31 +++++
+ ntoskrnl/ex/init.c                            |   8 ++
+ ntoskrnl/inbv/inbv.c                          | 103 +++++++++++++++--
+ ntoskrnl/include/internal/inbv.h              |   3 +
+ ntoskrnl/xb/mm/init.c                         |  37 +++---
+ sdk/include/reactos/drivers/bootvid/bootvid.h |   3 +
+ tests/host/bootvid-lifetime/README.md         |  20 ++++
+ tests/host/bootvid-lifetime/check.py          |  30 +++++
+ tests/host/bootvid-lifetime/fixture.c         | 109 ++++++++++++++++++
+ 9 files changed, 321 insertions(+), 23 deletions(-)
+ create mode 100644 tests/host/bootvid-lifetime/README.md
+ create mode 100644 tests/host/bootvid-lifetime/check.py
+ create mode 100644 tests/host/bootvid-lifetime/fixture.c
+
+diff --git a/drivers/base/bootvid/i386/xbox/bootvid.c b/drivers/base/bootvid/i386/xbox/bootvid.c
+index 4eeac7a9..b6d65ef6 100644
+--- a/drivers/base/bootvid/i386/xbox/bootvid.c
++++ b/drivers/base/bootvid/i386/xbox/bootvid.c
+@@ -23,6 +23,7 @@ static ULONG FrameBufferWidth, FrameBufferHeight, PanH, PanV;
+ static UCHAR BytesPerPixel;
+ static RGBQUAD CachedPalette[BV_MAX_COLORS];
+ static PUCHAR BackBuffer = NULL;
++static BOOLEAN FrameBufferRetired;
+ 
+ /* PRIVATE FUNCTIONS *********************************************************/
+ 
+@@ -58,6 +59,8 @@ NvGetBytesPerPixel(
+ static VOID
+ ApplyPalette(VOID)
+ {
++    if (!FrameBufferStart) return;
++
+     PULONG Frame = (PULONG)FrameBufferStart;
+     ULONG x, y;
+ 
+@@ -116,6 +119,8 @@ NTAPI
+ VidInitialize(
+     _In_ BOOLEAN SetMode)
+ {
++    if (FrameBufferRetired) return FALSE;
++
+     BOOLEAN Result = FALSE;
+ 
+     /* FIXME: Add platform check */
+@@ -222,6 +227,18 @@ cleanup:
+     return Result;
+ }
+ 
++/* The Inbv writer lock must be held. Retirement is terminal for this boot. */
++VOID
++NTAPI
++VidReleaseFramebuffer(VOID)
++{
++    FrameBufferRetired = TRUE;
++    if (FrameBufferStart)
++        MmUnmapIoSpace((PVOID)FrameBufferStart, NV2A_VIDEO_MEMORY_SIZE);
++    FrameBufferStart = 0;
++    BackBuffer = NULL;
++}
++
+ VOID
+ NTAPI
+ VidCleanUp(VOID)
+@@ -234,6 +251,8 @@ VOID
+ ResetDisplay(
+     _In_ BOOLEAN SetMode)
+ {
++    if (!FrameBufferStart) return;
++
+     /* Reset the video mode with HAL if requested */
+     if (SetMode)
+         HalResetDisplay();
+@@ -249,6 +268,8 @@ InitPaletteWithTable(
+     _In_reads_(Count) const ULONG* Table,
+     _In_ ULONG Count)
+ {
++    if (!FrameBufferStart) return;
++
+     const ULONG* Entry = Table;
+ 
+     for (ULONG i = 0; i < Count; i++, Entry++)
+@@ -264,6 +285,8 @@ SetPixel(
+     _In_ ULONG Top,
+     _In_ UCHAR Color)
+ {
++    if (!FrameBufferStart) return;
++
+     PUCHAR Back = BackBuffer + BB_OFFSET(Left, Top);
+     PULONG Frame = (PULONG)(FrameBufferStart + FB_OFFSET(Left, Top));
+ 
+@@ -277,6 +300,8 @@ PreserveRow(
+     _In_ ULONG Height,
+     _In_ BOOLEAN Restore)
+ {
++    if (!FrameBufferStart) return;
++
+     PUCHAR NewPosition, OldPosition;
+ 
+     /* Calculate the position in memory for the row */
+@@ -320,6 +345,8 @@ VOID
+ DoScroll(
+     _In_ ULONG Scroll)
+ {
++    if (!FrameBufferStart) return;
++
+     ULONG RowSize = VidpScrollRegion.Right - VidpScrollRegion.Left + 1;
+ 
+     /* Calculate the position in memory for the row */
+@@ -390,6 +417,8 @@ VidSolidColorFill(
+     _In_ ULONG Bottom,
+     _In_ UCHAR Color)
+ {
++    if (!FrameBufferStart) return;
++
+     while (Top <= Bottom)
+     {
+         PUCHAR Back = BackBuffer + BB_OFFSET(Left, Top);
+@@ -415,6 +444,8 @@ VidScreenToBufferBlt(
+     _In_ ULONG Height,
+     _In_ ULONG Stride)
+ {
++    if (!FrameBufferStart) return;
++
+     /* Clear the destination buffer */
+     RtlZeroMemory(Buffer, Height * Stride);
+ 
+diff --git a/ntoskrnl/ex/init.c b/ntoskrnl/ex/init.c
+index b8e2b90b..28f577a1 100644
+--- a/ntoskrnl/ex/init.c
++++ b/ntoskrnl/ex/init.c
+@@ -2093,6 +2093,14 @@ Phase1InitializationDiscard(IN PVOID Context)
+ 
+     /* Clear the screen */
+     if (InbvBootDriverInstalled) FinalizeBootLogo();
++#ifdef SARCH_XBOX
++    /* Retire the cached boot framebuffer before its reservation rejoins RAM. */
++    {
++        extern VOID NTAPI NxkMmReleaseBootFramebuffer(VOID);
++        InbvRetireBootDriver();
++        NxkMmReleaseBootFramebuffer();
++    }
++#endif
+ 
+     /* Allow strings to be displayed */
+     InbvEnableDisplayString(TRUE);
+diff --git a/ntoskrnl/inbv/inbv.c b/ntoskrnl/inbv/inbv.c
+index 8fe76578..1b900f3e 100644
+--- a/ntoskrnl/inbv/inbv.c
++++ b/ntoskrnl/inbv/inbv.c
+@@ -37,6 +37,9 @@ static KSPIN_LOCK BootDriverLock;
+ static KIRQL InbvOldIrql;
+ static INBV_DISPLAY_STATE InbvDisplayState = INBV_DISPLAY_STATE_DISABLED;
+ BOOLEAN InbvBootDriverInstalled = FALSE;
++#ifdef SARCH_XBOX
++static BOOLEAN InbvBootDriverRetired;
++#endif
+ static INBV_RESET_DISPLAY_PARAMETERS InbvResetDisplayParameters = NULL;
+ 
+ static BOOLEAN InbvDisplayDebugStrings = FALSE;
+@@ -197,6 +200,10 @@ InbvDriverInitialize(
+     BOOLEAN ResetMode = FALSE; // By default do not reset the video mode
+     ULONG i;
+ 
++#ifdef SARCH_XBOX
++    if (InbvBootDriverRetired) return FALSE;
++#endif
++
+     /* Quit if we're already installed */
+     if (InbvBootDriverInstalled) return TRUE;
+ 
+@@ -269,11 +276,38 @@ InbvReleaseLock(VOID)
+     if (InbvOldIrql <= DISPATCH_LEVEL) KeLowerIrql(OldIrql);
+ }
+ 
++#ifdef SARCH_XBOX
++/* Serialize with every framebuffer writer before the pages are donated. */
++VOID
++NTAPI
++InbvRetireBootDriver(VOID)
++{
++    InbvAcquireLock();
++    InbvBootDriverRetired = TRUE;
++    InbvBootDriverInstalled = FALSE;
++    InbvDisplayState = INBV_DISPLAY_STATE_LOST;
++    InbvResetDisplayParameters = NULL;
++    VidReleaseFramebuffer();
++    InbvReleaseLock();
++}
++#endif
++
+ VOID
+ NTAPI
+ InbvEnableBootDriver(
+     _In_ BOOLEAN Enable)
+ {
++#ifdef SARCH_XBOX
++    InbvAcquireLock();
++    if (!InbvBootDriverRetired)
++    {
++        if (InbvBootDriverInstalled &&
++            InbvDisplayState == INBV_DISPLAY_STATE_OWNED) VidCleanUp();
++        InbvDisplayState = Enable ? INBV_DISPLAY_STATE_OWNED :
++                                   INBV_DISPLAY_STATE_DISABLED;
++    }
++    InbvReleaseLock();
++#else
+     /* Check if we're installed */
+     if (InbvBootDriverInstalled)
+     {
+@@ -299,12 +333,17 @@ InbvEnableBootDriver(
+         InbvDisplayState = Enable ? INBV_DISPLAY_STATE_OWNED :
+                                     INBV_DISPLAY_STATE_DISABLED;
+     }
++#endif
+ }
+ 
+ VOID
+ NTAPI
+ InbvAcquireDisplayOwnership(VOID)
+ {
++#ifdef SARCH_XBOX
++    if (InbvBootDriverRetired) return;
++#endif
++
+     /* Check if we have a callback and we're just acquiring it now */
+     if ((InbvResetDisplayParameters) &&
+         (InbvDisplayState == INBV_DISPLAY_STATE_LOST))
+@@ -314,7 +353,13 @@ InbvAcquireDisplayOwnership(VOID)
+     }
+ 
+     /* Acquire the display */
++#ifdef SARCH_XBOX
++    InbvAcquireLock();
++    if (!InbvBootDriverRetired) InbvDisplayState = INBV_DISPLAY_STATE_OWNED;
++    InbvReleaseLock();
++#else
+     InbvDisplayState = INBV_DISPLAY_STATE_OWNED;
++#endif
+ }
+ 
+ VOID
+@@ -322,9 +367,20 @@ NTAPI
+ InbvSetDisplayOwnership(
+     _In_ BOOLEAN DisplayOwned)
+ {
++#ifdef SARCH_XBOX
++    if (InbvBootDriverRetired) return;
++#endif
++
+     /* Set the new display state */
++#ifdef SARCH_XBOX
++    InbvAcquireLock();
++    if (!InbvBootDriverRetired)
++#endif
+     InbvDisplayState = DisplayOwned ? INBV_DISPLAY_STATE_OWNED :
+                                       INBV_DISPLAY_STATE_LOST;
++#ifdef SARCH_XBOX
++    InbvReleaseLock();
++#endif
+ }
+ 
+ BOOLEAN
+@@ -423,6 +479,17 @@ NTAPI
+ InbvNotifyDisplayOwnershipLost(
+     _In_ INBV_RESET_DISPLAY_PARAMETERS Callback)
+ {
++#ifdef SARCH_XBOX
++    InbvAcquireLock();
++    if (!InbvBootDriverRetired)
++    {
++        if (InbvBootDriverInstalled &&
++            InbvDisplayState != INBV_DISPLAY_STATE_LOST) VidCleanUp();
++        InbvResetDisplayParameters = Callback;
++        InbvDisplayState = INBV_DISPLAY_STATE_LOST;
++    }
++    InbvReleaseLock();
++#else
+     /* Check if we're installed */
+     if (InbvBootDriverInstalled)
+     {
+@@ -443,23 +510,27 @@ InbvNotifyDisplayOwnershipLost(
+         InbvResetDisplayParameters = Callback;
+         InbvDisplayState = INBV_DISPLAY_STATE_LOST;
+     }
++#endif
+ }
+ 
+ BOOLEAN
+ NTAPI
+ InbvResetDisplay(VOID)
+ {
+-    /* Check if we're installed and we own it */
++    BOOLEAN Reset = FALSE;
++#ifdef SARCH_XBOX
++    InbvAcquireLock();
++#endif
+     if (InbvBootDriverInstalled &&
+         (InbvDisplayState == INBV_DISPLAY_STATE_OWNED))
+     {
+-        /* Do the reset */
+         VidResetDisplay(TRUE);
+-        return TRUE;
++        Reset = TRUE;
+     }
+-
+-    /* Nothing to reset */
+-    return FALSE;
++#ifdef SARCH_XBOX
++    InbvReleaseLock();
++#endif
++    return Reset;
+ }
+ 
+ VOID
+@@ -560,7 +631,11 @@ InbvBitBlt(
+         InbvAcquireLock();
+ 
+         /* Do the blit */
+-        VidBitBlt(Buffer, X, Y);
++#ifdef SARCH_XBOX
++        if (InbvBootDriverInstalled &&
++            (InbvDisplayState == INBV_DISPLAY_STATE_OWNED))
++#endif
++            VidBitBlt(Buffer, X, Y);
+ 
+         /* Release the lock */
+         InbvReleaseLock();
+@@ -577,6 +652,9 @@ InbvBufferToScreenBlt(
+     _In_ ULONG Height,
+     _In_ ULONG Stride)
+ {
++#ifdef SARCH_XBOX
++    InbvAcquireLock();
++#endif
+     /* Check if we're installed and we own it */
+     if (InbvBootDriverInstalled &&
+         (InbvDisplayState == INBV_DISPLAY_STATE_OWNED))
+@@ -584,6 +662,10 @@ InbvBufferToScreenBlt(
+         /* Do the blit */
+         VidBufferToScreenBlt(Buffer, X, Y, Width, Height, Stride);
+     }
++#ifdef SARCH_XBOX
++    InbvReleaseLock();
++#endif
++
+ }
+ 
+ VOID
+@@ -596,6 +678,9 @@ InbvScreenToBufferBlt(
+     _In_ ULONG Height,
+     _In_ ULONG Stride)
+ {
++#ifdef SARCH_XBOX
++    InbvAcquireLock();
++#endif
+     /* Check if we're installed and we own it */
+     if (InbvBootDriverInstalled &&
+         (InbvDisplayState == INBV_DISPLAY_STATE_OWNED))
+@@ -603,6 +688,10 @@ InbvScreenToBufferBlt(
+         /* Do the blit */
+         VidScreenToBufferBlt(Buffer, X, Y, Width, Height, Stride);
+     }
++#ifdef SARCH_XBOX
++    InbvReleaseLock();
++#endif
++
+ }
+ 
+ /**
+diff --git a/ntoskrnl/include/internal/inbv.h b/ntoskrnl/include/internal/inbv.h
+index 03bff604..8b5baa41 100644
+--- a/ntoskrnl/include/internal/inbv.h
++++ b/ntoskrnl/include/internal/inbv.h
+@@ -23,6 +23,9 @@ InbvDriverInitialize(
+ );
+ 
+ extern BOOLEAN InbvBootDriverInstalled;
++#ifdef SARCH_XBOX
++VOID NTAPI InbvRetireBootDriver(VOID);
++#endif
+ 
+ INBV_DISPLAY_STATE
+ NTAPI
+diff --git a/ntoskrnl/xb/mm/init.c b/ntoskrnl/xb/mm/init.c
+index e5d08082..438148c3 100644
+--- a/ntoskrnl/xb/mm/init.c
++++ b/ntoskrnl/xb/mm/init.c
+@@ -132,6 +132,8 @@ NxpIsLoaderTypeTransientReclaimable(TYPE_OF_MEMORY Type)
+ #define NXK_MAX_EXTRA_DESCRIPTORS  2
+ static MEMORY_ALLOCATION_DESCRIPTOR NxkExtraDescriptors[NXK_MAX_EXTRA_DESCRIPTORS];
+ static ULONG                       NxkExtraDescriptorCount;
++static ULONG_PTR NxkBootFramebufferPa;
++static ULONG NxkBootFramebufferPages;
+ 
+ /*
+  * Split the LoaderFirmwarePermanent descriptor that freeldr leaves over the
+@@ -140,8 +142,8 @@ static ULONG                       NxkExtraDescriptorCount;
+  * (PA 0x03FE0000-0x04000000) actually needs to stay permanent -- the NV2A
+  * places RAMHT/RAMFC/graphics-contexts there and the GPU MMU finds them at
+  * a fixed PA, so NT must not hand those pages out.  The lower ~3.875 MB has
+- * no consumer in our build; retype it to LoaderFirmwareTemporary so the
+- * heap-claim loop below puts it back in the title's contig arena.
++ * a bootvid consumer until Phase 1 display retirement; retain the reservation
++ * until then and donate the lower range to the title page supply afterward.
+  */
+ static
+ VOID
+@@ -187,21 +189,13 @@ NxpSplitNv2aReserve(VOID)
+         InsertHeadList(&Desc->ListEntry, &Tail->ListEntry);
+ 
+         Desc->PageCount  = SplitPfn - Desc->BasePage;
+-#ifdef NXK_MM_PHYS
+-        /* One pool: retype the lower part so the PFN-database walk frees
+-         * it straight into the page supply. */
+-        Desc->MemoryType = LoaderFirmwareTemporary;
+-#else
+-        /* Retype the lower part to LoaderSpecialMemory.  NT's PFN init
+-         * excludes that type just like LoaderFirmwarePermanent -- no PFN
+-         * entries are created and the pages don't enter any free list --
+-         * but it's distinguishable from the kept-reserved upper part,
+-         * so NxpIsLoaderTypeTransientReclaimable can pick it up below
+-         * and the heap-claim loop folds it into the title heap. */
+-        Desc->MemoryType = LoaderSpecialMemory;
+-#endif
++        /* Bootvid still draws through this reservation during Phase 1.
++         * Keep it permanent until the display writer barrier has retired
++         * the mapping; the loader descriptors themselves are freed earlier. */
++        NxkBootFramebufferPa = Desc->BasePage << PAGE_SHIFT;
++        NxkBootFramebufferPages = (ULONG)Desc->PageCount;
+ 
+-        DPRINT1("nv2a split: reclaim PA %08lx-%08lx (%lu KB) for title heap; "
++        DPRINT1("nv2a split: defer PA %08lx-%08lx (%lu KB) for title heap; "
+                 "keep PA %08lx-%08lx (%lu KB) reserved for GPU\n",
+                 (ULONG)(Desc->BasePage << PAGE_SHIFT),
+                 (ULONG)((Desc->BasePage + Desc->PageCount) << PAGE_SHIFT),
+@@ -218,6 +212,17 @@ NxpSplitNv2aReserve(VOID)
+             (ULONG)NXK_KSEG0_RAM_SIZE);
+ }
+ 
++/* Called once after InbvRetireBootDriver has drained all framebuffer writers. */
++VOID
++NTAPI
++NxkMmReleaseBootFramebuffer(VOID)
++{
++    ULONG Pages = NxkBootFramebufferPages;
++
++    NxkBootFramebufferPages = 0;
++    if (Pages) NxkMmDonateHeapPages(NxkBootFramebufferPa, Pages);
++}
++
+ VOID
+ NTAPI
+ NxkMmReserveXboxWindows(VOID)
+diff --git a/sdk/include/reactos/drivers/bootvid/bootvid.h b/sdk/include/reactos/drivers/bootvid/bootvid.h
+index 76a81c09..867bb091 100644
+--- a/sdk/include/reactos/drivers/bootvid/bootvid.h
++++ b/sdk/include/reactos/drivers/bootvid/bootvid.h
+@@ -11,6 +11,9 @@
+ #pragma once
+ 
+ #include "display.h"
++#ifdef SARCH_XBOX
++VOID NTAPI VidReleaseFramebuffer(VOID);
++#endif
+ 
+ BOOLEAN
+ NTAPI
+diff --git a/tests/host/bootvid-lifetime/README.md b/tests/host/bootvid-lifetime/README.md
+new file mode 100644
+index 00000000..bd38fd03
+--- /dev/null
++++ b/tests/host/bootvid-lifetime/README.md
+@@ -0,0 +1,20 @@
++# Xbox boot framebuffer lifetime fixture
++
++Run `python3 tests/host/bootvid-lifetime/check.py <output-directory>`.
++
++The harness extracts actual Xbox bootvid initialization, palette/reset/pixel/fill
++bodies and production offset macros; Inbv reset/bitmap/buffer dispatch and ownership
++bodies; and the NV2A descriptor split and deferred donation bodies. Hardware mapping,
++page donation, and the spin lock are host shims. A deterministic lock acquisition
++hook retires the driver between a caller's initial check and dispatch. Drawing
++uses a small synthetic framebuffer and verifies that reused bytes remain unchanged.
++
++The twelve checks cover the initial reservation, retained hardware padding, boot
++writes, one-time deferred donation, terminal initialization/ownership, retired
++primitive writes, and queued bitmap/buffer/reset dispatch, enable, and ownership-loss notification.
++The donation harness runs the production PHYS page-return loop; the supply and PFN
++lock remain shims. The reserved range and retained padding are the same for the
++64 MiB and 128 MiB build layouts. This is a source lifetime
++regression, not native display or title qualification. A legacy source baseline can
++be supplied as the optional second argument; missing new lifecycle functions use
++explicit no-op compatibility hooks so baseline behavior remains observable.
+diff --git a/tests/host/bootvid-lifetime/check.py b/tests/host/bootvid-lifetime/check.py
+new file mode 100644
+index 00000000..56b17a13
+--- /dev/null
++++ b/tests/host/bootvid-lifetime/check.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python3
++"""Compile actual Xbox bootvid, Inbv dispatch and reservation bodies."""
++import pathlib, re, subprocess, sys
++root = pathlib.Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else pathlib.Path(__file__).resolve().parents[3]
++out = pathlib.Path(sys.argv[1]).resolve(); out.mkdir(parents=True, exist_ok=True)
++def body(path, name):
++    text = (root / path).read_text()
++    m = re.search(r'\n' + name + r'\s*\(', text)
++    if m is None: return None
++    start = text.index('{', m.end()); end = start + 1; depth = 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}'); end += 1
++    return text[start:end]
++def extract(path, signatures):
++    return '\n'.join(sig + '\n' + body(path, sig.split('(')[0].split()[-1]) for sig in signatures)
++vid = 'drivers/base/bootvid/i386/xbox/bootvid.c'
++inbv = 'ntoskrnl/inbv/inbv.c'
++mm = 'ntoskrnl/xb/mm/init.c'
++bodies = extract(vid, ['BOOLEAN VidInitialize(BOOLEAN SetMode)', 'VOID ApplyPalette(VOID)', 'VOID InitPaletteWithTable(const ULONG* Table, ULONG Count)', 'VOID SetPixel(ULONG Left, ULONG Top, UCHAR Color)', 'VOID VidSolidColorFill(ULONG Left, ULONG Top, ULONG Right, ULONG Bottom, UCHAR Color)', 'VOID ResetDisplay(BOOLEAN SetMode)', 'VOID PreserveRow(ULONG CurrentTop, ULONG Height, BOOLEAN Restore)', 'VOID DoScroll(ULONG Scroll)', 'VOID VidScreenToBufferBlt(PUCHAR Buffer, ULONG Left, ULONG Top, ULONG Width, ULONG Height, ULONG Stride)'])
++for path, sig, fallback in [(vid, 'VOID VidReleaseFramebuffer(VOID)', '{ FrameBufferRetired = TRUE; }'), (inbv, 'VOID InbvRetireBootDriver(VOID)', '{ InbvBootDriverInstalled = FALSE; }'), (mm, 'VOID NxkMmReleaseBootFramebuffer(VOID)', '{}')]:
++    bodies += '\n' + sig + '\n' + (body(path, sig.split('(')[0].split()[-1]) or fallback)
++bodies += '\n' + extract(inbv, ['BOOLEAN InbvResetDisplay(VOID)', 'VOID InbvBitBlt(PUCHAR Buffer, ULONG X, ULONG Y)', 'VOID InbvBufferToScreenBlt(PUCHAR Buffer, ULONG X, ULONG Y, ULONG Width, ULONG Height, ULONG Stride)', 'VOID InbvAcquireDisplayOwnership(VOID)', 'VOID InbvEnableBootDriver(BOOLEAN Enable)', 'VOID InbvNotifyDisplayOwnershipLost(INBV_RESET_DISPLAY_PARAMETERS Callback)'])
++bodies += '\n' + extract('ntoskrnl/xb/mm/contig.c', ['VOID NxkMmDonateHeapPages(ULONG_PTR Pa, ULONG Pages)'])
++bodies += '\n' + extract(mm, ['VOID NxpSplitNv2aReserve(VOID)'])
++fixture = pathlib.Path(__file__).with_name('fixture.c').read_text()
++macros = '\n'.join(line for line in (root / vid).read_text().splitlines() if line.startswith(('#define BB_OFFSET', '#define FB_OFFSET')))
++fixture = fixture.replace('/* PRODUCTION MACROS */', macros)
++source = out / 'check.c'; source.write_text(fixture.replace('/* PRODUCTION BODIES */', bodies))
++subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', str(source), '-o', str(out/'check')], check=True)
++raise SystemExit(subprocess.run([str(out/'check')]).returncode)
+diff --git a/tests/host/bootvid-lifetime/fixture.c b/tests/host/bootvid-lifetime/fixture.c
+new file mode 100644
+index 00000000..e80bcc6e
+--- /dev/null
++++ b/tests/host/bootvid-lifetime/fixture.c
+@@ -0,0 +1,109 @@
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++typedef int KIRQL; typedef uint16_t USHORT; typedef int32_t LONG; typedef void VOID; typedef int BOOLEAN; typedef uint32_t ULONG; typedef uintptr_t ULONG_PTR; typedef uint8_t UCHAR; typedef UCHAR *PUCHAR; typedef ULONG *PULONG; typedef void *PVOID;
++#define TRUE 1
++#define FALSE 0
++#define NTAPI
++#define SARCH_XBOX
++#define NXK_MM_PHYS
++#define PAGE_SHIFT 12
++#define NXK_NV2A_INSTANCE_BASE 0x03fe0000u
++#define NXK_NV2A_INSTANCE_BYTES 0x10000u
++#define NXK_KSEG0_RAM_SIZE 0x4000000u
++#define NXK_MAX_EXTRA_DESCRIPTORS 2
++#define NV2A_VIDEO_MEMORY_SIZE 4096
++#define SCREEN_WIDTH 4
++#define SCREEN_HEIGHT 3
++#define BOOTCHAR_HEIGHT 1
++#define BV_COLOR_BLACK 0
++#define PAGE_SIZE 4096
++#define ASSERT(x) do { if(!(x))abort(); } while(0)
++#define NV2A_CRTC_FRAMEBUFFER_START 0
++#define NV2A_RAMDAC_FP_HVALID_END 4
++#define NV2A_RAMDAC_FP_VVALID_END 8
++#define MmNonCached 0
++#define DPRINT1(...) ((void)0)
++#define RtlCopyMemory(p,q,n) memcpy(p,q,n)
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define InitializePalette() InitPaletteWithTable(palette, 2)
++/* PRODUCTION MACROS */
++typedef struct LIST_ENTRY {struct LIST_ENTRY *Flink,*Blink;} LIST_ENTRY,*PLIST_ENTRY;
++typedef struct {LIST_ENTRY ListEntry; ULONG MemoryType; ULONG_PTR BasePage,PageCount;} MEMORY_ALLOCATION_DESCRIPTOR,*PMEMORY_ALLOCATION_DESCRIPTOR;
++#define CONTAINING_RECORD(p,t,m) ((t*)(p))
++#define LoaderFirmwarePermanent 1
++#define LoaderFirmwareTemporary 2
++#define LoaderSpecialMemory 3
++static void InsertHeadList(PLIST_ENTRY head, PLIST_ENTRY entry) {entry->Flink=head->Flink; entry->Blink=head; head->Flink->Blink=entry; head->Flink=entry;}
++static struct {LIST_ENTRY MemoryDescriptorListHead;} loader, *KeLoaderBlock=&loader;
++static MEMORY_ALLOCATION_DESCRIPTOR NxkExtraDescriptors[2];
++static ULONG NxkExtraDescriptorCount;
++static ULONG_PTR NxkBootFramebufferPa;
++static ULONG NxkBootFramebufferPages;
++static ULONG donated, unmaps, draws, resets;
++static unsigned char ram[NV2A_VIDEO_MEMORY_SIZE], saved[NV2A_VIDEO_MEMORY_SIZE];
++static ULONG_PTR FrameBufferStart;
++static ULONG FrameBufferWidth=4, FrameBufferHeight=3, PanH, PanV;
++static UCHAR BytesPerPixel=4;
++static ULONG CachedPalette[2], palette[2]={0,0xffffff};
++static PUCHAR BackBuffer;
++static BOOLEAN FrameBufferRetired, InbvBootDriverRetired, InbvBootDriverInstalled;
++#define INBV_DISPLAY_STATE_DISABLED 0
++typedef void (*INBV_RESET_DISPLAY_PARAMETERS)(ULONG,ULONG);
++#define INBV_DISPLAY_STATE_OWNED 1
++#define INBV_DISPLAY_STATE_LOST 2
++static ULONG InbvDisplayState;
++static void (*InbvResetDisplayParameters)(ULONG,ULONG);
++static int retire_on_acquire, held, failures;
++void InbvRetireBootDriver(VOID);
++static void InbvAcquireLock(void) {if(retire_on_acquire){retire_on_acquire=0; InbvRetireBootDriver();} if(held) abort(); held=1;}
++static void InbvReleaseLock(void) {if(!held)abort();held=0;}
++typedef struct { uint64_t QuadPart; } PHYSICAL_ADDRESS;
++static unsigned maps;
++static PVOID MmMapIoSpace(PHYSICAL_ADDRESS p,ULONG n,int c){(void)n;(void)c;maps++;return p.QuadPart==0xfd000000 ? (PVOID)0x10000 : ram;}
++static ULONG readreg(PULONG p){switch((uintptr_t)p-0x10000){case 0:return 0x3c00000;case 4:return 3;case 8:return 2;default:abort();}}
++#define READ_REGISTER_ULONG(p) readreg(p)
++static UCHAR NvGetBytesPerPixel(ULONG_PTR p,ULONG w){(void)p;(void)w;return 4;}
++static void MmUnmapIoSpace(PVOID p, ULONG n){if(p==(PVOID)0x10000)return;if(p!=(PVOID)FrameBufferStart || n!=NV2A_VIDEO_MEMORY_SIZE)abort();unmaps++;}
++static KIRQL MiAcquirePfnLock(void){if(held||FrameBufferStart)abort();return 0;}
++static void MiReleasePfnLock(KIRQL irql){(void)irql;}
++static void NxkPageSupplyReturn(ULONG_PTR pfn){if(pfn<0x3c00||pfn>=0x3ff0)abort();donated++;}
++void NxkMmDonateHeapPages(ULONG_PTR,ULONG);
++static struct {ULONG Left,Top,Right,Bottom;} VidpScrollRegion={0,0,3,2};
++
++static void HalResetDisplay(void){resets++;}
++void VidSolidColorFill(ULONG,ULONG,ULONG,ULONG,UCHAR);
++void InitPaletteWithTable(const ULONG*,ULONG);
++void ResetDisplay(BOOLEAN);
++static void VidResetDisplay(BOOLEAN mode){draws++;ResetDisplay(mode);}
++static void VidBitBlt(PUCHAR b,ULONG x,ULONG y){(void)b;(void)x;(void)y;draws++;InitPaletteWithTable(palette,2);}
++static void VidCleanUp(void){VidSolidColorFill(0,0,0,0,0);}
++void SetPixel(ULONG,ULONG,UCHAR);
++static void VidBufferToScreenBlt(PUCHAR b,ULONG x,ULONG y,ULONG w,ULONG h,ULONG s){(void)b;(void)w;(void)h;(void)s;draws++;SetPixel(x,y,1);}
++void SetPixel(ULONG,ULONG,UCHAR);
++/* PRODUCTION BODIES */
++static void check(int ok,const char *name){printf("%s %s\n",ok?"ok":"not ok",name);failures+=!ok;}
++static void init(void){memset(ram,0,sizeof(ram));FrameBufferStart=(ULONG_PTR)ram;BackBuffer=ram+128;FrameBufferRetired=InbvBootDriverRetired=FALSE;InbvBootDriverInstalled=TRUE;InbvDisplayState=INBV_DISPLAY_STATE_OWNED;draws=resets=unmaps=donated=maps=0;held=retire_on_acquire=0;}
++int main(void){
++ MEMORY_ALLOCATION_DESCRIPTOR d={.MemoryType=LoaderFirmwarePermanent,.BasePage=0x3c00,.PageCount=0x400};
++ loader.MemoryDescriptorListHead.Flink=loader.MemoryDescriptorListHead.Blink=&d.ListEntry;d.ListEntry.Flink=d.ListEntry.Blink=&loader.MemoryDescriptorListHead;
++ init();CachedPalette[1]=0xffffffffu;NxpSplitNv2aReserve();
++ check(d.MemoryType==LoaderFirmwarePermanent,"framebuffer excluded from initial supply");
++ check(d.PageCount==0x3f0 && NxkExtraDescriptors[0].BasePage==0x3ff0,"hardware padding retained");
++ VidSolidColorFill(0,0,0,0,1);check(*(ULONG*)ram==CachedPalette[1],"boot drawing remains available");
++ InbvRetireBootDriver();NxkMmReleaseBootFramebuffer();NxkMmReleaseBootFramebuffer();
++ check(donated==0x3f0 && unmaps==1,"deferred donation once after retirement");
++ check(!VidInitialize(FALSE) && maps==0,"retired initialization cannot remap");
++ memset(ram,0x5a,sizeof(ram));memcpy(saved,ram,sizeof(ram));
++ InbvAcquireDisplayOwnership();check(InbvDisplayState!=INBV_DISPLAY_STATE_OWNED,"ownership cannot reacquire retired driver");
++ InitPaletteWithTable(palette,2);SetPixel(0,0,1);ResetDisplay(TRUE);VidSolidColorFill(0,0,0,0,1);PreserveRow(0,1,TRUE);DoScroll(1);VidScreenToBufferBlt(saved,0,0,2,1,2);
++ check(memcmp(ram,saved,sizeof(ram))==0 && resets==0,"retired primitive redraw and reset preserve reused RAM");
++ init();retire_on_acquire=1;InbvBitBlt(NULL,0,0);check(draws==0,"queued bitmap rechecks after retirement");
++ init();retire_on_acquire=1;InbvBufferToScreenBlt(NULL,0,0,1,1,1);check(draws==0,"buffer blit participates in barrier");
++ init();retire_on_acquire=1;check(!InbvResetDisplay() && draws==0,"reset participates in barrier");
++ init();retire_on_acquire=1;InbvEnableBootDriver(TRUE);check(InbvDisplayState==INBV_DISPLAY_STATE_LOST,"queued enable cannot revive ownership");
++ init();retire_on_acquire=1;InbvNotifyDisplayOwnershipLost((INBV_RESET_DISPLAY_PARAMETERS)1);check(InbvResetDisplayParameters==NULL,"queued ownership loss cannot restore callback");
++ (void)FrameBufferHeight;(void)NxkBootFramebufferPa;(void)NxkBootFramebufferPages;(void)MmUnmapIoSpace;(void)NxkMmDonateHeapPages;(void)FrameBufferRetired;(void)InbvBootDriverRetired;
++ return failures?1:0;
++}
