@@ -236,7 +236,7 @@ index 69088c3e..48d160a2 100644
       * usable run while any other temporary storage is available. */
      for (p = 0x3400; p <= 0x3c00; ++p) {
 diff --git a/ntoskrnl/ex/init.c b/ntoskrnl/ex/init.c
-index ca9e2fad..4529a7b6 100644
+index ca9e2fad..cba2d24f 100644
 --- a/ntoskrnl/ex/init.c
 +++ b/ntoskrnl/ex/init.c
 @@ -2151,10 +2151,6 @@ Phase1Initialization(IN PVOID Context)
@@ -250,18 +250,22 @@ index ca9e2fad..4529a7b6 100644
          NxInitFreesDone = 1;
      }
  
-@@ -2165,7 +2161,9 @@ Phase1Initialization(IN PVOID Context)
+@@ -2165,7 +2161,13 @@ Phase1Initialization(IN PVOID Context)
       * idempotency makes this single call safe. */
      {
          extern VOID NxkMmEnsureXboxWindows(VOID);
 +        extern VOID NxkMmFinishWarmRestore(VOID);
++        extern VOID NxkMmRetireBootWorkspace(VOID);
          NxkMmEnsureXboxWindows();
++        /* Ensure is also used by allocations during boot. Retirement must
++         * occur here exactly once, after INIT has actually been discarded. */
++        NxkMmRetireBootWorkspace();
 +        NxkMmFinishWarmRestore();
      }
  
      /* Run the XBE title in place of smss.  Spawns the title's threads on
 diff --git a/ntoskrnl/xb/mm/init.c b/ntoskrnl/xb/mm/init.c
-index 1da594fb..2ab15446 100644
+index 1da594fb..d680e058 100644
 --- a/ntoskrnl/xb/mm/init.c
 +++ b/ntoskrnl/xb/mm/init.c
 @@ -783,8 +783,7 @@ NxkMmEnsureXboxWindows(VOID)
@@ -274,14 +278,6 @@ index 1da594fb..2ab15446 100644
       * Keep the old retail-base behavior separate from this physical layout. */
      if (NxkIsRetailBase())
      {
-@@ -824,6 +823,7 @@ NxkMmEnsureXboxWindows(VOID)
-     /* Bring up the system-memory aperture eagerly so the first call
-      * to MmAllocateSystemMemory doesn't have to allocate PT pages
-      * under whatever IRQL / lock the caller holds. */
-+    NxkMmRetireBootWorkspace();
-     NxkMmInitSystemVa();
- }
- 
 diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
 index 898920b5..9352078a 100644
 --- a/ntoskrnl/xb/mm/mm.h
@@ -406,7 +402,7 @@ index 78a45e13..5b819de3 100644
              else:
                  with self.assertRaisesRegex(ValueError, 'warm.*capacity'):
 diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
-index 01004e89..5f86b27a 100644
+index 01004e89..10948e1c 100644
 --- a/tests/host/boot-layout/check.py
 +++ b/tests/host/boot-layout/check.py
 @@ -8,6 +8,7 @@ functions are retained. Privileged paging-enable/CPU descriptor code is not run.
@@ -417,7 +413,18 @@ index 01004e89..5f86b27a 100644
  import sys
  
  root = Path(__file__).resolve().parents[3]
-@@ -70,6 +71,7 @@ shim = r'''
+@@ -43,6 +44,10 @@ persistence = (root/'ntoskrnl/xb/mm/persistence.c').read_text()
+ persistence = '\n'.join(line for line in persistence.splitlines() if not line.startswith('#include'))
+ shape = 'BOOLEAN ' + function((root/'ntoskrnl/xb/mm/init.c').read_text(), 'NxkMmRetailShapedMap')
+ init_source = (root/'ntoskrnl/xb/mm/init.c').read_text()
++phase = function((root/'ntoskrnl/ex/init.c').read_text(), 'Phase1Initialization')
++assert phase.index('NxInitFreesDone = 1') < phase.index('NxkMmEnsureXboxWindows();') < phase.index('NxkMmRetireBootWorkspace();') < phase.index('NxkMmFinishWarmRestore();')
++assert 'NxkMmRetireBootWorkspace();' not in function(init_source, 'NxkMmEnsureXboxWindows')
++
+ cluster_start = init_source.index('    if (NxkIsRetailBase())', init_source.index('NxkMmEnsureXboxWindows('))
+ cluster = init_source[cluster_start:]
+ cluster = cluster[:cluster.index('\n    /* The loader backs all 16 pages')]
+@@ -70,6 +75,7 @@ shim = r'''
  #include <stdlib.h>
  #include <string.h>
  #include <sys/mman.h>
@@ -425,7 +432,7 @@ index 01004e89..5f86b27a 100644
  #include "boot-layout.h"
  #include "warm-handoff.h"
  #include "xz/xz.h"
-@@ -83,13 +85,18 @@ typedef int32_t LONG;
+@@ -83,13 +89,18 @@ typedef int32_t LONG;
  #define CODE_SEG(x)
  #define DATA_SEG(x)
  #define MEMORY_MANAGEMENT 0
@@ -445,7 +452,7 @@ index 01004e89..5f86b27a 100644
  #define KSEG0_BASE 0x80000000u
  #define PCR_REGION_PAGES 16
  #define PCR_REGION_VA 0xffdf0000u
-@@ -149,7 +156,10 @@ static void MiReleasePfnLock(KIRQL irql) {(void)irql;}
+@@ -149,7 +160,10 @@ static void MiReleasePfnLock(KIRQL irql) {(void)irql;}
  static BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER p) {(void)p;return FALSE;}
  static unsigned returned[0x8000];static PFN_NUMBER MmHighestPhysicalPage;
  static void NxkPageSupplyReturn(PFN_NUMBER p) {returned[p]++;}
@@ -457,7 +464,7 @@ index 01004e89..5f86b27a 100644
  #define NXK_MM_PHYS
  #define SARCH_XBOX
  #define INSTALL_MORE_MEMORY 0
-@@ -168,6 +178,20 @@ shim += '\nstatic void clear_user_maps(void) {MMPTE *StartPde,*EndPde;\n' + user
+@@ -168,6 +182,20 @@ shim += '\nstatic void clear_user_maps(void) {MMPTE *StartPde,*EndPde;\n' + user
  shim += '\n' + ram_global + '\n' + hal + '\n' + loader_types
  shim += '\nstatic UCHAR KernelPayloadVa[sizeof(NXKRNL_XZ_HEADER)+1];\n#define KernelPayloadMaxSize ((UCHAR *)262144)\n' + decompress
  
@@ -478,7 +485,7 @@ index 01004e89..5f86b27a 100644
  cases = r'''
  static TYPE_OF_MEMORY type_at(unsigned pfn) {
   for(unsigned i=0;i<md_count;i++)if(pfn>=md[i].BasePage&&pfn-md[i].BasePage<md[i].PageCount)return md[i].MemoryType;
-@@ -216,7 +240,7 @@ int main(void) {
+@@ -216,7 +244,7 @@ int main(void) {
   for(unsigned i=0;i<5;i++){
    memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(ranges[i][0],ranges[i][1],TRUE);
    unsigned selected=0;for(unsigned j=0;j<PM_BYTES;j++)selected+=PmSelected[j]!=0;
@@ -487,7 +494,7 @@ index 01004e89..5f86b27a 100644
   }
   memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(0x1000000,0x1000,TRUE);check(PmBit(PmSelected,0x1000),"ordinary title page can persist");
   NxkMmPublishPersistence(TRUE);NxkMmReadPersistence(&lb);check(PmBit(PmRestored,0x1000)&&((PM_HANDOFF *)PM_VA)->Magic==0,"valid warm handoff restored and consumed");
-@@ -304,6 +328,61 @@ int main(void) {
+@@ -304,6 +332,61 @@ int main(void) {
    check(MxGetNextPage(35)==0x382b,"actual MM retains contiguous boot capacity after staging");
   }
  #endif
@@ -549,7 +556,7 @@ index 01004e89..5f86b27a 100644
   printf("%dMiB: %d checks, %d failures\n",XBOX_RAM_MIB,checks,failures);return failures!=0;
  }
  '''
-@@ -353,6 +432,38 @@ for capacity in (128, 64):
+@@ -353,6 +436,38 @@ for capacity in (128, 64):
          assert symbols['StackTop'] == limit - 16
          assert symbols['BssEnd'] <= symbols['StackTop'] - 0x10000
          assert symbols['KernelImageMaxSize'] == 0x400000
@@ -588,6 +595,11 @@ index 01004e89..5f86b27a 100644
          blob = (build/'loader/nxldr.bin').read_bytes()
          # Real emitted Xcode instructions: PCI memory top and both PFB writes.
          memory_top = 0x3ffffff if capacity == 64 else 0x7ffffff
+@@ -365,3 +480,4 @@ for capacity in (128, 64):
+ subprocess.run([sys.executable, str(root/'tests/host/boot-layout/check-image-bounds.py'),
+                 str(out/'image-bounds')], check=True)
+ sys.exit(bool(failures))
++
 diff --git a/tests/host/clean-room/persistence.c b/tests/host/clean-room/persistence.c
 index 0659b293..4edef078 100644
 --- a/tests/host/clean-room/persistence.c
