@@ -1,0 +1,255 @@
+From 94cba73964f00eaf17edba45e1840ddde5dad43b Mon Sep 17 00:00:00 2001
+From: Mainkill1 <Mainkill1@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 05:01:57 -0700
+Subject: [PATCH] mm: reselect contiguous tracking slot after unlocked reclaim
+
+---
+ ntoskrnl/xb/mm/contig.c           |   4 +-
+ tests/host/contig-retry/README.md |  21 +++++
+ tests/host/contig-retry/check.py  |  41 +++++++++
+ tests/host/contig-retry/fixture.c | 142 ++++++++++++++++++++++++++++++
+ 4 files changed, 207 insertions(+), 1 deletion(-)
+ create mode 100644 tests/host/contig-retry/README.md
+ create mode 100644 tests/host/contig-retry/check.py
+ create mode 100644 tests/host/contig-retry/fixture.c
+
+diff --git a/ntoskrnl/xb/mm/contig.c b/ntoskrnl/xb/mm/contig.c
+index 16cafc69..d7351e52 100644
+--- a/ntoskrnl/xb/mm/contig.c
++++ b/ntoskrnl/xb/mm/contig.c
+@@ -570,7 +570,9 @@ NxMmAllocateContiguousMemoryEx(
+         if (NxpReclaimEmptyBucketPages() != 0)
+         {
+             KIRQL PfnIrql;
+-            KeAcquireSpinLock(&NxContigLock, &OldIrql);
++            /* Reclaim released the lock: another allocation may now own
++             * our earlier slot. Select a fresh slot before taking a run. */
++            if (!NxpContigTakeSlot(&Slot, &OldIrql)) return NULL;
+             PfnIrql = MiAcquirePfnLock();
+             Base = NxkPageSupplyTakeRun(RunPages, LowPfn, HighPfn,
+                                         AlignPages);
+diff --git a/tests/host/contig-retry/README.md b/tests/host/contig-retry/README.md
+new file mode 100644
+index 00000000..0a14d1f8
+--- /dev/null
++++ b/tests/host/contig-retry/README.md
+@@ -0,0 +1,21 @@
++# Contiguous allocation retry tracking
++
++Run `python3 tests/host/contig-retry/check.py OUTPUT_DIRECTORY`.
++
++The fixture extracts the maintained `NXK_MM_PHYS` allocation body, tracking-slot
++search/take/grow functions, record writer, and allocation-size query from
++`ntoskrnl/xb/mm/contig.c`. It models locks, physical-run supply, and pool backing
++in host C; it does not run a guest scheduler or emulate real physical pressure.
++
++The reclaim shim deterministically interleaves another call to the production
++allocator while the first call has released its tracking lock. The table begins
++with only the first call's chosen slot empty, so the competing call occupies it.
++Cases cover a newly available slot, table growth, failed growth, failed physical
++retry, no pages reclaimed, ordinary success, and successful relocation retry.
++Assertions check both owners' visible tracking/query results, physical-run takes,
++and lock ordering/balance. The supplied run window and alignment are checked.
++
++Without reselection after reclaim, four cases fail because the competing record
++is overwritten or a run is taken despite unavailable tracking capacity. The
++three control cases pass. This demonstrates a bookkeeping race; it does not
++establish a title failure cause or native qualification.
+diff --git a/tests/host/contig-retry/check.py b/tests/host/contig-retry/check.py
+new file mode 100644
+index 00000000..e20a2be3
+--- /dev/null
++++ b/tests/host/contig-retry/check.py
+@@ -0,0 +1,41 @@
++#!/usr/bin/env python3
++"""Run the PHYS allocator and tracking bodies with a deterministic reclaim interleave."""
++import pathlib
++import re
++import subprocess
++import sys
++
++root = pathlib.Path(__file__).resolve().parents[3]
++output = pathlib.Path(sys.argv[1]).resolve()
++output.mkdir(parents=True, exist_ok=True)
++text = (root / "ntoskrnl/xb/mm/contig.c").read_text()
++
++
++def body(name):
++    # First occurrence selects the NXK_MM_PHYS allocator, not its revert path.
++    match = re.search(r"\n" + re.escape(name) + r"\s*\(", text)
++    if match is None:
++        raise ValueError(name)
++    start = text.index("{", match.end())
++    end, depth = start + 1, 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[start:end]
++
++
++signatures = [
++    "ULONG NxpContigFindFreeSlotLocked(VOID)",
++    "BOOLEAN NxpContigGrow(ULONG OldSlots)",
++    "BOOLEAN NxpContigTakeSlot(OUT PULONG Slot, OUT PKIRQL OldIrql)",
++    "VOID NxpRecordHeapContigLocked(ULONG Slot, PVOID Alias, ULONG_PTR Pa, SIZE_T AllocBytes, SIZE_T RequestSize)",
++    "PVOID NTAPI NxMmAllocateContiguousMemoryEx(IN SIZE_T NumberOfBytes, IN ULONG_PTR LowestAcceptableAddress, IN ULONG_PTR HighestAcceptableAddress, IN ULONG_PTR Alignment, IN ULONG Protect)",
++    "SIZE_T NTAPI NxMmQueryAllocationSize(IN PVOID BaseAddress)",
++]
++fixture = (pathlib.Path(__file__).with_name("fixture.c")).read_text()
++bodies = "\n".join(signature + "\n" + body(signature.split("(")[0].split()[-1]) for signature in signatures)
++source = output / "check.c"
++source.write_text(fixture.replace("/* PRODUCTION BODIES */", bodies))
++exe = output / "check"
++subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(exe)], check=True)
++raise SystemExit(subprocess.run([str(exe)]).returncode)
+diff --git a/tests/host/contig-retry/fixture.c b/tests/host/contig-retry/fixture.c
+new file mode 100644
+index 00000000..df8ca542
+--- /dev/null
++++ b/tests/host/contig-retry/fixture.c
+@@ -0,0 +1,142 @@
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++typedef uint32_t ULONG, PFN_NUMBER;
++typedef uintptr_t ULONG_PTR;
++typedef uint64_t ULONGLONG;
++typedef size_t SIZE_T;
++typedef void *PVOID;
++typedef int BOOLEAN, KIRQL, KSPIN_LOCK;
++typedef ULONG *PULONG;
++typedef KIRQL *PKIRQL;
++#define VOID void
++#define IN
++#define OUT
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define PAGE_SIZE 4096u
++#define PAGE_SHIFT 12
++#define NXK_KSEG0_BASE 0x80000000u
++#define NXK_KSEG0_RAM_SIZE 0x04000000u
++#define NXK_NV2A_INSTANCE_BASE 0x03fe0000u
++#define NXK_CONTIG_INITIAL_SLOTS 64
++#define NXK_CONTIG_TAG 1
++#define NonPagedPool 0
++#define UNREFERENCED_PARAMETER(x) ((void)(x))
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define XbDbg(...) ((void)0)
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define RtlCopyMemory(p,q,n) memcpy(p,q,n)
++
++typedef struct {
++    PVOID Alias;
++    ULONG_PTR Pa, PaEnd;
++    SIZE_T Size;
++} NXK_CONTIG_ENTRY;
++static NXK_CONTIG_ENTRY NxContigInitial[NXK_CONTIG_INITIAL_SLOTS];
++static NXK_CONTIG_ENTRY *NxContigTable = NxContigInitial;
++static ULONG NxContigSlots, NxContigHint;
++static KSPIN_LOCK NxContigLock;
++static int contigHeld, pfnHeld, lockErrors, actor, attempts, runTakes;
++static int ordinary, reclaimZero, freeOther, growthFail, retryFail, retryRelocate;
++static PVOID competitor;
++static void KeAcquireSpinLock(KSPIN_LOCK *lock, PKIRQL old) {
++    (void)lock; *old = 0;
++    if (contigHeld || pfnHeld) ++lockErrors;
++    contigHeld = 1;
++}
++static void KeReleaseSpinLock(KSPIN_LOCK *lock, KIRQL old) {
++    (void)lock; (void)old;
++    if (!contigHeld || pfnHeld) ++lockErrors;
++    contigHeld = 0;
++}
++static KIRQL MiAcquirePfnLock(void) {
++    if (!contigHeld || pfnHeld) ++lockErrors;
++    pfnHeld = 1; return 0;
++}
++static void MiReleasePfnLock(KIRQL old) {
++    (void)old;
++    if (!pfnHeld) ++lockErrors;
++    pfnHeld = 0;
++}
++static PVOID ExAllocatePoolWithTag(int pool, SIZE_T bytes, ULONG tag) {
++    (void)pool; (void)tag;
++    if (contigHeld || pfnHeld) ++lockErrors;
++    return growthFail ? NULL : malloc(bytes);
++}
++static void ExFreePoolWithTag(PVOID ptr, ULONG tag) { (void)tag; free(ptr); }
++static void NxkMmEnsureXboxWindows(void) {}
++static SIZE_T NxkMmQueryRestored(PVOID va) { (void)va; return 0; }
++static PFN_NUMBER take(int relocated, PFN_NUMBER pages, PFN_NUMBER low,
++                       PFN_NUMBER high, PFN_NUMBER align) {
++    if (!contigHeld || !pfnHeld || pages != 2 || low != 0x100 ||
++        high != 0x3fdF || align != 2) ++lockErrors;
++    if (actor == 2) { if (!relocated) { ++runTakes; return 0x200; } return 0; }
++    ++attempts;
++    if (ordinary && !relocated) { ++runTakes; return 0x300; }
++    if (attempts > 2 && !retryFail && relocated == retryRelocate) {
++        ++runTakes; return 0x300;
++    }
++    return 0;
++}
++static PFN_NUMBER NxkPageSupplyTakeRun(PFN_NUMBER n, PFN_NUMBER l, PFN_NUMBER h, PFN_NUMBER a) { return take(0,n,l,h,a); }
++static PFN_NUMBER NxkPageSupplyTakeRunRelocate(PFN_NUMBER n, PFN_NUMBER l, PFN_NUMBER h, PFN_NUMBER a) { return take(1,n,l,h,a); }
++ULONG NxpReclaimEmptyBucketPages(VOID);
++
++/* PRODUCTION BODIES */
++
++ULONG NxpReclaimEmptyBucketPages(VOID) {
++    if (contigHeld || pfnHeld) ++lockErrors;
++    /* Another allocator runs while A has released the tracking lock.
++     * With only slot 0 empty, its search wraps and occupies A's old slot. */
++    actor = 2;
++    competitor = NxMmAllocateContiguousMemoryEx(5000,0x100000,0xffffffff,8192,0);
++    actor = 1;
++    if (freeOther) memset(&NxContigTable[1],0,sizeof(NxContigTable[1]));
++    return reclaimZero ? 0 : 1;
++}
++static int check(const char *name, int success, int grow, int expectedTakes) {
++    if (NxContigTable != NxContigInitial) free(NxContigTable);
++    NxContigTable = NxContigInitial;
++    memset(NxContigInitial,0,sizeof(NxContigInitial));
++    NxContigSlots = 2; NxContigHint = 0;
++    NxContigTable[1] = (NXK_CONTIG_ENTRY){(void *)(uintptr_t)0x80100000,0x100000,0x102000,5000};
++    contigHeld = pfnHeld = lockErrors = attempts = runTakes = 0;
++    actor = 1; competitor = NULL;
++    PVOID result = NxMmAllocateContiguousMemoryEx(5000,0x100000,0xffffffff,8192,0);
++    int ok = result == (success ? (void *)(uintptr_t)0x80300000 : NULL);
++    if (!ordinary) {
++        ok &= competitor == (void *)(uintptr_t)0x80200000;
++        ok &= NxMmQueryAllocationSize(competitor) == 5000;
++        ok &= NxContigTable[0].Alias == competitor && NxContigTable[0].Pa == 0x200000 &&
++              NxContigTable[0].PaEnd == 0x202000;
++    }
++    if (success) ok &= NxMmQueryAllocationSize(result) == 5000;
++    ok &= (NxContigSlots > 2) == grow;
++    ok &= !contigHeld && !pfnHeld && !lockErrors && runTakes == expectedTakes;
++    printf("%s: %s\n",ok ? "PASS" : "FAIL",name);
++    return !ok;
++}
++int main(void) {
++    int failures = 0;
++    freeOther = 1;
++    failures += check("retry preserves concurrent allocation and selects a fresh slot",1,0,2);
++    freeOther = 0;
++    failures += check("retry grows a tracking table filled during reclaim",1,1,2);
++    growthFail = 1;
++    failures += check("tracking growth failure takes no retry run and preserves ownership",0,0,1);
++    growthFail = 0; freeOther = 1; retryFail = 1;
++    failures += check("failed physical retry preserves concurrent ownership and releases locks",0,0,1);
++    retryFail = 0; reclaimZero = 1;
++    failures += check("zero-page reclaim returns without replacing concurrent ownership",0,0,1);
++    reclaimZero = 0; ordinary = 1;
++    failures += check("ordinary success records the original request size",1,0,1);
++    ordinary = 0; retryRelocate = 1;
++    failures += check("relocation retry also records in a fresh tracking slot",1,0,2);
++    if (NxContigTable != NxContigInitial) free(NxContigTable);
++    return failures ? 1 : 0;
++}
+-- 
+2.47.3
+

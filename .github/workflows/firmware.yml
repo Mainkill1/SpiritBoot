@@ -53,7 +53,8 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 216d11e4cb4a551a8c2994b5899de5417e236a4e
+            test "$actual_tree" = c42518eb9638f14cabf19643d1c7875f1209cb18
+            python3 "$GUEST_SOURCE/tests/host/contig-retry/check.py" "$output/contig-retry" >"$output/contig-retry.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-overwrite.py" "$output/fatx-overwrite" >"$output/fatx-overwrite.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check.py" "$output/boot-layout" >"$output/boot-layout.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check-image-bounds.py" "$output/image-bounds" >"$output/image-bounds.log" 2>&1
