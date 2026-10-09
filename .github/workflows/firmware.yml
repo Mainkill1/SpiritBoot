@@ -53,7 +53,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = b4c681a6658dff97c8e3fc0a7a8d58abb8c42cf9
+            test "$actual_tree" = baad4d8ce29f15c463548d9dec442b9dd498cb9d
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check.py" "$output/boot-layout" >"$output/boot-layout.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check-image-bounds.py" "$output/image-bounds" >"$output/image-bounds.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
