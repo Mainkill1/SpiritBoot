@@ -163,7 +163,8 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           from tools.kernel_performance import capture
-          result = capture(Path('artifacts/kernel-performance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib'), {})
+          result = capture(Path('artifacts/kernel-performance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib'), {},
+                           expected_memory_mib=${{ matrix.memory_mib }})
           assert len(result['workloads']) == 41, result
           PY
       - uses: actions/upload-artifact@v4
