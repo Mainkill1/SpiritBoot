@@ -1,0 +1,433 @@
+diff --git a/drivers/filesystems/vfatfs/CMakeLists.txt b/drivers/filesystems/vfatfs/CMakeLists.txt
+index 43ec1804..2ee23c74 100644
+--- a/drivers/filesystems/vfatfs/CMakeLists.txt
++++ b/drivers/filesystems/vfatfs/CMakeLists.txt
+@@ -39,10 +39,17 @@ endif()
+ # power-off).  On by default; turn OFF to relax power-loss durability for
+ # throughput.  Only meaningful on the Xbox FATX build.
+ option(NXK_FATX_WRITE_THROUGH "FATX write-through durability (retail parity)" ON)
++option(NXK_METADATA_COUNTERS "Diagnostic aggregate directory-update counters" OFF)
++if(NXK_METADATA_COUNTERS)
++    list(APPEND SOURCE metadata.c)
++endif()
+ 
+ add_library(vfatfs ${SOURCE})
+ target_link_libraries(vfatfs ${PSEH_LIB})
+ target_compile_definitions(vfatfs PRIVATE DriverEntry=VfatfsDriverEntry)
++if(NXK_METADATA_COUNTERS)
++    target_compile_definitions(vfatfs PRIVATE NXK_METADATA_COUNTERS=1)
++endif()
+ if(NXK_FATX_WRITE_THROUGH)
+     target_compile_definitions(vfatfs PRIVATE NXK_FATX_WRITE_THROUGH=1)
+ endif()
+diff --git a/drivers/filesystems/vfatfs/dirwr.c b/drivers/filesystems/vfatfs/dirwr.c
+index 617df6fd..825916af 100644
+--- a/drivers/filesystems/vfatfs/dirwr.c
++++ b/drivers/filesystems/vfatfs/dirwr.c
+@@ -10,6 +10,7 @@
+ /* INCLUDES *****************************************************************/
+ 
+ #include "vfat.h"
++#include "metadata.h"
+ 
+ #define NDEBUG
+ #include <debug.h>
+@@ -164,6 +165,7 @@ VfatUpdateEntry(
+     }
+     _SEH2_END;
+ 
++    VfatRecordMetadataUpdate(DeviceExt->FatInfo.FatType, PinEntry, &pFcb->entry);
+     pFcb->Flags &= ~FCB_IS_DIRTY;
+     RtlCopyMemory(PinEntry, &pFcb->entry, SizeDirEntry);
+     CcSetDirtyPinnedData(Context, NULL);
+diff --git a/drivers/filesystems/vfatfs/metadata.c b/drivers/filesystems/vfatfs/metadata.c
+new file mode 100644
+index 00000000..e196bd80
+--- /dev/null
++++ b/drivers/filesystems/vfatfs/metadata.c
+@@ -0,0 +1,72 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "vfat.h"
++#include "metadata.h"
++
++#ifdef NXK_METADATA_COUNTERS
++/* Diagnostic-only, opt-in aggregate storage: no allocation, logging or timer. */
++VFAT_METADATA_COUNTERS VfatMetadataCounters = {
++    0x4d455431, 1, sizeof(VFAT_METADATA_COUNTERS), 0, {{0}}
++};
++
++C_ASSERT(sizeof(FATX_DIR_ENTRY) == 64);
++C_ASSERT(FIELD_OFFSET(FATX_DIR_ENTRY, FirstCluster) == 44);
++C_ASSERT(FIELD_OFFSET(FATX_DIR_ENTRY, FileSize) == 48);
++C_ASSERT(FIELD_OFFSET(FATX_DIR_ENTRY, UpdateTime) == 52);
++C_ASSERT(sizeof(FAT_DIR_ENTRY) == 32);
++C_ASSERT(FIELD_OFFSET(FAT_DIR_ENTRY, CreationTimeMs) == 13);
++C_ASSERT(FIELD_OFFSET(FAT_DIR_ENTRY, FirstClusterHigh) == 20);
++C_ASSERT(FIELD_OFFSET(FAT_DIR_ENTRY, UpdateTime) == 22);
++C_ASSERT(FIELD_OFFSET(FAT_DIR_ENTRY, FirstCluster) == 26);
++C_ASSERT(FIELD_OFFSET(FAT_DIR_ENTRY, FileSize) == 28);
++C_ASSERT(sizeof(VFAT_METADATA_COUNTERS) == 80);
++
++VOID
++VfatRecordMetadataUpdate(ULONG FatType, const VOID *Before, const VOID *After)
++{
++    BOOLEAN FatX = FatType == FATX16 || FatType == FATX32;
++    ULONG Mask = 0;
++    ULONG Length = FatX ? sizeof(FATX_DIR_ENTRY) : sizeof(FAT_DIR_ENTRY);
++
++    if (RtlCompareMemory(Before, After, Length) != Length)
++    {
++        if (FatX)
++        {
++            const FATX_DIR_ENTRY *Old = Before;
++            const FATX_DIR_ENTRY *New = After;
++
++            if (Old->FirstCluster != New->FirstCluster ||
++                Old->FileSize != New->FileSize)
++                Mask |= 1;
++            if (RtlCompareMemory(&Old->UpdateTime, &New->UpdateTime, 12) != 12)
++                Mask |= 2;
++            if (RtlCompareMemory(Old, New, 44) != 44)
++                Mask |= 4;
++        }
++        else
++        {
++            const FAT_DIR_ENTRY *Old = Before;
++            const FAT_DIR_ENTRY *New = After;
++
++            if (Old->FirstCluster != New->FirstCluster ||
++                Old->FileSize != New->FileSize ||
++                (FatType == FAT32 &&
++                 Old->FirstClusterHigh != New->FirstClusterHigh))
++                Mask |= 1;
++            if (RtlCompareMemory(&Old->CreationTimeMs,
++                                 &New->CreationTimeMs, 7) != 7 ||
++                RtlCompareMemory(&Old->UpdateTime, &New->UpdateTime, 4) != 4)
++                Mask |= 2;
++            /* On FAT12/16 the high-cluster union holds an EA index. */
++            if (RtlCompareMemory(Old, New, 13) != 13 ||
++                (FatType != FAT32 &&
++                 Old->ExtendedAttributes != New->ExtendedAttributes))
++                Mask |= 4;
++        }
++    }
++
++    /* No assumption that all callers share the same FSD resource: UP threads
++     * can still preempt. Use the kernel's atomic operation for each count. */
++    if (InterlockedIncrement(&VfatMetadataCounters.Count[FatX ? 1 : 0][Mask]) == 0)
++        InterlockedIncrement(&VfatMetadataCounters.Wraps);
++}
++#endif
+diff --git a/drivers/filesystems/vfatfs/metadata.h b/drivers/filesystems/vfatfs/metadata.h
+new file mode 100644
+index 00000000..04f69443
+--- /dev/null
++++ b/drivers/filesystems/vfatfs/metadata.h
+@@ -0,0 +1,22 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++
++#ifdef NXK_METADATA_COUNTERS
++/* Snapshot only while the guest is stopped. Counts are atomic individually,
++ * not a transaction across bins. Bit0=storage, bit1=times, bit2=other;
++ * bin0=byte-identical. Row0=FAT12/16/32, row1=FATX16/32. */
++typedef struct _VFAT_METADATA_COUNTERS
++{
++    ULONG Magic;
++    ULONG Schema;
++    ULONG Bytes;
++    volatile LONG Wraps;
++    volatile LONG Count[2][8];
++} VFAT_METADATA_COUNTERS;
++
++extern VFAT_METADATA_COUNTERS VfatMetadataCounters;
++VOID VfatRecordMetadataUpdate(ULONG FatType, const VOID *Before,
++                             const VOID *After);
++#else
++#define VfatRecordMetadataUpdate(FatType, Before, After) ((void)0)
++#endif
+diff --git a/tests/host/metadata/check.py b/tests/host/metadata/check.py
+new file mode 100644
+index 00000000..3e5adc23
+--- /dev/null
++++ b/tests/host/metadata/check.py
+@@ -0,0 +1,279 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Production metadata-counter/update/flush bodies; independent byte/I/O oracles."""
++import argparse
++from pathlib import Path
++import re
++import subprocess
++root=Path(__file__).resolve().parents[3]
++parser=argparse.ArgumentParser(); parser.add_argument('output',type=Path); args=parser.parse_args()
++out=args.output.resolve(); out.mkdir(parents=True,exist_ok=True)
++def extract(path,name):
++ text=path.read_text(); hit=re.search(r'\b'+name+r'\s*\([^;]*?\)\s*\{',text)
++ assert hit,name
++ start=text.rfind('\n\n',0,hit.start())+2; brace=text.index('{',hit.start()); depth,end=1,brace+1
++ while depth:
++  depth+=(text[end]=='{')-(text[end]=='}'); end+=1
++ return text[start:end]+'\n'
++vfat=root/'drivers/filesystems/vfatfs'; cache=root/'ntoskrnl/xb/mm/cache.c'
++assert (vfat/'metadata.c').is_file(), 'metadata counter diagnostic not implemented'
++shim = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <stddef.h>
++#include <pthread.h>
++#include <setjmp.h>
++typedef uint32_t ULONG;
++typedef int32_t NTSTATUS;
++typedef int64_t LONGLONG;
++typedef size_t SIZE_T, *PSIZE_T;
++typedef void VOID, *PVOID;
++typedef union { int64_t QuadPart; struct { uint32_t LowPart; int32_t HighPart; } u; } LARGE_INTEGER;
++typedef struct { unsigned char ShortName[11], Attrib, lCase, CreationTimeMs; uint16_t CreationTime, CreationDate, AccessDate; union { uint16_t FirstClusterHigh, ExtendedAttributes; }; uint16_t UpdateTime, UpdateDate, FirstCluster; uint32_t FileSize; } FAT_DIR_ENTRY;
++typedef struct { unsigned char FilenameLength, Attrib, Filename[42]; uint32_t FirstCluster, FileSize; uint16_t UpdateTime, UpdateDate, CreationTime, CreationDate, AccessTime, AccessDate; } FATX_DIR_ENTRY;
++typedef union { FAT_DIR_ENTRY Fat; FATX_DIR_ENTRY FatX; } DIR_ENTRY, *PDIR_ENTRY;
++typedef struct { NTSTATUS Status; SIZE_T Information; } IO_STATUS_BLOCK;
++typedef struct { VOID *FsContext; } FILE_OBJECT;
++typedef struct { LARGE_INTEGER FileSize, ValidDataLength; VOID *FileObject; } NXC_MAP;
++typedef struct { NXC_MAP *Map; LONGLONG Offset; unsigned char *Data; int Busy, RefCount, Dirty, Valid; } NXC_BLOCK;
++typedef struct FCB { ULONG Flags, startIndex, dirIndex; int root, SectionObjectPointers; struct FCB *parentFcb; FILE_OBJECT *FileObject; DIR_ENTRY entry; } FCB, *PVFATFCB;
++typedef struct { FILE_OBJECT *FATFileObject; struct { ULONG FatType; } FatInfo; } DEVICE_EXTENSION, *PDEVICE_EXTENSION;
++#define IN
++#define OUT
++#define OPTIONAL
++#define TRUE 1
++#define FALSE 0
++#define STATUS_SUCCESS 0
++#define STATUS_END_OF_FILE -2
++#define STATUS_DISK_CORRUPT_ERROR -3
++#define FCB_IS_DIRTY 1
++#define FCB_IS_FAT 4
++#define FCB_IS_VOLUME 8
++#define VFAT_WRITE_THROUGH 2
++#define NXC_BLOCK_SIZE 16384
++#define PAGE_SIZE 4096
++#define NXC_BLOCK_SHIFT 14
++#define MAXLONGLONG INT64_MAX
++#define ASSERT assert
++#define NT_SUCCESS(x) ((x) >= 0)
++#define ROUND_UP(x,n) (((x)+(n)-1)&~((n)-1))
++#define min(x,y) ((x)<(y)?(x):(y))
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define BooleanFlagOn(v,f) ((v)&(f))
++#define RtlCopyMemory memcpy
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define ExReleaseFastMutex(p) ((void)(p))
++#define ExAcquireFastMutex(p) ((void)(p))
++#define _SEH2_TRY if (setjmp(pin_error) == 0)
++#define _SEH2_EXCEPT(x) else
++#define _SEH2_YIELD(x) x
++#define _SEH2_GetExceptionCode() -3
++#define _SEH2_END
++#define PIN_WAIT 1
++static int NxcMutex, NxcWbDepth;
++static ULONG CcDataPages, CcDataFlushes, CcLazyWriteIos, CcLazyWritePages;
++static struct { ULONG Flags; } globals = { VFAT_WRITE_THROUGH };
++#define VfatGlobalData (&globals)
++static unsigned reads, writes, dirty_calls, pins, unpins, flush_calls;
++static unsigned char platter[NXC_BLOCK_SIZE], buffer[NXC_BLOCK_SIZE];
++static NXC_MAP map;
++static NXC_BLOCK block;
++static FCB parent, file;
++static FILE_OBJECT parent_object;
++static DEVICE_EXTENSION device;
++static NTSTATUS init_status;
++static NTSTATUS read_status, write_status;
++static jmp_buf pin_error;
++static int fatx_mode = 1;
++typedef int32_t LONG;
++typedef int BOOLEAN;
++#define FAT16 1
++#define FAT12 2
++#define FAT32 3
++#define FATX16 4
++#define FATX32 5
++#define C_ASSERT(x) _Static_assert((x), #x)
++#define FIELD_OFFSET(t,f) offsetof(t,f)
++#define RtlCompareMemory(a,b,n) (!memcmp(a,b,n)?(n):0)
++#define InterlockedIncrement(p) __atomic_add_fetch((p),1,__ATOMIC_SEQ_CST)
++static NTSTATUS NxcPagingIo(VOID *file, VOID *data, LONGLONG offset, ULONG length,
++                           int write, SIZE_T *got) {
++    (void)file; assert(offset == 0 && length == NXC_BLOCK_SIZE);
++    if (write) {
++        ++writes;
++        if (write_status) { *got=0; return write_status; }
++        memcpy(platter, data, length);
++    } else {
++        ++reads;
++        if (read_status) { *got=0; return read_status; }
++        memcpy(data, platter, length);
++    }
++    *got = length; return STATUS_SUCCESS;
++}
++static int vfatVolumeIsFatX(PDEVICE_EXTENSION d) { (void)d; return fatx_mode; }
++static int vfatFCBIsRoot(PVFATFCB f) { return f->root; }
++static NTSTATUS vfatFCBInitializeCacheFromVolume(PDEVICE_EXTENSION d, PVFATFCB f) {
++    (void)d; assert(f == &parent); return init_status;
++}
++static int CcPinRead(FILE_OBJECT *, LARGE_INTEGER *, ULONG, int, VOID **, VOID **);
++static void CcSetDirtyPinnedData(VOID *b, VOID *lsn) { assert(b == &block && !lsn); block.Dirty=1; ++dirty_calls; }
++static void CcUnpinData(VOID *b) { assert(b == &block && block.RefCount > 0); --block.RefCount; ++unpins; }
++static void CcFlushCache(int *, VOID *, ULONG, IO_STATUS_BLOCK *);
++'''
++adapters = r'''
++static int CcPinRead(FILE_OBJECT *f, LARGE_INTEGER *o, ULONG n, int wait, VOID **b, VOID **data) {
++    assert(f == &parent_object && wait && o->QuadPart >= 0 && o->QuadPart+n <= NXC_BLOCK_SIZE);
++    ++pins; ++block.RefCount;
++    if (!block.Valid) {
++        block.Busy=1;
++        if (NxcReadBlock(&block) != STATUS_SUCCESS) {
++            --block.RefCount;
++            longjmp(pin_error,1);
++        }
++    }
++    *b = &block; *data = block.Data+o->QuadPart; return TRUE;
++}
++static void CcFlushCache(int *section, VOID *o, ULONG n, IO_STATUS_BLOCK *iosb) {
++    (void)o; (void)n; ++flush_calls; iosb->Status=STATUS_SUCCESS; iosb->Information=0;
++    if (section != &parent.SectionObjectPointers || !block.Dirty) return;
++    block.Busy=1; ++block.RefCount;
++    iosb->Status=NxcFlushBlock(&block, &iosb->Information); --block.RefCount;
++}
++static void reset(void) {
++    memset(platter, 0xa5, sizeof platter); memset(buffer, 0x19, sizeof buffer);
++    map=(NXC_MAP){.FileSize={.QuadPart=NXC_BLOCK_SIZE},.FileObject=&parent_object};
++    block=(NXC_BLOCK){.Map=&map,.Data=buffer};
++    parent=(FCB){.root=1,.FileObject=&parent_object};
++    file=(FCB){.Flags=FCB_IS_DIRTY,.startIndex=3,.dirIndex=3,.parentFcb=&parent};
++    memcpy(&file.entry,platter+file.startIndex*64,64);
++    reads=writes=dirty_calls=pins=unpins=flush_calls=0;
++    init_status=read_status=write_status=STATUS_SUCCESS;
++    fatx_mode=1; device.FatInfo.FatType=FATX16;
++#ifdef NXK_METADATA_COUNTERS
++    memset((VOID *)VfatMetadataCounters.Count,0,sizeof VfatMetadataCounters.Count); VfatMetadataCounters.Wraps=0;
++#endif
++}
++'''
++main = r'''
++static void *increment_thread(void *unused) {
++    (void)unused;
++#ifdef NXK_METADATA_COUNTERS
++    FATX_DIR_ENTRY e={0};
++    for(unsigned i=0;i<5000;++i) VfatRecordMetadataUpdate(FATX16,&e,&e);
++#endif
++    return NULL;
++}
++int main(void) {
++    reset();
++    for(unsigned i=0;i<100;++i) {
++        file.Flags |= FCB_IS_DIRTY;
++        assert(VfatUpdateEntry(&device,&file)==STATUS_SUCCESS);
++        VfatFlushWriteThrough(&device,&file);
++        assert(!memcmp(platter+3*64,&file.entry,64));
++    }
++    assert(reads==1 && writes==100 && dirty_calls==100 && pins==unpins && block.RefCount==0);
++#ifdef NXK_METADATA_COUNTERS
++    assert(VfatMetadataCounters.Count[1][0]==100);
++    assert(VfatMetadataCounters.Magic==0x4d455431 && VfatMetadataCounters.Schema==1);
++#endif
++    reset();
++    for(unsigned i=1;i<=100;++i) {
++        file.entry.FatX.FileSize=i*16384; file.Flags |= FCB_IS_DIRTY;
++        assert(VfatUpdateEntry(&device,&file)==STATUS_SUCCESS); VfatFlushWriteThrough(&device,&file);
++        assert(!memcmp(platter+3*64,&file.entry,64));
++    }
++    assert(reads==1 && writes==100 && dirty_calls==100);
++#ifdef NXK_METADATA_COUNTERS
++    assert(VfatMetadataCounters.Count[1][1]==100 && VfatMetadataCounters.Count[1][0]==0);
++    /* Independent literal byte ranges catch an omitted field in any group. */
++    for(unsigned format=0;format<2;++format) for(unsigned byte=0;byte<(format?64:32);++byte) {
++        reset(); fatx_mode=format; device.FatInfo.FatType=format?FATX32:FAT32;
++        memset(&file.entry,0,sizeof file.entry); memset(platter,0,sizeof platter);
++        ((unsigned char *)&file.entry)[byte]=1;
++        unsigned wanted=format?(byte<44?4:(byte<52?1:2)):
++            (byte<13?4:((byte<20 || (byte>=22 && byte<26))?2:1));
++        assert(VfatUpdateEntry(&device,&file)==0);
++        assert(VfatMetadataCounters.Count[format][wanted]==1);
++    }
++    for(unsigned format=0;format<2;++format) for(unsigned mask=0;mask<8;++mask) {
++        reset(); fatx_mode=format; device.FatInfo.FatType=format?FATX32:FAT32;
++        memset(&file.entry,0,sizeof file.entry); memset(platter,0,sizeof platter);
++        if(format) {
++            if(mask&1) file.entry.FatX.FileSize=17;
++            if(mask&2) file.entry.FatX.UpdateTime=23;
++            if(mask&4) file.entry.FatX.Attrib=9;
++        } else {
++            if(mask&1) file.entry.Fat.FirstClusterHigh=17;
++            if(mask&2) file.entry.Fat.CreationTimeMs=23;
++            if(mask&4) file.entry.Fat.lCase=9;
++        }
++        assert(VfatUpdateEntry(&device,&file)==0); VfatFlushWriteThrough(&device,&file);
++        assert(VfatMetadataCounters.Count[format][mask]==1 && writes==1 && dirty_calls==1 && pins==unpins);
++    }
++    /* FAT16 extended-attribute word is not FAT32's high cluster word. */
++    reset(); fatx_mode=0; device.FatInfo.FatType=FAT16;
++    memset(&file.entry,0,sizeof file.entry); memset(platter,0,sizeof platter);
++    file.entry.Fat.FirstClusterHigh=31;
++    assert(VfatUpdateEntry(&device,&file)==0 && VfatMetadataCounters.Count[0][4]==1);
++    reset(); VfatMetadataCounters.Count[1][0]=-1;
++    VfatRecordMetadataUpdate(FATX16,&file.entry,&file.entry);
++    assert(VfatMetadataCounters.Count[1][0]==0 && VfatMetadataCounters.Wraps==1);
++    reset(); pthread_t threads[4];
++    for(unsigned i=0;i<4;++i) assert(!pthread_create(threads+i,NULL,increment_thread,NULL));
++    for(unsigned i=0;i<4;++i) assert(!pthread_join(threads[i],NULL));
++    assert(VfatMetadataCounters.Count[1][0]==20000);
++#else
++    (void)increment_thread;
++#endif
++    reset();
++    for(unsigned i=0;i<100;++i) {
++        block.Valid=0; file.Flags |= FCB_IS_DIRTY;
++        assert(VfatUpdateEntry(&device,&file)==0); VfatFlushWriteThrough(&device,&file);
++        assert(!memcmp(platter+3*64,&file.entry,64));
++    }
++    assert(reads==100 && writes==100 && dirty_calls==100 && pins==unpins);
++    reset(); block.Valid=1; memcpy(buffer,platter,sizeof buffer); block.Dirty=1; buffer[0]=0x77;
++    assert(VfatUpdateEntry(&device,&file)==0); VfatFlushWriteThrough(&device,&file);
++    assert(writes==1 && platter[0]==0x77);
++    reset(); init_status=-3;
++    assert(VfatUpdateEntry(&device,&file)==-3 && dirty_calls==0 && pins==0 && (file.Flags&FCB_IS_DIRTY));
++#ifdef NXK_METADATA_COUNTERS
++    assert(VfatMetadataCounters.Count[1][0]==0);
++#endif
++    reset(); read_status=-3;
++    assert(VfatUpdateEntry(&device,&file)==-3 && dirty_calls==0 && unpins==0 && block.RefCount==0);
++    assert(!block.Valid && (file.Flags&FCB_IS_DIRTY));
++#ifdef NXK_METADATA_COUNTERS
++    assert(VfatMetadataCounters.Count[1][0]==0);
++#endif
++    reset(); file.entry.FatX.Attrib ^= 1; write_status=-3;
++    assert(VfatUpdateEntry(&device,&file)==0); VfatFlushWriteThrough(&device,&file);
++    assert(block.Dirty && writes==1 && platter[3*64+1]==0xa5);
++    write_status=0; VfatFlushWriteThrough(&device,&file);
++    assert(!block.Dirty && writes==2 && platter[3*64+1]==(0xa5^1));
++    reset(); file.root=1; assert(VfatUpdateEntry(&device,&file)==0 && pins==0);
++    puts("PASS metadata classifications, byte/dirty/unpin/flush preservation and atomic counting");
++    return 0;
++}
++'''
++
++metadata=(vfat/'metadata.c').read_text().replace('#include "vfat.h"','').replace('#include "metadata.h"','')
++bodies=''.join(extract(p,n) for p,n in [(cache,'NxcReadBlock'),(cache,'NxcFlushBlock'),(vfat/'dirwr.c','VfatUpdateEntry'),(vfat/'flush.c','VfatFlushWriteThrough')])
++unit=shim+'\n#include "'+str(vfat/'metadata.h')+'"\n'+metadata+bodies+adapters+main
++(out/'fixture.c').write_text(unit)
++for enabled in (False,True):
++ binary=out/('enabled' if enabled else 'disabled')
++ # setjmp emulates PSEH control flow; GCC cannot prove successful pin assigns
++ # these production locals. Suppress only its adapter-induced diagnostics.
++ command=['cc','-std=c11','-Wall','-Wextra','-Werror',
++          '-Wno-clobbered','-Wno-maybe-uninitialized','-O2','-pthread']
++ if enabled: command+=['-DNXK_METADATA_COUNTERS=1']
++ subprocess.run(command+[str(out/'fixture.c'),'-o',str(binary)],check=True)
++ subprocess.run([str(binary)],check=True)
++ symbols=subprocess.check_output(['nm',str(binary)],text=True)
++ assert (' VfatMetadataCounters' in symbols)==enabled, 'disabled build contains counter storage'
++ assert (' VfatRecordMetadataUpdate' in symbols)==enabled, 'disabled build contains diagnostic helper'
++print('PASS both compiled configurations; disabled binary has no counters/helper symbols')
