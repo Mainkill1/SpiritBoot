@@ -15,10 +15,14 @@ def main():
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--variant", choices=("release", "debug"), default="release")
+    parser.add_argument("--media-policy", choices=("strict", "emulator-file-media"),
+                        default="emulator-file-media",
+                        help="loaded media compatibility; default: emulator-file-media")
     parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
     args = parser.parse_args()
     try:
-        result = build_firmware(args.source, args.output, args.variant, args.lock)
+        result = build_firmware(args.source, args.output, args.variant, args.lock,
+                                args.media_policy)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"build failed: {error}", file=sys.stderr)
         return 1

@@ -13,6 +13,8 @@ Xbox kernel with the Mainkill1 xemu fork. The tooling builds release/checked fla
 images, records provenance, captures boot diagnostics, and grades an open test XBE.
 Conker: Live & Reloaded is the first retail target.
 
+The build tool defaults to the explicit [file-backed emulator media policy](docs/EMULATOR_MEDIA_POLICY.md); use `--media-policy strict` to retain the original certificate behavior.
+
 See [build and launch instructions](docs/BUILD_AND_RUN.md) and
 [reproduced baseline evidence](docs/provenance/OPEN_FIRMWARE_BASELINE.md).
 The [direct XISO suite evidence](docs/provenance/XISO_SUITE_BASELINE.md) records

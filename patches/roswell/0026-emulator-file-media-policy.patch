@@ -1,0 +1,243 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -278,6 +278,11 @@
+         add_definitions(-D_X86_ -D__i386__ -Di386)
+         if(SARCH STREQUAL "xbox")
+             add_definitions(-DSARCH_XBOX)
++            option(XBOX_EMULATOR_FILE_MEDIA
++                   "Allow file-backed media in the loaded title certificate" OFF)
++            if(XBOX_EMULATOR_FILE_MEDIA)
++                add_definitions(-DXB_EMULATOR_FILE_MEDIA=1)
++            endif()
+             # the HAL is part of the kernel image -- it is linked into
+             # ntoskrnl, not a separate hal.dll -- and there is no user mode.
+             # So the HAL-import decoration (NTHALAPI, _DECL_HAL_KE_IMPORT) is
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -142,6 +142,77 @@
+ #define XBE_THUNK_ORDINAL 0x80000000
+ 
+ #define XBE_TAG        'ebxN'
++
++
++/* Retain the original certificate for provenance and title-key derivation.
++ * The file-backed-media policy changes only the loaded compatibility view. */
++#ifndef XB_EMULATOR_FILE_MEDIA
++#define XB_EMULATOR_FILE_MEDIA 0
++#endif
++#define XBE_CERT_MEDIA_OFFSET 0x9cu
++#define XBE_CERT_MIN_SIZE 0xd0u /* Includes both mandatory 16-byte keys. */
++#define XBE_MEDIA_DVD 2u
++#define XBE_MEDIA_HARD_DISK 1u
++#define XBE_MEDIA_TYPE_MASK 0x00ffffffu
++static PUCHAR XepOriginalCertificate;
++static ULONG XepOriginalCertificateSize;
++
++static NTSTATUS
++XePrepareTitleCertificate(PXBE_HEADER Header, PVOID ImageBase,
++                          ULONG HeaderBytes, ULONG CompletedBytes)
++{
++    extern VOID NxkDeriveTitleKeys(PVOID Certificate);
++#if XB_EMULATOR_FILE_MEDIA
++    ULONG Offset, Size, OriginalMedia, EffectiveMedia;
++    PUCHAR Certificate, Original;
++
++    /* Header fields may not enlarge or relocate the bytes actually read. */
++    if (HeaderBytes < sizeof(*Header) || CompletedBytes < HeaderBytes ||
++        Header->BaseAddr != (ULONG_PTR)ImageBase ||
++        Header->SizeOfHeaders != HeaderBytes)
++        return STATUS_INVALID_IMAGE_FORMAT;
++
++    /* Use subtraction: neither a malformed VA nor Size may wrap a range. */
++    if (Header->CertificateAddr < Header->BaseAddr ||
++        Header->SizeOfHeaders < sizeof(Size))
++        return STATUS_INVALID_IMAGE_FORMAT;
++    Offset = Header->CertificateAddr - Header->BaseAddr;
++    if (Offset < sizeof(*Header) ||
++        Offset > Header->SizeOfHeaders - sizeof(Size))
++        return STATUS_INVALID_IMAGE_FORMAT;
++    Certificate = (PUCHAR)(ULONG_PTR)Header->CertificateAddr;
++    RtlCopyMemory(&Size, Certificate, sizeof(Size));
++    if (Size < XBE_CERT_MIN_SIZE || Size > Header->SizeOfHeaders - Offset)
++        return STATUS_INVALID_IMAGE_FORMAT;
++
++    Original = ExAllocatePoolWithTag(NonPagedPool, Size, XBE_TAG);
++    if (Original == NULL)
++        return STATUS_INSUFFICIENT_RESOURCES;
++    RtlCopyMemory(Original, Certificate, Size);
++    if (XepOriginalCertificate != NULL)
++        ExFreePoolWithTag(XepOriginalCertificate, XBE_TAG);
++    XepOriginalCertificate = Original;
++    XepOriginalCertificateSize = Size;
++    NxkDeriveTitleKeys(Original);
++
++    RtlCopyMemory(&OriginalMedia, Original + XBE_CERT_MEDIA_OFFSET,
++                  sizeof(OriginalMedia));
++    EffectiveMedia = OriginalMedia;
++    if ((OriginalMedia & XBE_MEDIA_TYPE_MASK) == XBE_MEDIA_DVD)
++        EffectiveMedia |= XBE_MEDIA_HARD_DISK;
++    RtlCopyMemory(Certificate + XBE_CERT_MEDIA_OFFSET, &EffectiveMedia,
++                  sizeof(EffectiveMedia));
++    XbDbg("file-backed media policy: original=%08lx effective=%08lx\n",
++          OriginalMedia, EffectiveMedia);
++#else
++    (void)ImageBase;
++    (void)HeaderBytes;
++    (void)CompletedBytes;
++    /* Strict builds retain the original loader behavior and certificate. */
++    NxkDeriveTitleKeys((PVOID)(ULONG_PTR)Header->CertificateAddr);
++#endif
++    return STATUS_SUCCESS;
++}
+ 
+ /* Retail search order: disc first (D:), dashboard on C: as fallback.  Xbox
+  * partition naming is Partition1=E, Partition2=C, Partition3=X,
+@@ -3331,7 +3402,7 @@
+     IO_STATUS_BLOCK iosb;
+     LARGE_INTEGER off;
+     NTSTATUS status;
+-    ULONG entry, thunkAddr, i;
++    ULONG entry, thunkAddr, i, headersSize;
+     PULONG thunk;
+     PVOID tlsBlock = NULL;
+ 
+@@ -3379,7 +3450,8 @@
+     XeImageRangeStart = (ULONG_PTR)imageBase;
+     XeImageRangeEnd = (ULONG_PTR)imageBase + hdr->SizeOfImage;
+ 
+-    imageSize = hdr->SizeOfHeaders;
++    headersSize = hdrBuf.SizeOfHeaders;
++    imageSize = headersSize;
+     status = XeNtAllocateVirtualMemory(&imageBase, 0, &imageSize,
+                                        MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+     if (!NT_SUCCESS(status))
+@@ -3393,7 +3465,7 @@
+      * relative, so they only resolve once the headers live at BaseAddr). */
+     off.QuadPart = 0;
+     status = ZwReadFile(FileHandle, NULL, NULL, NULL, &iosb, imageBase,
+-                        hdr->SizeOfHeaders, &off, NULL);
++                        headersSize, &off, NULL);
+     if (!NT_SUCCESS(status))
+     {
+         XbDbg("XBE headers read failed (%08lx)\n", status);
+@@ -3404,8 +3476,13 @@
+     /* The keys the title signs and links with come out of its own
+      * certificate; derive them now, while nothing can have read them. */
+     {
+-        extern VOID NxkDeriveTitleKeys(PVOID Certificate);
+-        NxkDeriveTitleKeys((PVOID)(ULONG_PTR)hdr->CertificateAddr);
++        status = XePrepareTitleCertificate(hdr, imageBase, headersSize,
++                                          (ULONG)iosb.Information);
++        if (!NT_SUCCESS(status))
++        {
++            XbDbg("invalid title certificate or media policy (%08lx)\n", status);
++            return status;
++        }
+     }
+ 
+     /* XeLoadSection re-reads raw data through this handle for the life of
+--- /dev/null
++++ b/tests/host/xbe-media/check.py
+@@ -0,0 +1,102 @@
++#!/usr/bin/env python3
++"""Compile the production certificate policy and title-key call boundary."""
++from pathlib import Path
++import re, subprocess, sys
++root,out=map(Path,sys.argv[1:3]);out.mkdir(parents=True,exist_ok=True)
++s=(root/'ntoskrnl/xb/xbe.c').read_text()
++def function(name):
++ m=re.search(r'(?:static\s+)?NTSTATUS\s+'+name+r'\s*\([^)]*\)\s*\{',s)
++ if not m:return ''
++ i=s.index('{',m.start());depth=1;j=i+1
++ while depth:
++  depth += (s[j]=='{')-(s[j]=='}');j+=1
++ return s[m.start():j]
++helper=function('XePrepareTitleCertificate')
++if helper:
++ declarations=s[s.index('/* Retain the original certificate'):s.index('static NTSTATUS\nXePrepareTitleCertificate')]
++ call=re.search(r'/\* The keys the title.*?\n    \}',s,re.S).group()
++else:
++ declarations='static unsigned char *XepOriginalCertificate; static unsigned long XepOriginalCertificateSize;'
++ call=re.search(r'/\* The keys the title.*?\n    \}',s,re.S).group()
++shim=r'''
++#define _GNU_SOURCE
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++typedef void VOID; typedef uint32_t ULONG; typedef uintptr_t ULONG_PTR;
++typedef unsigned char UCHAR,*PUCHAR; typedef void *PVOID;
++typedef int32_t NTSTATUS;
++typedef struct {ULONG BaseAddr,SizeOfHeaders,CertificateAddr;} XBE_HEADER,*PXBE_HEADER;
++#define STATUS_SUCCESS ((NTSTATUS)0)
++#define STATUS_INVALID_IMAGE_FORMAT ((NTSTATUS)0xc000007b)
++#define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xc000009a)
++#define NT_SUCCESS(s) ((s)>=0)
++#define NonPagedPool 0
++#define XBE_TAG 0
++#define RtlCopyMemory memcpy
++#define XbDbg(...) ((void)0)
++static int fail_alloc,allocations,frees,key_calls;
++static unsigned char derived[512];static unsigned derived_size;
++static void *ExAllocatePoolWithTag(int pool,size_t size,int tag){
++ (void)pool;(void)tag;if(fail_alloc)return NULL;allocations++;return malloc(size);}
++static void ExFreePoolWithTag(void*p,int tag){(void)tag;frees++;free(p);}
++void NxkDeriveTitleKeys(PVOID cert){key_calls++;if(!cert)return;
++ memcpy(&derived_size,cert,4);if(derived_size>sizeof(derived))abort();memcpy(derived,cert,derived_size);}
++'''
++shim=shim.replace('typedef struct {ULONG BaseAddr,SizeOfHeaders,CertificateAddr;} XBE_HEADER,*PXBE_HEADER;', re.search(r'typedef struct _XBE_HEADER.*?XBE_HEADER, \*PXBE_HEADER;',s,re.S).group())
++shim+=declarations+'\n'+helper+'\nstatic ULONG completed=4096;static PVOID actualBase;\nstatic NTSTATUS load(PXBE_HEADER hdr){NTSTATUS status=STATUS_SUCCESS;PVOID imageBase=actualBase;ULONG headersSize=4096;struct {ULONG Information;} iosb={completed};(void)imageBase;(void)headersSize;(void)iosb;'+call+'\nreturn status;}\n'
++shim+=r'''
++static void put32(unsigned char*p,unsigned v){memcpy(p,&v,4);}
++static unsigned get32(unsigned char*p){unsigned v;memcpy(&v,p,4);return v;}
++static unsigned char *image;
++static XBE_HEADER header;
++static unsigned checks,failed;
++#define CHECK(v) do{checks++;if(!(v)){fprintf(stderr,"FAIL %s:%d %s\n",__FILE__,__LINE__,#v);failed++;}}while(0)
++static void reset(unsigned media,unsigned cert_size){
++ memset(image,0xa5,4096);put32(image+0x200,cert_size);put32(image+0x29c,media);
++ header=(XBE_HEADER){.BaseAddr=(ULONG)(uintptr_t)image,.SizeOfHeaders=4096,.CertificateAddr=(ULONG)(uintptr_t)(image+0x200)};
++ key_calls=0;derived_size=0;fail_alloc=0;completed=4096;actualBase=image;
++}
++int main(void){
++ image=mmap(NULL,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_32BIT,-1,0);
++ if(image==MAP_FAILED){perror("mmap");return 2;}
++ unsigned masks[]={2,3,1,0xffffff,0x80000002,0x80000001,0};
++ for(unsigned i=0;i<sizeof(masks)/sizeof(*masks);i++){
++  reset(masks[i],0x1d0);unsigned char original[0x1d0];memcpy(original,image+0x200,sizeof(original));
++  CHECK(load(&header)==STATUS_SUCCESS);CHECK(key_calls==1);CHECK(derived_size==sizeof(original));
++  CHECK(memcmp(derived,original,sizeof(original))==0);
++#if XB_EMULATOR_FILE_MEDIA
++  unsigned effective=(masks[i]&0xffffff)==2?masks[i]|1:masks[i];
++  CHECK(get32(image+0x29c)==effective);CHECK(XepOriginalCertificateSize==sizeof(original));
++  CHECK(XepOriginalCertificate && memcmp(XepOriginalCertificate,original,sizeof(original))==0);
++#else
++  CHECK(memcmp(image+0x200,original,sizeof(original))==0);CHECK(!XepOriginalCertificate);
++#endif
++  put32(image+0x29c,masks[i]);CHECK(memcmp(image+0x200,original,sizeof(original))==0);
++ }
++#if XB_EMULATOR_FILE_MEDIA
++ reset(2,0x1d0);completed=4095;CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++ reset(2,0x1d0);header.BaseAddr+=16;CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++ reset(2,0x1d0);header.SizeOfHeaders=8192;CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++ reset(2,0x1d0);header.CertificateAddr=header.BaseAddr+64;put32(image+64,0xd0);CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++ reset(2,0x1d0);header.CertificateAddr=header.BaseAddr-1;CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++ reset(2,0x1d0);header.CertificateAddr=header.BaseAddr+4094;CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++ reset(2,0xcf);CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++ reset(2,4096);CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++ reset(2,0x1d0);fail_alloc=1;CHECK(load(&header)==STATUS_INSUFFICIENT_RESOURCES);CHECK(!key_calls);CHECK(get32(image+0x29c)==2);
++ reset(2,0xd0);CHECK(load(&header)==STATUS_SUCCESS);CHECK(derived_size==0xd0);CHECK(get32(image+0x29c)==3);
++ reset(2,0x1d0);header.SizeOfHeaders=3;CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++ reset(2,0x1d0);header.CertificateAddr=0xfffffff0;CHECK(load(&header)==STATUS_INVALID_IMAGE_FORMAT);CHECK(!key_calls);
++#endif
++ if(XepOriginalCertificate){ExFreePoolWithTag(XepOriginalCertificate,0);XepOriginalCertificate=NULL;}
++ CHECK(allocations==frees);munmap(image,4096);
++ printf("policy=%d: %u production certificate checks, %u failures\n",XB_EMULATOR_FILE_MEDIA,checks,failed);
++ return !!failed;
++}
++'''
++for mode in [0,1]:
++ p=out/f'check-{mode}.c';p.write_text(shim)
++ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable',f'-DXB_EMULATOR_FILE_MEDIA={mode}','-fsanitize=address,undefined','-fno-omit-frame-pointer',str(p),'-o',str(out/f'check-{mode}')],check=True)
++ subprocess.run([str(out/f'check-{mode}')],check=True)
