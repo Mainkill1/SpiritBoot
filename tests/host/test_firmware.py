@@ -125,6 +125,35 @@ elif '--build' in sys.argv:
         configure = next(c for c in manifest["commands"] if "-G" in c)
         self.assertIn("-DXBOX_RAM_MIB=128", configure)
 
+    def test_upper_reservation_is_explicit_and_recorded(self):
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertFalse(manifest["reserve_upper_ram"])
+        configure = next(c for c in manifest["commands"] if "-G" in c)
+        self.assertIn("-DXBOX_RESERVE_UPPER_RAM=OFF", configure)
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/build-firmware.py"),
+             "--source", str(self.source), "--output", str(self.output),
+             "--lock", str(self.lock), "--reserve-upper-ram"],
+            env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertTrue(manifest["reserve_upper_ram"])
+        self.assertEqual(manifest["memory_mib"], 128)
+        configure = next(c for c in manifest["commands"] if "-G" in c)
+        self.assertIn("-DXBOX_RESERVE_UPPER_RAM=ON", configure)
+
+    def test_upper_reservation_rejects_64_mib_before_output_changes(self):
+        from tools.firmware import build_firmware
+        self.output.mkdir()
+        image = self.output / "flash.bin"
+        image.write_bytes(b"previous image")
+        with self.assertRaisesRegex(ValueError, "128"):
+            build_firmware(self.source, self.output, lock_path=self.lock,
+                           memory_mib=64, reserve_upper_ram=True)
+        self.assertEqual(image.read_bytes(), b"previous image")
+
     def test_unsupported_capacity_is_rejected_before_output_changes(self):
         from tools.firmware import build_firmware
         self.output.mkdir()
