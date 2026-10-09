@@ -1,0 +1,20 @@
+diff --git a/tests/host/clean-room/pins.c b/tests/host/clean-room/pins.c
+index 0fd5aaee..b52fc747 100644
+--- a/tests/host/clean-room/pins.c
++++ b/tests/host/clean-room/pins.c
+@@ -24,8 +24,13 @@ static unsigned checks;
+ #define CHECK(c) do{++checks;if(!(c)){fprintf(stderr,"FAIL %u: %s\n",checks,#c);return 1;}}while(0)
+ int main(void)
+ {
+-    UCHAR metadata[32*(sizeof(ULONG)+2*sizeof(USHORT))];
+-    NxkPageSupplyInitialize(31,metadata);
++    struct {
++        UCHAR entries[32*(sizeof(ULONG)+sizeof(USHORT))];
++        UCHAR guard[32*sizeof(USHORT)];
++    } metadata;
++    memset(&metadata,0xa5,sizeof(metadata));
++    NxkPageSupplyInitialize(31,metadata.entries);
++    for(unsigned i=0;i<sizeof(metadata.guard);++i)CHECK(metadata.guard[i]==0xa5);
+     MmLockUnlockPhysicalPage(0x10025,FALSE);
+     CHECK(NxpPins[16]==1&&NxpPins[1]==0);
+     MmLockUnlockPhysicalPage(0xFD000000,FALSE);CHECK(NxpPins[16]==1);
