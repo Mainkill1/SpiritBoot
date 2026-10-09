@@ -67,10 +67,10 @@ index 305bb0cf..5530bbe4 100644
                      h->Stages, PM_MAX_STAGES, &count)) return 0;
      for (i = 0; i < count; ++i) {
 diff --git a/boot/nxldr/gen-flash-bin.py b/boot/nxldr/gen-flash-bin.py
-index dbf3c548..d1eccf94 100755
+index dbf3c548..fd00dcc9 100755
 --- a/boot/nxldr/gen-flash-bin.py
 +++ b/boot/nxldr/gen-flash-bin.py
-@@ -20,11 +20,12 @@
+@@ -20,14 +20,35 @@
  #
  # matching the structure nxldr's loader.c expects.
  #
@@ -84,7 +84,55 @@ index dbf3c548..d1eccf94 100755
  NM = os.environ.get("NM", "nm")
  
  
-@@ -113,6 +114,80 @@ def prepare_kernel_image(kernel: bytes, image_max: int) -> bytes:
++def discarded_image_pages(section_ranges, image_size):
++    donated = 0
++    i = 0
++    while i < len(section_ranges):
++        name, start, size, flags = section_ranges[i]
++        if name != b'INIT' and not flags & 0x02000000:
++            i += 1
++            continue
++        last = i
++        while last + 1 < len(section_ranges) and section_ranges[last+1][3] & 0x02000000:
++            last += 1
++        _, end, size, _ = section_ranges[last]
++        end += size
++            # Runtime donates the final discardable padding page as well.
++        end = (end + 4095) & ~4095
++        donated += max(0, (end // 4096) - ((start + 4095) // 4096))
++        i = last + 1
++    return donated
++
++
+ def prepare_kernel_image(kernel: bytes, image_max: int) -> bytes:
+     """Place owned PE32 sections at their RVAs before compression.
+ 
+@@ -88,23 +109,7 @@ def prepare_kernel_image(kernel: bytes, image_max: int) -> bytes:
+         capacity = int(re.search(r'#define PM_MAX_STAGES (\d+)u', f.read())[1])
+     with open(os.path.join(os.path.dirname(__file__), 'boot-layout.h')) as f:
+         workspace = int(re.search(r'#define NXBL_RETIRED_BOOT_PAGES (\d+)', f.read())[1])
+-    donated = 0
+-    i = 0
+-    while i < len(section_ranges):
+-        name, start, size, flags = section_ranges[i]
+-        if name != b'INIT' and not flags & 0x02000000:
+-            i += 1
+-            continue
+-        last = i
+-        while last + 1 < len(section_ranges) and section_ranges[last+1][3] & 0x02000000:
+-            last += 1
+-        _, end, size, _ = section_ranges[last]
+-        end += size
+-        require(end <= image_size, 'discardable section outside mapped image')
+-        # Runtime donates the final discardable padding page as well.
+-        end = (end + 4095) & ~4095
+-        donated += max(0, (end // 4096) - ((start + 4095) // 4096))
+-        i = last + 1
++    donated = discarded_image_pages(section_ranges, image_size)
+     require(donated + workspace <= capacity, 'warm persistence staging capacity exceeded')
+     result = bytearray(image_size)
+     result[:headers] = kernel[:headers]
+@@ -113,6 +118,81 @@ def prepare_kernel_image(kernel: bytes, image_max: int) -> bytes:
      return bytes(result)
  
  
@@ -150,13 +198,14 @@ index dbf3c548..d1eccf94 100755
 +        capacity = int(re.search(r'#define PM_MAX_STAGES (\d+)u', f.read())[1])
 +    with open(os.path.join(os.path.dirname(__file__), 'boot-layout.h')) as f:
 +        workspace = int(re.search(r'#define NXBL_RETIRED_BOOT_PAGES (\d+)', f.read())[1])
-+    discarded = 0
++    section_ranges = []
 +    for i in range(sections):
 +        sh = table + i * 40
++        size, rva, raw_size = struct.unpack_from('<III', kernel, sh + 8)
 +        flags = struct.unpack_from('<I', kernel, sh + 36)[0]
-+        if flags & 0x02000000 or kernel[sh:sh+8].rstrip(b'\0') == b'INIT':
-+            size, _, raw_size = struct.unpack_from('<III', kernel, sh + 8)
-+            discarded += (max(size, raw_size) + 4095) // 4096
++        section_ranges.append((kernel[sh:sh+8].rstrip(b'\0'), rva,
++                               max(size, raw_size), flags))
++    discarded = discarded_image_pages(section_ranges, len(image))
 +    if workspace + discarded + raw_bytes // 4096 > capacity:
 +        raise ValueError('warm persistence staging capacity exceeded')
 +    return bytes(image), rom_start, bytes(rom)
@@ -165,7 +214,7 @@ index dbf3c548..d1eccf94 100755
  def read_linker_symbols(elf_path, names):
      """Return {name: integer_value} for the given linker symbols."""
      out = subprocess.check_output([NM, "--no-sort", elf_path],
-@@ -166,7 +241,12 @@ def main() -> int:
+@@ -166,7 +246,12 @@ def main() -> int:
      ap.add_argument("--kernel",
                      help="path to xboxkrnl.exe; omit for a loader-only image "
                           "with the payload slot left as 0xff fill")
@@ -178,7 +227,7 @@ index dbf3c548..d1eccf94 100755
  
      if args.nxldr is None:
          candidates = [
-@@ -204,19 +284,33 @@ def main() -> int:
+@@ -204,19 +289,33 @@ def main() -> int:
      except FileNotFoundError:
          pass
  
@@ -216,7 +265,7 @@ index dbf3c548..d1eccf94 100755
                             len(compressed), len(prepared)) + compressed
          if len(blob) > payload_max_size:
              sys.exit("gen-flash-bin.py: xz(xboxkrnl) is %d bytes, "
-@@ -224,6 +318,10 @@ def main() -> int:
+@@ -224,6 +323,10 @@ def main() -> int:
                       "(raw=%d, xz=%d, header=12)" %
                       (len(blob), payload_max_size,
                        kernel_raw_size, len(compressed)))
@@ -228,7 +277,7 @@ index dbf3c548..d1eccf94 100755
  
      os.makedirs(os.path.dirname(args.out), exist_ok=True)
 diff --git a/boot/nxldr/loader.c b/boot/nxldr/loader.c
-index 61cc063e..cc87b70d 100644
+index 61cc063e..5d51fc3d 100644
 --- a/boot/nxldr/loader.c
 +++ b/boot/nxldr/loader.c
 @@ -21,6 +21,7 @@
@@ -239,7 +288,15 @@ index 61cc063e..cc87b70d 100644
  
  /* GDB-visible sentinels. */
  volatile ULONG LoaderPhase = 0;
-@@ -70,8 +71,11 @@ DecompressKernel(void)
+@@ -55,6 +56,7 @@ xz_arena_alloc(unsigned long Size)
+  * nxldr.ld (it follows the loader's .data source). */
+ extern const UCHAR KernelPayloadVa[];
+ extern const UCHAR KernelPayloadMaxSize[]; /* absolute linker symbol */
++extern const UCHAR FlashCapacity[]; /* actual linked BIOS capacity */
+ 
+ /*
+  * Decompress the prepared kernel from flash to its final RAM image and return its
+@@ -70,8 +72,11 @@ DecompressKernel(void)
      struct xz_dec *Xz;
      struct xz_buf Buf;
      enum xz_ret Ret;
@@ -252,13 +309,15 @@ index 61cc063e..cc87b70d 100644
          Header->DecompressedSize == 0 ||
          Header->DecompressedSize > NXBL_IMAGE_BYTES ||
          (Header->DecompressedSize & 4095) != 0 ||
-@@ -109,6 +113,24 @@ DecompressKernel(void)
+@@ -109,6 +114,26 @@ DecompressKernel(void)
          dprintf("xz decode failed ret=%d out=%u\n", (int)Ret, (unsigned)Buf.out_pos);
          return NULL;
      }
 +    RomCount = NxRomCount(Destination, Header->DecompressedSize);
 +    if (RomCount < 0 ||
-+        (Header->Magic == NXKRNL_ROM_MAGIC ? RomCount == 0 : RomCount != 0))
++        (Header->Magic == NXKRNL_ROM_MAGIC ? RomCount == 0 : RomCount != 0) ||
++        (RomCount > 0 && NxRomRead32(Destination + NX_ROM_TABLE_OFFSET + 12)
++                         != (ULONG_PTR)FlashCapacity))
 +    {
 +        LoaderFailCode = 0x524f; /* ROM */
 +        return NULL;
@@ -267,7 +326,7 @@ index 61cc063e..cc87b70d 100644
 +    {
 +        const UCHAR *Span = Destination + NX_ROM_TABLE_OFFSET + 16 + i * 16;
 +        ULONG Bytes = NxRomRead32(Span + 4) * 4096;
-+        const UCHAR *Raw = (const UCHAR *)NxRomRead32(Span + 8);
++        const UCHAR *Raw = (const UCHAR *)(ULONG_PTR)NxRomRead32(Span + 8);
 +        if (xz_crc32(Raw, Bytes, 0) != NxRomRead32(Span + 12))
 +        {
 +            LoaderFailCode = 0x524f;
@@ -289,6 +348,18 @@ index fa118762..a3bbe9d0 100644
  typedef struct _NXKRNL_XZ_HEADER
  {
      ULONG Magic;
+diff --git a/boot/nxldr/nxldr.ld b/boot/nxldr/nxldr.ld
+index afd04ebd..f9c09c9f 100644
+--- a/boot/nxldr/nxldr.ld
++++ b/boot/nxldr/nxldr.ld
+@@ -162,6 +162,7 @@ ASSERT(BssEnd <= StackTop - 0x10000,
+ KernelPayloadOffset  = ALIGN(TEXT_SRC_LMA + SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data), 32);
+ KernelPayloadMaxSize = (FLASH_SIZE_LMA - 0x200) - KernelPayloadOffset;
+ KernelPayloadVa      = LOW_ROM_BASE + KernelPayloadOffset;
++FlashCapacity        = FLASH_SIZE_LMA;
+ /* gen-flash-bin rejects impossible PE footprints before compression; the
+  * runtime framing check uses the same capacity's bound before decoding. */
+ KernelImageMaxSize   = 0x00400000;
 diff --git a/boot/nxldr/paging.c b/boot/nxldr/paging.c
 index 18d4d72d..fa334181 100644
 --- a/boot/nxldr/paging.c
@@ -315,10 +386,10 @@ index 18d4d72d..fa334181 100644
      }
 diff --git a/boot/nxldr/rom-kernel.h b/boot/nxldr/rom-kernel.h
 new file mode 100644
-index 00000000..e8168d70
+index 00000000..9a81b896
 --- /dev/null
 +++ b/boot/nxldr/rom-kernel.h
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,89 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + * Private prepared-image residency table in unused header-page padding.
 + * Immutable bytes live in the first flash mirror; kernel VAs stay unchanged.
@@ -351,6 +422,8 @@ index 00000000..e8168d70
 +    if (pe > Bytes - 88 || NxRomRead32(Image + pe) != 0x4550 ||
 +        NxRomRead16(Image + pe + 4) != 0x14c ||
 +        NxRomRead16(Image + pe + 20) < 64 ||
++        NxRomRead16(Image + pe + 24) != 0x10b ||
++        NxRomRead32(Image + pe + 24 + 32) != 4096 ||
 +        NxRomRead32(Image + pe + 24 + 28) != 0x84000000 ||
 +        NxRomRead32(Image + pe + 24 + 56) != Bytes ||
 +        NxRomRead32(Image + pe + 24 + 60) > NX_ROM_TABLE_OFFSET) return -1;
@@ -374,8 +447,14 @@ index 00000000..e8168d70
 +            unsigned extent = NxRomRead32(section + 8);
 +            unsigned raw = NxRomRead32(section + 16);
 +            unsigned flags = NxRomRead32(section + 36);
++            unsigned limit = j + 1 < sections ?
++                NxRomRead32(Image + table + (j + 1) * 40 + 12) : Bytes;
 +            if (raw > extent) extent = raw;
-+            if (start > Bytes || extent > Bytes - start) return -1;
++            if ((start & 4095) || start < 4096 || start > Bytes ||
++                limit > Bytes || limit < start || (limit & 4095) ||
++                extent > Bytes - start ||
++                extent / 4096 + (extent % 4096 != 0) >
++                    (limit - start) / 4096) return -1;
 +            if ((flags & 0x40000000) && !(flags & 0x82000000) &&
 +                rva >= start && rva - start < extent &&
 +                (rva - start) / 4096 + pages <=
@@ -524,8 +603,22 @@ index 0cd48fc3..908ffc2c 100644
  VOID NTAPI NxkMmPublishPersistence(BOOLEAN WarmReset);
  VOID NxkMmSetPersistentPages(ULONG_PTR Pa, SIZE_T Size, BOOLEAN Persist);
  VOID NxkMmClearPersistence(ULONG_PTR Pa, ULONG_PTR End);
+diff --git a/tests/host/boot-image/check.py b/tests/host/boot-image/check.py
+index 8552efb6..bbd298c7 100644
+--- a/tests/host/boot-image/check.py
++++ b/tests/host/boot-image/check.py
+@@ -132,7 +132,8 @@ class PreparedImage(unittest.TestCase):
+                 subprocess.run(['cc', '-O2', '-fno-builtin', '-no-pie',
+                                 '-Wl,-Ttext-segment=0x10000000',
+                                 f'-DXBOX_RAM_MIB={capacity}', '-I'+str(loader),
+-                                *map(str, sources), '-Wl,--defsym,KernelPayloadMaxSize=262144',
++                    *map(str, sources), '-Wl,--defsym,KernelPayloadMaxSize=262144',
++                    '-Wl,--defsym,FlashCapacity=262144',
+                                 '-o', str(exe)], check=True)
+                 cases = [('valid', blob, True),
+                          ('old-format', struct.pack('<I', 0x5a4b584e) + blob[4:], False),
 diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
-index 44a3bad7..b4bd2184 100644
+index 44a3bad7..088c2574 100644
 --- a/tests/host/boot-layout/check.py
 +++ b/tests/host/boot-layout/check.py
 @@ -28,6 +28,7 @@ def function(text, name):
@@ -536,7 +629,16 @@ index 44a3bad7..b4bd2184 100644
  paging = paging.replace('(ULONG *)PD_PA', 'host_page(PD_PA)')
  paging = paging.replace('(ULONG *)(NXBL_PT_LOW_PA + i * PAGE_SIZE)', 'host_page(NXBL_PT_LOW_PA + i * PAGE_SIZE)')
  paging = paging.replace('(ULONG *)(NXBL_PT_KSEG0_PA + i * PAGE_SIZE)', 'host_page(NXBL_PT_KSEG0_PA + i * PAGE_SIZE)')
-@@ -133,7 +134,7 @@ static void PciCfgWrite32(unsigned bus,unsigned dev,unsigned fn,unsigned off,ULO
+@@ -64,6 +65,8 @@ hal = 'VOID ' + function((root/'hal/halx86/xbox/pci.c').read_text(), 'NxConfigur
+ video = (root/'hal/halx86/xbox/video/xbox-video-support.c').read_text()
+ ram_global = next(line for line in video.splitlines() if line.startswith('unsigned int xbox_ram ='))
+ decompress = 'static const void *' + function((root/'boot/nxldr/loader.c').read_text(), 'DecompressKernel')
++decompress = decompress.replace('NxRomCount(Destination,',
++    'NxRomCount((const UCHAR *)host_page((ULONG)(ULONG_PTR)Destination),')
+ loader_types = (root/'boot/nxldr/nxldr.h').read_text()
+ loader_types = loader_types[loader_types.index('#define NXKRNL_XZ_MAGIC'):loader_types.index('#endif /* NXLDR_H */')]
+ 
+@@ -133,7 +136,7 @@ static void PciCfgWrite32(unsigned bus,unsigned dev,unsigned fn,unsigned off,ULO
  }
  static void BootDetectMemorySize(void) {}
  struct xz_dec {int unused;};static struct xz_dec decoder;
@@ -545,15 +647,17 @@ index 44a3bad7..b4bd2184 100644
  struct xz_dec *xz_dec_init(enum xz_mode mode,uint32_t max) {(void)mode;(void)max;return &decoder;}
  static int write_scratch;
  enum xz_ret xz_dec_run(struct xz_dec *d,struct xz_buf *b) {(void)d;if(write_scratch)memset((void *)(NXBL_KSEG0_BASE+(uintptr_t)b->out),0x5a,b->out_size);b->out_pos=b->out_size;b->in_pos=b->in_size;return XZ_STREAM_END;}
-@@ -180,6 +181,8 @@ shim += '\nstatic PMEMORY_ALLOCATION_DESCRIPTOR select_boot_zone(void) {PLIST_EN
+@@ -180,7 +183,9 @@ shim += '\nstatic PMEMORY_ALLOCATION_DESCRIPTOR select_boot_zone(void) {PLIST_EN
  shim += '\nstatic void reclaim_boot_pts(void) {\n' + cluster + '\n}\n'
  shim += '\nstatic void clear_user_maps(void) {MMPTE *StartPde,*EndPde;\n' + user_clear + '\n}\n'
  shim += '\n' + ram_global + '\n' + hal + '\n' + loader_types
+-shim += '\nstatic UCHAR KernelPayloadVa[sizeof(NXKRNL_XZ_HEADER)+1];\n#define KernelPayloadMaxSize ((UCHAR *)262144)\n' + decompress
 +crc = (root/'boot/nxldr/xz/xz_crc32.c').read_text().replace('#include "xz_private.h"','')
 +shim += crc
- shim += '\nstatic UCHAR KernelPayloadVa[sizeof(NXKRNL_XZ_HEADER)+1];\n#define KernelPayloadMaxSize ((UCHAR *)262144)\n' + decompress
++shim += '\nstatic UCHAR KernelPayloadVa[sizeof(NXKRNL_XZ_HEADER)+1];\n#define KernelPayloadMaxSize ((UCHAR *)262144)\n#define FlashCapacity ((UCHAR *)262144)\n' + decompress
  
  # Execute the real early guard with only physical addresses redirected to
+ # the host RAM alias. The emitted-ROM check below separately tests placement.
 diff --git a/tests/host/rom-kernel/boot.c b/tests/host/rom-kernel/boot.c
 new file mode 100644
 index 00000000..4e04090e
@@ -659,10 +763,10 @@ index 00000000..a77c2de3
 + subprocess.run([str(exe)],check=True)
 diff --git a/tests/host/rom-kernel/check-loader.py b/tests/host/rom-kernel/check-loader.py
 new file mode 100644
-index 00000000..f93788eb
+index 00000000..ee11a61e
 --- /dev/null
 +++ b/tests/host/rom-kernel/check-loader.py
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,32 @@
 +#!/usr/bin/env python3
 +# SPDX-License-Identifier: GPL-2.0-or-later
 +"""Run the production decompressor and XZ decoder with owned RAM/ROM inputs."""
@@ -683,7 +787,8 @@ index 00000000..f93788eb
 +(out/'loader.inc').write_text('void *'+function('xz_arena_alloc')+'\nstatic const void *'+function('DecompressKernel'))
 +prepared,start,rom=t.builder.prepare_rom_kernel_image(t.image(),0x100000,0x80000,retain_pages={0x1000})
 +legacy=t.builder.prepare_kernel_image(t.image(),0x100000)
-+for name,magic,data in [('rom',0x5249584e,prepared),('legacy',0x494b584e,legacy),('wrong',0x494b584e,prepared)]:
++claimed=bytearray(prepared);struct.pack_into('<I',claimed,0x80c,0x100000)
++for name,magic,data in [('wrong-capacity',0x5249584e,bytes(claimed)),('rom',0x5249584e,prepared),('legacy',0x494b584e,legacy),('wrong',0x494b584e,prepared)]:
 + compressed=t.builder.xz_compress(data)
 + payload=struct.pack('<III',magic,len(compressed),len(data))+compressed
 + (out/(name+'.inc')).write_text(','.join(str(b) for b in payload))
@@ -716,10 +821,10 @@ index 00000000..9a534d03
 +subprocess.run([str(out/'table')],check=True)
 diff --git a/tests/host/rom-kernel/loader.c b/tests/host/rom-kernel/loader.c
 new file mode 100644
-index 00000000..1502c900
+index 00000000..4d3b9279
 --- /dev/null
 +++ b/tests/host/rom-kernel/loader.c
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,59 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#define _GNU_SOURCE
 +#include <stdint.h>
@@ -735,6 +840,7 @@ index 00000000..1502c900
 +#define NXKRNL_XZ_MAGIC 0x494b584eUL
 +#define NXKRNL_ROM_MAGIC 0x5249584eUL
 +#define XZ_ARENA_SIZE (48*1024)
++#define FlashCapacity ((const UCHAR *)0x80000)
 +#define KernelPayloadMaxSize ((const UCHAR *)sizeof(KernelPayloadVa))
 +#define dprintf(...) ((void)0)
 +typedef struct {ULONG Magic,CompressedSize,DecompressedSize;} NXKRNL_XZ_HEADER;
@@ -748,6 +854,9 @@ index 00000000..1502c900
 +};
 +static const UCHAR wrong_payload[]={
 +#include "wrong.inc"
++};
++static const UCHAR wrong_capacity[]={
++#include "wrong-capacity.inc"
 +};
 +static const UCHAR rom_bytes[]={
 +#include "rom-bytes.inc"
@@ -770,16 +879,17 @@ index 00000000..1502c900
 + check(!run(rom_payload,sizeof(rom_payload))&&LoaderFailCode,"corrupted raw ROM is rejected before any paging handoff");
 + flash[ROM_OFFSET+17]^=1;
 + check(!run(wrong_payload,sizeof(wrong_payload)),"legacy framing cannot silently admit ROM-dependent image");
++ check(!run(wrong_capacity,sizeof(wrong_capacity)),"declared ROM capacity must equal the actual linked flash capacity");
 + check(run(legacy_payload,sizeof(legacy_payload))==ram&&((UCHAR *)ram)[0x2000]==37,"legacy RAM firmware still decompresses its original instructions");
 + printf("ROM production loader %u MiB: %u checks, %u failures\n",XBOX_RAM_MIB,checks,failures);
 + munmap(ram,0x100000);munmap(flash,0x80000);return failures!=0;
 +}
 diff --git a/tests/host/rom-kernel/table.c b/tests/host/rom-kernel/table.c
 new file mode 100644
-index 00000000..a89384fc
+index 00000000..286b5844
 --- /dev/null
 +++ b/tests/host/rom-kernel/table.c
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,42 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include <stdio.h>
 +#include <string.h>
@@ -815,6 +925,8 @@ index 00000000..a89384fc
 + check(NxRomCount(image,sizeof(image))==-1,"writable section cannot become ROM");
 + memcpy(image,source,sizeof(image));put(0x178+2*40+36,0x42000040);
 + check(NxRomCount(image,sizeof(image))==-1,"discardable section cannot become permanent ROM");
++ memcpy(image,source,sizeof(image));put(0x178+16,0x3000);put(0x810,0x3000);
++ check(NxRomCount(image,sizeof(image))==-1,"raw section extent cannot claim the following writable section");
 + memset(image+0x800,0,0x300);check(NxRomCount(image,sizeof(image))==0,"legacy RAM image has no ROM spans");
 + check(NxRomCount(image,0x800)==0,"short legacy input never reads table outside bounds");
 + printf("ROM table: %u checks, %u failures\n",checks,failures);
@@ -822,10 +934,10 @@ index 00000000..a89384fc
 +}
 diff --git a/tests/host/rom-kernel/test-image.py b/tests/host/rom-kernel/test-image.py
 new file mode 100644
-index 00000000..0552443a
+index 00000000..25e6d792
 --- /dev/null
 +++ b/tests/host/rom-kernel/test-image.py
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,108 @@
 +#!/usr/bin/env python3
 +# SPDX-License-Identifier: GPL-2.0-or-later
 +"""Exercise the actual image builder against independently owned PE bytes."""
@@ -904,6 +1016,16 @@ index 00000000..0552443a
 +        self.assertEqual(prepared[0x2000:0x3000],bytes([37])*4096)
 +        self.assertEqual(prepared[0x800:0x900],bytes(256))
 +
++    def test_rom_and_discardable_run_share_one_warm_staging_budget(self):
++        raw=bytearray(image());struct.pack_into('<H',raw,0x86,5)
++        struct.pack_into('<I',raw,0x98+56,458*4096)
++        sh=0x178+4*40;raw[sh:sh+8]=b'.reloc\0\0'
++        struct.pack_into('<IIII',raw,sh+8,4096,457*4096,0,0)
++        struct.pack_into('<I',raw,sh+36,0x42000040)
++        self.assertEqual(len(builder.prepare_kernel_image(bytes(raw),0x400000)),458*4096)
++        with self.assertRaisesRegex(ValueError,'staging'):
++            builder.prepare_rom_kernel_image(bytes(raw),0x400000,0x80000,retain_pages={0x1000})
++
 +    def test_cli_places_rom_without_overwriting_loader_or_reset(self):
 +        with tempfile.TemporaryDirectory() as directory:
 +            path=Path(directory);loader=bytearray([255])*0x80000
@@ -924,3 +1046,29 @@ index 00000000..0552443a
 +            self.assertEqual(flash[0x7e000:0x7f000],bytes([111])*4096)
 +
 +if __name__ == '__main__': unittest.main()
+diff --git a/tests/xbe/rom-shadow-persistence/Makefile b/tests/xbe/rom-shadow-persistence/Makefile
+new file mode 100644
+index 00000000..2245ebea
+--- /dev/null
++++ b/tests/xbe/rom-shadow-persistence/Makefile
+@@ -0,0 +1,5 @@
++XBE_TITLE = rom-shadow-persistence
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /usr/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/rom-shadow-persistence/main.c b/tests/xbe/rom-shadow-persistence/main.c
+new file mode 100644
+index 00000000..9bcddd0d
+--- /dev/null
++++ b/tests/xbe/rom-shadow-persistence/main.c
+@@ -0,0 +1,9 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * 64 MiB optional-ROM qualification. CI first proves that this exact page
++ * is a ROM-backed code shadow. The public guest then allocates that RAM,
++ * persists it through a real quick reboot, and verifies bytes and ownership.
++ */
++#define DATA_PA 0x03403000UL
++#define PERSIST_PAGES 1
++#define GUARD_PAGES 0
++#include "../clean-room-warm-reboot/main.c"

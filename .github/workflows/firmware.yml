@@ -203,6 +203,38 @@ jobs:
                            expected_memory_mib=${{ matrix.memory_mib }})
           assert len(result['workloads']) == 41, result
           PY
+      - name: Qualify exact ROM shadow through native warm reboot
+        if: matrix.variant == 'release-rom' && matrix.memory_mib == 64
+        run: |
+          python3 - <<'PYCODE'
+          import lzma, pathlib, struct
+          flash = pathlib.Path('artifacts/firmware-release-rom-64mib/flash.bin').read_bytes()
+          offsets = [p for p in range(len(flash)-18) if flash[p:p+4] == b'NXIR' and flash[p+12:p+18] == b'\xfd7zXZ\0']
+          assert len(offsets) == 1, offsets
+          p = offsets[0]; compressed = struct.unpack_from('<I', flash, p+4)[0]
+          image = lzma.decompress(flash[p+12:p+12+compressed])
+          count = struct.unpack_from('<I', image, 0x808)[0]
+          spans = [struct.unpack_from('<IIII', image, 0x810+i*16) for i in range(count)]
+          assert any(rva <= 0x3000 < rva+pages*4096 for rva,pages,physical,crc in spans), spans
+          PYCODE
+          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-release-rom-64mib/build.json"))["source_directory"])')
+          nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+            -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -w "$guest_source/tests/xbe/rom-shadow-persistence" \
+            "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
+          docker run --init --rm -v "$PWD:/work" spiritboot-toolchain xvfb-run -a \
+            python3 scripts/run-firmware.py --xemu artifacts/squashfs-root/usr/bin/xemu \
+            --flash artifacts/firmware-release-rom-64mib/flash.bin \
+            --hdd artifacts/xbox_hdd.qcow2 \
+            --dvd "$guest_source/tests/xbe/rom-shadow-persistence/rom-shadow-persistence.iso" \
+            --memory-mib 64 --output artifacts/rom-shadow-release-rom-64mib --timeout 45 --expect-tap
+          python3 - <<'PYCODE'
+          import json
+          result = json.load(open('artifacts/rom-shadow-release-rom-64mib/run.json'))
+          assert result['status'] == 'passed' and result['tap']['ok'] == result['tap']['plan'] == 7, result
+          assert result['tap']['todo'] == result['tap']['failed'] == result['tap']['skipped'] == 0, result
+          PYCODE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -227,4 +259,5 @@ jobs:
             artifacts/firmware-upper-reserve/flash.bin
             artifacts/firmware-upper-reserve/build.json
             artifacts/firmware-upper-reserve/build.log
+            artifacts/rom-shadow-release-rom-64mib/
             LICENSE
