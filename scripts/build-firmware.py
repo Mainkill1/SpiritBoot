@@ -15,6 +15,8 @@ def main():
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--variant", choices=("release", "debug"), default="release")
+    parser.add_argument("--memory-mib", type=int, choices=(64, 128), default=128,
+                        help="firmware RAM layout; default: 128 MiB")
     parser.add_argument("--media-policy", choices=("strict", "emulator-file-media"),
                         default="emulator-file-media",
                         help="loaded media compatibility; default: emulator-file-media")
@@ -22,7 +24,7 @@ def main():
     args = parser.parse_args()
     try:
         result = build_firmware(args.source, args.output, args.variant, args.lock,
-                                args.media_policy)
+                                args.media_policy, args.memory_mib)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"build failed: {error}", file=sys.stderr)
         return 1

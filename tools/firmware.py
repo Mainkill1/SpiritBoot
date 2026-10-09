@@ -89,19 +89,21 @@ def patch_inputs(patches):
 
 
 def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
-                   media_policy="emulator-file-media"):
+                   media_policy="emulator-file-media", memory_mib=128):
     source, output = Path(source).resolve(), Path(output).resolve()
     if variant not in ("release", "debug"):
         raise ValueError("variant must be release or debug")
     if media_policy not in ("strict", "emulator-file-media"):
         raise ValueError("invalid media policy")
+    if memory_mib not in (64, 128):
+        raise ValueError("memory capacity must be 64 or 128 MiB")
     if output == source or source.is_relative_to(output) or output.is_relative_to(source):
         raise ValueError("source and output directories must not overlap")
     output.mkdir(parents=True, exist_ok=True)
     published = output / "flash.bin"
     published.unlink(missing_ok=True)
     manifest = {"schema": 1, "status": "failed", "variant": variant,
-                "media_policy": media_policy,
+                "media_policy": media_policy, "memory_mib": memory_mib,
                 "source": str(source), "source_directory": str(source), "output_directory": str(output),
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "commands": []}
@@ -167,6 +169,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
             run(["cmake", "-G", "Ninja", "-S", str(actual_source), "-B", str(build),
                  f"-DCMAKE_TOOLCHAIN_FILE={actual_source / 'toolchain-gcc.cmake'}",
                  "-DCMAKE_BUILD_TYPE=Release", f"-DDBG={int(variant == 'debug')}", "-DKDBG=FALSE",
+                 f"-DXBOX_RAM_MIB={memory_mib}",
                  "-DXBOX_EMULATOR_FILE_MEDIA=" +
                  ("ON" if media_policy == "emulator-file-media" else "OFF")])
             run(["cmake", "--build", str(build), "--clean-first", "--target", "flash", "--parallel", "4"])
@@ -234,10 +237,12 @@ def grade_tap(text):
 
 
 def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve_hdd=False,
-                 tb_plugin=None):
+                 tb_plugin=None, memory_mib=128):
     """Capture an open-firmware run. A deadline never becomes a passing test."""
     if not isinstance(timeout, (int, float)) or not 0 < timeout <= 86400:
         raise ValueError("timeout must be between 0 and 86400 seconds")
+    if memory_mib not in (64, 128):
+        raise ValueError("memory capacity must be 64 or 128 MiB")
     paths = {"xemu": Path(xemu).resolve(), "flash": Path(flash).resolve(),
              "hdd": Path(hdd).resolve()}
     if dvd is not None:
@@ -269,7 +274,7 @@ def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve
             raise ValueError(f"private HDD conversion failed: {error.output}") from error
     config = output / "xemu.toml"
     config.write_text("[general]\nshow_welcome = false\nskip_boot_anim = true\n"
-                      "[sys]\nmem_limit = '128'\n[sys.files]\n" + "\n".join(
+                      f"[sys]\nmem_limit = '{memory_mib}'\n[sys.files]\n" + "\n".join(
                           f"{name}_path = {json.dumps(value, ensure_ascii=False)}" for name, value in
                           [("bootrom", ""), ("flashrom", str(paths["flash"])),
                            ("eeprom", ""), ("hdd", str(runtime_hdd))] +
@@ -287,7 +292,7 @@ def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve
         command.extend(["-plugin", f'{paths["tb_plugin"]},output={capture}'])
     manifest = {"schema": 1, "status": "launch_failed", "command": command,
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "timeout_seconds": timeout, "memory_mib": 128,
+                "timeout_seconds": timeout, "memory_mib": memory_mib,
                 "boot_mode": "open-direct", "snapshot": not preserve_hdd, "expect_tap": tap,
                 "assets": {name: {"path": str(path), "sha256": sha256(path),
                                   "size": path.stat().st_size} for name, path in paths.items()}}
