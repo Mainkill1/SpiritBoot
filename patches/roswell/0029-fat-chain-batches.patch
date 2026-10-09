@@ -1,0 +1,389 @@
+diff --git a/drivers/filesystems/vfatfs/fat.c b/drivers/filesystems/vfatfs/fat.c
+index 39f5ade2..6902efcb 100644
+--- a/drivers/filesystems/vfatfs/fat.c
++++ b/drivers/filesystems/vfatfs/fat.c
+@@ -821,6 +821,117 @@ GetNextCluster(
+     return Status;
+ }
+ 
++/*
++ * Walk non-extending seeks with one bounded metadata lease. Drop the old
++ * mapping before changing chunks, and drop all ownership between batches.
++ */
++NTSTATUS
++WalkFatChain(
++    PDEVICE_EXTENSION DeviceExt,
++    ULONG CurrentCluster,
++    ULONG Links,
++    PULONG Cluster)
++{
++    ULONG EntrySize, EntryMask, ChunkSize;
++    NTSTATUS Status = STATUS_SUCCESS;
++
++    if ((DeviceExt->FatInfo.FatType == FAT16 ||
++         DeviceExt->FatInfo.FatType == FATX16) &&
++        DeviceExt->GetNextCluster == FAT16GetNextCluster)
++    {
++        EntrySize = sizeof(USHORT);
++        EntryMask = 0xffff;
++    }
++    else if ((DeviceExt->FatInfo.FatType == FAT32 ||
++              DeviceExt->FatInfo.FatType == FATX32) &&
++             DeviceExt->GetNextCluster == FAT32GetNextCluster)
++    {
++        EntrySize = sizeof(ULONG);
++        EntryMask = FAT32EntryMask(DeviceExt);
++    }
++    else
++    {
++        while (Links--)
++        {
++            Status = GetNextCluster(DeviceExt, CurrentCluster, &CurrentCluster);
++            if (!NT_SUCCESS(Status))
++                return Status;
++        }
++        *Cluster = CurrentCluster;
++        return STATUS_SUCCESS;
++    }
++
++    ChunkSize = CACHEPAGESIZE(DeviceExt);
++    while (Links)
++    {
++        PVOID Context = NULL, BaseAddress = NULL;
++        ULONG MappedOffset = 0;
++        ULONG BatchLinks = Links < 256 ? Links : 256;
++        ULONG i;
++
++        ExAcquireResourceSharedLite(&DeviceExt->FatResource, TRUE);
++        _SEH2_TRY
++        {
++            for (i = 0; i < BatchLinks; ++i)
++            {
++                ULONG FATOffset, ChunkOffset;
++                LARGE_INTEGER Offset;
++
++                if (CurrentCluster == 0)
++                {
++                    Status = STATUS_FILE_CORRUPT_ERROR;
++                    break;
++                }
++                FATOffset = CurrentCluster * EntrySize;
++                ChunkOffset = ROUND_DOWN(FATOffset, ChunkSize);
++                if (Context == NULL || MappedOffset != ChunkOffset)
++                {
++                    if (Context != NULL)
++                    {
++                        CcUnpinData(Context);
++                        Context = NULL;
++                    }
++                    Offset.QuadPart = ChunkOffset;
++                    if (!CcMapData(DeviceExt->FATFileObject, &Offset, ChunkSize,
++                                   MAP_WAIT, &Context, &BaseAddress))
++                    {
++                        Status = STATUS_UNSUCCESSFUL;
++                        break;
++                    }
++                    MappedOffset = ChunkOffset;
++                }
++                if (EntrySize == sizeof(USHORT))
++                    CurrentCluster = *(PUSHORT)((char *)BaseAddress +
++                                               FATOffset % ChunkSize);
++                else
++                    CurrentCluster = *(PULONG)((char *)BaseAddress +
++                                              FATOffset % ChunkSize);
++                CurrentCluster &= EntryMask;
++                if (CurrentCluster >= EntryMask - 7)
++                    CurrentCluster = 0xffffffff;
++                if (CurrentCluster == 0)
++                {
++                    Status = STATUS_FILE_CORRUPT_ERROR;
++                    break;
++                }
++            }
++        }
++        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
++        {
++            Status = _SEH2_GetExceptionCode();
++        }
++        _SEH2_END;
++        if (Context != NULL)
++            CcUnpinData(Context);
++        ExReleaseResourceLite(&DeviceExt->FatResource);
++        if (!NT_SUCCESS(Status))
++            return Status;
++        Links -= BatchLinks;
++    }
++    *Cluster = CurrentCluster;
++    return STATUS_SUCCESS;
++}
++
+ /*
+  * FUNCTION: Retrieve the next cluster depending on the FAT type
+  */
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index 908bd924..62d983fb 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -99,12 +99,11 @@ OffsetToCluster(
+         }
+         else
+         {
+-            for (i = 0; i < FileOffset / DeviceExt->FatInfo.BytesPerCluster; i++)
+-            {
+-                Status = GetNextCluster (DeviceExt, CurrentCluster, &CurrentCluster);
+-                if (!NT_SUCCESS(Status))
+-                    return Status;
+-            }
++            Status = WalkFatChain(DeviceExt, CurrentCluster,
++                                  FileOffset / DeviceExt->FatInfo.BytesPerCluster,
++                                  &CurrentCluster);
++            if (!NT_SUCCESS(Status))
++                return Status;
+             *Cluster = CurrentCluster;
+        }
+        return STATUS_SUCCESS;
+diff --git a/drivers/filesystems/vfatfs/vfat.h b/drivers/filesystems/vfatfs/vfat.h
+index 25ddaf0b..b86e751d 100644
+--- a/drivers/filesystems/vfatfs/vfat.h
++++ b/drivers/filesystems/vfatfs/vfat.h
+@@ -922,6 +922,13 @@ GetNextCluster(
+     ULONG CurrentCluster,
+     PULONG NextCluster);
+ 
++NTSTATUS
++WalkFatChain(
++    PDEVICE_EXTENSION DeviceExt,
++    ULONG CurrentCluster,
++    ULONG Links,
++    PULONG Cluster);
++
+ NTSTATUS
+ GetNextClusterExtend(
+     PDEVICE_EXTENSION DeviceExt,
+diff --git a/tests/host/fatx/check-chain-walk.py b/tests/host/fatx/check-chain-walk.py
+new file mode 100644
+index 00000000..d8186961
+--- /dev/null
++++ b/tests/host/fatx/check-chain-walk.py
+@@ -0,0 +1,221 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise production seek traversal, metadata lifetime and work counts."""
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++fat = (root / "drivers/filesystems/vfatfs/fat.c").read_text()
++rw = (root / "drivers/filesystems/vfatfs/rw.c").read_text()
++names = ["FAT32EntryMask", "FAT32GetNextCluster", "FAT16GetNextCluster",
++         "GetNextCluster"]
++if "WalkFatChain(" in fat:
++    names.append("WalkFatChain")
++body = "\n".join(extract.function(fat, name) for name in names)
++body += extract.function(rw, "OffsetToCluster")
++shim = r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <assert.h>
++#include <string.h>
++#include <setjmp.h>
++typedef uint32_t ULONG, *PULONG;
++typedef uint16_t USHORT, *PUSHORT;
++typedef int32_t NTSTATUS;
++typedef int BOOLEAN;
++typedef void *PVOID;
++typedef struct { int64_t QuadPart; } LARGE_INTEGER;
++typedef struct _DEVICE_EXTENSION DEVICE_EXTENSION, *PDEVICE_EXTENSION;
++struct _DEVICE_EXTENSION {
++    struct { ULONG FatType, BytesPerCluster, SectorsPerCluster, rootStart;
++    } FatInfo;
++    PVOID FATFileObject;
++    int FatResource;
++    NTSTATUS (*GetNextCluster)(PDEVICE_EXTENSION, ULONG, PULONG);
++};
++#define FAT16 2
++#define FAT32 3
++#define FATX16 4
++#define FATX32 5
++#define TRUE 1
++#define FALSE 0
++#define STATUS_SUCCESS 0
++#define STATUS_UNSUCCESSFUL ((NTSTATUS)0xc0000001)
++#define STATUS_FILE_CORRUPT_ERROR ((NTSTATUS)0xc0000102)
++#define VFAT_BREAK_ON_CORRUPTION 1
++#define MAP_WAIT 1
++#define NT_SUCCESS(s) ((s) >= 0)
++#define NT_ASSERT(x) assert(x)
++#define ASSERT(x) assert(x)
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define DbgPrint(...) ((void)0)
++#define ROUND_DOWN(n,a) ((n) & ~((a)-1))
++#define CACHEPAGESIZE(d) (chunk_size)
++static jmp_buf exception;
++static NTSTATUS exception_status;
++#define _SEH2_TRY if (setjmp(exception) == 0)
++#define _SEH2_EXCEPT(x) else
++#define _SEH2_YIELD(x) x
++#define _SEH2_END
++#define _SEH2_GetExceptionCode() exception_status
++static struct { ULONG Flags; } global;
++#define VfatGlobalData (&global)
++static union { ULONG words[32768]; USHORT halves[65536]; } disk;
++static ULONG chunk_size;
++static unsigned maps, unpins, pins, acquisitions, releases, held, max_links;
++static unsigned links_this_lease, fault_map, false_map;
++static int CcMapData(PVOID file, LARGE_INTEGER *offset, ULONG length,
++                     int wait, PVOID *context, PVOID *base) {
++    (void)file; (void)wait;
++    assert(held == 1 && pins == 0 && length == chunk_size);
++    assert(offset->QuadPart >= 0);
++    ++maps;
++    if (maps == fault_map) {
++        exception_status = STATUS_UNSUCCESSFUL;
++        longjmp(exception, 1);
++    }
++    if (maps == false_map || (uint64_t)offset->QuadPart + length > sizeof(disk))
++        return FALSE;
++    *base = (unsigned char *)&disk + offset->QuadPart;
++    *context = *base;
++    ++pins;
++    return TRUE;
++}
++static void CcUnpinData(PVOID context) {
++    assert(context != NULL && pins == 1 && held == 1);
++    --pins; ++unpins;
++}
++static int ExAcquireResourceSharedLite(int *r, int wait) {
++    (void)r; (void)wait; assert(!held && !pins);
++    held = 1; links_this_lease = 0; ++acquisitions;
++    return TRUE;
++}
++static void ExReleaseResourceLite(int *r) {
++    (void)r; assert(held == 1 && pins == 0);
++    held = 0; ++releases;
++}
++static NTSTATUS GetNextClusterExtend(PDEVICE_EXTENSION d, ULONG c, PULONG n) {
++    return GetNextCluster(d, c, n);
++}
++'''
++# Forward declaration needed by the unchanged extension adapter.
++shim = shim.replace("static NTSTATUS GetNextClusterExtend", 
++    "NTSTATUS GetNextCluster(PDEVICE_EXTENSION, ULONG, PULONG);\n"
++    "static NTSTATUS GetNextClusterExtend")
++main = r'''
++static DEVICE_EXTENSION setup(ULONG type, ULONG chunk) {
++    DEVICE_EXTENSION d = {0};
++    d.FatInfo.FatType = type; d.FatInfo.BytesPerCluster = 4096;
++    d.FatInfo.SectorsPerCluster = 8; d.FatInfo.rootStart = 24;
++    d.GetNextCluster = (type == FAT16 || type == FATX16) ?
++                      FAT16GetNextCluster : FAT32GetNextCluster;
++    chunk_size = chunk;
++    memset(&disk, 0, sizeof(disk));
++    maps = unpins = pins = acquisitions = releases = held = 0;
++    links_this_lease = max_links = fault_map = false_map = 0;
++    return d;
++}
++static void put(ULONG type, ULONG c, ULONG next) {
++    if (type == FAT16 || type == FATX16) disk.halves[c] = next;
++    else disk.words[c] = next;
++}
++static int failures, checks;
++static void check(int ok, const char *label) {
++    ++checks; if (!ok) { ++failures; fprintf(stderr, "FAIL: %s\n", label); }
++}
++static void balanced(void) {
++    check(!pins && !held && maps == unpins && acquisitions == releases,
++          "all successful maps and resources released");
++}
++int main(void) {
++    const ULONG types[] = {FAT16, FATX16, FAT32, FATX32};
++    for (unsigned t = 0; t < 4; ++t) {
++        ULONG type = types[t], next = 0;
++        DEVICE_EXTENSION d = setup(type, 4096);
++        for (ULONG c = 2; c < 702; ++c) put(type, c, c + 1);
++        NTSTATUS s = OffsetToCluster(&d, 2, 700 * 4096, &next, FALSE);
++        check(s == STATUS_SUCCESS && next == 702, "700-link output unchanged");
++        check(maps <= 3 && acquisitions == 3,
++              "700 links use bounded batches, not 700 mappings");
++        balanced();
++        const ULONG lengths[] = {1, 256, 257, 512, 513};
++        for (unsigned b = 0; b < 5; ++b) {
++            d = setup(type, 4096);
++            for (ULONG c = 2; c < 702; ++c) put(type, c, c + 1);
++            s = OffsetToCluster(&d, 2, lengths[b] * 4096, &next, FALSE);
++            check(s == STATUS_SUCCESS && next == 2 + lengths[b] &&
++                  maps == (lengths[b] + 255) / 256 && maps == acquisitions,
++                  "batch boundary preserves output and bounds mapping lease");
++            balanced();
++        }
++
++        d = setup(type, 4096);
++        ULONG chain[] = {2, 4090, 4, 8190, 6, 4100, 8};
++        for (unsigned i = 0; i < 6; ++i) put(type, chain[i], chain[i+1]);
++        next = 0;
++        s = OffsetToCluster(&d, 2, 6 * 4096, &next, FALSE);
++        check(s == STATUS_SUCCESS && next == 8, "fragmented mapping transitions");
++        balanced();
++
++        d = setup(type, 16384); put(type, 2, 0xffffffffu);
++        s = OffsetToCluster(&d, 2, 4096, &next, FALSE);
++        check(s == STATUS_SUCCESS && next == 0xffffffffu, "terminal EOF preserved");
++        balanced();
++
++        d = setup(type, 4096); next = 0x1234;
++        s = OffsetToCluster(&d, 2, 4096, &next, FALSE);
++        check(s == STATUS_FILE_CORRUPT_ERROR && next == 0x1234,
++              "free entry is corruption and preserves caller output");
++        balanced();
++
++        d = setup(type, 4096); put(type, 2, 4090);
++        fault_map = 2; next = 0x1234;
++        s = OffsetToCluster(&d, 2, 2 * 4096, &next, FALSE);
++        check(s == STATUS_UNSUCCESSFUL && next == 0x1234,
++              "mapping exception propagates without partial output");
++        check(!pins && !held && unpins == 1 && acquisitions == releases,
++              "exception releases old mapping and resource");
++    }
++    DEVICE_EXTENSION d = setup(FATX16, 4096); ULONG next = 0x1234;
++    false_map = 1;
++    check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == STATUS_UNSUCCESSFUL &&
++          next == 0x1234 && !pins && !held && acquisitions == releases,
++          "false mapping result releases ownership and preserves output");
++    d = setup(FAT32, 4096);
++    put(FAT32, 2, 0xa0000003u);
++    check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == 0 && next == 3,
++          "DOS FAT32 masks high nibble");
++    balanced();
++    d = setup(FATX32, 4096); put(FATX32, 2, 0xf0000003u);
++    check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == 0 && next == 0xf0000003u,
++          "FATX32 retains full-width entry");
++    balanced();
++    d = setup(FATX16, 4096); put(FATX16, 2, 3);
++    check(OffsetToCluster(&d, 2, 4096, &next, TRUE) == 0 && next == 3,
++          "extension route unchanged");
++    balanced();
++    d = setup(FATX16, 4096);
++    check(OffsetToCluster(&d, 1, 8192, &next, FALSE) == 0 && next == 40 && !maps,
++          "root sentinel route unchanged");
++    check(OffsetToCluster(&d, 2, 0, &next, FALSE) == 0 && next == 2 && !maps,
++          "zero-link seek requires no mapping");
++    printf("FAT chain production paths: %d checks, %d failures\n", checks, failures);
++    return failures != 0;
++}
++'''
++source = out / "chain.c"
++source.write_text(shim + body + main)
++subprocess.run(["cc", "-std=c11", "-O0", "-Wall", "-Wextra", "-Werror",
++                str(source), "-o", str(out / "chain")], check=True)
++subprocess.run([str(out / "chain")], check=True)
