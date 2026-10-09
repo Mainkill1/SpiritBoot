@@ -1,0 +1,136 @@
+diff --git a/tests/host/boot-image/check.py b/tests/host/boot-image/check.py
+index 5b819de3..8552efb6 100644
+--- a/tests/host/boot-image/check.py
++++ b/tests/host/boot-image/check.py
+@@ -90,6 +90,18 @@ class PreparedImage(unittest.TestCase):
+                 with self.assertRaisesRegex(ValueError, 'warm.*capacity'):
+                     self.pack(raw)
+ 
++    def test_partial_final_discardable_page_counts_toward_reset_budget(self):
++        # With 453 whole pages the workspace exactly fills the handoff.
++        # One byte in another mapped discardable page must exceed that budget.
++        raw = fixture()
++        sh = 0x178 + 2 * 40
++        raw[sh:sh+8] = b'INIT\0\0\0\0'
++        struct.pack_into('<I', raw, sh+8, 453 * 4096 + 1)
++        struct.pack_into('<I', raw, sh+36, 0x02000000)
++        struct.pack_into('<I', raw, 0xd0, (3 + 454) * 4096)
++        with self.assertRaisesRegex(ValueError, 'warm.*capacity'):
++            self.pack(raw)
++
+     def test_actual_runtime_validator_does_not_remap(self):
+         with tempfile.TemporaryDirectory() as tmp:
+             tmp = Path(tmp)
+diff --git a/tests/host/discardable-sections/check.py b/tests/host/discardable-sections/check.py
+new file mode 100644
+index 00000000..153fd949
+--- /dev/null
++++ b/tests/host/discardable-sections/check.py
+@@ -0,0 +1,16 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production boot section walker with owned PE/layout fixtures."""
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve(); out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location('extract', root/'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec); spec.loader.exec_module(extract)
++body = extract.function((root/'ntoskrnl/mm/ARM3/sysldr.c').read_text(), 'MiFindInitializationCode')
++(out/'actual.inc').write_text(body)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-I'+str(out),str(Path(__file__).with_name('fixture.c')),'-o',str(out/'discardable')],check=True)
++subprocess.run([str(out/'discardable')],check=True)
+diff --git a/tests/host/discardable-sections/fixture.c b/tests/host/discardable-sections/fixture.c
+new file mode 100644
+index 00000000..2c02bdbd
+--- /dev/null
++++ b/tests/host/discardable-sections/fixture.c
+@@ -0,0 +1,85 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <assert.h>
++typedef void VOID,*PVOID;
++typedef uint32_t ULONG;
++typedef uintptr_t ULONG_PTR;
++typedef unsigned char BOOLEAN;
++typedef const char *PCCH;
++#define IN
++#define OUT
++#define NTAPI
++#define CODE_SEG(s)
++#define SARCH_XBOX 1
++#define TRUE 1
++#define FALSE 0
++#define PAGE_SIZE 4096u
++#define IMAGE_SCN_MEM_DISCARDABLE 0x02000000u
++#define LDRP_MM_LOADED 1u
++#define ASSERT assert
++#define max(a,b) ((a)>(b)?(a):(b))
++#define ALIGN_UP_BY(x,a) (((x)+(a)-1)&~(ULONG_PTR)((a)-1))
++#define ALIGN_DOWN_BY(x,a) ((x)&~(ULONG_PTR)((a)-1))
++#define DBG_UNREFERENCED_LOCAL_VARIABLE(x) (void)(x)
++#define MI_IS_PHYSICAL_ADDRESS(x) 0
++#define DPRINT(...) ((void)0)
++#define WrVirtualMemory 0
++#define KernelMode 0
++#define MUTANT_INCREMENT 0
++typedef struct LINK {struct LINK *Flink,*Blink;} LIST_ENTRY,*PLIST_ENTRY;
++typedef struct {char Name[8];union {ULONG VirtualSize;} Misc;ULONG VirtualAddress,SizeOfRawData,Characteristics;} IMAGE_SECTION_HEADER,*PIMAGE_SECTION_HEADER;
++typedef struct {struct {ULONG NumberOfSections;} FileHeader;struct {ULONG SectionAlignment;} OptionalHeader;IMAGE_SECTION_HEADER sections[8];} IMAGE_NT_HEADERS,*PIMAGE_NT_HEADERS;
++typedef struct {LIST_ENTRY InLoadOrderLinks;PVOID DllBase;ULONG Flags,SizeOfImage;int BaseDllName;} LDR_DATA_TABLE_ENTRY,*PLDR_DATA_TABLE_ENTRY;
++#define IMAGE_FIRST_SECTION(h) ((h)->sections)
++#define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p)-offsetof(t,f)))
++static LIST_ENTRY PsLoadedModuleList;
++static LDR_DATA_TABLE_ENTRY module;
++static IMAGE_NT_HEADERS header;
++static int MmSystemLoadLock,PsLoadedModuleResource,phase,no_header;
++static ULONG_PTR starts[8],ends[8];static unsigned freed,checks;
++static void KeEnterCriticalRegion(void){assert(phase==0);phase=1;}
++static void KeWaitForSingleObject(int *l,int r,int m,int a,void *t){(void)l;(void)r;(void)m;(void)a;(void)t;assert(phase==1);phase=2;}
++static void ExAcquireResourceExclusiveLite(int *l,int w){(void)l;(void)w;assert(phase==2);phase=3;}
++static void ExReleaseResourceLite(int *l){(void)l;assert(phase==3);phase=2;}
++static void KeReleaseMutant(int *l,int i,int a,int b){(void)l;(void)i;(void)a;(void)b;assert(phase==2);phase=1;}
++static void KeLeaveCriticalRegion(void){assert(phase==1);phase=0;}
++static PIMAGE_NT_HEADERS RtlImageNtHeader(PVOID p){assert(p==module.DllBase);return no_header?NULL:&header;}
++static void MiFreeInitializationCode(PVOID a,PVOID b){assert(phase==3&&freed<8);starts[freed]=(ULONG_PTR)a;ends[freed++]=(ULONG_PTR)b;}
++#include "actual.inc"
++static void setup(unsigned n,ULONG size){
++ memset(&header,0,sizeof(header));memset(&module,0,sizeof(module));
++ header.FileHeader.NumberOfSections=n;header.OptionalHeader.SectionAlignment=4096;
++ module.DllBase=(PVOID)0x84000000u;module.SizeOfImage=size;
++ module.InLoadOrderLinks.Flink=&PsLoadedModuleList;PsLoadedModuleList.Flink=&module.InLoadOrderLinks;
++ freed=0;phase=0;no_header=0;
++}
++static void section(unsigned i,const char *name,ULONG rva,ULONG vs,ULONG raw,ULONG flags){
++ IMAGE_SECTION_HEADER *s=&header.sections[i];memcpy(s->Name,name,strlen(name));
++ s->VirtualAddress=rva;s->Misc.VirtualSize=vs;s->SizeOfRawData=raw;s->Characteristics=flags;
++}
++static void expect(unsigned count,ULONG first,ULONG end){
++ PVOID a=NULL,b=NULL;MiFindInitializationCode(&a,&b);assert(phase==0);
++ if(freed!=count||(count&&(starts[0]!=(ULONG_PTR)module.DllBase+first||ends[0]!=(ULONG_PTR)module.DllBase+end))){
++  fprintf(stderr,"discard check %u: ranges=%u expected=%u first=%lx end=%lx\n",checks,freed,count,(unsigned long)(freed?starts[0]:0),(unsigned long)(freed?ends[0]:0));exit(1);
++ }
++ assert(a==NULL);for(unsigned i=0;i<freed;++i){assert(!(starts[i]&4095)&&!(ends[i]&4095));assert(ends[i]<=(ULONG_PTR)module.DllBase+module.SizeOfImage);}
++ ++checks;
++}
++int main(void){
++ setup(2,0x3000);section(0,"INIT",0x1000,0x901,0xa00,IMAGE_SCN_MEM_DISCARDABLE);section(1,".rsrc",0x2000,0xac8,0xc00,IMAGE_SCN_MEM_DISCARDABLE);expect(1,0x1000,0x3000);
++ setup(1,0x2000);section(0,"INIT",0x1000,1,0,IMAGE_SCN_MEM_DISCARDABLE);expect(1,0x1000,0x2000);
++ setup(1,0x2000);section(0,"INIT",0x1000,0,0,IMAGE_SCN_MEM_DISCARDABLE);expect(0,0,0);
++ setup(2,0x3000);section(0,"INIT",0x1000,1,0,IMAGE_SCN_MEM_DISCARDABLE);section(1,".data",0x2000,1,0,0);expect(1,0x1000,0x2000);
++ setup(3,0x4000);section(0,"INIT",0x1000,1,0,IMAGE_SCN_MEM_DISCARDABLE);section(1,".data",0x2000,1,0,0);section(2,".rsrc",0x3000,1,0,IMAGE_SCN_MEM_DISCARDABLE);expect(2,0x1000,0x2000);assert(starts[1]==0x84003000u&&ends[1]==0x84004000u);
++ setup(1,0x3000);section(0,"INIT",0x1000,0x1001,0x1800,IMAGE_SCN_MEM_DISCARDABLE);expect(1,0x1000,0x3000);
++ setup(1,0x2000);section(0,"INIT",0x1000,0x3000,0,IMAGE_SCN_MEM_DISCARDABLE);expect(1,0x1000,0x2000);
++ setup(1,0x2000);section(0,"INIT",0x1000,1,0,IMAGE_SCN_MEM_DISCARDABLE);module.Flags=LDRP_MM_LOADED;expect(0,0,0);
++ setup(1,0x2000);section(0,"INIT",0x1000,1,0,IMAGE_SCN_MEM_DISCARDABLE);no_header=1;expect(0,0,0);
++ setup(1,0x2000);module.DllBase=(PVOID)(ALIGN_DOWN_BY((ULONG_PTR)&MiFindInitializationCode,4096)-4096);section(0,"INIT",0x1000,1,0,IMAGE_SCN_MEM_DISCARDABLE);
++ PVOID a=NULL,b=NULL;MiFindInitializationCode(&a,&b);assert(!freed&&phase==0&&a==(char *)module.DllBase+0x1000&&b==(char *)module.DllBase+0x2000);++checks;
++ printf("production discardable-section walker: %u/%u cases PASS\n",checks,checks);return 0;
++}
