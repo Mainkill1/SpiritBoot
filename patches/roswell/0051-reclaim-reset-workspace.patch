@@ -1,0 +1,19 @@
+diff --git a/tests/host/warm-stage/test.c b/tests/host/warm-stage/test.c
+index 6274c456..fc27b500 100644
+--- a/tests/host/warm-stage/test.c
++++ b/tests/host/warm-stage/test.c
+@@ -18,6 +18,14 @@ int main(void)
+     puts("128 MiB image has no overlap with the low-64-MiB handoff: PASS");
+     return 0;
+ #endif
++    /* Reclaimed loader and superseded PT bytes must be protected before
++     * startup writes either range, even with no selected INIT pages. */
++    select_page(NXBL_LOADER_PA >> 12);
++    select_page(NXBL_PT_LOW_PA >> 12);
++    assert(NxWarmPlan(bitmap, 0x78000, pairs, 8, &count));
++    assert(count == 2);
++    assert(pairs[0].Original == (NXBL_LOADER_PA >> 12));
++    assert(pairs[1].Original == (NXBL_PT_LOW_PA >> 12));
+     memset(bitmap, 0, sizeof(bitmap));
+     select_page(base + 0x66); select_page(base + 0x70);
+     select_page(0x100); /* ordinary selected page must not be staging */
