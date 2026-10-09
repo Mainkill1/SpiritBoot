@@ -79,6 +79,26 @@ elif '--build' in sys.argv:
         self.assertEqual(manifest["patches"], [])
         self.assertTrue((self.output / "build.log").exists())
 
+    def test_default_build_records_file_media_policy(self):
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertEqual(manifest["media_policy"], "emulator-file-media")
+        configure = next(c for c in manifest["commands"] if "-G" in c)
+        self.assertIn("-DXBOX_EMULATOR_FILE_MEDIA=ON", configure)
+
+    def test_strict_build_records_disabled_media_policy(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/build-firmware.py"),
+             "--source", str(self.source), "--output", str(self.output),
+             "--lock", str(self.lock), "--media-policy", "strict"],
+            env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertEqual(manifest["media_policy"], "strict")
+        configure = next(c for c in manifest["commands"] if "-G" in c)
+        self.assertIn("-DXBOX_EMULATOR_FILE_MEDIA=OFF", configure)
+
     def test_failed_build_invalidates_previous_flash(self):
         self.output.mkdir()
         (self.output / "flash.bin").write_bytes(b"stale")
