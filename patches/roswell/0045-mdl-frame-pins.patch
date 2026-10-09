@@ -1,0 +1,241 @@
+From 4eed3ea59fe363a0d726b58643e269a3fe7d9550 Mon Sep 17 00:00:00 2001
+From: Mainkill1 <Mainkill1@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 09:19:18 -0700
+Subject: [PATCH] MM: retain page ownership and count PT-backed MDL pins
+
+---
+ ntoskrnl/mm/ARM3/mdlsup.c    | 50 +++++++++++---------------------
+ ntoskrnl/mm/ARM3/miarm.h     |  3 ++
+ tests/host/mdl-pins/cases.c  | 15 ++++++++++
+ tests/host/mdl-pins/check.py | 31 ++++++++++++++++++++
+ tests/host/mdl-pins/shim.h   | 55 ++++++++++++++++++++++++++++++++++++
+ 5 files changed, 120 insertions(+), 34 deletions(-)
+ create mode 100644 tests/host/mdl-pins/cases.c
+ create mode 100644 tests/host/mdl-pins/check.py
+ create mode 100644 tests/host/mdl-pins/shim.h
+
+diff --git a/ntoskrnl/mm/ARM3/mdlsup.c b/ntoskrnl/mm/ARM3/mdlsup.c
+index b1d0d68b..197a3f8d 100644
+--- a/ntoskrnl/mm/ARM3/mdlsup.c
++++ b/ntoskrnl/mm/ARM3/mdlsup.c
+@@ -1239,10 +1239,17 @@ MmProbeAndLockPages(IN PMDL Mdl,
+         //
+         Mdl->Process = CurrentProcess;
+ 
++#ifdef NXK_MM_PHYS
++        /* Xbox page ownership and DMA pins use the page-supply PFN lock,
++         * including title addresses; a working-set lock cannot protect them. */
++        UsePfnLock = TRUE;
++        OldIrql = MiAcquirePfnLock();
++#else
+         /* Lock the process working set */
+         MiLockProcessWorkingSet(CurrentProcess, PsGetCurrentThread());
+         UsePfnLock = FALSE;
+         OldIrql = MM_NOIRQL;
++#endif
+     }
+ 
+     //
+@@ -1415,14 +1422,15 @@ MmProbeAndLockPages(IN PMDL Mdl,
+          * MI_IS_PHYSICAL_ADDRESS above; we never reach here with a
+          * non-PFN page. */
+         ASSERT(Pfn1 != NULL);
++#ifdef NXK_MM_PHYS
++        ASSERT(UsePfnLock);
++#else
+         ASSERT(CurrentProcess == NULL || UsePfnLock == FALSE);
++#endif
+         MiReferenceProbedPageAndBumpLockCount(Pfn1);
+ #ifdef NXK_MM_PHYS
+-        /* MDL-locked pages are DMA targets: the device captures the
+-         * physical address, so the relocating contiguous allocator must
+-         * not move the frame until MmUnlockPages.  Owner is recomputed
+-         * from the PTE on unlock. */
+-        NxkPageSupplySetOwner(PageFrameIndex, 0);
++        /* Preserve the frame's owner; each MDL holds its own DMA pin. */
++        NxkPageSupplyPin(PageFrameIndex, FALSE);
+ #endif
+ #else
+         if (Pfn1)
+@@ -1581,35 +1589,6 @@ MmUnlockPages(IN PMDL Mdl)
+         return;
+     }
+ 
+-#ifdef NXK_MM_PHYS
+-    /* DMA is done with these frames: restore their relocatability if
+-     * the originating PTE still maps them (decommit during the IO
+-     * leaves the owner cleared, which is the safe direction). */
+-    {
+-        PPFN_NUMBER P = (PPFN_NUMBER)(Mdl + 1);
+-        ULONG_PTR Va = (ULONG_PTR)Mdl->StartVa;
+-        PFN_NUMBER N = PageCount;
+-        KIRQL OldIrql2 = MiAcquirePfnLock();
+-        while (N--)
+-        {
+-            if (*P != LIST_HEAD)
+-            {
+-                PMMPTE PteAddr = MiAddressToPte((PVOID)Va);
+-                PMMPDE PdeAddr = MiAddressToPde((PVOID)Va);
+-                if ((PdeAddr->u.Hard.Valid) && !(PdeAddr->u.Hard.LargePage) &&
+-                    (PteAddr->u.Hard.Valid) &&
+-                    (PteAddr->u.Hard.PageFrameNumber == *P))
+-                {
+-                    NxkPageSupplySetOwner(*P, (ULONG_PTR)PteAddr);
+-                }
+-            }
+-            P++;
+-            Va += PAGE_SIZE;
+-        }
+-        MiReleasePfnLock(OldIrql2);
+-    }
+-#endif
+-
+ #ifndef SARCH_XBOX
+     /* MDL_IO_SPACE is set when MmProbeAndLockPages walks a non-PFN page;
+      * on Xbox MMIO is PSE-mapped and caught by MI_IS_PHYSICAL_ADDRESS, so
+@@ -1731,6 +1710,9 @@ MmUnlockPages(IN PMDL Mdl)
+         /* Get the current entry and reference count */
+         Pfn1 = (PMMPFN)*MdlPages;
+         MiDereferencePfnAndDropLockCount(Pfn1);
++#ifdef NXK_MM_PHYS
++        NxkPageSupplyPin((PFN_NUMBER)(Pfn1 - MmPfnDatabase), TRUE);
++#endif
+     } while (++MdlPages < LastPage);
+ 
+     //
+diff --git a/ntoskrnl/mm/ARM3/miarm.h b/ntoskrnl/mm/ARM3/miarm.h
+index 16effdc5..1bda0b11 100644
+--- a/ntoskrnl/mm/ARM3/miarm.h
++++ b/ntoskrnl/mm/ARM3/miarm.h
+@@ -2183,6 +2183,9 @@ NxkPageSupplyTakeRun(
+     IN PFN_NUMBER HighPfn,
+     IN PFN_NUMBER AlignPages);
+ 
++VOID
++NxkPageSupplyPin(PFN_NUMBER Page, BOOLEAN Unlock);
++
+ VOID
+ NxkPageSupplySetOwner(
+     IN PFN_NUMBER Page,
+diff --git a/tests/host/mdl-pins/cases.c b/tests/host/mdl-pins/cases.c
+new file mode 100644
+index 00000000..c68a7bc2
+--- /dev/null
++++ b/tests/host/mdl-pins/cases.c
+@@ -0,0 +1,15 @@
++struct TestMdl {MDL mdl;PFN_NUMBER pages[3];};
++static struct TestMdl make(unsigned count){struct TestMdl t={{MDL_PAGES_LOCKED,(void*)0x81000000,NULL,0,count*4096,NULL},{3,LIST_HEAD,LIST_HEAD}};return t;}
++static int fails,checks;
++static void check(int ok,const char*text){checks++;printf("%s %s\n",ok?"PASS":"FAIL",text);if(!ok)fails++;}
++static void reset(void){memset(pfns,0,sizeof pfns);memset(owners,0,sizeof owners);memset(pins,0,sizeof pins);pte.u.Hard.Valid=1;pte.u.Hard.PageFrameNumber=3;}
++int main(void){
++ struct TestMdl a,b;
++ reset();a=make(1);lock_page(3);check(owners[3]==0,"fixed contiguous owner remains zero while locked");MmUnlockPages(&a.mdl);check(owners[3]==0,"fixed contiguous owner remains zero after unlock");
++ reset();owners[3]=0xc0000040;a=make(1);lock_page(3);MmUnlockPages(&a.mdl);check(owners[3]==0xc0000040,"VM owning PTE preserved exactly across MDL lifetime");
++ reset();owners[3]=0xc0000040;a=make(1);b=make(1);lock_page(3);lock_page(3);MmUnlockPages(&a.mdl);check(pins[3]==1,"first of two MDL unlocks retains DMA pin");MmUnlockPages(&b.mdl);check(pins[3]==0&&owners[3]==0xc0000040,"last MDL unlock drops pin without replacing owner");
++ reset();a=make(2);lock_page(3);MmUnlockPages(&a.mdl);check(pins[3]==0&&owners[3]==0,"partial probe rollback releases only initialized PFN prefix");
++ reset();a=make(2);a.pages[1]=3;lock_page(3);lock_page(3);MmUnlockPages(&a.mdl);check(!pins[3]&&!owners[3],"aliased PFN entries balance each acquired pin");
++ reset();a=make(1);owners[3]=0xc0000040;lock_page(3);owners[3]=0;pte.u.Hard.Valid=0;MmUnlockPages(&a.mdl);check(!pins[3]&&!owners[3],"decommit during MDL does not invent a replacement owner");
++ check(!held,"PFN lock released at completion");printf("%d checks, %d failures\n",checks,fails);return fails?1:0;
++}
+diff --git a/tests/host/mdl-pins/check.py b/tests/host/mdl-pins/check.py
+new file mode 100644
+index 00000000..5b99f693
+--- /dev/null
++++ b/tests/host/mdl-pins/check.py
+@@ -0,0 +1,31 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Actual MDL unlock and page-reference NXK branches with modeled PFN tables.
++The existing clean-room pin suite separately covers real supply bookkeeping.
++No guest trap execution or native gameplay qualification is asserted here.
++"""
++from pathlib import Path
++import importlib.util,subprocess,sys
++sys.dont_write_bytecode=True
++here=Path(__file__).resolve().parent;root=here.parents[2]
++out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py')
++m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
++source=(root/'ntoskrnl/mm/ARM3/mdlsup.c').read_text()
++header=(root/'ntoskrnl/mm/ARM3/miarm.h').read_text()
++unlock=m.function(source,'MmUnlockPages')
++anchor=source.index('MiReferenceProbedPageAndBumpLockCount(Pfn1);',source.index('PageFrameIndex = PFN_FROM_PTE(PointerPte);'))
++start=source.find('#ifdef NXK_MM_PHYS',anchor,source.index('#else',anchor))
++hook='' if start<0 else source[start:source.index('#endif',start)]+'\n#endif\n'
++def pin_body(name):
++ body=m.function(header,name);a=body.index('#ifdef NXK_MM_PHYS');b=body.index('#endif',a)
++ return body[a:b]+'\n#endif\n'
++ref='static void MiReferenceProbedPageAndBumpLockCount(PMMPFN Pfn1){\n'+pin_body('MiReferenceProbedPageAndBumpLockCount')+'}\n'
++drop='static void MiDereferencePfnAndDropLockCount(PMMPFN Pfn1){\n'+pin_body('MiDereferencePfnAndDropLockCount')+'}\n'
++begin=source.index('if (Base > MM_HIGHEST_USER_ADDRESS)',source.index('MmProbeAndLockPages'))
++end=source.index('    //\n    // Get the last PTE',begin)
++selection=source[begin:end]
++lock='static void lock_page(PFN_NUMBER PageFrameIndex){KIRQL OldIrql;BOOLEAN UsePfnLock;ULONG TotalPages=1;PVOID Base=(void*)0x10000;PEPROCESS CurrentProcess=&process;MDL mdl={0};PMDL Mdl=&mdl;int Operation=0;\n'+selection+'(void)Operation;MiReferenceProbedPageAndBumpLockCount(MiGetPfnEntry(PageFrameIndex));\n'+hook+'if(UsePfnLock)MiReleasePfnLock(OldIrql);else MiUnlockProcessWorkingSet(CurrentProcess,PsGetCurrentThread()); }\n'
++(out/'mdl.c').write_text((here/'shim.h').read_text()+ref+drop+lock+unlock+(here/'cases.c').read_text())
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function',str(out/'mdl.c'),'-o',str(out/'mdl')],check=True)
++subprocess.run([str(out/'mdl')],check=True)
+diff --git a/tests/host/mdl-pins/shim.h b/tests/host/mdl-pins/shim.h
+new file mode 100644
+index 00000000..119ba879
+--- /dev/null
++++ b/tests/host/mdl-pins/shim.h
+@@ -0,0 +1,55 @@
++
++#include <stdint.h>
++#include <stddef.h>
++#include <assert.h>
++#include <stdio.h>
++#include <string.h>
++typedef uintptr_t PFN_NUMBER, *PPFN_NUMBER, ULONG_PTR, SIZE_T;
++typedef intptr_t LONG_PTR;
++typedef unsigned ULONG;
++typedef int BOOLEAN, KIRQL;
++typedef void VOID, *PVOID;
++typedef struct {SIZE_T NumberOfLockedPages;} EPROCESS,*PEPROCESS;
++typedef struct {unsigned references;} MMPFN,*PMMPFN;
++typedef struct {struct {struct {unsigned Valid,LargePage;PFN_NUMBER PageFrameNumber;} Hard;} u;} MMPTE,*PMMPTE;
++typedef MMPTE *PMMPDE;
++typedef struct {unsigned MdlFlags;void *StartVa,*MappedSystemVa;unsigned ByteOffset,ByteCount;PEPROCESS Process;} MDL,*PMDL;
++#define FALSE 0
++#define TRUE 1
++#define IN
++#define NTAPI
++#define ASSERT assert
++#define DPRINT(...) ((void)0)
++#define SARCH_XBOX 1
++#define NXK_MM_PHYS 1
++#define MDL_PAGES_LOCKED 1
++#define MDL_SOURCE_IS_NONPAGED_POOL 2
++#define MDL_PARTIAL 4
++#define MDL_MAPPED_TO_SYSTEM_VA 8
++#define MDL_DESCRIBES_AWE 16
++#define LIST_HEAD ((PFN_NUMBER)-1)
++#define PAGE_SIZE 4096
++#define MI_IS_PHYSICAL_ADDRESS(p) ((uintptr_t)(p)==0xff000000)
++#define ADDRESS_AND_SIZE_TO_SPAN_PAGES(p,n) (((uintptr_t)(p)%4096+(n)+4095)/4096)
++#define MM_HIGHEST_USER_ADDRESS ((void*)0x7fffffff)
++#define MM_NOIRQL 0
++#define IoReadAccess 0
++static EPROCESS process;
++static PEPROCESS PsGetCurrentProcess(void){return &process;}
++static void *PsGetCurrentThread(void){return NULL;}
++static void MiLockProcessWorkingSet(PEPROCESS p,void*t){(void)p;(void)t;}
++static void MiUnlockProcessWorkingSet(PEPROCESS p,void*t){(void)p;(void)t;}
++static MMPFN pfns[16];static ULONG_PTR owners[16];static unsigned pins[16];
++static MMPTE pte={{{1,0,3}}},pde={{{1,0,0}}};static int held;
++static KIRQL MiAcquirePfnLock(void){assert(!held);held=1;return 0;}
++static void MiReleasePfnLock(KIRQL old){(void)old;assert(held);held=0;}
++static PMMPFN MiGetPfnEntry(PFN_NUMBER p){assert(p<16);return pfns+p;}
++
++static PMMPTE MiAddressToPte(void *p){(void)p;return &pte;}
++static PMMPDE MiAddressToPde(void *p){(void)p;return &pde;}
++static void NxkPageSupplySetOwner(PFN_NUMBER p,ULONG_PTR owner){assert(held);owners[p]=owner;}
++static void NxkPageSupplyPin(PFN_NUMBER p,BOOLEAN unlock){assert(held);if(unlock){assert(pins[p]);pins[p]--;}else pins[p]++;}
++static void MmUnmapLockedPages(void *p,PMDL m){(void)p;m->MdlFlags&=~MDL_MAPPED_TO_SYSTEM_VA;}
++static void InterlockedExchangeAddSizeT(SIZE_T *p,LONG_PTR delta){*p+=delta;}
++#define UNREFERENCED_PARAMETER(p) ((void)(p))
++#define MmPfnDatabase pfns
+-- 
+2.47.3
+
