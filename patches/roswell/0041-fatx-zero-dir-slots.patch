@@ -1,0 +1,94 @@
+From 1c8dde50709ab86b268ed7e593a54f3908745d3f Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Fri, 9 Oct 2026 03:42:33 -0700
+Subject: [PATCH] fatx: reuse zero-length unused directory slots
+
+---
+ drivers/filesystems/vfatfs/vfat.h        |  5 +-
+ tests/host/fatx/check-directory-slots.py | 58 ++++++++++++++++++++++++
+ 2 files changed, 62 insertions(+), 1 deletion(-)
+ create mode 100644 tests/host/fatx/check-directory-slots.py
+
+diff --git a/drivers/filesystems/vfatfs/vfat.h b/drivers/filesystems/vfatfs/vfat.h
+index a23904aa..ca95e38a 100644
+--- a/drivers/filesystems/vfatfs/vfat.h
++++ b/drivers/filesystems/vfatfs/vfat.h
+@@ -211,7 +211,10 @@ typedef struct _slot slot;
+ #define FAT_ENTRY_LONG(DirEntry)     (((DirEntry)->Attrib & 0x3f) == 0x0f)
+ #define FAT_ENTRY_VOLUME(DirEntry)   (((DirEntry)->Attrib & 0x1f) == 0x08)
+ 
+-#define FATX_ENTRY_DELETED(DirEntry) ((DirEntry)->FilenameLength == 0xe5)
++/* Zero-length entries are unused slots, not a directory terminator: a
++ * later slot may still contain a file. Reuse them like deleted entries. */
++#define FATX_ENTRY_DELETED(DirEntry) ((DirEntry)->FilenameLength == 0 || \
++                                    (DirEntry)->FilenameLength == 0xe5)
+ #define FATX_ENTRY_END(DirEntry)     ((DirEntry)->FilenameLength == 0xff)
+ #define FATX_ENTRY_LONG(DirEntry)    (FALSE)
+ #define FATX_ENTRY_VOLUME(DirEntry)  (((DirEntry)->Attrib & 0x1f) == 0x08)
+diff --git a/tests/host/fatx/check-directory-slots.py b/tests/host/fatx/check-directory-slots.py
+new file mode 100644
+index 00000000..b497f4a0
+--- /dev/null
++++ b/tests/host/fatx/check-directory-slots.py
+@@ -0,0 +1,58 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production FATX directory search with unused-slot fixtures."""
++from pathlib import Path
++import importlib.util,re,subprocess
++import sys
++root=Path(__file__).resolve().parents[3]
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
++body=m.function((root/'drivers/filesystems/vfatfs/dirwr.c').read_text(),'vfatFindDirSpace')
++header=(root/'drivers/filesystems/vfatfs/vfat.h').read_text()
++header=header.replace('\\\n',' ')
++macros='\n'.join(re.findall(r'^#define (?:ENTRY_END|ENTRY_DELETED|FAT_ENTRY_END|FAT_ENTRY_DELETED|FATX_ENTRY_END|FATX_ENTRY_DELETED).*$',header,re.M))
++shim=r'''
++#include <stdint.h>
++#include <string.h>
++#include <stdio.h>
++#include <assert.h>
++typedef uint32_t ULONG,*PULONG;typedef uintptr_t ULONG_PTR;typedef int32_t NTSTATUS;typedef int BOOLEAN;typedef void *PVOID;
++typedef union { int64_t QuadPart; struct { uint32_t LowPart; int32_t HighPart; } u; } LARGE_INTEGER;
++typedef struct { unsigned char FilenameLength,rest[63]; } FATX_DIR_ENTRY;
++typedef struct { unsigned char Filename[32]; } FAT_DIR_ENTRY;
++typedef union { FATX_DIR_ENTRY FatX; FAT_DIR_ENTRY Fat; } DIR_ENTRY,*PDIR_ENTRY;
++typedef struct { struct { LARGE_INTEGER FileSize; } RFCB; void *FileObject; int root; } FCB,*PVFATFCB;
++typedef struct { struct { ULONG BytesPerCluster,FatType; } FatInfo; } DEVICE,*PDEVICE_EXTENSION;
++#define IN
++#define OUT
++#define FALSE 0
++#define TRUE 1
++#define FAT32 3
++#define PIN_WAIT 1
++#define NT_SUCCESS(s) ((s)>=0)
++#define min(a,b) ((a)<(b)?(a):(b))
++#define _SEH2_TRY if(1)
++#define _SEH2_EXCEPT(x) else if(0)
++#define _SEH2_YIELD(s) s
++#define _SEH2_END
++#define DPRINT(...) ((void)0)
++static unsigned char data[16384];static unsigned growths;
++static int vfatVolumeIsFatX(PDEVICE_EXTENSION d){(void)d;return 1;}
++static int vfatFCBIsRoot(PVFATFCB f){return f->root;}
++static NTSTATUS vfatFCBInitializeCacheFromVolume(PDEVICE_EXTENSION d,PVFATFCB f){(void)d;(void)f;return 0;}
++static NTSTATUS VfatSetAllocationSizeInformation(void *o,PVFATFCB f,PDEVICE_EXTENSION d,LARGE_INTEGER *s,int a){(void)o;(void)f;(void)d;(void)s;(void)a;++growths;return (NTSTATUS)0xc000007f;}
++static void CcPinRead(void *f,LARGE_INTEGER *o,ULONG n,int w,void **c,void **p){(void)f;(void)w;assert(o->QuadPart>=0&&(uint64_t)o->QuadPart+n<=sizeof(data));*p=data+o->QuadPart;*c=data;}
++static void CcUnpinData(void *c){(void)c;}
++static void CcSetDirtyPinnedData(void *c,void *x){(void)c;(void)x;}
++static void RtlZeroMemory(void *p,ULONG n){memset(p,0,n);}
++'''
++cases=r'''
++static int run(const char *name,unsigned char filler,int hole,int expected){
++ DEVICE d={{16384,4}};FCB f={0};ULONG slot=99;f.RFCB.FileSize.QuadPart=sizeof(data);f.FileObject=&f;growths=0;memset(data,filler,sizeof(data));data[0]=13;data[64]=14;if(hole)data[192]=7;
++ int result=vfatFindDirSpace(&d,&f,1,&slot);int pass=expected?(result&&slot==2&&growths==0&&(!hole||data[192]==7)):(!result&&growths==1);
++ printf("%s: %s result=%d slot=%u growths=%u\n",name,pass?"PASS":"FAIL",result,slot,growths);return !pass;
++}
++int main(void){int bad=0;bad+=run("zero tail",0,0,1);bad+=run("zero hole before valid entry",0,1,1);bad+=run("ff tail",255,0,1);bad+=run("deleted slot",229,0,1);bad+=run("genuinely full directory",6,0,0);return bad?1:0;}
++'''
++p=Path(sys.argv[1]).resolve();p.mkdir(parents=True,exist_ok=True);(p/'fixture.c').write_text(shim+'\n'+macros+'\n'+body+'\n'+cases)
++subprocess.run(['cc','-O2','-Wall','-Wextra',str(p/'fixture.c'),'-o',str(p/'fixture')],check=True)
++r=subprocess.run([str(p/'fixture')],capture_output=True,text=True);(p/'results.txt').write_text(r.stdout);print(r.stdout,end='');raise SystemExit(r.returncode)
+-- 
+2.47.3
+
