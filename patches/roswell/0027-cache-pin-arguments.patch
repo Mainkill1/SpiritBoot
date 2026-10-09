@@ -1,0 +1,186 @@
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index 8f3304fa..27da1be7 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -1127,7 +1127,7 @@ NxcPinCommon(
+     BlockOffset = FileOffset->QuadPart & ~(LONGLONG)(NXC_BLOCK_SIZE - 1);
+     At = (ULONG)(FileOffset->QuadPart - BlockOffset);
+ 
+-    if (At + Length > NXC_BLOCK_SIZE)
++    if (FileOffset->QuadPart < 0 || Length > NXC_BLOCK_SIZE - At)
+     {
+         /* No reachable caller spans blocks (see the block-size note);
+          * truncating would walk the caller off its buffer, so fail
+@@ -1232,14 +1232,19 @@ CcPinMappedData(
+     IN OUT PVOID *Bcb)
+ {
+     PVOID Buffer;
++    PVOID NewBcb;
+     PVOID OldBcb = *Bcb;
+     BOOLEAN Result;
+ 
+     ++CcPinMappedDataCount;
+ 
+-    Result = CcPinRead(FileObject, FileOffset, Length, Flags, Bcb, &Buffer);
+-    if (Result && OldBcb != NULL)
+-        CcUnpinData(OldBcb);
++    Result = CcPinRead(FileObject, FileOffset, Length, Flags, &NewBcb, &Buffer);
++    if (Result)
++    {
++        *Bcb = NewBcb;
++        if (OldBcb != NULL)
++            CcUnpinData(OldBcb);
++    }
+     return Result;
+ }
+ 
+diff --git a/tests/host/cache/check-pin-arguments.py b/tests/host/cache/check-pin-arguments.py
+new file mode 100644
+index 00000000..d3dda494
+--- /dev/null
++++ b/tests/host/cache/check-pin-arguments.py
+@@ -0,0 +1,144 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise extracted production pin/unpin bodies, allocation work and lifetimes."""
++import argparse
++import importlib.util
++from pathlib import Path
++import re
++import subprocess
++import sys
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++parser = argparse.ArgumentParser()
++parser.add_argument('output', type=Path)
++args = parser.parse_args()
++out = args.output.resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location('extract', root / 'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++source = (root / 'ntoskrnl/xb/mm/cache.c').read_text()
++bcb = re.search(r'typedef struct _NXC_BCB\s*\{.*?\} NXC_BCB;', source, re.S).group()
++helpers = ''
++for name in ('NxcAllocateBcbLocked', 'NxcCacheBcbLocked'):
++    if re.search(r'\b' + name + r'\s*\(', source):
++        helpers += extract.function(source, name)
++functions = ''.join(extract.function(source, name) for name in
++    ('NxcPinCommon', 'CcPinRead', 'CcPinMappedData', 'CcUnpinData', 'CcRepinBcb'))
++shim = r'''
++#define _XOPEN_SOURCE 700
++#include <assert.h>
++#include <pthread.h>
++#include <stdatomic.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <setjmp.h>
++typedef unsigned ULONG; typedef int LONG, BOOLEAN; typedef long long LONGLONG;
++typedef void VOID, *PVOID;
++typedef struct { LONGLONG QuadPart; } LARGE_INTEGER, *PLARGE_INTEGER;
++typedef struct { unsigned NodeTypeCode, NodeByteSize, MappedLength;
++ LARGE_INTEGER MappedFileOffset; } PUBLIC_BCB;
++typedef struct { unsigned id; BOOLEAN PinAccess; } NXC_MAP;
++typedef struct { NXC_MAP *SharedCacheMap; } SECTION;
++typedef struct { SECTION *SectionObjectPointer; } FILE_OBJECT, *PFILE_OBJECT;
++typedef struct { unsigned char *Data; unsigned RefCount; } NXC_BLOCK;
++#define IN
++#define OUT
++#define NTAPI
++#define ASSERT assert
++#define NXC_BLOCK_SIZE 4096
++#define NXC_TAG 1
++#define NXC_NODE_BCB 3
++#define NXC_FREE_BCB_LIMIT 8
++#define NonPagedPool 0
++#define TRUE 1
++#define FALSE 0
++#define PIN_WAIT 1
++#define STATUS_INVALID_PARAMETER 1
++#define STATUS_INSUFFICIENT_RESOURCES 2
++#define BooleanFlagOn(v,f) (((v)&(f)) != 0)
++#define XbDbg(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p)-offsetof(t,f)))
++#define RtlZeroMemory(p,n) memset(p,0,n)
++static _Thread_local jmp_buf outer, inner;
++static _Thread_local int catching, raised, held;
++static int mode, fail_alloc, NxcMutex;
++static pthread_mutex_t host_mutex=PTHREAD_MUTEX_INITIALIZER;
++static _Atomic unsigned allocs, frees, live;
++static unsigned locks, block_puts, CcPinReadWait, CcPinReadNoWait, CcPinMappedDataCount;
++static unsigned char data[4096];
++static NXC_BLOCK block = { data, 0 };
++static void *ExAllocatePoolWithTag(int pool, size_t n, int tag) {
++ (void)pool; (void)tag; assert(!held); ++allocs;
++ if (fail_alloc) return NULL;
++ void *p=malloc(n); assert(p); memset(p,0xA5,n); ++live; return p;
++}
++static void ExFreePoolWithTag(void *p, int tag) {
++ (void)tag; assert(p && live && !held); --live; ++frees; free(p);
++}
++static void ExAcquireFastMutex(int *m) { (void)m; assert(!held); assert(!pthread_mutex_lock(&host_mutex)); held=1; ++locks; }
++static void ExReleaseFastMutex(int *m) { (void)m; assert(held); held=0; assert(!pthread_mutex_unlock(&host_mutex)); }
++static _Noreturn void ExRaiseStatus(int status) {
++ assert(!held); raised=status;
++ if(catching) longjmp(inner,1);
++ longjmp(outer,1);
++}
++#define _SEH2_TRY if ((catching=1,setjmp(inner))==0)
++#define _SEH2_EXCEPT(x) else for(catching=0;!catching;catching=1)
++#define _SEH2_END catching=0
++#define _SEH2_GetExceptionCode() raised
++static NXC_BLOCK *NxcGetBlock(NXC_MAP *map,LONGLONG off,BOOLEAN wait) {
++ (void)map; (void)off; assert(held);
++ if(mode==2) { ExReleaseFastMutex(&NxcMutex); ExRaiseStatus(123); }
++ if(mode==1) { assert(!wait); return NULL; }
++ ++block.RefCount; return &block;
++}
++static void NxcPutBlock(NXC_BLOCK *b) { assert(held && b->RefCount); --b->RefCount; ++block_puts; }
++static LONG InterlockedDecrement(LONG *p) { return __atomic_sub_fetch(p,1,__ATOMIC_SEQ_CST); }
++static LONG InterlockedIncrement(LONG *p) { return __atomic_add_fetch(p,1,__ATOMIC_SEQ_CST); }
++void CcUnpinData(PVOID);
++'''
++globals = '\nstatic NXC_BCB *NxcFreeBcbs;\nstatic ULONG NxcFreeBcbCount;\n' if helpers else ''
++main = r'''
++static NXC_MAP map={1,TRUE};static SECTION section={&map};static FILE_OBJECT file={&section};
++static PVOID b, buffer;
++static unsigned failures;
++static void check_range(LONGLONG offset, ULONG length) {
++ LARGE_INTEGER at={offset}; b=(void*)0x1234;buffer=(void*)0x5678;raised=0;
++ unsigned before=allocs;
++ if(!setjmp(outer)) {
++  if(NxcPinCommon(&file,&at,length,TRUE,TRUE,&b,&buffer)) {
++   CcUnpinData(b);++failures;printf("FAIL invalid range accepted offset=%lld length=%u\n",offset,length);
++  } else { ++failures;puts("FAIL invalid range returned FALSE rather than raising"); }
++ } else {
++  assert(raised==STATUS_INVALID_PARAMETER && allocs==before);
++  assert(b==(void*)0x1234 && buffer==(void*)0x5678 && !held);
++ }
++}
++int main(void) {
++ check_range(-1,1);check_range(16,UINT32_MAX);check_range(4095,2);
++ if(failures) return 1;
++ LARGE_INTEGER at={16};
++ assert(NxcPinCommon(&file,&at,8,TRUE,FALSE,&b,&buffer));PVOID old=b;
++ mode=1;assert(!CcPinMappedData(&file,&at,8,0,&b));
++ if(b!=old) { puts("FAIL failed mapped-to-pinned conversion lost original BCB");CcUnpinData(old);return 1; }
++ assert(((NXC_BCB*)b)->RefCount==1 && block.RefCount==1 && !held);
++ mode=2;raised=0;
++ if(!setjmp(outer)) { CcPinMappedData(&file,&at,8,PIN_WAIT,&b); assert(0); }
++ assert(raised==123 && b==old && !held && block.RefCount==1);
++ mode=0;assert(CcPinMappedData(&file,&at,8,PIN_WAIT,&b));assert(b!=old && block.RefCount==1);
++ CcUnpinData(b);assert(!block.RefCount && !held);
++ puts("pin arguments: negative/overflow/cross-block rejected before allocation; old handle preserved on miss/IO error; successful replacement PASS");
++'''
++cleanup = r'''
++ while(NxcFreeBcbs) { NXC_BCB *next=NxcFreeBcbs->NextFree; ExFreePoolWithTag(NxcFreeBcbs,NXC_TAG); NxcFreeBcbs=next; --NxcFreeBcbCount; }
++ assert(!live && !NxcFreeBcbCount); return 0;
++}
++''' if helpers else 'assert(!live);return 0; }\n'
++(out / 'pin-arguments.c').write_text(shim+bcb+globals+helpers+functions+main+cleanup)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-fno-inline','-pthread','-fsanitize=address,undefined',str(out/'pin-arguments.c'),'-o',str(out/'pin-arguments')],check=True)
++subprocess.run([str(out/'pin-arguments')],check=True)
