@@ -1,0 +1,61 @@
+diff --git a/tests/xbe/clean-room-warm-reboot/main.c b/tests/xbe/clean-room-warm-reboot/main.c
+index 29b2db59..5e3214e9 100644
+--- a/tests/xbe/clean-room-warm-reboot/main.c
++++ b/tests/xbe/clean-room-warm-reboot/main.c
+@@ -6,7 +6,10 @@
+ #include <xboxkrnl/xboxkrnl.h>
+ #include "../api-regression/tap.h"
+ #include <string.h>
++#ifndef DATA_PA
+ #define DATA_PA 0x02000000UL
++#endif
++#define CONTROL_PA 0x039fe000UL
+ #define PROBE_MAGIC 0x43524D50UL /* independent test sentinel */
+ typedef struct { ULONG Magic, Pa, Count, NestedReturned, Order[6]; UCHAR Fill[64]; } PROBE;
+ static PROBE *record;
+@@ -38,7 +41,7 @@ int main(void)
+     if (magic == PROBE_MAGIC) {
+         BOOLEAN pass = TRUE;
+         tap_puts("== clean-room-warm-reboot stage 2 ==\n");
+-        tap_version(14); tap_plan(5);
++        tap_version(14); tap_plan(7);
+         record = (PROBE *)(0x80000000UL | pa);
+         pass = record->Magic == PROBE_MAGIC && MmGetPhysicalAddress(record) == pa;
+         if (pass) tap_ok(1, "same physical address and contents");
+@@ -66,7 +69,23 @@ int main(void)
+         else tap_not_ok(5, "nested noreturn reset unwinds and remaining callbacks run before outer reset");
+         pass &= nested;
+         MmPersistContiguousMemory(record, PAGE_SIZE, FALSE);
+-        MmFreeContiguousMemory(record);
++        if (ownership) MmFreeContiguousMemory(record);
++        PUCHAR control = (PUCHAR)(0x80000000UL | CONTROL_PA);
++        BOOLEAN control_data = TRUE;
++        for (ULONG i = 0; i < PAGE_SIZE; ++i)
++            if (control[i] != (UCHAR)(i ^ 0x5c)) control_data = FALSE;
++        if (control_data) tap_ok(6, "ordinary control page preserves every byte");
++        else tap_not_ok(6, "ordinary control page preserves every byte");
++        BOOLEAN control_owner = MmQueryAllocationSize(control) == PAGE_SIZE;
++        competing = MmAllocateContiguousMemoryEx(PAGE_SIZE, CONTROL_PA,
++            CONTROL_PA + PAGE_SIZE - 1, PAGE_SIZE, PAGE_READWRITE);
++        control_owner &= competing == NULL;
++        if (competing) MmFreeContiguousMemory(competing);
++        if (control_owner) tap_ok(7, "ordinary control retains allocation ownership");
++        else tap_not_ok(7, "ordinary control retains allocation ownership");
++        pass &= control_data && control_owner;
++        MmPersistContiguousMemory(control, PAGE_SIZE, FALSE);
++        if (control_owner) MmFreeContiguousMemory(control);
+         tap_puts(pass ? "== clean-room-warm-reboot end PASS ==\n" :
+                         "== clean-room-warm-reboot end FAIL ==\n");
+         stop();
+@@ -91,6 +110,11 @@ int main(void)
+     }
+     HalRegisterShutdownNotification(&regs[0], TRUE); /* stable duplicate */
+     HalRegisterShutdownNotification(&regs[3], FALSE); /* removed before shutdown */
++    PUCHAR control = MmAllocateContiguousMemoryEx(PAGE_SIZE, CONTROL_PA,
++        CONTROL_PA + PAGE_SIZE - 1, PAGE_SIZE, PAGE_READWRITE);
++    if (!control) { tap_puts("== clean-room-warm-reboot control setup FAIL ==\n"); stop(); }
++    for (ULONG i = 0; i < PAGE_SIZE; ++i) control[i] = (UCHAR)(i ^ 0x5c);
++    MmPersistContiguousMemory(control, PAGE_SIZE, TRUE);
+     LaunchDataPage = MmAllocateContiguousMemory(PAGE_SIZE);
+     if (!LaunchDataPage) { tap_puts("== clean-room-warm-reboot launch FAIL ==\n"); stop(); }
+     memset(LaunchDataPage, 0, PAGE_SIZE);
