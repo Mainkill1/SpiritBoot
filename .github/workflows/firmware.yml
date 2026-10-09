@@ -53,7 +53,9 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 65fb8c399fc4478438f4e4e1983b8ac3557791ed
+            test "$actual_tree" = 002beee8ab97e4dc4d742b53c536fbfbff9e2b06
+            python3 "$GUEST_SOURCE/tests/host/boot-layout/check.py" "$output/boot-layout" >"$output/boot-layout.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/boot-layout/check-image-bounds.py" "$output/image-bounds" >"$output/image-bounds.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-unwind.py" "$output/cache-pin-unwind" >"$output/cache-pin-unwind.log" 2>&1
@@ -90,7 +92,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             spiritboot-toolchain python3 scripts/build-firmware.py \
             --source .reference/roswell --output artifacts/firmware-repeat --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
-          cmp artifacts/firmware-release/flash.bin artifacts/firmware-repeat/flash.bin
+          cmp artifacts/firmware-release-${{ matrix.memory_mib }}mib/flash.bin artifacts/firmware-repeat/flash.bin
       - name: Prepare pinned open runtime fixtures
         run: |
           python3 - <<'PY'
