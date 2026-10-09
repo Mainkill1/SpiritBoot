@@ -53,7 +53,9 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 45f25e7462f7867f1615ccadbdc7b3e8f0f3f460
+            test "$actual_tree" = dfbb6cb16da7a78694e94171842f4175f4b23188
+            python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check.py" "$output/upper-ram-reservation" >"$output/upper-ram-reservation.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" >"$output/upper-ram-config.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/warm-stage/check.py" >"$output/warm-stage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/reset-frame/check.py" "$output/reset-frame" >"$output/reset-frame.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fault-information/check.py" "$output/fault-information" >"$output/fault-information.log" 2>&1
@@ -97,6 +99,20 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/kernel-performance/check.py" "$GUEST_SOURCE" "$output/optimization" --optimized >"$output/optimization.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/kernel-performance/pins.py" "$GUEST_SOURCE" "$output/pins" --optimized --vector >"$output/pins.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/kernel-performance/pins.py" "$GUEST_SOURCE" "$output/pins-diagnostics" --optimized --vector --diagnostics >"$output/pins-diagnostics.log" 2>&1'
+      - name: Build optional upper RAM reservation profile
+        if: matrix.variant == 'release' && matrix.memory_mib == 128
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+            spiritboot-toolchain python3 scripts/build-firmware.py \
+            --source .reference/roswell --output artifacts/firmware-upper-reserve \
+            --variant release --memory-mib 128 --reserve-upper-ram ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
+          python3 - <<'PY'
+          import json
+          result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
+          assert result['status'] == 'built' and result['memory_mib'] == 128, result
+          assert result['reserve_upper_ram'] is True, result
+          assert result['source_tree'] == 'dfbb6cb16da7a78694e94171842f4175f4b23188', result
+          PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
         run: |
@@ -199,4 +215,7 @@ jobs:
             artifacts/critical-section-contention-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/io-apc-order-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/kernel-host-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/firmware-upper-reserve/flash.bin
+            artifacts/firmware-upper-reserve/build.json
+            artifacts/firmware-upper-reserve/build.log
             LICENSE
