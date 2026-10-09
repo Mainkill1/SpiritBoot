@@ -87,6 +87,18 @@ elif '--build' in sys.argv:
         configure = next(c for c in manifest["commands"] if "-G" in c)
         self.assertIn("-DXBOX_EMULATOR_FILE_MEDIA=ON", configure)
 
+    def test_64_mib_build_pins_capacity_in_configure_and_receipt(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/build-firmware.py"),
+             "--source", str(self.source), "--output", str(self.output),
+             "--lock", str(self.lock), "--memory-mib", "64"],
+            env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertEqual(manifest["memory_mib"], 64)
+        configure = next(c for c in manifest["commands"] if "-G" in c)
+        self.assertIn("-DXBOX_RAM_MIB=64", configure)
+
     def test_strict_build_records_disabled_media_policy(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/build-firmware.py"),
