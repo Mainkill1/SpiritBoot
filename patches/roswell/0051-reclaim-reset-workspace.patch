@@ -1,0 +1,710 @@
+diff --git a/boot/nxldr/CMakeLists.txt b/boot/nxldr/CMakeLists.txt
+index 6ede3020..062fca2f 100644
+--- a/boot/nxldr/CMakeLists.txt
++++ b/boot/nxldr/CMakeLists.txt
+@@ -14,6 +14,7 @@ endif()
+ 
+ set(NXLDR_CFLAGS
+     -m32
++    -fstack-usage
+     -ffreestanding
+     -nostdlib
+     -fno-pic
+@@ -82,6 +83,7 @@ set(NXLDR_OBJS ${NXLDR_OUT_DIR}/startup.o)
+ # name).  serial.c is DBG-only; the release loader is serial-silent.
+ set(NXLDR_SOURCES
+     loader.c
++    early-warm.c
+     mem.c
+     pe.c
+     paging.c
+diff --git a/boot/nxldr/boot-layout.h b/boot/nxldr/boot-layout.h
+index 37b9a6e7..e31231aa 100644
+--- a/boot/nxldr/boot-layout.h
++++ b/boot/nxldr/boot-layout.h
+@@ -47,6 +47,8 @@
+ #define NXBL_PCR_REGION_PA 0x00030000UL /* 16 pages backing 0xFFDF0000..   */
+ #define NXBL_LB_PA 0x00040000UL         /* LoaderBlock page                */
+ #define NXBL_AUX_PA 0x00041000UL        /* extension + LDR entry + descs   */
++#define NXBL_EARLY_STACK_TOP 0x00040000UL /* live top PCR page; 4 KiB */
++#define NXBL_RETIRED_BOOT_PAGES 52        /* 32 loader + 20 obsolete PTs */
+ #define NXBL_PAGES_SPANNED 0x4400       /* Extension->LoaderPagesSpanned   */
+ 
+ #endif /* NXBL_BOOT_LAYOUT_H */
+diff --git a/boot/nxldr/early-warm.c b/boot/nxldr/early-warm.c
+new file mode 100644
+index 00000000..305bb0cf
+--- /dev/null
++++ b/boot/nxldr/early-warm.c
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Runs entirely from ROM, before loader copy/BSS or page-table writes.
++ * The caller supplies the existing reserved PCR page as a bounded stack.
++ * No mutable globals, allocator, logger or RAM-resident library calls.
++ */
++#include "nxldr.h"
++#include "warm-handoff.h"
++extern const UCHAR KernelPayloadVa[];
++
++int NxPreserveWarmBoot(void)
++{
++    PM_HANDOFF *h = (PM_HANDOFF *)0xD000;
++    const NXKRNL_XZ_HEADER *payload = (const void *)KernelPayloadVa;
++    unsigned launch = *(const unsigned *)0xE000 == PM_LAUNCH_MAGIC ?
++        PmHash((const unsigned char *)0xE000, PM_LAUNCH_BYTES) : 0;
++    unsigned count, i;
++    if (h->Magic != PM_MAGIC || h->Version != PM_VERSION ||
++        h->BitmapBytes != PM_BYTES || h->ImageBase != NXBL_IMAGE_BASE ||
++        h->StageCount > PM_MAX_STAGES || h->LaunchHash != launch ||
++        h->Checksum != PmChecksum(h)) return 1;
++    if (h->StageCount || payload->Magic != NXKRNL_XZ_MAGIC ||
++        !NxWarmPlan(h->Pages, payload->DecompressedSize,
++                    h->Stages, PM_MAX_STAGES, &count)) return 0;
++    for (i = 0; i < count; ++i) {
++        volatile unsigned *to = (void *)((ULONG_PTR)h->Stages[i].Temporary << 12);
++        const volatile unsigned *from = (const void *)((ULONG_PTR)h->Stages[i].Original << 12);
++        unsigned word;
++        /* Volatile words prohibit lowering the loop to RAM memcpy. */
++        for (word = 0; word < 1024; ++word) to[word] = from[word];
++    }
++    h->StageCount = count;
++    h->Checksum = PmChecksum(h);
++    return 1;
++}
+diff --git a/boot/nxldr/gen-flash-bin.py b/boot/nxldr/gen-flash-bin.py
+index cab684ee..8c8b33ae 100755
+--- a/boot/nxldr/gen-flash-bin.py
++++ b/boot/nxldr/gen-flash-bin.py
+@@ -86,6 +86,8 @@ def prepare_kernel_image(kernel: bytes, image_max: int) -> bytes:
+     # fixed handoff can protect on reset. This adds no resident RAM.
+     with open(os.path.join(os.path.dirname(__file__), 'warm-handoff.h')) as f:
+         capacity = int(re.search(r'#define PM_MAX_STAGES (\d+)u', f.read())[1])
++    with open(os.path.join(os.path.dirname(__file__), 'boot-layout.h')) as f:
++        workspace = int(re.search(r'#define NXBL_RETIRED_BOOT_PAGES (\d+)', f.read())[1])
+     donated = 0
+     i = 0
+     while i < len(section_ranges):
+@@ -103,7 +105,7 @@ def prepare_kernel_image(kernel: bytes, image_max: int) -> bytes:
+             end = (end + 4095) & ~4095
+         donated += max(0, (end // 4096) - ((start + 4095) // 4096))
+         i = last + 1
+-    require(donated <= capacity, 'warm persistence staging capacity exceeded')
++    require(donated + workspace <= capacity, 'warm persistence staging capacity exceeded')
+     result = bytearray(image_size)
+     result[:headers] = kernel[:headers]
+     for rva, offset, size in copies:
+diff --git a/boot/nxldr/loader.c b/boot/nxldr/loader.c
+index def1867d..61cc063e 100644
+--- a/boot/nxldr/loader.c
++++ b/boot/nxldr/loader.c
+@@ -21,7 +21,6 @@
+ #include "paging.h"
+ #include "pe.h"
+ #include "xz/xz.h"
+-#include "warm-handoff.h"
+ 
+ /* GDB-visible sentinels. */
+ volatile ULONG LoaderPhase = 0;
+@@ -113,31 +112,6 @@ DecompressKernel(void)
+     return Destination;
+ }
+ 
+-/* Preserve the selected pages before XZ replaces their old INIT bytes.
+- * All planning finishes before any copy. The kernel validates each pair and
+- * reserves its temporary PFN in the boot descriptor list before MM starts. */
+-static int PreserveWarmImage(void)
+-{
+-    PM_HANDOFF *H = (PM_HANDOFF *)0xD000;
+-    const NXKRNL_XZ_HEADER *Payload = (const void *)KernelPayloadVa;
+-    unsigned launch = *(const unsigned *)0xE000 == PM_LAUNCH_MAGIC ?
+-        PmHash((const unsigned char *)0xE000, PM_LAUNCH_BYTES) : 0;
+-    unsigned count, i;
+-    if (H->Magic != PM_MAGIC || H->Version != PM_VERSION ||
+-        H->BitmapBytes != PM_BYTES || H->ImageBase != NXBL_IMAGE_BASE ||
+-        H->StageCount > PM_MAX_STAGES || H->LaunchHash != launch ||
+-        H->Checksum != PmChecksum(H)) return 1; /* no valid warm handoff */
+-    if (H->StageCount || Payload->Magic != NXKRNL_XZ_MAGIC ||
+-        !NxWarmPlan(H->Pages, Payload->DecompressedSize,
+-                    H->Stages, PM_MAX_STAGES, &count)) return 0;
+-    for (i = 0; i < count; ++i)
+-        memcpy((void *)((ULONG_PTR)H->Stages[i].Temporary << 12),
+-               (const void *)((ULONG_PTR)H->Stages[i].Original << 12), 4096);
+-    H->StageCount = count;
+-    H->Checksum = PmChecksum(H);
+-    return 1;
+-}
+-
+ __attribute__((noreturn)) void
+ LoaderMain(void)
+ {
+@@ -149,10 +123,6 @@ LoaderMain(void)
+ 
+     LoaderPhase = 0x21; /* entered LoaderMain */
+ 
+-    if (!PreserveWarmImage()) {
+-        LoaderFailCode = 0x504D; /* valid persistence could not be preserved */
+-        goto halt;
+-    }
+     KernelImage = DecompressKernel();
+     if (KernelImage == NULL)
+         goto halt;
+diff --git a/boot/nxldr/nxldr.ld b/boot/nxldr/nxldr.ld
+index bbcb7bf4..afd04ebd 100644
+--- a/boot/nxldr/nxldr.ld
++++ b/boot/nxldr/nxldr.ld
+@@ -60,6 +60,9 @@ SECTIONS {
+     .low_rom LOW_ROM_BASE : AT (0) {
+         *(.low_rom)
+         *(.low_rom.*)
++        EarlyWarmBegin = .;
++        *early-warm.o(.text .text.* .rodata .rodata.*)
++        EarlyWarmEnd = .;
+         EndLowRom = .;
+     }
+ 
+diff --git a/boot/nxldr/startup.S b/boot/nxldr/startup.S
+index 7f746338..03228bdb 100644
+--- a/boot/nxldr/startup.S
++++ b/boot/nxldr/startup.S
+@@ -102,6 +102,7 @@ _start_low_rom:
+ .org 0x1000
+ .global _post_xcode_entry
+ _post_xcode_entry:
++    cli
+     /* Disable APIC base / clear pending interrupts (MSR 0x1b). */
+     movl  $0x1b, %ecx
+     xor   %eax, %eax
+@@ -190,6 +191,18 @@ _post_xcode_entry:
+ 
+     cld
+ 
++    /* The live PCR page is never donated to titles. Use it before any
++     * loader RAM write; the guard and all its callees execute from ROM. */
++    movl  $NXBL_EARLY_STACK_TOP, %esp
++    call  NxPreserveWarmBoot
++    testl %eax, %eax
++    jnz   .Lwarm_preserved
++.Lwarm_failed:
++    cli
++    hlt
++    jmp   .Lwarm_failed
++.Lwarm_preserved:
++
+     /* Copy .text/.rodata/.data from flash (right after .low_rom) to
+      * RAM (PA 0x100000+). */
+     mov   $RamCopyDst, %edi
+diff --git a/boot/nxldr/warm-stage.h b/boot/nxldr/warm-stage.h
+index 69088c3e..48d160a2 100644
+--- a/boot/nxldr/warm-stage.h
++++ b/boot/nxldr/warm-stage.h
+@@ -18,6 +18,21 @@ static inline int NxWarmSelected(const unsigned char *Bitmap, unsigned Page)
+     return Page < 0x4000 && (Bitmap[Page >> 3] & (1u << (Page & 7)));
+ }
+ 
++/* Only these boot allocations become title RAM after their final use.
++ * The live kernel-image and PCR tables are deliberately excluded. */
++static inline int NxWarmWorkspacePage(unsigned Page)
++{
++#if XBOX_RAM_MIB == 64
++    return (Page >= (NXBL_LOADER_PA >> 12) &&
++            Page < (NXBL_LOADER_LIMIT_PA >> 12)) ||
++           (Page >= (NXBL_PT_LOW_PA >> 12) &&
++            Page < (NXBL_PT_LOW_PA >> 12) + 20);
++#else
++    (void)Page;
++    return 0;
++#endif
++}
++
+ static inline int NxWarmTemporaryPage(unsigned Page, unsigned ImageBytes)
+ {
+     unsigned image = NXBL_IMAGE_PA >> 12;
+@@ -39,11 +54,14 @@ static inline int NxWarmPlan(const unsigned char *Bitmap, unsigned ImageBytes,
+     *Count = 0;
+     if (!ImageBytes || (ImageBytes & 4095) || ImageBytes > NXBL_IMAGE_BYTES)
+         return 0;
+-    for (p = first; p < first + (ImageBytes >> 12); ++p) {
++    for (p = 0; p < 0x4000; ++p) {
+         if (!NxWarmSelected(Bitmap, p)) continue;
++        if (!NxWarmWorkspacePage(p) &&
++            !(p >= first && p - first < (ImageBytes >> 12))) continue;
+         if (count == Capacity) return 0;
+         Pairs[count++].Original = (unsigned short)p;
+     }
++    if (!count) return 1;
+     /* Early MM carves one high-zone descriptor. Preserve its largest
+      * usable run while any other temporary storage is available. */
+     for (p = 0x3400; p <= 0x3c00; ++p) {
+diff --git a/ntoskrnl/ex/init.c b/ntoskrnl/ex/init.c
+index ca9e2fad..cba2d24f 100644
+--- a/ntoskrnl/ex/init.c
++++ b/ntoskrnl/ex/init.c
+@@ -2151,10 +2151,6 @@ Phase1Initialization(IN PVOID Context)
+         MiFindInitializationCode(&StartAddress, &EndAddress);
+         if (StartAddress)
+             MiFreeInitializationCode(StartAddress, EndAddress);
+-        {
+-            extern VOID NxkMmFinishWarmRestore(VOID);
+-            NxkMmFinishWarmRestore();
+-        }
+         NxInitFreesDone = 1;
+     }
+ 
+@@ -2165,7 +2161,13 @@ Phase1Initialization(IN PVOID Context)
+      * idempotency makes this single call safe. */
+     {
+         extern VOID NxkMmEnsureXboxWindows(VOID);
++        extern VOID NxkMmFinishWarmRestore(VOID);
++        extern VOID NxkMmRetireBootWorkspace(VOID);
+         NxkMmEnsureXboxWindows();
++        /* Ensure is also used by allocations during boot. Retirement must
++         * occur here exactly once, after INIT has actually been discarded. */
++        NxkMmRetireBootWorkspace();
++        NxkMmFinishWarmRestore();
+     }
+ 
+     /* Run the XBE title in place of smss.  Spawns the title's threads on
+diff --git a/ntoskrnl/xb/mm/init.c b/ntoskrnl/xb/mm/init.c
+index 1da594fb..d680e058 100644
+--- a/ntoskrnl/xb/mm/init.c
++++ b/ntoskrnl/xb/mm/init.c
+@@ -783,8 +783,7 @@ NxkMmEnsureXboxWindows(VOID)
+      * shaped map they sit in title-visible RAM at the head of the
+      * loader cluster -- hand the 20 pages back.  (The PCR PT and the
+      * final kernel-image PT and PCR PT stay live.) The selected 64 MiB
+-     * artifact retains all 22 pages: resetting rewrites them, so they must
+-     * never become valid title allocations that can request persistence.
++     * artifact uses the guarded workspace retirement below instead.
+      * Keep the old retail-base behavior separate from this physical layout. */
+     if (NxkIsRetailBase())
+     {
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index 898920b5..9352078a 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -210,6 +210,7 @@ BOOLEAN NxkMmPersistentPage(PFN_NUMBER Page);
+ VOID NxkMmReadPersistence(PLOADER_PARAMETER_BLOCK Lb);
+ VOID NxkMmRestoreInitPages(ULONG_PTR Pa, ULONG Pages);
+ VOID NxkMmFinishWarmRestore(VOID);
++VOID NxkMmRetireBootWorkspace(VOID);
+ VOID NTAPI NxkMmPublishPersistence(BOOLEAN WarmReset);
+ VOID NxkMmSetPersistentPages(ULONG_PTR Pa, SIZE_T Size, BOOLEAN Persist);
+ VOID NxkMmClearPersistence(ULONG_PTR Pa, ULONG_PTR End);
+diff --git a/ntoskrnl/xb/mm/persistence.c b/ntoskrnl/xb/mm/persistence.c
+index 1b828a6d..c69855d1 100644
+--- a/ntoskrnl/xb/mm/persistence.c
++++ b/ntoskrnl/xb/mm/persistence.c
+@@ -18,13 +18,10 @@ static UCHAR PmRestored[PM_BYTES];
+ #if XBOX_RAM_MIB == 64
+ static BOOLEAN PmBootCollision(PFN_NUMBER First, PFN_NUMBER Last)
+ {
+-    /* Defense in depth for permanently boot-owned frames. Actual image
+-     * ownership comes from LoaderSystemCode, not its whole virtual window.
+-     * A warm handoff across different kernel images is not guaranteed. */
+-    return (First < (NXBL_LOADER_LIMIT_PA >> PAGE_SHIFT) &&
+-            Last >= (NXBL_LOADER_PA >> PAGE_SHIFT)) ||
+-           (First < ((NXBL_PT_PCR_PA + PAGE_SIZE) >> PAGE_SHIFT) &&
+-            Last >= (NXBL_PT_LOW_PA >> PAGE_SHIFT));
++    /* Only the two still-live tables remain permanently protected here.
++     * Reclaimed loader/obsolete-table pages are staged by the ROM guard. */
++    return First < ((NXBL_PT_PCR_PA + PAGE_SIZE) >> PAGE_SHIFT) &&
++           Last >= (NXBL_PT_LOW_PA >> PAGE_SHIFT) + 20;
+ }
+ #endif
+ 
+@@ -125,9 +122,10 @@ VOID NxkMmReadPersistence(PLOADER_PARAMETER_BLOCK Lb)
+                    pair.Temporary <= slot->Stages[i - 1].Temporary)) ||
+             !PmBit(slot->Pages, pair.Original) ||
+             PmBit(slot->Pages, pair.Temporary) ||
+-            pair.Original < (NXBL_IMAGE_PA >> PAGE_SHIFT) ||
+-            !NxWarmDonated((const UCHAR *)__ImageBase, PmImageBytes(),
+-                          pair.Original - (NXBL_IMAGE_PA >> PAGE_SHIFT)) ||
++            (!NxWarmWorkspacePage(pair.Original) &&
++             (pair.Original < (NXBL_IMAGE_PA >> PAGE_SHIFT) ||
++              !NxWarmDonated((const UCHAR *)__ImageBase, PmImageBytes(),
++                            pair.Original - (NXBL_IMAGE_PA >> PAGE_SHIFT)))) ||
+             !NxWarmTemporaryPage(pair.Temporary, PmImageBytes()) ||
+             !d || d->MemoryType != LoaderFree) goto rejected;
+     }
+@@ -146,7 +144,8 @@ VOID NxkMmReadPersistence(PLOADER_PARAMETER_BLOCK Lb)
+             allowed = d->MemoryType == LoaderFree ||
+                 (d->MemoryType == LoaderFirmwarePermanent && p >= 0x3C00 &&
+                  p < (NXK_NV2A_INSTANCE_BASE >> PAGE_SHIFT));
+-            if (!allowed && d->MemoryType == LoaderSystemCode &&
++            if (!allowed && (d->MemoryType == LoaderSystemCode ||
++                             (d->MemoryType == LoaderMemoryData && NxWarmWorkspacePage(p))) &&
+                 stage < slot->StageCount && slot->Stages[stage].Original == p) {
+                 allowed = TRUE;
+                 ++stage;
+@@ -206,6 +205,32 @@ VOID NxkMmRestoreInitPages(ULONG_PTR Pa, ULONG Pages)
+     }
+     if (!remaining) slot->StageCount = 0;
+ }
++/* Phase 1 has left loader code/stack and retired INIT. The caller has
++ * replaced the identity tables and flushed CR3. Fail before copying if any
++ * page remains a live page directory/table. Restoration acquires its own
++ * donation lock, so do not call while holding the PFN lock. */
++VOID NxkMmRetireBootWorkspace(VOID)
++{
++#if XBOX_RAM_MIB == 64
++    extern volatile LONG NxInitFreesDone;
++    volatile ULONG *directory = (volatile ULONG *)0xC0300000;
++    ULONG i;
++    if (!NxInitFreesDone || NxWarmWorkspacePage((__readcr3() & ~4095UL) >> 12))
++        KeBugCheckEx(MEMORY_MANAGEMENT, 0x504D, 0, 0, 2);
++    for (i = 0; i < 1024; ++i) {
++        ULONG entry = directory[i];
++        if ((entry & 1) && !(entry & 0x80) && NxWarmWorkspacePage(entry >> 12))
++            KeBugCheckEx(MEMORY_MANAGEMENT, 0x504D, i, entry, 3);
++    }
++    NxkMmRestoreInitPages(NXBL_LOADER_PA,
++        (NXBL_LOADER_LIMIT_PA - NXBL_LOADER_PA) >> PAGE_SHIFT);
++    NxkMmRestoreInitPages(NXBL_PT_LOW_PA, 20);
++    NxkMmDonateHeapPages(NXBL_LOADER_PA,
++        (NXBL_LOADER_LIMIT_PA - NXBL_LOADER_PA) >> PAGE_SHIFT);
++    NxkMmDonateHeapPages(NXBL_PT_LOW_PA, 20);
++#endif
++}
++
+ VOID NxkMmFinishWarmRestore(VOID)
+ {
+     if (((PM_HANDOFF *)PM_VA)->StageCount)
+@@ -235,8 +260,8 @@ VOID NxkMmSetPersistentPages(ULONG_PTR Pa, SIZE_T Size, BOOLEAN Persist)
+ {
+     PFN_NUMBER first = Pa >> PAGE_SHIFT, last = (Pa + Size - 1) >> PAGE_SHIFT, p;
+     KIRQL irql;
+-    /* Reclaimed boot objects may be live title allocations, but their PAs
+-     * must be reused by the next loader. Reject these collisions as a whole. */
++    /* Keep live low structures and the remaining live boot tables protected.
++     * The ROM guard stages selected reclaimed workspace before reset writes. */
+     if (first == 0 || last >= PM_PAGES ||
+         (first < 0x11 && last >= 0xD) ||
+         (first < 0x42 && last >= 0x30) ||
+diff --git a/tests/host/boot-image/check.py b/tests/host/boot-image/check.py
+index 78a45e13..5b819de3 100644
+--- a/tests/host/boot-image/check.py
++++ b/tests/host/boot-image/check.py
+@@ -77,14 +77,14 @@ class PreparedImage(unittest.TestCase):
+ 
+     def test_persistence_metadata_bounds_all_donatable_pages(self):
+         # A final discardable zero-filled section needs one pair per whole page.
+-        for pages in (505, 506):
++        for pages in (453, 454):
+             raw = fixture()
+             sh = 0x178 + 2 * 40
+             raw[sh:sh+8] = b'INIT\0\0\0\0'
+             struct.pack_into('<I', raw, sh+8, pages * 4096)
+             struct.pack_into('<I', raw, sh+36, 0x02000000)
+             struct.pack_into('<I', raw, 0xd0, (3 + pages) * 4096)
+-            if pages == 505:
++            if pages == 453:
+                 self.pack(raw)
+             else:
+                 with self.assertRaisesRegex(ValueError, 'warm.*capacity'):
+diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
+index 01004e89..10948e1c 100644
+--- a/tests/host/boot-layout/check.py
++++ b/tests/host/boot-layout/check.py
+@@ -8,6 +8,7 @@ functions are retained. Privileged paging-enable/CPU descriptor code is not run.
+ """
+ from pathlib import Path
+ import subprocess
++import re
+ import sys
+ 
+ root = Path(__file__).resolve().parents[3]
+@@ -43,6 +44,10 @@ persistence = (root/'ntoskrnl/xb/mm/persistence.c').read_text()
+ persistence = '\n'.join(line for line in persistence.splitlines() if not line.startswith('#include'))
+ shape = 'BOOLEAN ' + function((root/'ntoskrnl/xb/mm/init.c').read_text(), 'NxkMmRetailShapedMap')
+ init_source = (root/'ntoskrnl/xb/mm/init.c').read_text()
++phase = function((root/'ntoskrnl/ex/init.c').read_text(), 'Phase1Initialization')
++assert phase.index('NxInitFreesDone = 1') < phase.index('NxkMmEnsureXboxWindows();') < phase.index('NxkMmRetireBootWorkspace();') < phase.index('NxkMmFinishWarmRestore();')
++assert 'NxkMmRetireBootWorkspace();' not in function(init_source, 'NxkMmEnsureXboxWindows')
++
+ cluster_start = init_source.index('    if (NxkIsRetailBase())', init_source.index('NxkMmEnsureXboxWindows('))
+ cluster = init_source[cluster_start:]
+ cluster = cluster[:cluster.index('\n    /* The loader backs all 16 pages')]
+@@ -70,6 +75,7 @@ shim = r'''
+ #include <stdlib.h>
+ #include <string.h>
+ #include <sys/mman.h>
++#include <setjmp.h>
+ #include "boot-layout.h"
+ #include "warm-handoff.h"
+ #include "xz/xz.h"
+@@ -83,13 +89,18 @@ typedef int32_t LONG;
+ #define CODE_SEG(x)
+ #define DATA_SEG(x)
+ #define MEMORY_MANAGEMENT 0
+-#define KeBugCheckEx(...) abort()
++static jmp_buf bugcheck;
++static int catch_bugcheck;
++#define KeBugCheckEx(...) do { if(catch_bugcheck) longjmp(bugcheck,1); abort(); } while(0)
+ #define NTAPI
+ #define TRUE 1
+ #define FALSE 0
+ #define PAGE_SIZE 4096u
+ #define PAGE_SHIFT 12
+ #define PD_PA 0xf000u
++static ULONG host_cr3 = PD_PA;
++#define __readcr3() host_cr3
++volatile LONG NxInitFreesDone = 1;
+ #define KSEG0_BASE 0x80000000u
+ #define PCR_REGION_PAGES 16
+ #define PCR_REGION_VA 0xffdf0000u
+@@ -149,7 +160,10 @@ static void MiReleasePfnLock(KIRQL irql) {(void)irql;}
+ static BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER p) {(void)p;return FALSE;}
+ static unsigned returned[0x8000];static PFN_NUMBER MmHighestPhysicalPage;
+ static void NxkPageSupplyReturn(PFN_NUMBER p) {returned[p]++;}
+-static void NxkMmDonateHeapPages(ULONG_PTR pa, ULONG count) {while(count--)returned[(pa>>12)+count]++;}
++BOOLEAN NxkMmPersistentPage(PFN_NUMBER);
++static void NxkMmDonateHeapPages(ULONG_PTR pa, ULONG count) {
++ while(count--) {unsigned p=(pa>>12)+count; if(!NxkMmPersistentPage(p)) returned[p]++;}
++}
+ #define NXK_MM_PHYS
+ #define SARCH_XBOX
+ #define INSTALL_MORE_MEMORY 0
+@@ -168,6 +182,20 @@ shim += '\nstatic void clear_user_maps(void) {MMPTE *StartPde,*EndPde;\n' + user
+ shim += '\n' + ram_global + '\n' + hal + '\n' + loader_types
+ shim += '\nstatic UCHAR KernelPayloadVa[sizeof(NXKRNL_XZ_HEADER)+1];\n#define KernelPayloadMaxSize ((UCHAR *)262144)\n' + decompress
+ 
++# Execute the real early guard with only physical addresses redirected to
++# the host RAM alias. The emitted-ROM check below separately tests placement.
++early = (root/'boot/nxldr/early-warm.c').read_text()
++early = '\n'.join(line for line in early.splitlines()
++                  if not line.startswith(('#include', 'extern ')))
++early = early.replace('(PM_HANDOFF *)0xD000', '(PM_HANDOFF *)PM_VA')
++early = early.replace('0xE000', 'PM_LAUNCH_VA')
++early = early.replace('h->ImageBase != NXBL_IMAGE_BASE', 'h->ImageBase != (ULONG)(ULONG_PTR)__ImageBase')
++for member in ('Temporary', 'Original'):
++    early = early.replace('((ULONG_PTR)h->Stages[i].'+member+' << 12)',
++                          '(NXK_KSEG0_BASE | ((ULONG_PTR)h->Stages[i].'+member+' << 12))')
++shim += '\n' + early
++
++
+ cases = r'''
+ static TYPE_OF_MEMORY type_at(unsigned pfn) {
+  for(unsigned i=0;i<md_count;i++)if(pfn>=md[i].BasePage&&pfn-md[i].BasePage<md[i].PageCount)return md[i].MemoryType;
+@@ -216,7 +244,7 @@ int main(void) {
+  for(unsigned i=0;i<5;i++){
+   memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(ranges[i][0],ranges[i][1],TRUE);
+   unsigned selected=0;for(unsigned j=0;j<PM_BYTES;j++)selected+=PmSelected[j]!=0;
+-  check((selected!=0)==(XBOX_RAM_MIB==128),"64 warm selection cannot select reserved loader/PT;128 unchanged");
++  check(selected!=0,"reclaimed loader/obsolete tables accept warm selection");
+  }
+  memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(0x1000000,0x1000,TRUE);check(PmBit(PmSelected,0x1000),"ordinary title page can persist");
+  NxkMmPublishPersistence(TRUE);NxkMmReadPersistence(&lb);check(PmBit(PmRestored,0x1000)&&((PM_HANDOFF *)PM_VA)->Magic==0,"valid warm handoff restored and consumed");
+@@ -304,6 +332,61 @@ int main(void) {
+   check(MxGetNextPage(35)==0x382b,"actual MM retains contiguous boot capacity after staging");
+  }
+ #endif
++
++#if XBOX_RAM_MIB == 64
++ /* The actual ROM guard, actual descriptor admission, and actual retirement
++  * share a handoff. Overwrite exactly the pages startup/paging will reuse. */
++ ULONG *recursive=mmap((void *)0xc0000000,0x400000,PROT_READ|PROT_WRITE,
++   MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
++ if(recursive==MAP_FAILED){perror("mmap retire facade");return 2;}
++ ULONG *pdes=(ULONG *)0xc0300000;
++ for(unsigned i=0;i<16;i++)pdes[0x200+i]=(i<<22)|0x83;
++ pdes[0x210]=(NXBL_PT_LOW_PA+20*PAGE_SIZE)|3;
++ for(unsigned selected=0;selected<2;selected++) {
++  build_descriptors(&lb,0x78000);
++  memset(PmSelected,0,sizeof(PmSelected));memset(PmRestored,0,sizeof(PmRestored));
++  for(unsigned p=0;p<0x4000;p++)if(NxWarmWorkspacePage(p)) {
++   if(selected)PmSet(PmSelected,p,TRUE);
++   memset((void *)(NXK_KSEG0_BASE+(uintptr_t)p*PAGE_SIZE),p&255,PAGE_SIZE);
++  }
++  NxkMmSetPersistentPages(NXBL_PT_LOW_PA+20*PAGE_SIZE,2*PAGE_SIZE,TRUE);
++  check(!PmBit(PmSelected,(NXBL_PT_LOW_PA>>12)+20)&&!PmBit(PmSelected,(NXBL_PT_LOW_PA>>12)+21),"both live tables reject persistence");
++  NxkMmPublishPersistence(TRUE);compressed->DecompressedSize=0x78000;
++  check(NxPreserveWarmBoot(),"real ROM guard stages selected reset workspace");
++  check(slot->StageCount==(selected?52:0),"every reclaimed workspace page has one staging pair");
++  NX_WARM_PAIR saved[52];memcpy(saved,slot->Stages,sizeof(saved));
++  if(selected)for(unsigned i=0;i<52;i++) {
++   unsigned p=saved[i].Original;
++   check(!memcmp((void *)(NXK_KSEG0_BASE+(uintptr_t)p*PAGE_SIZE),
++    (void *)(NXK_KSEG0_BASE+(uintptr_t)saved[i].Temporary*PAGE_SIZE),PAGE_SIZE),"guard preserves full page before destructive boot");
++  }
++  for(unsigned p=0;p<0x4000;p++)if(NxWarmWorkspacePage(p))
++   memset((void *)(NXK_KSEG0_BASE+(uintptr_t)p*PAGE_SIZE),0x55,PAGE_SIZE);
++  NxkMmReadPersistence(&lb);memset(returned,0,sizeof(returned));
++  NxkMmRetireBootWorkspace();NxkMmFinishWarmRestore();
++  for(unsigned p=0;p<0x4000;p++)if(NxWarmWorkspacePage(p)) {
++   UCHAR *bytes=(void *)(NXK_KSEG0_BASE+(uintptr_t)p*PAGE_SIZE);
++   check(returned[p]==!selected,"workspace returned once only when not title-owned");
++   if(selected)check(bytes[0]==(p&255)&&bytes[PAGE_SIZE-1]==(p&255),"restored workspace title bytes survive reset overwrite");
++  }
++  if(selected)for(unsigned i=0;i<52;i++)check(returned[saved[i].Temporary]==1,"temporary staging returned once");
++  check(!returned[(NXBL_PT_LOW_PA>>12)+20]&&!returned[(NXBL_PT_LOW_PA>>12)+21],"both live PTs remain reserved");
++ }
++ for(unsigned failure=0;failure<3;failure++) {
++  memset(returned,0,sizeof(returned));
++  NxInitFreesDone=failure!=0;
++  host_cr3=failure==1?NXBL_LOADER_PA:PD_PA;
++  pdes[5]=failure==2?NXBL_PT_LOW_PA|3:0;
++  catch_bugcheck=1;
++  if(!setjmp(bugcheck)){NxkMmRetireBootWorkspace();check(0,"unsafe retirement must stop");}
++  else check(1,"live INIT/directory/table blocks reclamation");
++  catch_bugcheck=0;
++  unsigned n=0;for(unsigned p=0;p<0x8000;p++)n+=returned[p];
++  check(n==0,"unsafe retirement changes no allocator ownership");
++ }
++ NxInitFreesDone=1;host_cr3=PD_PA;pdes[5]=0;
++ munmap(recursive,0x400000);
++#endif
+  printf("%dMiB: %d checks, %d failures\n",XBOX_RAM_MIB,checks,failures);return failures!=0;
+ }
+ '''
+@@ -353,6 +436,38 @@ for capacity in (128, 64):
+         assert symbols['StackTop'] == limit - 16
+         assert symbols['BssEnd'] <= symbols['StackTop'] - 0x10000
+         assert symbols['KernelImageMaxSize'] == 0x400000
++        # Reject RAM-resident callees/data and unbounded early-stack growth.
++        early_object = build/'loader/early-warm.o'
++        sections = subprocess.check_output(['objdump', '-h', str(early_object)], text=True)
++        for line in sections.splitlines():
++            fields = line.split()
++            if len(fields) >= 3 and fields[0].isdigit():
++                if fields[1].startswith(('.data', '.bss')):
++                    assert int(fields[2], 16) == 0, 'early guard has mutable globals'
++        relocations = subprocess.check_output(['objdump', '-r', str(early_object)], text=True)
++        for line in relocations.splitlines():
++            fields = line.split()
++            if len(fields) == 3 and fields[1].startswith('R_386_'):
++                assert fields[2] == 'KernelPayloadVa' or fields[2].startswith(('.text.', '.rodata.')), line
++        usage = (build/'loader/early-warm.su').read_text().splitlines()
++        assert usage and all(line.split('\t')[-1] == 'static' for line in usage)
++        # All local functions are non-recursive. Summing every frame plus
++        # return addresses conservatively bounds the deepest possible chain.
++        stack_bound = sum(int(line.split('\t')[1]) + 4 for line in usage)
++        assert stack_bound < 4096
++        assert symbols['LOW_ROM_BASE'] <= symbols['EarlyWarmBegin'] < symbols['EarlyWarmEnd'] <= symbols['EndLowRom']
++        guard = subprocess.check_output(['objdump', '-d',
++            '--start-address='+str(symbols['EarlyWarmBegin']),
++            '--stop-address='+str(symbols['EarlyWarmEnd']), str(build/'loader/nxldr.elf')], text=True)
++        for line in guard.splitlines():
++            if re.search(r'\bcall\b', line):
++                target = re.search(r'\bcall\s+([0-9a-f]+) ', line)
++                assert target and symbols['EarlyWarmBegin'] <= int(target[1],16) < symbols['EarlyWarmEnd'], line
++        entry = subprocess.check_output(['objdump', '-d',
++            '--start-address='+str(symbols['_post_xcode_entry']),
++            '--stop-address='+str(symbols['EarlyWarmBegin']), str(build/'loader/nxldr.elf')], text=True)
++        assert entry.index('<NxPreserveWarmBoot>') < entry.index('rep movs')
++        print(f'{capacity}MiB: ROM-only guard, conservative stack bound {stack_bound} bytes')
+         blob = (build/'loader/nxldr.bin').read_bytes()
+         # Real emitted Xcode instructions: PCI memory top and both PFB writes.
+         memory_top = 0x3ffffff if capacity == 64 else 0x7ffffff
+@@ -365,3 +480,4 @@ for capacity in (128, 64):
+ subprocess.run([sys.executable, str(root/'tests/host/boot-layout/check-image-bounds.py'),
+                 str(out/'image-bounds')], check=True)
+ sys.exit(bool(failures))
++
+diff --git a/tests/host/clean-room/persistence.c b/tests/host/clean-room/persistence.c
+index 0659b293..4edef078 100644
+--- a/tests/host/clean-room/persistence.c
++++ b/tests/host/clean-room/persistence.c
+@@ -8,6 +8,8 @@
+ #define MEMORY_MANAGEMENT 0
+ #define KeBugCheckEx(...) abort()
+ UCHAR __ImageBase[1];
++volatile LONG NxInitFreesDone = 1;
++#define __readcr3() 0xf000u
+ /* This facade exercises unstaged bookkeeping; layout checks execute restore. */
+ VOID NxkMmDonateHeapPages(ULONG_PTR pa, ULONG count)
+ { (void)pa; (void)count; abort(); }
+diff --git a/tests/host/warm-stage/test.c b/tests/host/warm-stage/test.c
+index 6274c456..273f3dff 100644
+--- a/tests/host/warm-stage/test.c
++++ b/tests/host/warm-stage/test.c
+@@ -6,6 +6,10 @@
+ 
+ static unsigned char bitmap[2048];
+ static NX_WARM_PAIR pairs[8];
++static void clear_workspace(void) {
++    for (unsigned p = 0; p < 0x4000; ++p)
++        if (NxWarmWorkspacePage(p)) bitmap[p / 8] &= ~(1u << (p % 8));
++}
+ static void select_page(unsigned p) { bitmap[p / 8] |= 1u << (p % 8); }
+ int main(void)
+ {
+@@ -18,6 +22,14 @@ int main(void)
+     puts("128 MiB image has no overlap with the low-64-MiB handoff: PASS");
+     return 0;
+ #endif
++    /* Reclaimed loader and superseded PT bytes must be protected before
++     * startup writes either range, even with no selected INIT pages. */
++    select_page(NXBL_LOADER_PA >> 12);
++    select_page(NXBL_PT_LOW_PA >> 12);
++    assert(NxWarmPlan(bitmap, 0x78000, pairs, 8, &count));
++    assert(count == 2);
++    assert(pairs[0].Original == (NXBL_LOADER_PA >> 12));
++    assert(pairs[1].Original == (NXBL_PT_LOW_PA >> 12));
+     memset(bitmap, 0, sizeof(bitmap));
+     select_page(base + 0x66); select_page(base + 0x70);
+     select_page(0x100); /* ordinary selected page must not be staging */
+@@ -28,6 +40,7 @@ int main(void)
+ 
+     /* A saturated low arena must use legal high storage, not selected RAM. */
+     memset(bitmap, 0xff, sizeof(bitmap));
++    clear_workspace();
+     bitmap[0x3821 / 8] &= ~(1u << (0x3821 % 8));
+     bitmap[0x3822 / 8] &= ~(1u << (0x3822 % 8));
+     memset(bitmap + base / 8, 0, 0x78 / 8);
+@@ -39,6 +52,7 @@ int main(void)
+ 
+     /* Preserve the one viable boot carve, despite its lower address. */
+     memset(bitmap, 0xff, sizeof(bitmap));
++    clear_workspace();
+     memset(bitmap + base / 8, 0, 0x78 / 8);
+     select_page(base + 0x70);
+     for (unsigned p = 0x3820; p <= 0x384d; ++p)
+@@ -47,6 +61,7 @@ int main(void)
+     assert(NxWarmPlan(bitmap, 0x78000, pairs, 8, &count));
+     assert(count == 1 && pairs[0].Temporary == 0x3bbf);
+     memset(bitmap, 0xff, sizeof(bitmap));
++    clear_workspace();
+     memset(bitmap + base / 8, 0, 0x78 / 8);
+     select_page(base + 0x70);
+ 
+diff --git a/tests/xbe/clean-room-warm-reboot/main.c b/tests/xbe/clean-room-warm-reboot/main.c
+index 87eb4398..2a2866bd 100644
+--- a/tests/xbe/clean-room-warm-reboot/main.c
++++ b/tests/xbe/clean-room-warm-reboot/main.c
+@@ -13,8 +13,11 @@
+ #ifndef PERSIST_PAGES
+ #define PERSIST_PAGES 1
+ #endif
++#ifndef GUARD_PAGES
++#define GUARD_PAGES 1
++#endif
+ #define PERSIST_BYTES (PERSIST_PAGES * PAGE_SIZE)
+-#define ALLOCATION_BYTES ((PERSIST_PAGES + 2) * PAGE_SIZE)
++#define ALLOCATION_BYTES ((PERSIST_PAGES + 2 * GUARD_PAGES) * PAGE_SIZE)
+ #define CONTROL_PA 0x039fe000UL
+ #define PROBE_MAGIC 0x43524D50UL /* independent test sentinel */
+ typedef struct { ULONG Magic, Pa, Count, NestedReturned, Order[6]; UCHAR Fill[64]; } PROBE;
+@@ -101,15 +104,18 @@ int main(void)
+     tap_puts("== clean-room-warm-reboot stage 1 ==\n");
+     PVOID allocation = MmAllocateContiguousMemoryEx(ALLOCATION_BYTES, DATA_PA,
+         DATA_PA + ALLOCATION_BYTES - 1, PAGE_SIZE, PAGE_READWRITE);
+-    if (!allocation) { tap_puts("== clean-room-warm-reboot setup FAIL ==\n"); stop(); }
++    if (!allocation) { tap_version(14); tap_plan(1);
++        tap_not_ok(1, "required physical range is available to the title"); stop(); }
+     memset(allocation, 0x37, ALLOCATION_BYTES);
+-    record = (PROBE *)((PUCHAR)allocation + PAGE_SIZE);
++    record = (PROBE *)((PUCHAR)allocation + GUARD_PAGES * PAGE_SIZE);
+     memset(record, 0xA6, PERSIST_BYTES);
+     memset(record, 0, sizeof(*record)); record->Magic = PROBE_MAGIC;
+-    record->Pa = DATA_PA + PAGE_SIZE; memset(record->Fill, 0xA6, sizeof(record->Fill));
++    record->Pa = DATA_PA + GUARD_PAGES * PAGE_SIZE; memset(record->Fill, 0xA6, sizeof(record->Fill));
+     MmPersistContiguousMemory(allocation, ALLOCATION_BYTES, TRUE);
+-    MmPersistContiguousMemory(allocation, PAGE_SIZE, FALSE);
+-    MmPersistContiguousMemory((PUCHAR)allocation + (PERSIST_PAGES + 1) * PAGE_SIZE, PAGE_SIZE, FALSE);
++    if (GUARD_PAGES) {
++        MmPersistContiguousMemory(allocation, GUARD_PAGES * PAGE_SIZE, FALSE);
++        MmPersistContiguousMemory((PUCHAR)allocation + (PERSIST_PAGES + GUARD_PAGES) * PAGE_SIZE, GUARD_PAGES * PAGE_SIZE, FALSE);
++    }
+     MmPersistContiguousMemory((PUCHAR)record + 17, 20, TRUE); /* valid partial range */
+     MmPersistContiguousMemory((PVOID)0xFFFFFFF0, 128, TRUE); /* overflow, inert */
+     for (ULONG i = 0; i < 5; ++i) {
