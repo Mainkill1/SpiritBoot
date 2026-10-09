@@ -1,0 +1,147 @@
+diff --git a/drivers/storage/class/classpnp/classp.h b/drivers/storage/class/classpnp/classp.h
+index 2eba9190d1069c7cfa277cec6006bece3bbd4f94..3bc3571f36c2db3eddaa6f1b86ccdd060e74761e 100644
+--- a/drivers/storage/class/classpnp/classp.h
++++ b/drivers/storage/class/classpnp/classp.h
+@@ -825,8 +825,10 @@ struct _CLASS_PRIVATE_FDO_DATA {
+     /*
+      *  Circular array of timestamped logs of errors that occurred on this device.
+      */
++#ifndef SARCH_XBOX
+     ULONG ErrorLogNextIndex;
+     CLASS_ERROR_LOG_DATA ErrorLogs[NUM_ERROR_LOG_ENTRIES];
++#endif
+ 
+     //
+     // Number of outstanding critical Io requests from Mm
+diff --git a/tests/host/class-errorlog-layout/README.md b/tests/host/class-errorlog-layout/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4007b95c7b0c984b07478e61f5f742b62c39fa6b
+--- /dev/null
++++ b/tests/host/class-errorlog-layout/README.md
+@@ -0,0 +1,18 @@
++# Xbox private error-log layout gate
++
++This check compiles the maintained `classp.h` with the flags and generated
++headers from a configured production Xbox build. It catches accidental ring
++reintroduction, an allocation crossing the 1024-byte pool class, changes to
++generic release/debug ring layout, and compiled Xbox ring consumers.
++
++Build `classpnp` first, then run inside the same compiler environment:
++
++```sh
++python3 tests/host/class-errorlog-layout/check.py /path/to/build /path/to/evidence
++```
++
++The generic compatibility checks use the unchanged header's independently
++recorded 32-bit NTDDI_WIN8 release/debug sizes and offsets with `SARCH_XBOX`
++removed. They retain the production ReactOS/compiler definitions. The gate
++does not claim to compile a full generic kernel or measure boot memory.
++The Xbox debug packet log is separate and remains present.
+diff --git a/tests/host/class-errorlog-layout/check.py b/tests/host/class-errorlog-layout/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..0a0c47d95e48bef6ffe539c41a2e199f1783555e
+--- /dev/null
++++ b/tests/host/class-errorlog-layout/check.py
+@@ -0,0 +1,102 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Compile the real classpnp header and audit the configured Xbox target.
++
++Usage: check.py BUILD_DIRECTORY OUTPUT_DIRECTORY
++Requires generated SDK headers from a production Xbox classpnp build.
++"""
++import json
++from pathlib import Path
++import re
++import shlex
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++build, output = (Path(arg).resolve() for arg in sys.argv[1:])
++output.mkdir(parents=True, exist_ok=True)
++class_root = root / "drivers/storage/class/classpnp"
++commands = []
++for line in subprocess.check_output(
++        ["ninja", "-C", str(build), "-t", "commands", "classpnp"], text=True).splitlines():
++    command = shlex.split(line)
++    if "-c" in command:
++        source = Path(command[command.index("-c") + 1])
++        if source.parent == class_root and source.suffix == ".c":
++            commands.append((source, command))
++if not commands or any("-DSARCH_XBOX" not in command for _, command in commands):
++    raise SystemExit("expected the production Xbox classpnp compiler commands")
++
++
++def flags(command):
++    """Reuse production flags without object/dependency/LTO side effects."""
++    result = []
++    iterator = iter(command)
++    for arg in iterator:
++        if arg in ("-o", "-c", "-MT", "-MF"):
++            next(iterator)
++        elif arg not in ("-MD", "-MMD") and not arg.startswith("-flto"):
++            result.append(arg)
++    return result
++
++
++def compile_case(name, command, text, expect_missing=None):
++    source = output / (name + ".c")
++    source.write_text('#include "classp.h"\n' + text)
++    actual = command + ["-fsyntax-only", str(source)]
++    (output / (name + "-command.txt")).write_text(shlex.join(actual) + "\n")
++    result = subprocess.run(actual, cwd=build, text=True, capture_output=True)
++    (output / (name + ".log")).write_text(result.stdout + result.stderr)
++    if expect_missing:
++        if result.returncode == 0 or not re.search(
++                r"has no member named ." + re.escape(expect_missing), result.stderr):
++            raise SystemExit(name + ": expected the actual header to omit " + expect_missing)
++    elif result.returncode:
++        sys.stderr.write(result.stderr)
++        raise SystemExit(name + ": production layout contract failed")
++    print(name + ": PASS")
++
++
++base = flags(commands[0][1])
++for debug in (0, 1):
++    configured = [arg for arg in base if not arg.startswith("-DDBG=")]
++    configured.append("-DDBG=" + str(debug))
++    if not debug:
++        compile_case("xbox-release-bucket", configured, """
++_Static_assert(sizeof(CLASS_PRIVATE_FDO_DATA) + 8 <= 1024,
++    "Xbox private data must fit the existing 1024-byte pool class");
++_Static_assert(sizeof(CLASS_PRIVATE_FDO_DATA) + 8 > 512,
++    "allocation-class expectation needs updating if the data shrinks further");
++""")
++    for member in ("ErrorLogNextIndex", "ErrorLogs"):
++        compile_case("xbox-" + str(debug) + "-no-" + member, configured,
++                     "void check(CLASS_PRIVATE_FDO_DATA *data) { (void)data->" + member + "; }\n",
++                     expect_missing=member)
++    # Independently recorded from the unchanged production header using the
++    # same compiler and flags with SARCH_XBOX removed (not a surrogate struct).
++    generic = [arg for arg in configured if arg != "-DSARCH_XBOX"]
++    size = 53656 if debug else 2400
++    compile_case("generic-" + str(debug) + "-preserves-ring", generic, f"""
++_Static_assert(sizeof(CLASS_PRIVATE_FDO_DATA) == {size}, "generic private-data layout changed");
++_Static_assert(offsetof(CLASS_PRIVATE_FDO_DATA, ErrorLogNextIndex) == 548, "generic index moved");
++_Static_assert(offsetof(CLASS_PRIVATE_FDO_DATA, ErrorLogs) == 552, "generic ring moved");
++_Static_assert(offsetof(CLASS_PRIVATE_FDO_DATA, NumHighPriorityPagingIo) == 2216, "generic tail moved");
++_Static_assert(sizeof(((CLASS_PRIVATE_FDO_DATA *)0)->ErrorLogs) / sizeof(CLASS_ERROR_LOG_DATA) == 16,
++    "generic error-ring depth changed");
++_Static_assert(sizeof(CLASS_ERROR_LOG_DATA) == 104, "generic error-log entry changed");
++""")
++
++audit = []
++for debug in (0, 1):
++    for source, command in commands:
++        preprocessed = output / (source.stem + "-" + str(debug) + "-preprocessed.c")
++        configured = [arg for arg in flags(command) if not arg.startswith("-DDBG=")]
++        actual = configured + ["-DDBG=" + str(debug), "-E", "-P", str(source), "-o", str(preprocessed)]
++        subprocess.run(actual, cwd=build, check=True)
++        references = re.findall(r"\b(?:ErrorLogNextIndex|ErrorLogs)\b", preprocessed.read_text())
++        audit.append({"source": str(source.relative_to(root)), "debug": debug,
++                      "references": len(references), "command": actual})
++        if references:
++            raise SystemExit(str(source) + ": compiled Xbox error-ring reference found")
++(output / "consumer-audit.json").write_text(json.dumps(audit, indent=2) + "\n")
++print(f"all {len(commands)} configured Xbox classpnp translation units, release/debug: zero ring references PASS")
