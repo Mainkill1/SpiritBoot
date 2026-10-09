@@ -79,12 +79,14 @@ def asset_identity(asset):
     return {'sha256': digest, 'size': size}
 
 
-def capture(path, mapping):
+def capture(path, mapping, *, expected_memory_mib=128):
+    require(type(expected_memory_mib) is int and expected_memory_mib in (64, 128),
+            'unsupported expected memory capacity')
     path = Path(path)
     run_path, serial_path = path / 'run.json', path / 'serial.log'
     run, serial = read_json(run_path), serial_path.read_text()
     require(run.get('schema') == 1 and run.get('status') == 'passed' and run.get('returncode') == 0, f'{path}: failed driver')
-    require(run.get('memory_mib') == 128 and run.get('boot_mode') == 'open-direct' and run.get('expect_tap') is True and run.get('snapshot') is True, f'{path}: runtime configuration mismatch')
+    require(type(run.get('memory_mib')) is int and run.get('memory_mib') == expected_memory_mib and run.get('boot_mode') == 'open-direct' and run.get('expect_tap') is True and run.get('snapshot') is True, f'{path}: runtime configuration mismatch')
     tap = grade_tap(serial)
     require(tap == run.get('tap') and tap['passed'] and tap['plan'] == 42 and tap['ok'] == 42 and tap['ran'] == 42 and tap['failed'] == tap['todo'] == tap['skipped'] == 0 and not tap['errors'], f'{path}: unclean TAP')
     lines = serial.splitlines()
@@ -121,7 +123,7 @@ def capture(path, mapping):
             verified.append({'asset': name, 'path': str(local)})
     elapsed = run.get('elapsed_seconds')
     require(type(elapsed) in (int, float) and math.isfinite(elapsed) and elapsed > 0, 'invalid elapsed duration')
-    return {'path': str(path), 'run_sha256': sha256(run_path), 'serial_sha256': sha256(serial_path), 'started_utc': run['started_utc'], 'elapsed_seconds': elapsed, 'clock': meta[1], 'frequency': frequency, 'workloads': workloads, 'assets': assets, 'asset_records':run['assets'], 'locally_verified_assets': verified}
+    return {'path': str(path), 'memory_mib': run['memory_mib'], 'run_sha256': sha256(run_path), 'serial_sha256': sha256(serial_path), 'started_utc': run['started_utc'], 'elapsed_seconds': elapsed, 'clock': meta[1], 'frequency': frequency, 'workloads': workloads, 'assets': assets, 'asset_records':run['assets'], 'locally_verified_assets': verified}
 
 
 def display_numbers(value):
