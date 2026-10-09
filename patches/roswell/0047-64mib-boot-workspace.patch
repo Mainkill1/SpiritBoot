@@ -1,0 +1,115 @@
+From 18d921aae55af0413cf95023e439f4ac78983fcb Mon Sep 17 00:00:00 2001
+From: Mainkill1 <Mainkill1@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 09:54:05 -0700
+Subject: [PATCH] Boot: bound 64 MiB loader workspace and free untouched tails
+
+---
+ boot/nxldr/CMakeLists.txt       |  4 ++--
+ boot/nxldr/boot-layout.h        |  4 ++--
+ ntoskrnl/xb/nxldr-entry.c       |  5 +++++
+ tests/host/boot-layout/check.py | 14 ++++++++------
+ 4 files changed, 17 insertions(+), 10 deletions(-)
+
+diff --git a/boot/nxldr/CMakeLists.txt b/boot/nxldr/CMakeLists.txt
+index 779dd69b..f3ea8eb5 100644
+--- a/boot/nxldr/CMakeLists.txt
++++ b/boot/nxldr/CMakeLists.txt
+@@ -56,8 +56,8 @@ endif()
+ if(XBOX_RAM_MIB STREQUAL "64")
+     list(APPEND NXLDR_LDFLAGS
+         --defsym __nxldr_ram_code__=0x03800000
+-        --defsym __nxldr_ram_limit__=0x03900000
+-        --defsym __nxldr_scratch_max_size__=0x002C0000)
++        --defsym __nxldr_ram_limit__=0x03820000
++        --defsym __nxldr_scratch_max_size__=0x00100000)
+ endif()
+ 
+ # Listed so any header edit retriggers the whole loader build.
+diff --git a/boot/nxldr/boot-layout.h b/boot/nxldr/boot-layout.h
+index fde3b753..506142a6 100644
+--- a/boot/nxldr/boot-layout.h
++++ b/boot/nxldr/boot-layout.h
+@@ -28,9 +28,9 @@
+ #define NXBL_IMAGE_PA 0x03400000UL
+ #define NXBL_PT_LOW_PA 0x03BC0000UL
+ #define NXBL_LOADER_PA 0x03800000UL
+-#define NXBL_LOADER_LIMIT_PA 0x03900000UL
++#define NXBL_LOADER_LIMIT_PA 0x03820000UL
+ #define NXBL_SCRATCH_PA 0x03900000UL
+-#define NXBL_SCRATCH_BYTES (NXBL_PT_LOW_PA - NXBL_SCRATCH_PA)
++#define NXBL_SCRATCH_BYTES 0x00100000UL
+ #define NXBL_PFB_TIMING 0x03070003
+ #define NXBL_MEMORY_TOP 0x03FFFFFF
+ #else
+diff --git a/ntoskrnl/xb/nxldr-entry.c b/ntoskrnl/xb/nxldr-entry.c
+index ac4798b4..b1e8a972 100644
+--- a/ntoskrnl/xb/nxldr-entry.c
++++ b/ntoskrnl/xb/nxldr-entry.c
+@@ -331,8 +331,13 @@ NxldrBuildLoaderBlock(VOID)
+      * the next reset overwrites before checking its persistent bitmap. */
+     AddMd(Lb, &Cursor, LoaderMemoryData, NXBL_LOADER_PA >> PAGE_SHIFT,
+           (NXBL_LOADER_LIMIT_PA - NXBL_LOADER_PA) >> PAGE_SHIFT);
++    AddMd(Lb, &Cursor, LoaderFree, NXBL_LOADER_LIMIT_PA >> PAGE_SHIFT,
++          (NXBL_SCRATCH_PA - NXBL_LOADER_LIMIT_PA) >> PAGE_SHIFT);
+     AddMd(Lb, &Cursor, LoaderMemoryData, NXBL_SCRATCH_PA >> PAGE_SHIFT,
+           NXBL_SCRATCH_BYTES >> PAGE_SHIFT);
++    AddMd(Lb, &Cursor, LoaderFree,
++          (NXBL_SCRATCH_PA + NXBL_SCRATCH_BYTES) >> PAGE_SHIFT,
++          (NXBL_PT_LOW_PA - NXBL_SCRATCH_PA - NXBL_SCRATCH_BYTES) >> PAGE_SHIFT);
+     AddMd(Lb, &Cursor, LoaderMemoryData, HighBase, HighCount);
+     AddMd(Lb, &Cursor, LoaderFree, HighBase + HighCount, 0x3C00 - (HighBase + HighCount));
+     AddMd(Lb, &Cursor, LoaderFirmwarePermanent, 0x3C00, 0x400);
+diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
+index 13123835..f7ad8b92 100644
+--- a/tests/host/boot-layout/check.py
++++ b/tests/host/boot-layout/check.py
+@@ -182,7 +182,8 @@ int main(void) {
+  check(type_at(imagepa/PAGE_SIZE)==LoaderSystemCode&&type_at((imagepa+0x76000)/PAGE_SIZE)==LoaderSystemCode,"whole image excluded from free supply");
+  check(type_at(ptpa/PAGE_SIZE)==LoaderMemoryData&&type_at(ptpa/PAGE_SIZE+21)==LoaderMemoryData,"live PT cluster reserved");
+  check(type_at(0x100)==LoaderFree&&type_at(0x2000)==LoaderFree,"1MiB and32MiB remain ordinary title RAM as on128MiB BIOS");
+- check(XBOX_RAM_MIB==128||(type_at(0x3800)==LoaderMemoryData&&type_at(0x3900)==LoaderMemoryData&&type_at(0x3bbf)==LoaderMemoryData),"64 loader/stack/scratch reserved throughout runtime");
++ check(XBOX_RAM_MIB==128||(type_at(0x3800)==LoaderMemoryData&&type_at(0x3900)==LoaderMemoryData&&type_at((NXBL_SCRATCH_PA+NXBL_SCRATCH_BYTES)/PAGE_SIZE-1)==LoaderMemoryData),"64 loader/stack/scratch reserved throughout runtime");
++ check(XBOX_RAM_MIB==128||(type_at(0x3820)==LoaderFree&&type_at(0x3a00)==LoaderFree),"64 unused loader and scratch tails become free");
+  check(type_at(0xd)==LoaderMemoryData&&type_at(0x10)==LoaderMemoryData&&type_at(0x30)==LoaderMemoryData,"low bootstrap reservations retained");
+  check(NXBL_PAGES_SPANNED==0x4400,"virtual System PTE floor stays above kernel VA");
+  check(NxkMmRetailShapedMap()==(XBOX_RAM_MIB==64),"allocation policy follows physical layout, independently of image VA");
+@@ -215,8 +216,8 @@ int main(void) {
+  memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(0x1000000,0x1000,TRUE);check(PmBit(PmSelected,0x1000),"ordinary title page can persist");
+  NxkMmPublishPersistence(TRUE);NxkMmReadPersistence(&lb);check(PmBit(PmRestored,0x1000)&&((PM_HANDOFF *)PM_VA)->Magic==0,"valid warm handoff restored and consumed");
+  memset(PmRestored,0,sizeof(PmRestored));NxkMmReadPersistence(&lb);check(!PmBit(PmRestored,0x1000),"handoff consumed only once");
+- unsigned ordinary[]={0x100,0x2001,0x37ff};
+- for(unsigned i=0;i<3;i++) {
++ unsigned ordinary[]={0x100,0x2001,0x37ff,0x3820,0x3a00};
++ for(unsigned i=0;i<5;i++) {
+   unsigned p=ordinary[i];UCHAR *bytes=(UCHAR *)(NXK_KSEG0_BASE+(uintptr_t)p*PAGE_SIZE);memset(bytes,0xa6,PAGE_SIZE);
+   memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(p*PAGE_SIZE+17,20,TRUE);check(PmBit(PmSelected,p),"ordinary allocated title page can be selected at1MiB/32MiB/image padding");
+   NxkMmPublishPersistence(TRUE);compressed->DecompressedSize=0x9ea00;write_scratch=1;DecompressKernel();write_scratch=0;
+@@ -224,8 +225,9 @@ int main(void) {
+   check(PmBit(PmRestored,p)&&bytes[0]==0xa6&&bytes[PAGE_SIZE-1]==0xa6,"valid title persistence survives actual scratch materialization and boot reservations");
+  }
+  memset(returned,0,sizeof(returned));MmHighestPhysicalPage=XBOX_RAM_MIB*256-1;MiInitializePfnDatabase(&lb);
++ check(XBOX_RAM_MIB==128||(returned[0x3820]&&returned[0x3a00]),"actual PFN walk admits unused boot tails");
+  check(returned[0x100]==1&&returned[0x2001]==1,"actual PFN descriptor walk admits ordinary title RAM");
+- check(XBOX_RAM_MIB==128||(!returned[0x3800]&&!returned[0x3900]&&!returned[0x3bbf]),"actual PFN descriptor walk does not release64 bootstrap storage");
++ check(XBOX_RAM_MIB==128||(!returned[0x3800]&&!returned[0x3900]&&!returned[(NXBL_SCRATCH_PA+NXBL_SCRATCH_BYTES)/PAGE_SIZE-1]),"actual PFN descriptor walk does not release64 bootstrap storage");
+  for(unsigned p=ptpa/PAGE_SIZE;p<ptpa/PAGE_SIZE+22;p++)check(!returned[p],"actual PFN descriptor walk reserves every bootstrap PT");
+  memset(returned,0,sizeof(returned));reclaim_boot_pts();
+  for(unsigned p=ptpa/PAGE_SIZE;p<ptpa/PAGE_SIZE+22;p++)check(!returned[p],"64 keeps bootstrap PTs reserved after PSE paint;128 behavior unchanged");
+@@ -279,12 +281,12 @@ for capacity in (128, 64):
+             if len(fields) == 3:
+                 symbols[fields[2]] = int(fields[0], 16)
+         start = 0x3800000 if capacity == 64 else 0x7d00000
+-        limit = 0x3900000 if capacity == 64 else 0x7f00000
++        limit = 0x3820000 if capacity == 64 else 0x7f00000
+         assert symbols['RamStart'] == start
+         assert symbols['RamCopyDst'] == start
+         assert symbols['StackTop'] == limit - 16
+         assert symbols['BssEnd'] <= symbols['StackTop'] - 0x10000
+-        assert symbols['KernelScratchMaxSize'] == (0x2c0000 if capacity == 64 else 0x800000)
++        assert symbols['KernelScratchMaxSize'] == (0x100000 if capacity == 64 else 0x800000)
+         assert symbols['KernelImageMaxSize'] == 0x400000
+         blob = (build/'loader/nxldr.bin').read_bytes()
+         # Real emitted Xcode instructions: PCI memory top and both PFB writes.
+-- 
+2.47.3
+
