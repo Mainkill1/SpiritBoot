@@ -1,0 +1,343 @@
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index 27da1be7..904b41a7 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -121,7 +121,11 @@ typedef struct _NXC_BCB
+ {
+     PUBLIC_BCB PFCB;                /* must be first: callers hand &PFCB back */
+     NXC_BLOCK *Block;
+-    NXC_MAP *Map;
++    union
++    {
++        NXC_MAP *Map;
++        struct _NXC_BCB *NextFree;   /* only after the final unpin */
++    };
+     LONG RefCount;
+     LONG PinCount;
+ } NXC_BCB;
+@@ -132,6 +136,10 @@ static ULONG NxcWbDepth;                        /* write-back re-entrancy depth
+ static LIST_ENTRY NxcLruList;       /* head = oldest */
+ static LIST_ENTRY NxcMapList;
+ static FAST_MUTEX NxcMutex;
++/* Retain only idle handles; active BCBs remain independently allocated. */
++#define NXC_FREE_BCB_LIMIT 8
++static NXC_BCB *NxcFreeBcbs;
++static ULONG NxcFreeBcbCount;
+ static PFN_NUMBER NxcZeroPagePfn;   /* backs no-map CcZeroData writes */
+ 
+ #define NXC_NODE_SHARED_MAP  0x02FF
+@@ -1106,6 +1114,42 @@ CcZeroData(
+ 
+ /* PIN INTERFACE ************************************************************/
+ 
++/* Enter with NxcMutex held.  A successful return keeps it held; pool
++ * allocation runs unlocked; a failed allocation leaves it released.
++ * Pool operations must not run under the cache mutex. */
++static NXC_BCB *
++NxcAllocateBcbLocked(VOID)
++{
++    NXC_BCB *Bcb = NxcFreeBcbs;
++
++    if (Bcb != NULL)
++    {
++        NxcFreeBcbs = Bcb->NextFree;
++        --NxcFreeBcbCount;
++        return Bcb;
++    }
++
++    ExReleaseFastMutex(&NxcMutex);
++    Bcb = ExAllocatePoolWithTag(NonPagedPool, sizeof(*Bcb), NXC_TAG);
++    if (Bcb != NULL)
++        ExAcquireFastMutex(&NxcMutex);
++    return Bcb;
++}
++
++/* Only the last reference may transfer a BCB into the idle list.  No map
++ * or block reference is retained.  Overflow is freed after unlocking. */
++static BOOLEAN
++NxcCacheBcbLocked(NXC_BCB *Bcb)
++{
++    if (NxcFreeBcbCount == NXC_FREE_BCB_LIMIT)
++        return FALSE;
++
++    Bcb->NextFree = NxcFreeBcbs;
++    NxcFreeBcbs = Bcb;
++    ++NxcFreeBcbCount;
++    return TRUE;
++}
++
+ static BOOLEAN
+ NxcPinCommon(
+     IN PFILE_OBJECT FileObject,
+@@ -1138,7 +1182,8 @@ NxcPinCommon(
+         ExRaiseStatus(STATUS_INVALID_PARAMETER);
+     }
+ 
+-    Bcb = ExAllocatePoolWithTag(NonPagedPool, sizeof(*Bcb), NXC_TAG);
++    ExAcquireFastMutex(&NxcMutex);
++    Bcb = NxcAllocateBcbLocked();
+     if (Bcb == NULL)
+     {
+         *pBcb = NULL;
+@@ -1147,7 +1192,6 @@ NxcPinCommon(
+ 
+     _SEH2_TRY
+     {
+-        ExAcquireFastMutex(&NxcMutex);
+         Block = NxcGetBlock(Map, BlockOffset, Wait);
+         ExReleaseFastMutex(&NxcMutex);
+     }
+@@ -1293,8 +1337,11 @@ CcUnpinData(
+     {
+         ExAcquireFastMutex(&NxcMutex);
+         NxcPutBlock(iBcb->Block);
++        if (NxcCacheBcbLocked(iBcb))
++            iBcb = NULL;
+         ExReleaseFastMutex(&NxcMutex);
+-        ExFreePoolWithTag(iBcb, NXC_TAG);
++        if (iBcb != NULL)
++            ExFreePoolWithTag(iBcb, NXC_TAG);
+     }
+ }
+ 
+diff --git a/tests/host/cache/check-pin-reuse.py b/tests/host/cache/check-pin-reuse.py
+new file mode 100644
+index 00000000..bc3b35fb
+--- /dev/null
++++ b/tests/host/cache/check-pin-reuse.py
+@@ -0,0 +1,195 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise extracted production pin/unpin bodies, allocation work and lifetimes."""
++import argparse
++import importlib.util
++from pathlib import Path
++import re
++import subprocess
++import sys
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++parser = argparse.ArgumentParser()
++parser.add_argument('output', type=Path)
++args = parser.parse_args()
++out = args.output.resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location('extract', root / 'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++source = (root / 'ntoskrnl/xb/mm/cache.c').read_text()
++bcb = re.search(r'typedef struct _NXC_BCB\s*\{.*?\} NXC_BCB;', source, re.S).group()
++helpers = ''
++for name in ('NxcAllocateBcbLocked', 'NxcCacheBcbLocked'):
++    if re.search(r'\b' + name + r'\s*\(', source):
++        helpers += extract.function(source, name)
++functions = ''.join(extract.function(source, name) for name in
++    ('NxcPinCommon', 'CcPinRead', 'CcPinMappedData', 'CcUnpinData', 'CcRepinBcb'))
++shim = r'''
++#define _XOPEN_SOURCE 700
++#include <assert.h>
++#include <pthread.h>
++#include <stdatomic.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <setjmp.h>
++typedef unsigned ULONG; typedef int LONG, BOOLEAN; typedef long long LONGLONG;
++typedef void VOID, *PVOID;
++typedef struct { LONGLONG QuadPart; } LARGE_INTEGER, *PLARGE_INTEGER;
++typedef struct { unsigned NodeTypeCode, NodeByteSize, MappedLength;
++ LARGE_INTEGER MappedFileOffset; } PUBLIC_BCB;
++typedef struct { unsigned id; BOOLEAN PinAccess; } NXC_MAP;
++typedef struct { NXC_MAP *SharedCacheMap; } SECTION;
++typedef struct { SECTION *SectionObjectPointer; } FILE_OBJECT, *PFILE_OBJECT;
++typedef struct { unsigned char *Data; unsigned RefCount; } NXC_BLOCK;
++#define IN
++#define OUT
++#define NTAPI
++#define ASSERT assert
++#define NXC_BLOCK_SIZE 4096
++#define NXC_TAG 1
++#define NXC_NODE_BCB 3
++#define NXC_FREE_BCB_LIMIT 8
++#define NonPagedPool 0
++#define TRUE 1
++#define FALSE 0
++#define PIN_WAIT 1
++#define STATUS_INVALID_PARAMETER 1
++#define STATUS_INSUFFICIENT_RESOURCES 2
++#define BooleanFlagOn(v,f) (((v)&(f)) != 0)
++#define XbDbg(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p)-offsetof(t,f)))
++#define RtlZeroMemory(p,n) memset(p,0,n)
++static _Thread_local jmp_buf outer, inner;
++static _Thread_local int catching, raised, held;
++static int mode, fail_alloc, NxcMutex;
++static pthread_mutex_t host_mutex=PTHREAD_MUTEX_INITIALIZER;
++static _Atomic unsigned allocs, frees, live;
++static unsigned locks, block_puts, CcPinReadWait, CcPinReadNoWait, CcPinMappedDataCount;
++static unsigned char data[4096];
++static NXC_BLOCK block = { data, 0 };
++static void *ExAllocatePoolWithTag(int pool, size_t n, int tag) {
++ (void)pool; (void)tag; assert(!held); ++allocs;
++ if (fail_alloc) return NULL;
++ void *p=malloc(n); assert(p); memset(p,0xA5,n); ++live; return p;
++}
++static void ExFreePoolWithTag(void *p, int tag) {
++ (void)tag; assert(p && live && !held); --live; ++frees; free(p);
++}
++static void ExAcquireFastMutex(int *m) { (void)m; assert(!held); assert(!pthread_mutex_lock(&host_mutex)); held=1; ++locks; }
++static void ExReleaseFastMutex(int *m) { (void)m; assert(held); held=0; assert(!pthread_mutex_unlock(&host_mutex)); }
++static _Noreturn void ExRaiseStatus(int status) {
++ assert(!held); raised=status;
++ if(catching) longjmp(inner,1);
++ longjmp(outer,1);
++}
++#define _SEH2_TRY if ((catching=1,setjmp(inner))==0)
++#define _SEH2_EXCEPT(x) else for(catching=0;!catching;catching=1)
++#define _SEH2_END catching=0
++#define _SEH2_GetExceptionCode() raised
++static NXC_BLOCK *NxcGetBlock(NXC_MAP *map,LONGLONG off,BOOLEAN wait) {
++ (void)map; (void)off; assert(held);
++ if(mode==2) { ExReleaseFastMutex(&NxcMutex); ExRaiseStatus(123); }
++ if(mode==1) { assert(!wait); return NULL; }
++ ++block.RefCount; return &block;
++}
++static void NxcPutBlock(NXC_BLOCK *b) { assert(held && b->RefCount); --b->RefCount; ++block_puts; }
++static LONG InterlockedDecrement(LONG *p) { return __atomic_sub_fetch(p,1,__ATOMIC_SEQ_CST); }
++static LONG InterlockedIncrement(LONG *p) { return __atomic_add_fetch(p,1,__ATOMIC_SEQ_CST); }
++void CcUnpinData(PVOID);
++'''
++globals = '\nstatic NXC_BCB *NxcFreeBcbs;\nstatic ULONG NxcFreeBcbCount;\n' if helpers else ''
++main = r'''
++static NXC_MAP maps[2]={{1,TRUE},{2,TRUE}};
++static SECTION sections[2]={{&maps[0]},{&maps[1]}};
++static FILE_OBJECT files[2]={{&sections[0]},{&sections[1]}};
++static PVOID pin(unsigned map,unsigned offset,BOOLEAN is_pin) {
++ LARGE_INTEGER at={offset}; PVOID b=NULL,buf=NULL;
++ assert(NxcPinCommon(&files[map],&at,16,TRUE,is_pin,&b,&buf));
++ NXC_BCB *v=b; assert(!held && v->Map==&maps[map] && v->Block==&block);
++ assert(v->RefCount==1 && v->PinCount==is_pin && v->PFCB.NodeTypeCode==NXC_NODE_BCB);
++ assert(v->PFCB.NodeByteSize==0 && v->PFCB.MappedLength==16);
++ assert(v->PFCB.MappedFileOffset.QuadPart==offset && buf==data+offset);
++ return b;
++}
++static pthread_barrier_t barrier;
++static void *parallel_cycle(void *arg) {
++ unsigned id=(unsigned)(uintptr_t)arg;
++ for(unsigned i=0;i<1000;++i) {
++  PVOID b=pin(id%2,i%32,TRUE);
++  int rc=pthread_barrier_wait(&barrier); assert(rc==0 || rc==PTHREAD_BARRIER_SERIAL_THREAD);
++  CcUnpinData(b);
++  rc=pthread_barrier_wait(&barrier); assert(rc==0 || rc==PTHREAD_BARRIER_SERIAL_THREAD);
++ }
++ return NULL;
++}
++static void *shared_repin(void *arg) {
++ for(unsigned i=0;i<1000;++i) { CcRepinBcb(arg); CcUnpinData(arg); }
++ return NULL;
++}
++int main(void) {
++ PVOID b=pin(0,0,TRUE); CcUnpinData(b);
++ unsigned warm_allocs=allocs,warm_frees=frees,warm_locks=locks;
++ for(unsigned i=0;i<1000;++i) { b=pin(i%2,i%32,i%2); CcUnpinData(b); }
++ if(allocs!=warm_allocs || frees!=warm_frees) {
++  printf("FAIL warmed pin/unpin still allocates: allocations=%u frees=%u\n",allocs-warm_allocs,frees-warm_frees); return 1;
++ }
++ assert(locks-warm_locks==2000 && block.RefCount==0);
++ b=pin(0,20,TRUE); CcRepinBcb(b); CcUnpinData(b);
++ assert(((NXC_BCB*)b)->RefCount==1 && block.RefCount==1);
++ PVOID other=pin(1,25,FALSE); assert(other!=b);
++ CcUnpinData(other); CcUnpinData(b); assert(!block.RefCount);
++ b=pin(0,30,FALSE); PVOID old=b; LARGE_INTEGER at={31};
++ assert(CcPinMappedData(&files[0],&at,16,PIN_WAIT,&b));
++ assert(b!=old && block.RefCount==1 && ((NXC_BCB*)b)->PinCount==1);
++ CcUnpinData(b);
++ PVOID many[20]; for(unsigned i=0;i<20;++i) {
++  many[i]=pin(i%2,i,TRUE); for(unsigned j=0;j<i;++j) assert(many[i]!=many[j]);
++ }
++ assert(live==20 && block.RefCount==20);
++ for(unsigned i=0;i<20;++i) CcUnpinData(many[i]);
++ assert(live==8 && block.RefCount==0 && !held);
++ /* Drain retained handles into active ownership to force cold allocation. */
++ for(unsigned i=0;i<8;++i) many[i]=pin(0,i,FALSE);
++ fail_alloc=1; raised=0; PVOID untouched=(void*)0x1234,buffer=(void*)0x5678;
++ if(!setjmp(outer)) { NxcPinCommon(&files[0],&at,8,TRUE,FALSE,&untouched,&buffer); assert(0); }
++ assert(raised==STATUS_INSUFFICIENT_RESOURCES && !held && !untouched && buffer==(void*)0x5678);
++ fail_alloc=0;
++ /* Miss and I/O error must release provisional handles without changing active pins. */
++ mode=1; unsigned prior_live=live;
++ assert(!NxcPinCommon(&files[0],&at,8,FALSE,FALSE,&untouched,&buffer));
++ assert(!untouched && !buffer && !held && live==prior_live && block.RefCount==8);
++ mode=2; untouched=(void*)0x1234;buffer=(void*)0x5678;raised=0;
++ if(!setjmp(outer)) { NxcPinCommon(&files[0],&at,8,TRUE,FALSE,&untouched,&buffer); assert(0); }
++ assert(raised==123 && !held && live==prior_live && untouched==(void*)0x1234 && buffer==(void*)0x5678);
++ mode=0; for(unsigned i=0;i<8;++i) CcUnpinData(many[i]);
++ /* Also exercise exception/miss cleanup using a reused handle. */
++ mode=1;assert(!NxcPinCommon(&files[0],&at,8,FALSE,FALSE,&untouched,&buffer));
++ assert(live==7 && !held && !block.RefCount);
++ mode=2;raised=0;
++ if(!setjmp(outer)) { NxcPinCommon(&files[0],&at,8,TRUE,FALSE,&untouched,&buffer); assert(0); }
++ assert(raised==123 && live==6 && !held && !block.RefCount);
++ mode=0;
++ pthread_t threads[4];assert(!pthread_barrier_init(&barrier,NULL,4));
++ for(unsigned i=0;i<4;++i) assert(!pthread_create(&threads[i],NULL,parallel_cycle,(void*)(uintptr_t)i));
++ for(unsigned i=0;i<4;++i) assert(!pthread_join(threads[i],NULL));
++ assert(!pthread_barrier_destroy(&barrier));assert(!block.RefCount && live<=8 && !held);
++ b=pin(1,7,FALSE);
++ for(unsigned i=0;i<4;++i) assert(!pthread_create(&threads[i],NULL,shared_repin,b));
++ for(unsigned i=0;i<4;++i) assert(!pthread_join(threads[i],NULL));
++ assert(((NXC_BCB*)b)->RefCount==1 && block.RefCount==1);
++ CcUnpinData(b);assert(!block.RefCount);
++ puts("pin reuse: warm pool/lock work, distinct active handles, repin, conversion, bound, OOM, miss, IO unwind PASS");
++'''
++cleanup = r'''
++ while(NxcFreeBcbs) { NXC_BCB *next=NxcFreeBcbs->NextFree; ExFreePoolWithTag(NxcFreeBcbs,NXC_TAG); NxcFreeBcbs=next; --NxcFreeBcbCount; }
++ assert(!live && !NxcFreeBcbCount); return 0;
++}
++''' if helpers else 'return 0; }\n'
++(out / 'pin-reuse.c').write_text(shim+bcb+globals+helpers+functions+main+cleanup)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-fno-inline','-pthread','-fsanitize=address,undefined',str(out/'pin-reuse.c'),'-o',str(out/'pin-reuse')],check=True)
++subprocess.run([str(out/'pin-reuse')],check=True)
+diff --git a/tests/host/cache/check-pin-unwind.py b/tests/host/cache/check-pin-unwind.py
+index 8692efac..58399946 100644
+--- a/tests/host/cache/check-pin-unwind.py
++++ b/tests/host/cache/check-pin-unwind.py
+@@ -6,7 +6,9 @@ import importlib.util,subprocess,sys
+ sys.dont_write_bytecode=True
+ root=Path(__file__).resolve().parents[3];out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
+ spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+-body=m.function((root/'ntoskrnl/xb/mm/cache.c').read_text(),'NxcPinCommon')
++source=(root/'ntoskrnl/xb/mm/cache.c').read_text()
++helpers=''.join(m.function(source,name) for name in ('NxcAllocateBcbLocked','NxcCacheBcbLocked'))
++body=m.function(source,'NxcPinCommon')
+ shim=r'''
+ #include <stdint.h>
+ #include <stddef.h>
+@@ -21,11 +23,14 @@ typedef struct {int dummy;} NXC_MAP;
+ typedef struct {NXC_MAP *SharedCacheMap;} SECTION;
+ typedef struct {SECTION *SectionObjectPointer;} FILE_OBJECT,*PFILE_OBJECT;
+ typedef struct {unsigned char *Data;} NXC_BLOCK;
+-typedef struct {struct {unsigned NodeTypeCode,NodeByteSize,MappedLength;LARGE_INTEGER MappedFileOffset;} PFCB;NXC_BLOCK *Block;NXC_MAP *Map;unsigned RefCount,PinCount;} NXC_BCB;
++typedef struct _NXC_BCB {struct {unsigned NodeTypeCode,NodeByteSize,MappedLength;LARGE_INTEGER MappedFileOffset;} PFCB;NXC_BLOCK *Block;union { NXC_MAP *Map;struct _NXC_BCB *NextFree; };unsigned RefCount,PinCount;} NXC_BCB;
+ #define IN
+ #define OUT
+ #define ASSERT assert
+ #define NXC_BLOCK_SIZE 4096
++#define NXC_FREE_BCB_LIMIT 8
++#define VOID void
++static NXC_BCB *NxcFreeBcbs;static ULONG NxcFreeBcbCount;
+ #define NXC_TAG 1
+ #define NonPagedPool 0
+ #define NXC_NODE_BCB 1
+@@ -60,6 +65,6 @@ int main(void){
+  ExFreePoolWithTag(bcb,1);puts("pin unwind: exception frees provisional BCB, preserves prior outputs, normal false/success PASS");
+ }
+ '''
+-(out/'pin.c').write_text(shim+body+main)
+-subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',str(out/'pin.c'),'-o',str(out/'pin')],check=True)
++(out/'pin.c').write_text(shim+helpers+body+main)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-fno-inline',str(out/'pin.c'),'-o',str(out/'pin')],check=True)
+ subprocess.run([str(out/'pin')],check=True)
