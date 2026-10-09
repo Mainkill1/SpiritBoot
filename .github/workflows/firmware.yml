@@ -53,7 +53,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = f67dd4741583d9fe14dc804b3176691d18619450
+            test "$actual_tree" = 4287d54cdc156057c8d3c5bda59948f2412429da
             python3 "$GUEST_SOURCE/tests/host/warm-stage/check.py" >"$output/warm-stage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/reset-frame/check.py" "$output/reset-frame" >"$output/reset-frame.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fault-information/check.py" "$output/fault-information" >"$output/fault-information.log" 2>&1

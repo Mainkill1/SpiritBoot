@@ -1,3 +1,262 @@
+diff --git a/ntoskrnl/mm/ARM3/i386/init.c b/ntoskrnl/mm/ARM3/i386/init.c
+index b0fdb0dc..6f5ad25f 100644
+--- a/ntoskrnl/mm/ARM3/i386/init.c
++++ b/ntoskrnl/mm/ARM3/i386/init.c
+@@ -510,13 +510,13 @@ MiInitMachineDependent(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
+          * array must cover the full 64 MB title world or those returns
+          * write past it (and the title silently loses the FB region). */
+         PFN_NUMBER SupplyHigh = MmHighestPhysicalPage;
+-        SIZE_T ArrayBytes;        /* one ULONG per page (links/owner unified) */
++        SIZE_T ArrayBytes;        /* ULONG links/owner + USHORT pin state */
+         SIZE_T MetaBytes = NxPoolPagesMetadataSize();
+         PFN_NUMBER CarvePages, CarvePfn;
+         PUCHAR Carve, Links;
+ 
+         if (SupplyHigh < 0x3FFF) SupplyHigh = 0x3FFF;   /* 64 MB of pages */
+-        ArrayBytes = (SupplyHigh + 1) * (sizeof(ULONG) + 2 * sizeof(USHORT));
++        ArrayBytes = (SupplyHigh + 1) * (sizeof(ULONG) + sizeof(USHORT));
+ 
+         /* (The NV2A padding at PA 0x3FF0000 -- retail's PFN-database
+          * home -- is NOT usable for this in xemu: PRAMIN aliases the
+diff --git a/ntoskrnl/xb/mm/api.c b/ntoskrnl/xb/mm/api.c
+index 103b40c3..1a0b5e64 100644
+--- a/ntoskrnl/xb/mm/api.c
++++ b/ntoskrnl/xb/mm/api.c
+@@ -70,64 +70,56 @@ MmFreeSystemMemory(_In_ PVOID Base, _In_ SIZE_T Size)
+ /* LOCK / UNLOCK ************************************************************/
+ 
+ /* Public ABI uses VOID and byte physical addresses. Invalid requests are
+- * inert. Validate the whole buffer and per-PFN alias multiplicity before
+- * changing counts. Count overflow conservatively pins until reboot. */
++ * inert. Validate the whole request before publishing pin/free state outside
++ * the PFN lock. Count overflow conservatively pins until reboot. */
+ VOID NTAPI
+ MmLockUnlockBufferPages(PVOID Base, SIZE_T Size, BOOLEAN Unlock)
+ {
+ #ifdef NXK_MM_PHYS
+     ULONG_PTR first = (ULONG_PTR)Base & ~(PAGE_SIZE - 1), last, va;
+-    ULONG_PTR translated = 0, i;
+-    PFN_NUMBER pages[NXK_PIN_BATCH_SMALL_PAGES];
+-    BOOLEAN applied = FALSE, sparse;
++    ULONG_PTR accepted = 0, i;
++    PFN_NUMBER pages[NXK_PIN_BATCH_SMALL_PAGES], previous = 0;
++    BOOLEAN valid = FALSE, ascending = TRUE, release = FALSE;
+     KIRQL irql;
+     if (Size == 0 || Size - 1 > MAXULONG_PTR - (ULONG_PTR)Base) return;
+     last = ((ULONG_PTR)Base + Size - 1) & ~(PAGE_SIZE - 1);
+     irql = MiAcquirePfnLock();
+-#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
+-    NxkPageSupplyAssertPinBatchEmpty();
+-#endif
+     for (va = first;; va += PAGE_SIZE) {
+-        ULONG_PTR pa;
+-        if (!NxMmIsAddressValid((PVOID)va)) goto out;
+-        pa = NxMmGetPhysicalAddress((PVOID)va);
+-        if (translated < NXK_PIN_BATCH_SMALL_PAGES)
+-            pages[translated] = pa >> PAGE_SHIFT;
+-        /* Include the RecordPin that increments scratch and then rejects. */
+-        ++translated;
+-        if (!NxkPageSupplyRecordPin(pa >> PAGE_SHIFT, Unlock)) goto out;
++        PFN_NUMBER page;
++        if (!NxMmIsAddressValid((PVOID)va)) goto finish;
++        page = NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT;
++        if (Unlock) {
++            if (!NxkPageSupplyTryUnlock(page, &release)) goto finish;
++        } else if (!NxkPageSupplyCanPin(page, FALSE)) goto finish;
++        if (accepted < NXK_PIN_BATCH_SMALL_PAGES) pages[accepted] = page;
++        if (page <= previous) ascending = FALSE;
++        previous = page;
++        ++accepted;
+         if (va == last) break;
+     }
+-    sparse = translated <= NXK_PIN_BATCH_SMALL_PAGES;
+-    if (sparse) {
+-        /* The PFN lock keeps these preflight translations stable. Keep
+-         * duplicate PFNs: every alias contributes one pin transition. */
+-        for (i = 0; i < translated; ++i) {
+-            NxkPageSupplyPin(pages[i], Unlock);
+-            NxkPageSupplyClearPinBatchPage(pages[i]);
+-        }
+-    } else {
+-        /* Preserve whole-request preflight for oversized requests. */
+-        for (va = first;; va += PAGE_SIZE) {
+-            NxkPageSupplyPin(
+-                NxMmGetPhysicalAddress((PVOID)va) >> PAGE_SHIFT, Unlock);
+-            if (va == last) break;
++    valid = TRUE;
++finish:
++    /* Restore the whole accepted prefix on failure. A successful aliased
++     * deferred release also restores first, then replays normal Pin below:
++     * release must occur at each PFN's last alias, preserving free-list order.
++     * Temporary decrements leave mappings/owners stable under the PFN lock. */
++    if (Unlock && (!valid || (release && !ascending))) {
++        for (i = 0; i < accepted; ++i) {
++            PFN_NUMBER page = accepted <= NXK_PIN_BATCH_SMALL_PAGES ? pages[i] :
++                NxMmGetPhysicalAddress((PVOID)(first + i * PAGE_SIZE)) >> PAGE_SHIFT;
++            NxkPageSupplyUndoUnlock(page);
+         }
+     }
+-    applied = TRUE;
+-out:
+-    if (translated > NXK_PIN_BATCH_SMALL_PAGES)
+-        NxkPageSupplyBeginPinBatch(); /* One bulk reset, only at exit. */
+-    else if (!applied)
+-    {
+-        /* Include an increment-then-reject PFN, but not an invalid VA
+-         * that never reached RecordPin. No cleanup translation is needed. */
+-        for (i = 0; i < translated; ++i)
+-            NxkPageSupplyClearPinBatchPage(pages[i]);
++    if (!valid || (Unlock && !release)) goto out;
++    for (i = 0; i < accepted; ++i) {
++        PFN_NUMBER page = accepted <= NXK_PIN_BATCH_SMALL_PAGES ? pages[i] :
++            NxMmGetPhysicalAddress((PVOID)(first + i * PAGE_SIZE)) >> PAGE_SHIFT;
++        if (Unlock && ascending)
++            NxkPageSupplyCommitUnlock(page);
++        else
++            NxkPageSupplyPin(page, Unlock);
+     }
+-#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
+-    NxkPageSupplyAssertPinBatchEmpty();
+-#endif
++out:
+     MiReleasePfnLock(irql);
+ #endif
+ }
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index 9352078a..0cd48fc3 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -220,14 +220,12 @@ BOOLEAN NxkMmFreeRestored(PVOID Alias);
+ VOID NxkMmDetachRestored(ULONG_PTR Pa, SIZE_T Size);
+ BOOLEAN NxkMmAdoptRestored(PVOID Alias, SIZE_T Size);
+ 
+-VOID NxkPageSupplyBeginPinBatch(VOID);
+-/* Initial tuning candidate, not a measured optimal crossover. */
++/* Bounded PFN vector; oversized requests retain stable retranslation. */
+ #define NXK_PIN_BATCH_SMALL_PAGES 64
+-VOID NxkPageSupplyClearPinBatchPage(PFN_NUMBER Page);
+-#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
+-VOID NxkPageSupplyAssertPinBatchEmpty(VOID);
+-#endif
+-BOOLEAN NxkPageSupplyRecordPin(PFN_NUMBER Page, BOOLEAN Unlock);
++/* Caller holds the PFN lock across tentative changes, rollback and commit. */
++BOOLEAN NxkPageSupplyTryUnlock(PFN_NUMBER Page, BOOLEAN *ReleaseNeeded);
++VOID NxkPageSupplyUndoUnlock(PFN_NUMBER Page);
++VOID NxkPageSupplyCommitUnlock(PFN_NUMBER Page);
+ 
+ /* Reserve stable copy aliases once, before titles can request relocation. */
+ VOID NxkPageSupplyInitializeRelocation(VOID);
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index c8af6fd5..16cf2aa6 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -87,7 +87,6 @@
+ 
+ static PULONG NxpLinks;
+ static PUSHORT NxpPins; /* count, sticky overflow, deferred free */
+-static PUSHORT NxpPinBatch; /* per-PFN multiplicity scratch under PFN lock */
+ #define NXP_PIN_LIMIT 0x3FFF
+ #define NXP_PIN_OVERFLOW 0x4000
+ #define NXP_RETURN_PENDING 0x8000
+@@ -163,8 +162,7 @@ NxkPageSupplyInitialize(
+     NxpLinks = LinksArray;
+     NxpHighestPfn = HighestPfn;
+     NxpPins = (PUSHORT)(NxpLinks + HighestPfn + 1);
+-    NxpPinBatch = NxpPins + HighestPfn + 1;
+-    RtlZeroMemory(NxpPins, (HighestPfn + 1) * 2 * sizeof(USHORT));
++    RtlZeroMemory(NxpPins, (HighestPfn + 1) * sizeof(USHORT));
+     RtlZeroMemory(LinksArray, (HighestPfn + 1) * sizeof(ULONG));
+ 
+     if (NxkMmRetailShapedMap())
+@@ -292,40 +290,37 @@ VOID NxkPageSupplyPin(PFN_NUMBER Page, BOOLEAN Unlock)
+     else ++NxpPins[Page];
+ }
+ 
+-/* Buffer preflight counts aliases of the same PFN before any mutation.
+- * Initialization zeroes scratch. The sole caller clears it at every exit,
+- * under the same PFN lock, so no entry reset is necessary. Small successful
+- * batches clear in the apply pass after all multiplicities were checked;
+- * large batches use this single bulk reset at exit. */
+-VOID NxkPageSupplyBeginPinBatch(VOID)
++/* These count-only transitions run under one PFN-lock hold. A failed
++ * buffer request restores every accepted decrement before unlocking. No
++ * ownership, mapping or free-list mutation is allowed until commit. */
++BOOLEAN NxkPageSupplyTryUnlock(PFN_NUMBER Page, BOOLEAN *ReleaseNeeded)
+ {
+     MI_ASSERT_PFN_LOCK_HELD();
+-    RtlZeroMemory(NxpPinBatch, (NxpHighestPfn + 1) * sizeof(USHORT));
+-}
+-VOID NxkPageSupplyClearPinBatchPage(PFN_NUMBER Page)
+-{
+-    MI_ASSERT_PFN_LOCK_HELD();
+-    /* A translated invalid PFN also reaches rejected-prefix cleanup. */
+-    if (Page > 0 && Page <= NxpHighestPfn)
+-        NxpPinBatch[Page] = 0;
++    if (!NxkPageSupplyCanPin(Page, TRUE)) return FALSE;
++    if (!(NxpPins[Page] & NXP_PIN_OVERFLOW)) {
++        --NxpPins[Page];
++        if (NxpPins[Page] == NXP_RETURN_PENDING) *ReleaseNeeded = TRUE;
++    }
++    return TRUE;
+ }
+-#if DBG && defined(NXK_PIN_BATCH_DIAGNOSTICS)
+-VOID NxkPageSupplyAssertPinBatchEmpty(VOID)
++VOID NxkPageSupplyUndoUnlock(PFN_NUMBER Page)
+ {
+-    PFN_NUMBER Page;
+     MI_ASSERT_PFN_LOCK_HELD();
+-    for (Page = 0; Page <= NxpHighestPfn; ++Page)
+-        ASSERT(NxpPinBatch[Page] == 0);
++    ASSERT(Page > 0 && Page <= NxpHighestPfn);
++    ASSERT(!(NxpLinks[Page] & NXP_FREE));
++    if (!(NxpPins[Page] & NXP_PIN_OVERFLOW)) {
++        ASSERT((NxpPins[Page] & NXP_PIN_LIMIT) < NXP_PIN_LIMIT);
++        ++NxpPins[Page];
++    }
+ }
+-#endif
+-BOOLEAN NxkPageSupplyRecordPin(PFN_NUMBER Page, BOOLEAN Unlock)
++VOID NxkPageSupplyCommitUnlock(PFN_NUMBER Page)
+ {
+     MI_ASSERT_PFN_LOCK_HELD();
+-    if (!NxkPageSupplyCanPin(Page, Unlock)) return FALSE;
+-    if (NxpPinBatch[Page] != MAXUSHORT) ++NxpPinBatch[Page];
+-    if (Unlock && !(NxpPins[Page] & NXP_PIN_OVERFLOW) &&
+-        NxpPinBatch[Page] > (NxpPins[Page] & NXP_PIN_LIMIT)) return FALSE;
+-    return TRUE;
++    if (NxpPins[Page] == NXP_RETURN_PENDING) {
++        NxpPins[Page] = 0;
++        NxpPushHead(Page);
++        if (Page < NxpSpillHint) NxpSpillHint = Page;
++    }
+ }
+ 
+ /*
+diff --git a/tests/host/bootvid-lifetime/fixture.c b/tests/host/bootvid-lifetime/fixture.c
+index 41eda77a..1f64a4fd 100644
+--- a/tests/host/bootvid-lifetime/fixture.c
++++ b/tests/host/bootvid-lifetime/fixture.c
+@@ -83,7 +83,7 @@ static void RtlSetBits(RTL_BITMAP *b,ULONG first,ULONG count){if(!pfnheld)abort(
+ PMMPFN MiGetPfnEntry(PFN_NUMBER);
+ static ULONG supply_metadata[0x8000*2];
+ static PULONG NxpLinks;
+-static PUSHORT NxpPins,NxpPinBatch;
++static PUSHORT NxpPins;
+ static PFN_NUMBER NxpHighestPfn,NxpKernelLowPfn,NxpKernelHighPfn,NxpSpillHint,NxpGenericAvail;
+ static ULONG NxpFreeHeadKernel,NxpFreeHeadTitle;
+ #define MmAvailablePages donated
+@@ -113,9 +113,9 @@ int main(void){
+  loader.MemoryDescriptorListHead.Flink=loader.MemoryDescriptorListHead.Blink=&d.ListEntry;d.ListEntry.Flink=d.ListEntry.Blink=&loader.MemoryDescriptorListHead;
+  init();CachedPalette[1]=0xffffffffu;
+  memset(supply_metadata,0xa5,sizeof(supply_metadata));NxkPageSupplyInitialize(0x7fff,supply_metadata);
+- check(NxpLinks[0x7fff]==0 && NxpPins[0x7fff]==0 && NxpPinBatch[0x7fff]==0,"full 128 MiB supply metadata initialized");
++ check(NxpLinks[0x7fff]==0 && NxpPins[0x7fff]==0,"full 128 MiB supply metadata initialized");
+  memset(supply_metadata,0xa5,sizeof(supply_metadata));NxkPageSupplyInitialize(0x3fff,supply_metadata);
+- check(NxpLinks[0x3fff]==0 && NxpPins[0x3fff]==0 && NxpPinBatch[0x3fff]==0,"full 64 MiB supply metadata initialized");
++ check(NxpLinks[0x3fff]==0 && NxpPins[0x3fff]==0,"full 64 MiB supply metadata initialized");
+  NxpSplitNv2aReserve();
+  check(d.MemoryType==LoaderFirmwarePermanent,"framebuffer excluded from initial supply");
+  check(d.PageCount==0x3f0 && NxkExtraDescriptors[0].BasePage==0x3ff0,"hardware padding retained");
 diff --git a/tests/host/clean-room/pins.c b/tests/host/clean-room/pins.c
 index 0fd5aaee..b52fc747 100644
 --- a/tests/host/clean-room/pins.c
@@ -18,3 +277,199 @@ index 0fd5aaee..b52fc747 100644
      MmLockUnlockPhysicalPage(0x10025,FALSE);
      CHECK(NxpPins[16]==1&&NxpPins[1]==0);
      MmLockUnlockPhysicalPage(0xFD000000,FALSE);CHECK(NxpPins[16]==1);
+diff --git a/tests/host/kernel-performance/pins-state.c b/tests/host/kernel-performance/pins-state.c
+new file mode 100644
+index 00000000..d78f7ccb
+--- /dev/null
++++ b/tests/host/kernel-performance/pins-state.c
+@@ -0,0 +1,90 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independent whole-request multiplicity oracle versus the production API.
++ * Pin itself is unchanged; compare its ordered execution with the new
++ * transactional caller, including every free-list link and owner entry. */
++#define main work_counts_main
++#include "pins.c"
++#undef main
++
++static PFN_NUMBER mapped[4096];
++static unsigned multiplicity[32768];
++typedef struct {
++    UCHAR bytes[sizeof(metadata)];
++    ULONG kernel, title, available, generic, spill;
++} STATE;
++static STATE initial, expected, actual;
++static void save(STATE *s)
++{
++    memcpy(s->bytes,metadata,sizeof(metadata));
++    s->kernel=NxpFreeHeadKernel;s->title=NxpFreeHeadTitle;
++    s->available=MmAvailablePages;s->generic=NxpGenericAvail;s->spill=NxpSpillHint;
++}
++static void restore(const STATE *s)
++{
++    memcpy(metadata,s->bytes,sizeof(metadata));
++    NxpFreeHeadKernel=s->kernel;NxpFreeHeadTitle=s->title;
++    MmAvailablePages=s->available;NxpGenericAvail=s->generic;NxpSpillHint=s->spill;
++}
++static void reference(unsigned n,BOOLEAN unlock)
++{
++    memset(multiplicity,0,sizeof(multiplicity));
++    for(unsigned i=0;i<n;++i) {
++        PFN_NUMBER p=mapped[i];
++        if(i==invalid_at||!NxkPageSupplyCanPin(p,unlock))return;
++        ++multiplicity[p];
++        if(unlock&&!(NxpPins[p]&NXP_PIN_OVERFLOW)&&
++           multiplicity[p]>(NxpPins[p]&NXP_PIN_LIMIT))return;
++    }
++    for(unsigned i=0;i<n;++i)NxkPageSupplyPin(mapped[i],unlock);
++}
++static void run_case(unsigned n,unsigned shape,unsigned scenario,BOOLEAN unlock)
++{
++    init(n,0);memset(multiplicity,0,sizeof(multiplicity));
++    for(unsigned i=0;i<n;++i) {
++        static const PFN_NUMBER mixed[]={4,16,16384,17,16,16384};
++        mapped[i]=shape==0?16+i:shape==1?16:shape==2?(i%3==1?17:16):
++                  shape==3?mixed[i%6]:16+n-i;
++        ++multiplicity[mapped[i]];
++    }
++    for(unsigned p=1;p<32768;++p)if(multiplicity[p]) {
++        NxpLinks[p]=0x100+p; /* stable owner must survive non-deferred paths */
++        NxpPins[p]=unlock?multiplicity[p]:0;
++        if(scenario==1||scenario==2||scenario==6) {
++            NxpPins[p]|=NXP_RETURN_PENDING;NxpLinks[p]=0;
++        }
++        if(scenario==6&&(p&1))NxpPins[p]|=NXP_PIN_OVERFLOW;
++        if(scenario==8)NxpPins[p]=NXP_PIN_LIMIT-1;
++    }
++    if(n) {
++        if(scenario==2)--NxpPins[mapped[n-1]];
++        if(scenario==3)invalid_at=n/2;
++        if(scenario==4)invalid_at=n-1;
++        if(scenario==5)mapped[n-1]=32768;
++        if(scenario==7){NxpPins[mapped[n-1]]=0;NxkPageSupplyReturn(mapped[n-1]);}
++    }
++    mapping=mapped;save(&initial);reference(n,unlock);save(&expected);
++    restore(&initial);
++    MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,unlock);save(&actual);
++    if(memcmp(&expected,&actual,sizeof(actual))) {
++        fprintf(stderr,"state mismatch n=%u shape=%u scenario=%u unlock=%u\n",n,shape,scenario,unlock);exit(1);
++    }
++    CHECK(cleared==0&&clears==0);
++}
++int main(void)
++{
++    unsigned sizes[]={0,1,2,3,63,64,65,128,4096};
++    unsigned cases=0;
++    for(unsigned s=0;s<sizeof(sizes)/sizeof(*sizes);++s)
++        for(unsigned shape=0;shape<5;++shape)
++            for(unsigned scenario=0;scenario<9;++scenario)
++                for(unsigned unlock=0;unlock<2;++unlock) {
++                    run_case(sizes[s],shape,scenario,unlock);++cases;
++                }
++    /* Explicit last-alias order: B is released before A, hence A is head. */
++    run_case(3,2,1,TRUE);
++    CHECK(NxpFreeHeadTitle==16&&NXP_NEXT(NxpLinks[16])==17);
++    CHECK(MmAvailablePages==2&&NxpGenericAvail==2);
++    puts("pending A,B,A release retains B-then-A insertion: PASS");
++    printf("production pin state differential: %u/%u cases passed\n",cases,cases);
++    return 0;
++}
+diff --git a/tests/host/kernel-performance/pins.c b/tests/host/kernel-performance/pins.c
+index 60f042fd..76010473 100644
+--- a/tests/host/kernel-performance/pins.c
++++ b/tests/host/kernel-performance/pins.c
+@@ -13,6 +13,7 @@ typedef USHORT *PUSHORT;
+ static ULONG MmAvailablePages;
+ static unsigned translations, cleared, clears, valid_pages, invalid_at, aliases;
+ static unsigned checks, optimized, vector;
++static const PFN_NUMBER *mapping;
+ static BOOLEAN NxkMmRetailShapedMap(void) { return FALSE; }
+ static PVOID NxkTryGetVerifiedWbDirectAlias(PFN_NUMBER p) { (void)p;return NULL; }
+ static VOID KeZeroPages(PVOID p, ULONG n) { (void)p;(void)n;assert(0); }
+@@ -25,21 +26,22 @@ static BOOLEAN NxMmIsAddressValid(PVOID p) {
+ static ULONG_PTR NxMmGetPhysicalAddress(PVOID p) {
+     ULONG_PTR i=((ULONG_PTR)p-0x1000)/PAGE_SIZE;
+     ++translations;
+-    return (aliases?16:16+i)*PAGE_SIZE;
++    return (mapping?mapping[i]:(aliases?16:16+i))*PAGE_SIZE;
+ }
+ static void counted_zero(void *p,size_t n) { cleared+=(unsigned)n;++clears;memset(p,0,n); }
+ #undef RtlZeroMemory
+ #define RtlZeroMemory counted_zero
+ #include "pins-actual.inc"
+ #define CHECK(c) do{++checks;if(!(c)){fprintf(stderr,"FAIL %u: %s\n",checks,#c);exit(1);}}while(0)
+-static UCHAR metadata[32768*(sizeof(ULONG)+2*sizeof(USHORT))];
++static UCHAR metadata[32768*(sizeof(ULONG)+sizeof(USHORT))];
+ static void init(unsigned n,unsigned alias) {
+     NxkPageSupplyInitialize(32767,metadata);
+-    valid_pages=n;invalid_at=~0U;aliases=alias;
++    valid_pages=n;invalid_at=~0U;aliases=alias;mapping=NULL;
++    NxpFreeHeadKernel=NxpFreeHeadTitle=NxpGenericAvail=MmAvailablePages=0;
+     translations=cleared=clears=0;
+ }
+ static void clean(void) {
+-    if(optimized) for(unsigned i=0;i<=NxpHighestPfn;++i) CHECK(NxpPinBatch[i]==0);
++    CHECK(cleared==0 && clears==0);
+ }
+ int main(int argc,char **argv) {
+     optimized=argc>1 && atoi(argv[1]);
+@@ -52,14 +54,14 @@ int main(int argc,char **argv) {
+             MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,FALSE);
+             CHECK(NxpPins[16]==(alias?n:!!n));clean();
+             printf("pin-work success n=%u alias=%u translations=%u cleared=%u bulk=%u\n",n,alias,translations,cleared,clears);
+-            if(optimized) CHECK(cleared==(n>64?65536:2*n));
++            if(optimized) CHECK(cleared==0);
+             if(vector) CHECK(translations==n*(n<=64?1:2));
+             MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,FALSE);clean();
+             CHECK(NxpPins[16]==2*(alias?n:!!n));
+             MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,TRUE);clean();
+             MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,TRUE);clean();
+             CHECK(NxpPins[16]==0);
+-            /* Underflow after RecordPin increments then rejects is inert. */
++            /* Over-unlock remains inert. */
+             MmLockUnlockBufferPages((PVOID)0x1000,n*PAGE_SIZE,TRUE);clean();
+             CHECK(NxpPins[16]==0);
+             if(!n) continue;
+@@ -71,7 +73,7 @@ int main(int argc,char **argv) {
+                 unsigned prefix=positions[p];
+                 printf("pin-work rejected n=%u prefix=%u alias=%u translations=%u cleared=%u bulk=%u\n",n,prefix,alias,translations,cleared,clears);
+                 if(optimized) {
+-                    CHECK(cleared==(prefix>64?65536:2*prefix));
++                    CHECK(cleared==0);
+                     CHECK(translations==prefix*(vector?1:(prefix<=64?2:1)));
+                 }
+                 invalid_at=~0U;
+@@ -90,7 +92,7 @@ int main(int argc,char **argv) {
+             printf("pin-work crossover prefix=%u alias=%u translations=%u cleared=%u bulk=%u\n",prefix,alias,translations,cleared,clears);
+             if(optimized) {
+                 CHECK(translations==prefix*(vector?1:(prefix<=64?2:1)));
+-                CHECK(cleared==(prefix<=64?2*prefix:65536));
++                CHECK(cleared==0);
+             }
+         }
+     }
+@@ -118,4 +120,5 @@ int main(int argc,char **argv) {
+     MmLockUnlockBufferPages((PVOID)0x1000,2*PAGE_SIZE,TRUE);clean();
+     CHECK(NxkPageSupplyIsFree(16));
+     printf("pin optimization checks: %u/%u passed\n",checks,checks);
++    return 0;
+ }
+diff --git a/tests/host/kernel-performance/pins.py b/tests/host/kernel-performance/pins.py
+index 22903744..8e22fbe4 100644
+--- a/tests/host/kernel-performance/pins.py
++++ b/tests/host/kernel-performance/pins.py
+@@ -11,9 +11,13 @@ api = (root / 'ntoskrnl/xb/mm/api.c').read_text()
+ body = supply[:supply.index('/*\n * Frame ownership:')] + '\n#endif\n'
+ body += supply[supply.index('BOOLEAN\nNxkPageSupplyIsFree'):supply.index('BOOLEAN\nNxkPageSupplyTakeSpecific')]
+ body += api[api.index('/* LOCK / UNLOCK '):api.index('/* QUERIES ')]
+-# Count real scalar stores without altering production sources.
+-body = body.replace('NxpPinBatch[Page] = 0;', '{ NxpPinBatch[Page] = 0; cleared += sizeof(USHORT); }')
+ (output / 'pins-actual.inc').write_text(body)
+ diagnostics = ['-DDBG=1', '-DNXK_PIN_BATCH_DIAGNOSTICS'] if '--diagnostics' in sys.argv else []
+ subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra'] + diagnostics + ['-I' + str(here.parent / 'clean-room/include'), '-I' + str(output), '-I' + str(root / 'ntoskrnl/xb/mm'), str(here / 'pins.c'), '-o', str(output / 'pins')], check=True)
+ subprocess.run([str(output / 'pins'), '1' if '--optimized' in sys.argv else '0', '1' if '--vector' in sys.argv else '0'], check=True)
++
++subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra'] + diagnostics +
++    ['-I'+str(here.parent/'clean-room/include'), '-I'+str(output),
++     '-I'+str(root/'ntoskrnl/xb/mm'), str(here/'pins-state.c'),
++     '-o', str(output/'pins-state')], check=True)
++subprocess.run([str(output/'pins-state')], check=True)
