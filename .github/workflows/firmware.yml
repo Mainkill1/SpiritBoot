@@ -52,7 +52,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 2525d930c85041db0f1741b4c890e53dbaa007c2
+            test "$actual_tree" = f97884b782e679b5e523671a48b96ddf792c7f05
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-unwind.py" "$output/cache-pin-unwind" >"$output/cache-pin-unwind.log" 2>&1
