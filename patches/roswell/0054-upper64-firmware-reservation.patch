@@ -1,0 +1,1069 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 351671e9d55cd828e5fd9567e0273276f8c2ca0c..3a6c7b1a783a26f494d52c657fbb520e60ae349c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -36,6 +36,13 @@ if(SARCH STREQUAL "xbox")
+         message(FATAL_ERROR "XBOX_RAM_MIB must be 64 or 128; capacity is selected at build time")
+     endif()
+     add_definitions(-DXBOX_RAM_MIB=${XBOX_RAM_MIB})
++    option(XBOX_RESERVE_UPPER_RAM "Reserve upper 64 MiB for private firmware allocations" OFF)
++    if(XBOX_RESERVE_UPPER_RAM)
++        if(NOT XBOX_RAM_MIB STREQUAL "128")
++            message(FATAL_ERROR "XBOX_RESERVE_UPPER_RAM requires XBOX_RAM_MIB=128")
++        endif()
++        add_definitions(-DXBOX_RESERVE_UPPER_RAM=1)
++    endif()
+ 
+     # Everything in this tree links into the single kernel image -- the
+     # folded drivers' "loadable .sys" view is a fiction on Xbox.  Define
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index f96372b62bef9e66a858f66d5f5cbfcc49b638fe..6f622ab03a6166b78d1b539a0d72864e76b1551f 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -213,6 +213,13 @@ if(NXK_MM_VM)
+     list(APPEND PCH_SKIP_SOURCE xb/mm/vm.c xb/mm/fault.c)
+ endif()
+ 
++# This profile's domain enforcement belongs to these nxmm backends.  An
++# ARM3 fallback must not silently turn a title allocation into private RAM.
++if(XBOX_RESERVE_UPPER_RAM AND
++   (NOT NXK_MM_PHYS OR NOT NXK_MM_POOL OR NOT NXK_MM_POOLPAGES OR NOT NXK_MM_VM))
++    message(FATAL_ERROR "XBOX_RESERVE_UPPER_RAM requires NXK_MM_PHYS, NXK_MM_POOL, NXK_MM_POOLPAGES and NXK_MM_VM")
++endif()
++
+ # nxcache: replace the section/VACB file cache (ntoskrnl/cc/) with the
+ # fixed-pool buffer cache in xb/mm/cache.c.
+ # Revert = -DNXK_MM_CACHE=OFF + reconfigure.
+diff --git a/ntoskrnl/xb/mm/api.c b/ntoskrnl/xb/mm/api.c
+index 1a0b5e64df2b1e8222c6f2274a9008df77b930c0..df721e596ca85f4154197d6f4a76ded6ffa5af8d 100644
+--- a/ntoskrnl/xb/mm/api.c
++++ b/ntoskrnl/xb/mm/api.c
+@@ -39,7 +39,11 @@ MmAllocateSystemMemory(_In_ SIZE_T Size, _In_ ULONG Protect)
+     {
+         DPRINT1("MmAllocateSystemMemory(%lu, %lx) -> aperture exhausted, "
+                 "falling back to NP pool\n", (ULONG)Size, Protect);
++#if XBOX_RESERVE_UPPER_RAM
++        return NxTitleAllocatePoolWithTag(Size, NXMM_TAG);
++#else
+         return ExAllocatePoolWithTag(NonPagedPool, Size, NXMM_TAG);
++#endif
+     }
+     return p;
+ }
+@@ -181,7 +185,11 @@ MmQueryStatistics(_Inout_ PMM_STATISTICS Stats)
+         return STATUS_INVALID_PARAMETER;
+ 
+     Stats->TotalPhysicalPages          = MmNumberOfPhysicalPages;
++#if XBOX_RESERVE_UPPER_RAM
++    Stats->AvailablePages              = (ULONG)NxkPageSupplyTitleAvailable();
++#else
+     Stats->AvailablePages              = (ULONG)MmAvailablePages;
++#endif
+ #ifdef NXK_MM_VM
+     Stats->VirtualMemoryBytesCommitted = (ULONG)NxVmCommittedBytes();
+     Stats->VirtualMemoryBytesReserved  = (ULONG)NxVmReservedBytes();
+@@ -243,7 +251,11 @@ NxMmCreateKernelStack(_In_ SIZE_T NumberOfBytes, _In_ BOOLEAN DebuggerThread)
+         return NULL;
+     NumberOfBytes = (NumberOfBytes + PAGE_SIZE - 1) & ~(SIZE_T)(PAGE_SIZE - 1);
+ 
++#if XBOX_RESERVE_UPPER_RAM
++    Base = NxTitleAllocatePoolWithTag(NumberOfBytes, 'kStN');
++#else
+     Base = ExAllocatePoolWithTag(NonPagedPool, NumberOfBytes, 'kStN');
++#endif
+     if (Base == NULL)
+         return NULL;
+ 
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index 0cd48fc3704129ef68498aec6a34dd47d6a548c1..b066e80814811416faaf35b2690d97e8f2c06733 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -132,6 +132,10 @@ extern volatile LONG NxInitFreesDone;
+ 
+ /* CROSS-FILE PROTOTYPES ****************************************************/
+ 
++PFN_NUMBER NTAPI NxkPageSupplyTakeTitleAny(ULONG Color);
++PFN_NUMBER NTAPI NxkPageSupplyTakeTitleZero(ULONG Color);
++PFN_NUMBER NTAPI NxkPageSupplyTitleAvailable(VOID);
++
+ /* xb/mm/contig.c -- heap-region helper called during boot init. */
+ VOID NxpAddHeapPagesCoalesced(ULONG_PTR Pa, ULONG Pages);
+ 
+@@ -189,6 +193,9 @@ PFN_COUNT NxVmCommittedPagesInRange(IN ULONG_PTR Start, IN ULONG_PTR End);
+ #define NXK_POOL_WINDOW_BASE   0xC1000000UL
+ #define NXK_POOL_WINDOW_PAGES  4096
+ PVOID NxPoolPagesAlloc(IN SIZE_T NumberOfBytes);
++PVOID NxPoolPagesAllocTitle(IN SIZE_T NumberOfBytes);
++PVOID NTAPI NxTitleAllocatePoolWithTag(IN SIZE_T NumberOfBytes, IN ULONG Tag);
++PVOID NTAPI NxTitleAllocatePool(IN SIZE_T NumberOfBytes);
+ SIZE_T NxPoolPagesQueryRunBytes(PVOID BaseAddress);
+ VOID NxPoolPagesSetMovable(IN PVOID BaseAddress, IN SIZE_T NumberOfBytes,
+                            IN BOOLEAN Movable);
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index 16cf2aa60251d2c1acb177628f9908864afb7893..2095c37654e2a44c75aa57f1a760c52988a0e164 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -102,6 +102,10 @@ static PFN_NUMBER NxpSpillHint;         /* <= lowest free title page */
+  * contig pre-flight must use this, not MmAvailablePages (which counts them),
+  * or it over-commits to windows it can't rehome and leaks pages partway. */
+ static PFN_NUMBER NxpGenericAvail;
++#if XBOX_RESERVE_UPPER_RAM
++static PFN_NUMBER NxpTitleAvail;
++static PFN_NUMBER NxpTitleGenericAvail;
++#endif
+ 
+ #define NXP_NEXT(e) ((e) & NXP_PFN_MASK)
+ #define NXP_PREV(e) (((e) >> NXP_PREV_SHIFT) & NXP_PFN_MASK)
+@@ -130,6 +134,13 @@ NxpPushHead(PFN_NUMBER Page)
+     *HeadPtr = (ULONG)Page;
+     MmAvailablePages++;
+     if (Page >= NXP_GENERIC_FLOOR_PFN) NxpGenericAvail++;
++#if XBOX_RESERVE_UPPER_RAM
++    if (Page < (NXK_KSEG0_RAM_SIZE >> PAGE_SHIFT))
++    {
++        NxpTitleAvail++;
++        if (Page >= NXP_GENERIC_FLOOR_PFN) NxpTitleGenericAvail++;
++    }
++#endif
+ }
+ 
+ static
+@@ -149,6 +160,13 @@ NxpUnlink(PFN_NUMBER Page)
+     NxpLinks[Page] = 0;
+     MmAvailablePages--;
+     if (Page >= NXP_GENERIC_FLOOR_PFN) NxpGenericAvail--;
++#if XBOX_RESERVE_UPPER_RAM
++    if (Page < (NXK_KSEG0_RAM_SIZE >> PAGE_SHIFT))
++    {
++        NxpTitleAvail--;
++        if (Page >= NXP_GENERIC_FLOOR_PFN) NxpTitleGenericAvail--;
++    }
++#endif
+ }
+ 
+ /* Called from MM init before the boot population, with an array sized
+@@ -165,6 +183,12 @@ NxkPageSupplyInitialize(
+     RtlZeroMemory(NxpPins, (HighestPfn + 1) * sizeof(USHORT));
+     RtlZeroMemory(LinksArray, (HighestPfn + 1) * sizeof(ULONG));
+ 
++#if XBOX_RESERVE_UPPER_RAM
++    ASSERT(HighestPfn >= 0x7FFF);
++    NxpTitleAvail = NxpTitleGenericAvail = 0;
++    NxpKernelLowPfn = NXK_KSEG0_RAM_SIZE >> PAGE_SHIFT;
++    NxpKernelHighPfn = HighestPfn;
++#else
+     if (NxkMmRetailShapedMap())
+     {
+         NxpKernelLowPfn = NXK_HIGH_ZONE_BASE >> PAGE_SHIFT;
+@@ -175,6 +199,7 @@ NxkPageSupplyInitialize(
+         NxpKernelLowPfn = NXK_KSEG0_RAM_SIZE >> PAGE_SHIFT;
+         NxpKernelHighPfn = HighestPfn;
+     }
++#endif
+     NxpSpillHint = 1;
+ }
+ 
+@@ -191,6 +216,10 @@ NxkPageSupplyTakeAny(ULONG Color)
+     Pfn = NxpFreeHeadKernel;
+     if (Pfn == 0)
+     {
++#if XBOX_RESERVE_UPPER_RAM
++        /* Private allocations must not consume title-reserved capacity. */
++        return 0;
++#else
+         /* Kernel class dry: spill to the lowest free page (measured
+          * retail order).  Only title pages can be free here, so the
+          * scan needs no class check. */
+@@ -204,11 +233,63 @@ NxkPageSupplyTakeAny(ULONG Color)
+             Pfn++;
+         }
+         NxpSpillHint = Pfn;
++#endif
+     }
+     NxpUnlink(Pfn);
+     return Pfn;
+ }
+ 
++PFN_NUMBER
++NTAPI
++NxkPageSupplyTakeTitleAny(ULONG Color)
++{
++#if XBOX_RESERVE_UPPER_RAM
++    PFN_NUMBER Pfn;
++    UNREFERENCED_PARAMETER(Color);
++    MI_ASSERT_PFN_LOCK_HELD();
++    if (NxpTitleGenericAvail == 0) return 0;
++    Pfn = NxpSpillHint < NXP_GENERIC_FLOOR_PFN ?
++              NXP_GENERIC_FLOOR_PFN : NxpSpillHint;
++    for (; Pfn < (NXK_KSEG0_RAM_SIZE >> PAGE_SHIFT); Pfn++)
++    {
++        if (!(NxpLinks[Pfn] & NXP_FREE)) continue;
++        NxpUnlink(Pfn);
++        NxpSpillHint = Pfn;
++        return Pfn;
++    }
++    return 0;
++#else
++    return NxkPageSupplyTakeAny(Color);
++#endif
++}
++
++PFN_NUMBER
++NTAPI
++NxkPageSupplyTakeTitleZero(ULONG Color)
++{
++    PFN_NUMBER Pfn = NxkPageSupplyTakeTitleAny(Color);
++    if (Pfn != 0)
++    {
++        PVOID Alias = NxkTryGetVerifiedWbDirectAlias(Pfn);
++        if (Alias != NULL)
++            KeZeroPages(Alias, PAGE_SIZE);
++        else
++            MiZeroPhysicalPage(Pfn);
++    }
++    return Pfn;
++}
++
++PFN_NUMBER
++NTAPI
++NxkPageSupplyTitleAvailable(VOID)
++{
++#if XBOX_RESERVE_UPPER_RAM
++    return NxpTitleAvail;
++#else
++    return MmAvailablePages;
++#endif
++}
++
+ PFN_NUMBER
+ NTAPI
+ NxkPageSupplyTakeZero(ULONG Color)
+@@ -367,6 +448,17 @@ NxkPageSupplyTakeAnyOutside(
+ 
+     MI_ASSERT_PFN_LOCK_HELD();
+ 
++#if XBOX_RESERVE_UPPER_RAM
++    /* All relocatable title data in this profile starts below 64 MiB.
++     * Keep its replacement in the same domain, including below spill hint. */
++    for (Pfn = NxpFreeHeadTitle; Pfn != 0; Pfn = NXP_NEXT(NxpLinks[Pfn]))
++    {
++        if (Pfn < NXP_GENERIC_FLOOR_PFN) continue;
++        if (Pfn >= LowPfn && Pfn <= HighPfn) continue;
++        NxpUnlink(Pfn);
++        return Pfn;
++    }
++#else
+     Pfn = NxpFreeHeadKernel;
+     if (Pfn != 0 && !(Pfn >= LowPfn && Pfn <= HighPfn))
+     {
+@@ -404,6 +496,7 @@ NxkPageSupplyTakeAnyOutside(
+         NxpUnlink(Pfn);
+         return Pfn;
+     }
++#endif
+     return 0;
+ }
+ 
+@@ -544,7 +637,7 @@ NxkPageSupplyTakeRunRelocate(
+     IN PFN_NUMBER HighPfn,
+     IN PFN_NUMBER AlignPages)
+ {
+-    PFN_NUMBER Base, i;
++    PFN_NUMBER Base, i, RelocationCapacity;
+ 
+     MI_ASSERT_PFN_LOCK_HELD();
+     ASSERT(NxpLinks != NULL);
+@@ -552,6 +645,12 @@ NxkPageSupplyTakeRunRelocate(
+     if (RunPages == 0) return 0;
+     if (AlignPages == 0) AlignPages = 1;
+     if (HighPfn > NxpHighestPfn) HighPfn = NxpHighestPfn;
++#if XBOX_RESERVE_UPPER_RAM
++    if (HighPfn >= 0x4000) HighPfn = 0x3fff;
++    RelocationCapacity = NxpTitleGenericAvail;
++#else
++    RelocationCapacity = NxpGenericAvail;
++#endif
+     if (LowPfn == 0) LowPfn = 1;
+     if (HighPfn < LowPfn || HighPfn - LowPfn + 1 < RunPages) return 0;
+ 
+@@ -588,8 +687,8 @@ NxkPageSupplyTakeRunRelocate(
+          * Low pin-only pages in this window are absent from the global
+          * generic count and must not be subtracted from it. */
+         if (Fits && ((Movable != 0 && NxpRelocationPtes == NULL) ||
+-                     NxpGenericAvail < FreeGenericInWindow ||
+-                     NxpGenericAvail - FreeGenericInWindow < Movable))
++                     RelocationCapacity < FreeGenericInWindow ||
++                     RelocationCapacity - FreeGenericInWindow < Movable))
+         {
+             Fits = FALSE;
+             if (Base < AlignPages) break;
+@@ -723,6 +822,27 @@ NxkPageSupplyTakeZero(ULONG Color)
+     return MiRemoveZeroPage(Color);
+ }
+ 
++PFN_NUMBER
++NTAPI
++NxkPageSupplyTakeTitleAny(ULONG Color)
++{
++    return NxkPageSupplyTakeAny(Color);
++}
++
++PFN_NUMBER
++NTAPI
++NxkPageSupplyTakeTitleZero(ULONG Color)
++{
++    return NxkPageSupplyTakeZero(Color);
++}
++
++PFN_NUMBER
++NTAPI
++NxkPageSupplyTitleAvailable(VOID)
++{
++    return MmAvailablePages;
++}
++
+ /* Take a ready-zeroed page only if one is immediately available.  On 0
+  * the caller falls back to TakeAny plus its own zeroing -- some contexts
+  * must not run the inline zeroing path under the PFN lock. */
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index 4863c29ec34b26e9b6086c1d771e8534698d57a6..7d30a054b1c0baea5d17dbde66953bcc290de674 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -39,10 +39,15 @@
+ /* Whole-page source: the nxmm window allocator when enabled, else the
+  * ARM3 pool page layer. */
+ #ifdef NXK_MM_POOLPAGES
+-#define NXP_PAGES_ALLOC(Bytes) NxPoolPagesAlloc(Bytes)
++#if XBOX_RESERVE_UPPER_RAM
++#define NXP_PAGES_ALLOC(Bytes, TitleData) \
++    ((TitleData) ? NxPoolPagesAllocTitle(Bytes) : NxPoolPagesAlloc(Bytes))
++#else
++#define NXP_PAGES_ALLOC(Bytes, TitleData) NxPoolPagesAlloc(Bytes)
++#endif
+ #define NXP_PAGES_FREE(Va)     NxPoolPagesFree(Va)
+ #else
+-#define NXP_PAGES_ALLOC(Bytes) MiAllocatePoolPages(NonPagedPool, (Bytes))
++#define NXP_PAGES_ALLOC(Bytes, TitleData) MiAllocatePoolPages(NonPagedPool, (Bytes))
+ #define NXP_PAGES_FREE(Va)     MiFreePoolPages(Va)
+ #endif
+ 
+@@ -56,6 +61,13 @@ static const USHORT NxpClassSize[] = {
+     32, 64, 128, 256, 512, 1024, 2048,
+ };
+ #define NXP_CLASSES       RTL_NUMBER_OF(NxpClassSize)
++#if XBOX_RESERVE_UPPER_RAM
++#define NXP_BUCKET_LISTS  (2 * NXP_CLASSES)
++#define NXP_SIZE_CLASS(Index) ((Index) % NXP_CLASSES)
++#else
++#define NXP_BUCKET_LISTS  NXP_CLASSES
++#define NXP_SIZE_CLASS(Index) (Index)
++#endif
+ #define NXP_SMALL_MAX     2040    /* user bytes; above = whole pages */
+ 
+ typedef struct _NXP_HEADER
+@@ -77,7 +89,7 @@ typedef struct _NXP_FREE
+ 
+ /* (block bytes + 15) >> 4 -> class index; 4096 >> 4 entries + 1. */
+ static UCHAR NxpClassMap[(PAGE_SIZE >> 4) + 1];
+-static NXP_FREE *NxpFreeLists[NXP_CLASSES];
++static NXP_FREE *NxpFreeLists[NXP_BUCKET_LISTS];
+ static KSPIN_LOCK NxpLock;
+ 
+ /* Per-window-page state for sub-page bucket pages.  One byte per page:
+@@ -233,24 +245,28 @@ NxpAllocFailed(IN POOL_TYPE PoolType,
+     }
+ }
+ 
+-PVOID
++static PVOID
+ NTAPI
+-ExAllocatePoolWithTag(IN POOL_TYPE PoolType,
++NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+                       IN SIZE_T NumberOfBytes,
+-                      IN ULONG Tag)
++                      IN ULONG Tag,
++                      IN BOOLEAN TitleData)
+ {
+     SIZE_T BlockBytes;
+     ULONG Class;
+     KIRQL OldIrql;
+     NXP_HEADER *Hdr;
+     NXP_FREE *Blk;
++#if !XBOX_RESERVE_UPPER_RAM
++    UNREFERENCED_PARAMETER(TitleData);
++#endif
+ 
+     /* Whole-page path. */
+     if (NumberOfBytes > NXP_SMALL_MAX)
+     {
+-        PVOID Va = NXP_PAGES_ALLOC(NumberOfBytes);
++        PVOID Va = NXP_PAGES_ALLOC(NumberOfBytes, TitleData);
+         if (Va == NULL && NxpReclaimEmptyBucketPages() != 0)
+-            Va = NXP_PAGES_ALLOC(NumberOfBytes);
++            Va = NXP_PAGES_ALLOC(NumberOfBytes, TitleData);
+         if (Va == NULL)
+         {
+             NxpAllocFailed(PoolType, NumberOfBytes);
+@@ -276,6 +292,10 @@ ExAllocatePoolWithTag(IN POOL_TYPE PoolType,
+ 
+     BlockBytes = (NumberOfBytes ? NumberOfBytes : 1) + sizeof(NXP_HEADER);
+     Class = NxpClassMap[(BlockBytes + 15) >> 4];
++#if XBOX_RESERVE_UPPER_RAM
++    /* Domain is explicit at the ABI seam; tags/caller addresses are irrelevant. */
++    if (TitleData) Class += NXP_CLASSES;
++#endif
+ 
+     KeAcquireSpinLock(&NxpLock, &OldIrql);
+     Blk = NxpFreeLists[Class];
+@@ -290,14 +310,14 @@ ExAllocatePoolWithTag(IN POOL_TYPE PoolType,
+     {
+         /* Refill: carve a fresh page into this class.  The page layer
+          * has its own lock; don't hold ours across it. */
+-        ULONG Size = NxpClassSize[Class];
++        ULONG Size = NxpClassSize[NXP_SIZE_CLASS(Class)];
+         ULONG Count = PAGE_SIZE / Size;
+         PUCHAR Page;
+ 
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+-        Page = NXP_PAGES_ALLOC(PAGE_SIZE);
++        Page = NXP_PAGES_ALLOC(PAGE_SIZE, TitleData);
+         if (Page == NULL && NxpReclaimEmptyBucketPages() != 0)
+-            Page = NXP_PAGES_ALLOC(PAGE_SIZE);
++            Page = NXP_PAGES_ALLOC(PAGE_SIZE, TitleData);
+         if (Page == NULL)
+         {
+             NxpAllocFailed(PoolType, NumberOfBytes);
+@@ -331,6 +351,27 @@ ExAllocatePoolWithTag(IN POOL_TYPE PoolType,
+     return Blk;
+ }
+ 
++PVOID
++NTAPI
++ExAllocatePoolWithTag(IN POOL_TYPE PoolType, IN SIZE_T NumberOfBytes, IN ULONG Tag)
++{
++    return NxpAllocatePoolWithTag(PoolType, NumberOfBytes, Tag, FALSE);
++}
++
++PVOID
++NTAPI
++NxTitleAllocatePoolWithTag(IN SIZE_T NumberOfBytes, IN ULONG Tag)
++{
++    return NxpAllocatePoolWithTag(NonPagedPool, NumberOfBytes, Tag, TRUE);
++}
++
++PVOID
++NTAPI
++NxTitleAllocatePool(IN SIZE_T NumberOfBytes)
++{
++    return NxTitleAllocatePoolWithTag(NumberOfBytes, TAG_NONE);
++}
++
+ PVOID
+ NTAPI
+ ExAllocatePool(POOL_TYPE PoolType,
+@@ -394,7 +435,7 @@ ExFreePoolWithTag(IN PVOID P,
+         KeBugCheckEx(BAD_POOL_CALLER, 0x0A,
+                      (ULONG_PTR)P, Hdr->Tag, TagToFree);
+     }
+-    ASSERT(Hdr->ClassIndex < NXP_CLASSES);
++    ASSERT(Hdr->ClassIndex < NXP_BUCKET_LISTS);
+ 
+     Hdr->Magic = NXP_MAGIC_FREE;
+     Blk = (NXP_FREE *)P;
+@@ -501,8 +542,13 @@ ExQueryPoolBlockSize(IN PVOID PoolBlock,
+ 
+     Hdr = ((NXP_HEADER *)PoolBlock) - 1;
+     ASSERT(Hdr->Magic == NXP_MAGIC_ALLOC);
++#if XBOX_RESERVE_UPPER_RAM
++    ASSERT(Hdr->ClassIndex < NXP_BUCKET_LISTS);
++    return (SIZE_T)NxpClassSize[Hdr->ClassIndex % NXP_CLASSES] - sizeof(NXP_HEADER);
++#else
+     ASSERT(Hdr->ClassIndex < NXP_CLASSES);
+     return (SIZE_T)NxpClassSize[Hdr->ClassIndex] - sizeof(NXP_HEADER);
++#endif
+ }
+ 
+ /* QUOTA / PRIORITY WRAPPERS ************************************************/
+diff --git a/ntoskrnl/xb/mm/poolpages.c b/ntoskrnl/xb/mm/poolpages.c
+index 56fe6b14a817e9e844e5bf42281602fe47ba9f2e..b9c7fb901579307af04ca180bf5c610c0484911d 100644
+--- a/ntoskrnl/xb/mm/poolpages.c
++++ b/ntoskrnl/xb/mm/poolpages.c
+@@ -169,9 +169,10 @@ NxPoolPagesQueryRunBytes(PVOID BaseAddress)
+     return (SIZE_T)Count << PAGE_SHIFT;
+ }
+ 
+-PVOID
+-NxPoolPagesAlloc(
+-    IN SIZE_T NumberOfBytes)
++static PVOID
++NxpPoolPagesAlloc(
++    IN SIZE_T NumberOfBytes,
++    IN BOOLEAN TitleData)
+ {
+     ULONG Count = (ULONG)BYTES_TO_PAGES(NumberOfBytes);
+     ULONG Start, i;
+@@ -236,7 +237,12 @@ NxPoolPagesAlloc(
+         }
+ 
+         ASSERT(NXPP_PTE(PageVa) == 0);
++#if XBOX_RESERVE_UPPER_RAM
++        Pfn = TitleData ? NxkPageSupplyTakeTitleAny(0) : NxkPageSupplyTakeAny(0);
++#else
++        UNREFERENCED_PARAMETER(TitleData);
+         Pfn = NxkPageSupplyTakeAny(0);
++#endif
+         if (Pfn == 0)
+         {
+ unwind:
+@@ -272,6 +278,18 @@ unwind:
+     return (PVOID)Va;
+ }
+ 
++PVOID
++NxPoolPagesAlloc(IN SIZE_T NumberOfBytes)
++{
++    return NxpPoolPagesAlloc(NumberOfBytes, FALSE);
++}
++
++PVOID
++NxPoolPagesAllocTitle(IN SIZE_T NumberOfBytes)
++{
++    return NxpPoolPagesAlloc(NumberOfBytes, TRUE);
++}
++
+ ULONG
+ NxPoolPagesFree(
+     IN PVOID BaseAddress)
+diff --git a/ntoskrnl/xb/mm/sysva.c b/ntoskrnl/xb/mm/sysva.c
+index 3345ef4548ffc8c076393ea83c1b19884ec1eab2..ef55d85ffa5d4b003dc07ba1f6214f5b60b80660 100644
+--- a/ntoskrnl/xb/mm/sysva.c
++++ b/ntoskrnl/xb/mm/sysva.c
+@@ -158,7 +158,11 @@ NxkSysVaAllocate(SIZE_T Size, ULONG Protect)
+         PFN_NUMBER Pfn;
+ 
+         PfnIrql = MiAcquirePfnLock();
++#if XBOX_RESERVE_UPPER_RAM
++        Pfn = NxkPageSupplyTakeTitleZero(0);
++#else
+         Pfn = NxkPageSupplyTakeZero(0);
++#endif
+         MiReleasePfnLock(PfnIrql);
+         if (Pfn == 0)
+         {
+diff --git a/ntoskrnl/xb/mm/vm.c b/ntoskrnl/xb/mm/vm.c
+index 1eb5af607df0a6cb595a56fb451cbb174d4d1926..aad5dbea3679d36095fe946b22ad0e82f760e757 100644
+--- a/ntoskrnl/xb/mm/vm.c
++++ b/ntoskrnl/xb/mm/vm.c
+@@ -306,7 +306,11 @@ NxvCommitRange(
+ 
+         {
+             KIRQL OldIrql = MiAcquirePfnLock();
++#if XBOX_RESERVE_UPPER_RAM
++            Pfn = Zero ? NxkPageSupplyTakeTitleZero(0) : NxkPageSupplyTakeTitleAny(0);
++#else
+             Pfn = Zero ? NxkPageSupplyTakeZero(0) : NxkPageSupplyTakeAny(0);
++#endif
+             MiReleasePfnLock(OldIrql);
+         }
+         if (Pfn == 0) goto rollback;
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index 65f338114fe901443bd3f7ebf290599b2dd6a467..2f51e58397edf008c88dabf07bddb85eb615ae55 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -314,8 +314,13 @@ XeKeGetCurrentThread(VOID)
+ static PVOID
+ XeAllocTls(_In_ SIZE_T Size)
+ {
++#if XBOX_RESERVE_UPPER_RAM
++    extern PVOID NTAPI NxTitleAllocatePoolWithTag(SIZE_T, ULONG);
++    ULONG_PTR raw = (ULONG_PTR)NxTitleAllocatePoolWithTag(Size + 16, XBE_TAG);
++#else
+     ULONG_PTR raw = (ULONG_PTR)ExAllocatePoolWithTag(NonPagedPool, Size + 16,
+                                                      XBE_TAG);
++#endif
+     if (raw == 0)
+         return NULL;
+     return (PVOID)(((raw + 4 + 15) & ~(ULONG_PTR)15) - 4);
+@@ -1380,12 +1385,22 @@ XeNtAllocateVirtualMemory(PVOID *Base, ULONG_PTR ZeroBits, PSIZE_T Size,
+ PVOID NTAPI
+ XeExAllocatePool(SIZE_T NumberOfBytes)
+ {
++#if XBOX_RESERVE_UPPER_RAM
++    extern PVOID NTAPI NxTitleAllocatePool(SIZE_T);
++    return NxTitleAllocatePool(NumberOfBytes);
++#else
+     return ExAllocatePool(NonPagedPool, NumberOfBytes);
++#endif
+ }
+ PVOID NTAPI
+ XeExAllocatePoolWithTag(SIZE_T NumberOfBytes, ULONG Tag)
+ {
++#if XBOX_RESERVE_UPPER_RAM
++    extern PVOID NTAPI NxTitleAllocatePoolWithTag(SIZE_T, ULONG);
++    return NxTitleAllocatePoolWithTag(NumberOfBytes, Tag);
++#else
+     return ExAllocatePoolWithTag(NonPagedPool, NumberOfBytes, Tag);
++#endif
+ }
+ 
+ /*
+diff --git a/tests/host/upper-ram-reservation/README.md b/tests/host/upper-ram-reservation/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..ea51d395e3093f4e0b7f5f4358c98af3ec3f5133
+--- /dev/null
++++ b/tests/host/upper-ram-reservation/README.md
+@@ -0,0 +1,20 @@
++# Upper RAM reservation component gate
++
++Run `python3 tests/host/upper-ram-reservation/check.py OUTPUT` from the source
++tree with a native C compiler. The gate extracts maintained production bodies,
++compiles them with synthetic PFN/PTE metadata and exercises their allocation,
++free, ownership, domain exhaustion, and statistics behavior. It covers title VM
++including MEM_NOZERO, both public pool ordinals, bucket reuse and reclamation,
++normal and exhausted-aperture system allocation, explicit public stack buffers,
++dedicated title TLS alignment, and relocation capacity/destinations. It also
++compiles the OFF profile and checks the existing 64/128 policies.
++
++The fixture substitutes serialization and the existing privileged relocation
++copy/PTE/TLB backend; production search, preflight, owners and counters execute.
++Native fixed mappings stand in for CPU page walks. This is component evidence,
++not an emulator boot, x86 TLB proof, or game qualification.
++
++Run `python3 tests/host/upper-ram-reservation/check-config.py OUTPUT` with the
++production cross toolchain and CMake installed. This configures the actual tree
++to check each required allocator backend, 128-MiB capacity, the supported profile
++and the default fallback configuration.
+diff --git a/tests/host/upper-ram-reservation/check-config.py b/tests/host/upper-ram-reservation/check-config.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..8f3c9e86e4b626ba81a6b9772327bcebcbe139a1
+--- /dev/null
++++ b/tests/host/upper-ram-reservation/check-config.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Check the real CMake contract with the production cross toolchain installed."""
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++base = ["cmake", "-G", "Ninja", "-S", str(root),
++        f"-DCMAKE_TOOLCHAIN_FILE={root / 'toolchain-gcc.cmake'}",
++        "-DCMAKE_BUILD_TYPE=Release", "-DDBG=0", "-DKDBG=FALSE"]
++backends = ("NXK_MM_PHYS", "NXK_MM_POOL", "NXK_MM_POOLPAGES", "NXK_MM_VM")
++for name in backends:
++    result = subprocess.run(base + ["-B", str(out / name), "-DXBOX_RAM_MIB=128",
++        "-DXBOX_RESERVE_UPPER_RAM=ON"] +
++        [f"-D{option}={'OFF' if option == name else 'ON'}" for option in backends],
++        capture_output=True, text=True)
++    (out / (name + ".log")).write_text(result.stdout + result.stderr)
++    assert result.returncode != 0 and "requires" in result.stderr, name
++for name, ram, profile, success in (("supported",128,"ON",True),
++                                   ("wrong-capacity",64,"ON",False),
++                                   ("default-fallback",128,"OFF",True)):
++    flags = ["-DNXK_MM_VM=OFF"] if name == "default-fallback" else []
++    result = subprocess.run(base + ["-B", str(out / name), f"-DXBOX_RAM_MIB={ram}",
++        f"-DXBOX_RESERVE_UPPER_RAM={profile}"] + flags, capture_output=True, text=True)
++    (out / (name + ".log")).write_text(result.stdout + result.stderr)
++    assert (result.returncode == 0) == success, name
++print("upper-ram-reservation: real CMake required-backend/capacity contract PASS")
+diff --git a/tests/host/upper-ram-reservation/check.py b/tests/host/upper-ram-reservation/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..23aff2d96feabdb57d3e999f83f48bae923e870e
+--- /dev/null
++++ b/tests/host/upper-ram-reservation/check.py
+@@ -0,0 +1,392 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise maintained page-supply and VM commit bodies with synthetic PFNs."""
++from pathlib import Path
++import re
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++def function(text, name):
++    # Match the declaration line, so API names mentioned in comments cannot
++    # accidentally pull includes or another function into the native fixture.
++    hit = re.search(r"(?m)^" + name + r"\s*\([^;]*?\)\s*\{", text)
++    assert hit, name
++    start = text.rfind("\n\n", 0, hit.start()) + 2
++    brace = text.index("{", hit.start())
++    depth, end = 1, brace + 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[start:end] + "\n"
++supply = (root / "ntoskrnl/xb/mm/pagesupply.c").read_text()
++vm = (root / "ntoskrnl/xb/mm/vm.c").read_text()
++core = supply[supply.index("#define NXP_FREE"):supply.index("VOID\nNTAPI\nNxkPageSupplyReturn")]
++shim = r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <assert.h>
++#include <sys/mman.h>
++typedef uint32_t ULONG, *PULONG, PFN_NUMBER, PFN_COUNT;
++typedef uint16_t USHORT, *PUSHORT;
++typedef uint8_t UCHAR, BOOLEAN, KIRQL;
++typedef uintptr_t ULONG_PTR;
++typedef size_t SIZE_T;
++typedef void VOID, *PVOID;
++typedef int32_t NTSTATUS;
++#define NTAPI
++#define IN
++#define TRUE 1
++#define FALSE 0
++#define PAGE_SIZE 4096u
++#define PAGE_SHIFT 12
++#define NXK_KSEG0_RAM_SIZE 0x04000000u
++#define NXK_HIGH_ZONE_BASE 0x03400000u
++#define NXK_HIGH_ZONE_LIMIT 0x03c00000u
++#define XBOX_RESERVE_UPPER_RAM 1
++#define NXK_MM_PHYS 1
++#define ASSERT assert
++#define MI_ASSERT_PFN_LOCK_HELD() ((void)0)
++#define UNREFERENCED_PARAMETER(x) ((void)(x))
++#define RtlZeroMemory(p,n) memset(p,0,n)
++static PFN_NUMBER MmAvailablePages;
++static BOOLEAN fixtureRetail;
++static BOOLEAN NxkMmRetailShapedMap(void) { return fixtureRetail; }
++static BOOLEAN NxkMmPersistentPage(PFN_NUMBER p) { (void)p; return FALSE; }
++static PVOID NxkTryGetVerifiedWbDirectAlias(PFN_NUMBER p) { (void)p; return NULL; }
++static void KeZeroPages(PVOID p, SIZE_T n) { memset(p,0,n); }
++static void MiZeroPhysicalPage(PFN_NUMBER p) { assert(p>0); }
++static KIRQL MiAcquirePfnLock(void) { return 0; }
++static void MiReleasePfnLock(KIRQL i) { (void)i; }
++static void KeInvalidateTlbEntry(PVOID p) { (void)p; }
++'''
++core += function(supply, "NxkPageSupplyReturn")
++core += function(supply, "NxkPageSupplySetOwner")
++adapter = r'''
++#define MC_SYSTEM 0
++static PFN_NUMBER MmAllocPage(int c) { (void)c; return NxkPageSupplyTakeZero(0); }
++static void MmDereferencePage(PFN_NUMBER p) { NxkPageSupplyReturn(p); }
++#define NXV_PDE(Va) (((PULONG)0xC0300000)[(ULONG_PTR)(Va)>>22])
++#define NXV_PTE(Va) (((PULONG)0xC0000000)[(ULONG_PTR)(Va)>>12])
++#define NXV_PTE_P 1u
++#define NXV_PTE_RW 2u
++#define NXV_PTE_FRESH 0x400u
++#define STATUS_SUCCESS 0
++#define STATUS_NO_MEMORY ((NTSTATUS)0xc0000017u)
++static SIZE_T NxvCommitted;
++'''
++body = "".join(function(vm, name) for name in
++               ("NxvEnsurePageTable", "NxvFreePageAtPte", "NxvCommitRange"))
++main = r'''
++static void reset(void) {
++    static ULONG storage[0x8000 + 0x4000];
++    memset(storage,0,sizeof(storage));
++    memset((void*)0xc0000000,0,0x400000);
++    MmAvailablePages=0; NxpFreeHeadKernel=NxpFreeHeadTitle=0; NxpGenericAvail=0;
++    NxvCommitted=0;
++    NxkPageSupplyInitialize(0x7fff,storage);
++    /* Existing page table isolates data selection from PT construction. */
++    NXV_PDE(0x10000)=0x07000003;
++}
++static void require(int ok,const char *message) {
++    if(!ok) {fprintf(stderr,"FAIL: %s\n",message);exit(1);}
++}
++int main(void) {
++    void *map=mmap((void*)0xc0000000,0x400000,PROT_READ|PROT_WRITE,
++                   MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
++    require(map==(void*)0xc0000000,"native fixture self-map reservation");
++    reset(); NxkPageSupplyReturn(0x20);
++    require(NxkPageSupplyTakeAny(0)==0,"private exhaustion must not steal a free low title page");
++    reset(); NxkPageSupplyReturn(0x20); NxkPageSupplyReturn(0x4001);
++    require(NxvCommitRange(0x10000,0x11000,3,TRUE)==STATUS_SUCCESS,"title commit succeeds on low RAM");
++    require((NXV_PTE(0x10000)>>12)==0x20,"title VM commit must select low RAM while high RAM is free");
++    reset(); NxkPageSupplyReturn(0x4001);
++    require(NxvCommitRange(0x10000,0x11000,3,FALSE)==STATUS_NO_MEMORY,"low exhaustion cannot spill title MEM_NOZERO into high RAM");
++    require(NXV_PTE(0x10000)==0 && NxvCommitted==0,"failed title commit leaves no mapping/charge");
++    require(NxkPageSupplyTakeAny(0)==0x4001,"upper reserve remains available to private allocation");
++    puts("upper-ram-reservation: maintained supply/VM selection and exhaustion PASS");
++}
++'''
++source = out / "supply-vm.c"
++source.write_text(shim + core + adapter + body + main)
++exe = out / "supply-vm"
++subprocess.run(["cc", "-std=gnu99", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
++                str(source), "-o", str(exe)], check=True)
++subprocess.run([str(exe)], check=True)
++
++relocation_shim = r'''
++static PVOID NxpRelocationPtes=(PVOID)1;
++static UCHAR frames[0x8000][PAGE_SIZE];
++#define HIGH_LEVEL 31
++#define DPRINT1(...) ((void)0)
++static void KeRaiseIrql(KIRQL level,KIRQL *old) { (void)level;*old=0; }
++static void KeLowerIrql(KIRQL old) { (void)old; }
++static void NxpMapRelocationPages(PFN_NUMBER s,PFN_NUMBER d) { (void)s;(void)d; }
++static void NxpUnmapRelocationPages(void) {}
++/* Substitute only the existing privileged copy/PTE/TLB backend. The
++ * maintained candidate search, capacity preflight, domain selection,
++ * owner transitions and free-list accounting execute without rewriting. */
++#define __asm__
++#define __volatile__(...) do { memcpy(frames[Dest],frames[Page],PAGE_SIZE); *Pte=NewEntry; } while(0)
++'''
++relocation_functions = ""
++for name in ("NxkPageSupplyTakeAnyOutside", "NxpRelocationCapacity", "NxkPageSupplyTakeRunRelocate"):
++    if re.search(r"(?m)^"+name+r"\s*\([^;]*?\)\s*\{", supply):
++        relocation_functions += function(supply, name)
++relocation_main = r'''
++static void require(int ok,const char *m) { if(!ok){fprintf(stderr,"FAIL: %s\n",m);exit(1);} }
++static void reset(void) {
++    static ULONG storage[0xc000];memset(storage,0,sizeof(storage));
++    memset((void*)0xc0000000,0,0x400000);
++    MmAvailablePages=0;NxpFreeHeadKernel=NxpFreeHeadTitle=0;NxpGenericAvail=0;
++    NxkPageSupplyInitialize(0x7fff,storage);
++    NXV_PTE(0x10000)=0x00020003;
++    NxkPageSupplySetOwner(0x20,(ULONG_PTR)&NXV_PTE(0x10000));
++    memset(frames[0x20],0x5a,PAGE_SIZE);
++}
++int main(void) {
++    require(mmap((void*)0xc0000000,0x400000,PROT_READ|PROT_WRITE,
++            MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0)==(void*)0xc0000000,"self-map fixture");
++    reset();NxkPageSupplyReturn(0x4001);
++    require(NxkPageSupplyTakeRunRelocate(1,0x20,0x20,1)==0,
++            "low relocation preflight must not count only-high free capacity");
++    require(NXV_PTE(0x10000)==0x00020003&&MmAvailablePages==1,
++            "failed domain relocation leaves owner mapping/free count intact");
++    reset();NxkPageSupplyReturn(0x21);NxkPageSupplyReturn(0x4001);
++    require(NxkPageSupplyTakeRunRelocate(1,0x20,0x20,1)==0x20,"low relocation with low capacity succeeds");
++    require((NXV_PTE(0x10000)>>12)==0x21,"low title data relocates only to another low frame");
++    require(memcmp(frames[0x20],frames[0x21],PAGE_SIZE)==0,"relocation backend preserves contents");
++    require(NxkPageSupplyGetOwner(0x21)==(ULONG_PTR)&NXV_PTE(0x10000),"destination retains PTE ownership");
++    require(NxkPageSupplyGetOwner(0x20)==0,"claimed source is no longer movable");
++    require(NxkPageSupplyTakeAny(0)==0x4001,"relocation leaves private high capacity untouched");
++    puts("upper-ram-reservation: maintained relocation preflight, low destination, owners/canaries PASS");
++}
++'''
++source = out / "relocation.c"
++source.write_text(shim + core + adapter + relocation_shim
++                  + function(supply,"NxkPageSupplyGetOwner") + relocation_functions + relocation_main)
++exe = out / "relocation"
++subprocess.run(["cc", "-std=gnu99", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
++                "-Wno-unused-variable", "-Wno-unused-but-set-variable", str(source), "-o", str(exe)], check=True)
++subprocess.run([str(exe)], check=True)
++
++# Compile the maintained pool page layer, bucket allocator and actual title
++# ordinal wrappers together. Native mappings stand in for the CPU's page walk;
++# production PTE/PFN metadata still controls every allocation and free.
++pages = (root / "ntoskrnl/xb/mm/poolpages.c").read_text()
++pool = (root / "ntoskrnl/xb/mm/pool.c").read_text()
++xbe = (root / "ntoskrnl/xb/xbe.c").read_text()
++pool_shim = r'''
++/* Separate production translation units reuse this name as a pool type. */
++#undef NXP_FREE
++typedef uint8_t *PUCHAR, *PBOOLEAN;
++typedef int KSPIN_LOCK;
++typedef ULONG POOL_TYPE;
++#define NXK_MM_POOLPAGES 1
++#define DBG 0
++#define NXK_POOL_WINDOW_BASE 0xc1000000u
++#define NXK_POOL_WINDOW_PAGES 4096u
++#define NXK_PDE_BASE 0xc0300000u
++#define NXK_PTE_BASE 0xc0000000u
++#define NXK_SYSMEM_BASE 0xd0000000u
++#define NXK_SYSMEM_LIMIT 0xd4000000u
++#define NXK_PTE_VALID 3u
++#define NXK_PDE_PT 3u
++#define NXK_SYSMEM_PT_COUNT 16
++#define NXK_4MB 0x400000u
++#define RTL_NUMBER_OF(a) (sizeof(a)/sizeof((a)[0]))
++#define C_ASSERT(x) _Static_assert(x,#x)
++#define BASE_POOL_TYPE_MASK 1u
++#define NonPagedPool 0u
++#define MUST_SUCCEED_POOL_MASK 0x100u
++#define POOL_RAISE_IF_ALLOCATION_FAILURE 0x10u
++#define MUST_SUCCEED_POOL_EMPTY 1
++#define BAD_POOL_CALLER 2
++#define BAD_POOL_HEADER 3
++#define STATUS_INSUFFICIENT_RESOURCES 4
++#define STATUS_SUCCESS 0
++#define TAG_NONE 0x656e6f4eu
++#define XBE_TAG 0x4542584eu
++#define OUT
++#define BYTES_TO_PAGES(n) (((n)+PAGE_SIZE-1)>>PAGE_SHIFT)
++#define PAGE_ALIGN(p) ((PVOID)((ULONG_PTR)(p)&~(ULONG_PTR)(PAGE_SIZE-1)))
++#define RtlFillMemory(p,n,v) memset(p,v,n)
++#define DPRINT1(...) ((void)0)
++static void KeInitializeSpinLock(KSPIN_LOCK *p) { *p=0; }
++static void KeAcquireSpinLock(KSPIN_LOCK *p,KIRQL *i) { assert(!*p); *p=1; *i=0; }
++static void KeReleaseSpinLock(KSPIN_LOCK *p,KIRQL i) { (void)i; assert(*p); *p=0; }
++static void KeBugCheckEx(ULONG b,ULONG_PTR a,ULONG_PTR c,ULONG_PTR d,ULONG_PTR f) {
++    (void)b;(void)a;(void)c;(void)d;(void)f; assert(!"unexpected pool bugcheck");
++}
++static void ExRaiseStatus(ULONG s) { (void)s; assert(!"unexpected pool exception"); }
++static ULONG __readcr3(void) { return 0; }
++static void __writecr3(ULONG p) { (void)p; }
++typedef int32_t LONG;
++#define _In_
++#define _Inout_
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000du)
++#define NXMM_TAG 123u
++static PFN_COUNT MmNumberOfPhysicalPages=32768;
++static LONG NxkMmStackPages,NxkMmStackPagesInPool;
++static LONG InterlockedExchangeAdd(volatile LONG *p,LONG v) { LONG old=*p;*p+=v;return old; }
++static LONG InterlockedCompareExchange(LONG *p,LONG v,LONG old) {
++    LONG result=*p;if(result==old)*p=v;return result;
++}
++'''
++definitions = pool[pool.index("static const USHORT NxpClassSize"):pool.index("/* BIG-BLOCK TABLE")]
++page_macros = pool[pool.index("#ifdef NXK_MM_POOLPAGES"):pool.index("/* SIZE CLASSES")]
++functions = []
++for name in ("InitializePool", "NxpAllocFailed", "NxpAllocatePoolWithTag",
++             "ExAllocatePoolWithTag", "NxTitleAllocatePoolWithTag", "NxTitleAllocatePool", "ExAllocatePool",
++             "ExFreePoolWithTag", "NxpReclaimEmptyBucketPages", "ExQueryPoolBlockSize"):
++    if re.search(r"\b" + name + r"\s*\([^;]*?\)\s*\{", pool):
++        functions.append(function(pool, name))
++pool_main = r'''
++static int is_low(PVOID p) {return (NXPP_PTE(p)>>PAGE_SHIFT)<0x4000;}
++static void pool_reset(void) {
++    static ULONG storage[0xc000],metadata[0x1000];
++    memset(storage,0,sizeof(storage));memset(metadata,0,sizeof(metadata));
++    memset((void*)0xc0000000,0,0x400000);memset((void*)0xc1000000,0,0x1000000);
++    MmAvailablePages=0;NxpFreeHeadKernel=NxpFreeHeadTitle=0;NxpGenericAvail=0;
++    NxkPageSupplyInitialize(0x7fff,storage);
++    NxPoolPagesInitialize(metadata);NxppScanHint=NxppCommitted=0;NxppLockInit=FALSE;
++    memset(NxpFreeLists,0,sizeof(NxpFreeLists));InitializePool(NonPagedPool,0);
++    NXPP_PDE((PVOID)0xc1000000)=0x07000003;
++}
++static void require(int ok,const char *message) {
++    if(!ok) {fprintf(stderr,"FAIL: %s\n",message);exit(1);}
++}
++int main(void) {
++    void *map=mmap((void*)0xc0000000,0x400000,PROT_READ|PROT_WRITE,
++                   MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
++    require(map==(void*)0xc0000000,"self-map fixture");
++    map=mmap((void*)0xc1000000,0x1000000,PROT_READ|PROT_WRITE,
++             MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
++    require(map==(void*)0xc1000000,"pool VA fixture");
++    pool_reset();NxkPageSupplyReturn(0x20);NxkPageSupplyReturn(0x4001);
++    PVOID private=ExAllocatePoolWithTag(NonPagedPool,64,123);
++    require(private&&!is_low(private),"internal pool uses upper backing");
++    ExFreePoolWithTag(private,123);
++    PVOID title=XeExAllocatePoolWithTag(64,456);
++    require(title&&is_low(title),"public pool cannot reuse a private upper bucket");
++    require(ExQueryPoolBlockSize(title,NULL)==120,"public pool retains size-class semantics");
++    ExFreePoolWithTag(title,456);
++    private=ExAllocatePoolWithTag(NonPagedPool,64,123);
++    require(private&&!is_low(private),"private pool cannot reuse a title lower bucket");
++    ExFreePoolWithTag(private,123);
++    require(NxpReclaimEmptyBucketPages()==2,"both domain buckets can be reclaimed");
++    require(NxPoolPagesCommitted()==0,"reclaimed buckets leave no charge");
++    pool_reset();NxkPageSupplyReturn(0x4001);
++    require(XeExAllocatePool(4096)==NULL,"public whole-page low exhaustion cannot steal high RAM");
++    require(NxPoolPagesCommitted()==0,"failed public whole-page allocation rolls back");
++    private=ExAllocatePoolWithTag(NonPagedPool,4096,123);
++    require(private&&!is_low(private),"private whole page survives public exhaustion");
++    require(ExQueryPoolBlockSize(private,NULL)==4096,"private whole-page query semantics");
++    ExFreePoolWithTag(private,123);
++    pool_reset();NxkPageSupplyReturn(0x20);
++    require(ExAllocatePoolWithTag(NonPagedPool,4096,123)==NULL,"private whole-page exhaustion cannot steal low RAM");
++    title=XeExAllocatePool(4096);
++    require(title&&is_low(title),"public whole page survives private exhaustion");
++    ExFreePoolWithTag(title,0);
++    require(MmAvailablePages==1,"whole-page frees restore the correct reservoir");
++    pool_reset();NxkPageSupplyReturn(0x20);
++    title=XeExAllocatePool(64);
++    require(title&&((NXP_HEADER*)title-1)->Tag==TAG_NONE,
++            "untagged public pool preserves the production TAG_NONE contract");
++    ExFreePoolWithTag(title,TAG_NONE);
++    pool_reset();NxkPageSupplyReturn(0x20);NxkPageSupplyReturn(0x4001);
++    PVOID stack=NxMmCreateKernelStack(4096,FALSE);
++    require(stack&&is_low((PVOID)((ULONG_PTR)stack-PAGE_SIZE)),
++            "public explicit kernel-stack buffer stays low");
++    require(NxkMmStackPages==1&&NxkMmStackPagesInPool==1,"explicit stack charges remain truthful");
++    NxMmDeleteKernelStack(stack,(PVOID)((ULONG_PTR)stack-PAGE_SIZE));
++    require(NxkMmStackPages==0&&NxkMmStackPagesInPool==0,"explicit stack free restores charges");
++    pool_reset();NxkPageSupplyReturn(0x20);NxkPageSupplyReturn(0x4001);
++    PVOID tls=XeAllocTls(64);
++    require(tls&&is_low(tls),"dedicated title TLS buffer stays low");
++    require(((ULONG_PTR)tls+4)%16==0,"title TLS alignment contract remains unchanged");
++    puts("upper-ram-reservation: actual public/internal pool bucket reuse, size/free, exhaustion PASS");
++    pool_reset();NxkPageSupplyReturn(0x20);NxkPageSupplyReturn(0x4001);
++    MM_STATISTICS stats={.Length=sizeof(stats)};
++    require(MmQueryStatistics(&stats)==STATUS_SUCCESS,"public statistics query succeeds");
++    require(stats.TotalPhysicalPages==32768 && stats.AvailablePages==1,
++            "public statistics report actual128 total and lower-only available");
++    NxSysVaReady=1;NXPP_PDE((PVOID)NXK_SYSMEM_BASE)=0x07000003;
++    PVOID system=MmAllocateSystemMemory(4096,4);
++    require(system&&is_low(system),"public system-memory data stays low");
++    MmFreeSystemMemory(system,4096);
++    pool_reset();NxkPageSupplyReturn(0x20);NxkPageSupplyReturn(0x4001);
++    for(ULONG va=NXK_SYSMEM_BASE;va<NXK_SYSMEM_LIMIT;va+=PAGE_SIZE) {
++        NXPP_PDE((PVOID)(ULONG_PTR)va)=1;NXPP_PTE((PVOID)(ULONG_PTR)va)=1;
++    }
++    system=MmAllocateSystemMemory(4096,4);
++    require(system&&is_low(system),"aperture-exhausted public system fallback stays low");
++    MmFreeSystemMemory(system,4096);
++    puts("upper-ram-reservation: public actual128 statistics and system/fallback low backing PASS");
++}
++'''
++source = out / "pool.c"
++def ordinal_wrapper(name):
++    emitted = function(xbe, name)
++    return emitted[emitted.index("PVOID NTAPI\n" + name):]
++
++pool_compilation = (shim + core + pool_shim + pages[pages.index("#define NXPP_BASE"):]
++                  + page_macros + definitions + "ULONG NxpReclaimEmptyBucketPages(void);\n"
++                  + "".join(functions)
++                  + ordinal_wrapper("XeExAllocatePool")
++                  + ordinal_wrapper("XeExAllocatePoolWithTag")
++                  + function(xbe,"XeAllocTls")
++                  + (root / "ntoskrnl/xb/mm/sysva.c").read_text().split("static KSPIN_LOCK NxSysVaLock;")[1].join(["static KSPIN_LOCK NxSysVaLock;", ""])
++                  + function((root / "ntoskrnl/xb/mm/api.c").read_text(), "MmAllocateSystemMemory")
++                  + function((root / "ntoskrnl/xb/mm/api.c").read_text(), "MmFreeSystemMemory")
++                  + function((root / "ntoskrnl/xb/mm/api.c").read_text(), "NxMmCreateKernelStack")
++                  + function((root / "ntoskrnl/xb/mm/api.c").read_text(), "NxMmDeleteKernelStack")
++                  + (root / "ntoskrnl/xb/mm/api.c").read_text().split("typedef struct _MM_STATISTICS")[1].split("extern PFN_COUNT")[0].join(["typedef struct _MM_STATISTICS", ""])
++                  + function((root / "ntoskrnl/xb/mm/api.c").read_text(), "MmQueryStatistics"))
++source.write_text(pool_compilation + pool_main)
++exe = out / "pool"
++subprocess.run(["cc", "-std=gnu99", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
++                "-Wno-multichar", str(source), "-o", str(exe)], check=True)
++subprocess.run([str(exe)], check=True)
++
++# The OFF profile must retain the existing 64/128 supply policy and shared
++# buckets. Compile the same maintained bodies with the feature disabled.
++default_main = pool_main.split("int main(void)")[0] + r'''
++int main(void) {
++    require(mmap((void*)0xc0000000,0x400000,PROT_READ|PROT_WRITE,
++        MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0)==(void*)0xc0000000,"self-map fixture");
++    require(mmap((void*)0xc1000000,0x1000000,PROT_READ|PROT_WRITE,
++        MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0)==(void*)0xc1000000,"pool fixture");
++    pool_reset();NxkPageSupplyReturn(0x20);
++    require(NxkPageSupplyTakeAny(0)==0x20,"default128 private allocator retains low spill");
++    pool_reset();NxkPageSupplyReturn(0x20);NxkPageSupplyReturn(0x4001);
++    PVOID p=ExAllocatePoolWithTag(NonPagedPool,64,123);
++    require(p&&!is_low(p),"default128 keeps preferred upper backing");
++    ExFreePoolWithTag(p,123);
++    PVOID title=XeExAllocatePoolWithTag(64,456);
++    require(title==p&&!is_low(title),"default128 public/private buckets remain shared");
++    ExFreePoolWithTag(title,456);
++    require(NxpReclaimEmptyBucketPages()==1,"default128 retains one shared bucket");
++    MM_STATISTICS stats={.Length=sizeof(stats)};
++    require(MmQueryStatistics(&stats)==STATUS_SUCCESS&&stats.AvailablePages==2,
++            "default128 public available remains global");
++    pool_reset();fixtureRetail=TRUE;
++    NxkPageSupplyInitialize(0x3fff,NxpLinks);
++    NxkPageSupplyReturn(0x20);NxkPageSupplyReturn(0x3401);
++    require(NxkPageSupplyTakeAny(0)==0x3401,"default64 retains high-zone preference");
++    require(NxkPageSupplyTakeAny(0)==0x20,"default64 retains low spill");
++    puts("upper-ram-reservation: feature-OFF default64/default128 supply, pools, statistics PASS");
++}
++'''
++source=out / "defaults.c"
++source.write_text(pool_compilation.replace("#define XBOX_RESERVE_UPPER_RAM 1",
++                                          "#define XBOX_RESERVE_UPPER_RAM 0") + default_main)
++exe=out / "defaults"
++subprocess.run(["cc", "-std=gnu99", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
++                "-Wno-multichar", str(source), "-o", str(exe)], check=True)
++subprocess.run([str(exe)], check=True)

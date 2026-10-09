@@ -90,7 +90,7 @@ def patch_inputs(patches):
 
 def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                    media_policy="emulator-file-media", metadata_counters=False,
-                   memory_mib=128):
+                   memory_mib=128, reserve_upper_ram=False):
     source, output = Path(source).resolve(), Path(output).resolve()
     if variant not in ("release", "debug"):
         raise ValueError("variant must be release or debug")
@@ -100,6 +100,10 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
         raise ValueError("metadata counters must be a boolean")
     if memory_mib not in (64, 128):
         raise ValueError("memory capacity must be 64 or 128 MiB")
+    if not isinstance(reserve_upper_ram, bool):
+        raise ValueError("upper RAM reservation must be a boolean")
+    if reserve_upper_ram and memory_mib != 128:
+        raise ValueError("upper RAM reservation requires 128 MiB")
     if output == source or source.is_relative_to(output) or output.is_relative_to(source):
         raise ValueError("source and output directories must not overlap")
     output.mkdir(parents=True, exist_ok=True)
@@ -107,6 +111,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
     published.unlink(missing_ok=True)
     manifest = {"schema": 1, "status": "failed", "variant": variant,
                 "media_policy": media_policy, "memory_mib": memory_mib,
+                "reserve_upper_ram": reserve_upper_ram,
                 "metadata_counters": metadata_counters,
                 "source": str(source), "source_directory": str(source), "output_directory": str(output),
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -174,6 +179,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                  f"-DCMAKE_TOOLCHAIN_FILE={actual_source / 'toolchain-gcc.cmake'}",
                  "-DCMAKE_BUILD_TYPE=Release", f"-DDBG={int(variant == 'debug')}", "-DKDBG=FALSE",
                  f"-DXBOX_RAM_MIB={memory_mib}",
+                 "-DXBOX_RESERVE_UPPER_RAM=" + ("ON" if reserve_upper_ram else "OFF"),
                  "-DXBOX_EMULATOR_FILE_MEDIA=" +
                  ("ON" if media_policy == "emulator-file-media" else "OFF"),
                  "-DNXK_METADATA_COUNTERS=" +

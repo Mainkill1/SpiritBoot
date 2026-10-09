@@ -17,6 +17,8 @@ def main():
     parser.add_argument("--variant", choices=("release", "debug"), default="release")
     parser.add_argument("--memory-mib", type=int, choices=(64, 128), default=128,
                         help="firmware RAM layout; default: 128 MiB")
+    parser.add_argument("--reserve-upper-ram", action="store_true",
+                        help="reserve upper 64 MiB for firmware; requires 128 MiB")
     parser.add_argument("--media-policy", choices=("strict", "emulator-file-media"),
                         default="emulator-file-media",
                         help="loaded media compatibility; default: emulator-file-media")
@@ -28,7 +30,8 @@ def main():
         result = build_firmware(args.source, args.output, args.variant, args.lock,
                                 args.media_policy,
                                 metadata_counters=args.metadata_counters,
-                                memory_mib=args.memory_mib)
+                                memory_mib=args.memory_mib,
+                                reserve_upper_ram=args.reserve_upper_ram)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"build failed: {error}", file=sys.stderr)
         return 1
