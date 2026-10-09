@@ -47,13 +47,15 @@ jobs:
       - name: Check the built source identity and actual kernel work
         run: |
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
+          guest_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["build_directory"])')
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-            -e GUEST_SOURCE="$guest_source" -e VARIANT=${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
+            -e GUEST_SOURCE="$guest_source" -e GUEST_BUILD="$guest_build" -e VARIANT=${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
             spiritboot-toolchain sh -ec '
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 670057805182edb64fb37994b95f62105bdb2ec6
+            test "$actual_tree" = 32d403d68c86ac1167e435e9f6b8fb513fadae00
+            python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check.py" "$output/upper-ram-reservation" >"$output/upper-ram-reservation.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" >"$output/upper-ram-config.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/warm-stage/check.py" >"$output/warm-stage.log" 2>&1
@@ -112,7 +114,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '670057805182edb64fb37994b95f62105bdb2ec6', result
+          assert result['source_tree'] == '32d403d68c86ac1167e435e9f6b8fb513fadae00', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
