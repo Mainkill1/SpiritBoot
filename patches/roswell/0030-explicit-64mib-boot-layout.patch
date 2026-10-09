@@ -1,0 +1,1056 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 60d4ace0..351671e9 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -30,6 +30,13 @@ endif()
+ project(REACTOS)
+ 
+ if(SARCH STREQUAL "xbox")
++    set(XBOX_RAM_MIB "128" CACHE STRING "Xbox RAM capacity for this firmware (64 or 128 MiB)")
++    set_property(CACHE XBOX_RAM_MIB PROPERTY STRINGS "64" "128")
++    if(NOT XBOX_RAM_MIB STREQUAL "64" AND NOT XBOX_RAM_MIB STREQUAL "128")
++        message(FATAL_ERROR "XBOX_RAM_MIB must be 64 or 128; capacity is selected at build time")
++    endif()
++    add_definitions(-DXBOX_RAM_MIB=${XBOX_RAM_MIB})
++
+     # Everything in this tree links into the single kernel image -- the
+     # folded drivers' "loadable .sys" view is a fiction on Xbox.  Define
+     # the in-image gates tree-wide so NTKERNELAPI/NTHALAPI/NTSYSAPI stop
+diff --git a/boot/nxldr/CMakeLists.txt b/boot/nxldr/CMakeLists.txt
+index eecc6599..779dd69b 100644
+--- a/boot/nxldr/CMakeLists.txt
++++ b/boot/nxldr/CMakeLists.txt
+@@ -34,6 +34,7 @@ set(NXLDR_CFLAGS
+     -ffunction-sections
+     -fdata-sections
+     ${NXLDR_DBG_FLAG}
++    -DXBOX_RAM_MIB=${XBOX_RAM_MIB}
+     -I${NXLDR_SRC_DIR}
+ )
+ 
+@@ -52,6 +53,13 @@ if(DBG)
+     list(APPEND NXLDR_LDFLAGS --defsym __nxldr_flash_size__=0x80000)
+ endif()
+ 
++if(XBOX_RAM_MIB STREQUAL "64")
++    list(APPEND NXLDR_LDFLAGS
++        --defsym __nxldr_ram_code__=0x03800000
++        --defsym __nxldr_ram_limit__=0x03900000
++        --defsym __nxldr_scratch_max_size__=0x002C0000)
++endif()
++
+ # Listed so any header edit retriggers the whole loader build.
+ set(NXLDR_HEADERS
+     ${NXLDR_SRC_DIR}/nxldr.h
+@@ -65,7 +73,7 @@ set(NXLDR_HEADERS
+ add_custom_command(
+     OUTPUT  ${NXLDR_OUT_DIR}/startup.o
+     COMMAND gcc ${NXLDR_CFLAGS} -c ${NXLDR_SRC_DIR}/startup.S -o ${NXLDR_OUT_DIR}/startup.o
+-    DEPENDS ${NXLDR_SRC_DIR}/startup.S ${NXLDR_SRC_DIR}/xcodes.inc.S
++    DEPENDS ${NXLDR_SRC_DIR}/startup.S ${NXLDR_SRC_DIR}/xcodes.inc.S ${NXLDR_HEADERS}
+ )
+ set(NXLDR_OBJS ${NXLDR_OUT_DIR}/startup.o)
+ 
+diff --git a/boot/nxldr/boot-layout.h b/boot/nxldr/boot-layout.h
+index 1e62e39a..fde3b753 100644
+--- a/boot/nxldr/boot-layout.h
++++ b/boot/nxldr/boot-layout.h
+@@ -5,24 +5,49 @@
+  * (ntoskrnl/xb/nxldr-entry.c) can include it; the loader has no NT types and
+  * the kernel has no loader types, but neither needs any here.
+  *
+- * There is one layout: a single kernel image at the 64 MiB mark
+- * (PA 0x4000000) so the title owns the low 64 MB of 128 MB RAM, the PCR
+- * backing + LoaderBlock pages at PA 0x30000-0x42000, and the page-table
+- * cluster at the top of RAM.  (GDT/IDT/TSS are the kernel's resident KiGdt/
+- * KiIdt/KiInitialTss, not low-PA tables.)
++ * Separate 64/128 MiB artifacts retain the same kernel VA and System PTE
++ * floor. The 64 MiB image occupies the existing 52..60 MiB kernel zone;
++ * the default 128 MiB image and loader stay above the title's low 64 MiB.
++ * GDT/IDT/TSS are the kernel's resident KiGdt/KiIdt/KiInitialTss.
+  */
+ 
+ #ifndef NXBL_BOOT_LAYOUT_H
+ #define NXBL_BOOT_LAYOUT_H
+ 
++#ifndef XBOX_RAM_MIB
++#define XBOX_RAM_MIB 128
++#endif
++#if XBOX_RAM_MIB != 64 && XBOX_RAM_MIB != 128
++#error XBOX_RAM_MIB must be 64 or 128
++#endif
++
+ #define NXBL_KSEG0_BASE 0x80000000UL
+ #define NXBL_PA_TO_KSEG0(pa) ((pa) | NXBL_KSEG0_BASE)
+ 
+-#define NXBL_IMAGE_BASE 0x84000000UL    /* PE ImageBase (PA 0x04000000)   */
+-#define NXBL_PT_LOW_PA 0x07F00000UL     /* 4 PTs, identity map of low 16 MB */
+-#define NXBL_PT_KSEG0_PA 0x07F04000UL   /* NXBL_PT_KSEG0_COUNT PTs, KSEG0  */
+-#define NXBL_PT_KSEG0_COUNT 17          /* PA 0..0x4400000: KSEG0 + image  */
+-#define NXBL_PT_PCR_PA 0x07F15000UL     /* 1 PT for the PCR window         */
++#if XBOX_RAM_MIB == 64
++#define NXBL_IMAGE_PA 0x03400000UL
++#define NXBL_PT_LOW_PA 0x03BC0000UL
++#define NXBL_LOADER_PA 0x03800000UL
++#define NXBL_LOADER_LIMIT_PA 0x03900000UL
++#define NXBL_SCRATCH_PA 0x03900000UL
++#define NXBL_SCRATCH_BYTES (NXBL_PT_LOW_PA - NXBL_SCRATCH_PA)
++#define NXBL_PFB_TIMING 0x03070003
++#define NXBL_MEMORY_TOP 0x03FFFFFF
++#else
++#define NXBL_IMAGE_PA 0x04000000UL
++#define NXBL_PT_LOW_PA 0x07F00000UL
++#define NXBL_LOADER_PA 0x07D00000UL
++#define NXBL_LOADER_LIMIT_PA 0x07F00000UL
++#define NXBL_SCRATCH_PA 0x07000000UL
++#define NXBL_SCRATCH_BYTES 0x00800000UL
++#define NXBL_PFB_TIMING 0x03070103
++#define NXBL_MEMORY_TOP 0x07FFFFFF
++#endif
++#define NXBL_IMAGE_BASE 0x84000000UL    /* Fixed PE virtual ImageBase */
++#define NXBL_IMAGE_BYTES 0x00400000UL   /* One PT maps the kernel window */
++#define NXBL_PT_KSEG0_PA (NXBL_PT_LOW_PA + 0x4000UL)
++#define NXBL_PT_KSEG0_COUNT 17          /* Low 64 MiB alias + kernel VA */
++#define NXBL_PT_PCR_PA (NXBL_PT_LOW_PA + 0x15000UL)
+ #define NXBL_PCR_REGION_PA 0x00030000UL /* 16 pages backing 0xFFDF0000..   */
+ #define NXBL_LB_PA 0x00040000UL         /* LoaderBlock page                */
+ #define NXBL_AUX_PA 0x00041000UL        /* extension + LDR entry + descs   */
+diff --git a/boot/nxldr/gen-flash-bin.py b/boot/nxldr/gen-flash-bin.py
+index b018a613..4a3c777d 100755
+--- a/boot/nxldr/gen-flash-bin.py
++++ b/boot/nxldr/gen-flash-bin.py
+@@ -68,6 +68,24 @@ def xz_compress(src_bytes: bytes) -> bytes:
+     return framed
+ 
+ 
++def validate_kernel_bounds(kernel: bytes, scratch_max: int, image_max: int) -> None:
++    """Refuse a PE that cannot fit the loader's physical buffers/maps."""
++    if not kernel or len(kernel) > scratch_max:
++        sys.exit("gen-flash-bin.py: kernel file is %d bytes, physical scratch limit is %d"
++                 % (len(kernel), scratch_max))
++    if len(kernel) < 0x40 or kernel[:2] != b"MZ":
++        sys.exit("gen-flash-bin.py: kernel has no PE DOS header")
++    pe = struct.unpack_from("<I", kernel, 0x3c)[0]
++    if pe > len(kernel) or len(kernel) - pe < 24 + 60 or kernel[pe:pe+4] != b"PE\0\0":
++        sys.exit("gen-flash-bin.py: kernel has no complete PE optional header")
++    if struct.unpack_from("<H", kernel, pe + 24)[0] != 0x10b:
++        sys.exit("gen-flash-bin.py: kernel is not PE32")
++    image_size = struct.unpack_from("<I", kernel, pe + 24 + 56)[0]
++    if not image_size or image_size > image_max:
++        sys.exit("gen-flash-bin.py: PE image span is %d bytes, mapped image limit is %d"
++                 % (image_size, image_max))
++
++
+ def main() -> int:
+     ap = argparse.ArgumentParser()
+     ap.add_argument("--out", default=os.path.join(REPO, "build/flash.bin"))
+@@ -106,6 +124,8 @@ def main() -> int:
+     syms = read_linker_symbols(args.elf, [
+         "KernelPayloadOffset",
+         "KernelPayloadMaxSize",
++        "KernelScratchMaxSize",
++        "KernelImageMaxSize",
+     ])
+     payload_offset = syms["KernelPayloadOffset"]
+     payload_max_size = syms["KernelPayloadMaxSize"]
+@@ -124,6 +144,8 @@ def main() -> int:
+     if args.kernel:
+         kernel_raw = open(args.kernel, "rb").read()
+         kernel_raw_size = len(kernel_raw)
++        validate_kernel_bounds(kernel_raw, syms["KernelScratchMaxSize"],
++                               syms["KernelImageMaxSize"])
+         compressed = xz_compress(kernel_raw)
+         blob = struct.pack("<III", NXKRNL_XZ_MAGIC,
+                            len(compressed), kernel_raw_size) + compressed
+diff --git a/boot/nxldr/loader.c b/boot/nxldr/loader.c
+index 12ec0c3c..cfebd709 100644
+--- a/boot/nxldr/loader.c
++++ b/boot/nxldr/loader.c
+@@ -64,15 +64,13 @@ static const void *
+ DecompressKernel(void)
+ {
+     const NXKRNL_XZ_HEADER *Header = (const NXKRNL_XZ_HEADER *)KernelPayloadVa;
+-    /* Scratch buffer at PA 0x02000000 (32 MiB) -- clear of the kernel PA and
+-     * above nxldr's own footprint (nxldr is at PA 0x00100000, stack tops at
+-     * 0x001ffff0). */
+-    UCHAR *Scratch = (UCHAR *)0x07000000;
++    /* Separate from the selected image, loader/stack and page tables. */
++    UCHAR *Scratch = (UCHAR *)NXBL_SCRATCH_PA;
+     struct xz_dec *Xz;
+     struct xz_buf Buf;
+     enum xz_ret Ret;
+ 
+-    if (Header->DecompressedSize > 0x00800000 || Header->Magic != NXKRNL_XZ_MAGIC)
++    if (Header->DecompressedSize > NXBL_SCRATCH_BYTES || Header->Magic != NXKRNL_XZ_MAGIC)
+     {
+         LoaderFailCode = 0x585a; /* 'XZ' */
+         dprintf("bad payload magic %#x\n", Header->Magic);
+diff --git a/boot/nxldr/nxldr.ld b/boot/nxldr/nxldr.ld
+index 3ffec446..f957f896 100644
+--- a/boot/nxldr/nxldr.ld
++++ b/boot/nxldr/nxldr.ld
+@@ -43,7 +43,9 @@ FLASH_SIZE_LMA = __nxldr_flash_size__;
+  * Xcode entry sit.  Linking the in-flash image here makes every flash-resident
+  * VMA match where it actually executes. */
+ LOW_ROM_BASE   = 0x100000000 - FLASH_SIZE_LMA;   /* 0xfffc0000 at 256 KB */
+-RAM_CODE       = 0x07D00000;   /* VA the ramcopied .text/.rodata/.data run at */
++PROVIDE(__nxldr_ram_code__ = 0x07D00000);
++PROVIDE(__nxldr_ram_limit__ = 0x07F00000);
++RAM_CODE       = __nxldr_ram_code__;
+ 
+ SECTIONS {
+     /DISCARD/ : {
+@@ -145,7 +147,9 @@ RamCopySrc       = LOW_ROM_BASE + TEXT_SRC_LMA;
+ RamCopyDst       = RAM_CODE;
+ RamCopySizeLongs = (SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data) + 3) / 4;
+ BssSizeLongs     = (BssEnd - BssStart + 3) / 4;
+-StackTop         = 0x07effff0;
++StackTop         = __nxldr_ram_limit__ - 0x10;
++ASSERT(BssEnd <= StackTop - 0x10000,
++       "boot/nxldr: loader footprint leaves less than 64 KiB for its stack");
+ 
+ /* Kernel payload region: the XZ-compressed xboxkrnl follows the .data source
+  * and runs up to the reset page -- its offset is wherever the loader code
+@@ -155,6 +159,11 @@ StackTop         = 0x07effff0;
+ KernelPayloadOffset  = ALIGN(TEXT_SRC_LMA + SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data), 32);
+ KernelPayloadMaxSize = (FLASH_SIZE_LMA - 0x200) - KernelPayloadOffset;
+ KernelPayloadVa      = LOW_ROM_BASE + KernelPayloadOffset;
++/* gen-flash-bin rejects impossible PE footprints before compression; the
++ * runtime framing check uses the same capacity's bound before decoding. */
++PROVIDE(__nxldr_scratch_max_size__ = 0x00800000);
++KernelScratchMaxSize = __nxldr_scratch_max_size__;
++KernelImageMaxSize   = 0x00400000;
+ ASSERT(KernelPayloadOffset < FLASH_SIZE_LMA - 0x200,
+        "boot/nxldr: loader code leaves no room for the kernel payload");
+ 
+diff --git a/boot/nxldr/paging.c b/boot/nxldr/paging.c
+index 9b983a5b..18d4d72d 100644
+--- a/boot/nxldr/paging.c
++++ b/boot/nxldr/paging.c
+@@ -3,8 +3,8 @@
+  *
+  * The page directory is pinned at the retail Xbox CR3 (PD_PA, 0x0F000).  The
+  * low PCR backing / LoaderBlock / Aux pages sit just above it, while the page
+- * tables themselves cluster near the top of 128 MB RAM so the low arena stays
+- * free for the title heap.  Concrete PAs come from boot-layout.h (NXBL_*):
++ * tables cluster at the selected reserved physical base. Concrete PAs come
++ * from boot-layout.h (NXBL_*); the default 128 MiB addresses are:
+  *
+  *   PA 0x0000F000        PD (1 page) -- pinned at the retail Xbox CR3.
+  *   PA 0x00030000        PCR region (16 pages) backing VA 0xFFDF0000..
+@@ -13,13 +13,13 @@
+  *   PA 0x07F00000        PT_LOW   -- 4 PTs, identity-maps PA 0..16MB (transient
+  *                                    -- killed by MmArmInitSystem user-PDE zero)
+  *   PA 0x07F04000        PT_KSEG0 -- 17 PTs, maps VA 0x80000000..0x84400000
+- *                                    to PA 0x0000000..0x4400000.
++ *                                    (the final PT uses NXBL_IMAGE_PA).
+  *   PA 0x07F15000        PT_PCR   -- 1 PT for VA 0xFFDF0000..0xFFE00000
+  *
+  * After PagingEnable(), the identity map keeps our loader's text/data/stack
+  * working; the kernel imagebase is reachable; KIP0PCRADDRESS = 0xFFDFF000
+  * resolves to NXBL_PCR_REGION_PA; and CR3 = PD_PA matches the value the retail
+- * Xbox kernel uses.  The persistent page tables are placed at the top of RAM.
++ * Xbox kernel uses. The kernel-image and PCR page tables stay reserved.
+  *
+  * Accessing these pages doesn't need KSEG0: the CPU page-walker uses raw PA
+  * from PD entries, and the kernel reads/writes PTs through the recursive
+@@ -60,15 +60,20 @@ PagingInit(void)
+         }
+         Pd[i] = ((ULONG)PtId) | PTE_FLAGS;
+     }
+-    /* Loader code/stack moved above the persistent low-64-MiB aperture. */
++#if XBOX_RAM_MIB == 128
+     Pd[0x1F] = 0x07C00083; /* identity PSE: 124..128 MiB */
++#else
++    /* Runs only until KiSystemStartup switches from the loader stack.
++     * MiInitMachineDependent clears user PDEs before installing title maps. */
++    Pd[0x0E] = 0x03800083; /* identity PSE: 56..60 MiB */
++#endif
+     dprintf("pi2\n");
+ 
+     /* KSEG0: NT's expected high-half identity for loader pages.
+      * VA (0x80000000 | PA) -> PA, covering PA 0..0x4400000 (68 MB).
+-     * 17 PTs at PD[0x200..0x210].  This also maps the kernel image
+-     * (PA 0x4000000..0x4400000 = VA 0x84000000..0x84400000) the way
+-     * NT expects -- no separate kernel-only PT.  Loader-spanned range
++     * 17 PTs at PD[0x200..0x210]. The last maps the selected physical
++     * image window at VA 0x84000000..0x84400000 (52 MiB on 64 MiB RAM,
++     * 64 MiB on 128 MiB RAM). Loader-spanned range
+      * matches LoaderBlock->Extension->LoaderPagesSpanned exactly, so
+      * MmSystemPteSpaceStart (= KSEG0 + MmBootImageSize) lands at
+      * PDE 0x211 right above our last KSEG0 PT.
+@@ -80,7 +85,7 @@ PagingInit(void)
+         ULONG *PtKseg0 = (ULONG *)(NXBL_PT_KSEG0_PA + i * PAGE_SIZE);
+         for (j = 0; j < 1024; j++)
+         {
+-            ULONG Pa = (i * 0x400000) + (j * PAGE_SIZE);
++            ULONG Pa = (i == 16 ? NXBL_IMAGE_PA : i * 0x400000) + (j * PAGE_SIZE);
+             PtKseg0[j] = Pa | PTE_FLAGS;
+         }
+         Pd[PD_INDEX(KSEG0_BASE) + i] = ((ULONG)PtKseg0) | PTE_FLAGS;
+diff --git a/boot/nxldr/pe.c b/boot/nxldr/pe.c
+index 4c6fad90..725115db 100644
+--- a/boot/nxldr/pe.c
++++ b/boot/nxldr/pe.c
+@@ -1,7 +1,8 @@
+ /*
+  * PE32 image loader for xboxkrnl.  Walks the PE header of the decompressed
+- * kernel image and copies its sections to PA = ImageBase + RVA - 0x80000000
+- * (the KSEG0 identity).  The kernel is a single contiguous image, so the
++ * kernel image and copies its sections to the selected physical image base
++ * plus RVA. The virtual ImageBase stays fixed for both RAM capacities. The
++ * kernel is a single contiguous image, so the
+  * sections pack from the base with no RVA holes.  Field offsets match
+  * Microsoft's "PE Format" spec; we avoid pulling in Windows headers to keep
+  * the loader self-contained.
+@@ -97,7 +98,13 @@ PeLoad(const void *Image)
+         LoaderFailCode = 7;
+         return 0;
+     }
+-    PaBase = ImageBase - NXBL_KSEG0_BASE;
++    if (SizeOfImage == 0 || SizeOfImage > NXBL_IMAGE_BYTES ||
++        EntryRva >= SizeOfImage)
++    {
++        LoaderFailCode = 7;
++        return 0;
++    }
++    PaBase = NXBL_IMAGE_PA;
+ 
+     Sh = Oh + SizeOpt;
+     if (Sh + (ULONG)NumSections * SH_SIZE > SizeOfImage)
+@@ -136,7 +143,8 @@ PeLoad(const void *Image)
+         ULONG RawOff = Read32(s + SH_PTR_TO_RAW_DATA_OFF);
+         ULONG CopySize;
+ 
+-        if (VAddr + VSize > SizeOfImage)
++        if (VAddr > SizeOfImage || VSize > SizeOfImage - VAddr ||
++            ROUND_PAGE_4K(VSize) > SizeOfImage - VAddr)
+         {
+             LoaderFailCode = 10;
+             return 0;
+diff --git a/boot/nxldr/pe.h b/boot/nxldr/pe.h
+index 489d0277..27c89645 100644
+--- a/boot/nxldr/pe.h
++++ b/boot/nxldr/pe.h
+@@ -8,7 +8,7 @@
+ 
+ #include "nxldr.h"
+ 
+-/* PE-load `Image` into RAM at PA = ImageBase + RVA - 0x80000000, section by
++/* PE-load `Image` into RAM at NXBL_IMAGE_PA + RVA, section by
+  * section.  Returns the entry-point VA (ImageBase + AddressOfEntryPoint) on
+  * success, 0 on failure (and sets LoaderFailCode).  The size is taken from the
+  * image's own PE header (SizeOfImage), which bounds the section copies.
+diff --git a/boot/nxldr/startup.S b/boot/nxldr/startup.S
+index 89256ed9..7f746338 100644
+--- a/boot/nxldr/startup.S
++++ b/boot/nxldr/startup.S
+@@ -14,6 +14,8 @@
+  *   - tail jmp into cromwell C (we go straight to our LoaderMain)
+  */
+ 
++#include "boot-layout.h"
++
+ /* Xcode interpreter encoding (1-byte opcode + 2x u32 operand).  These mirror
+  * cromwell's 2bBootStartup.S macros 1:1 so xcodes.inc.S can be lifted
+  * verbatim. */
+diff --git a/boot/nxldr/xcodes.inc.S b/boot/nxldr/xcodes.inc.S
+index 80ee593e..b2caef48 100644
+--- a/boot/nxldr/xcodes.inc.S
++++ b/boot/nxldr/xcodes.inc.S
+@@ -20,7 +20,7 @@
+ 	xcode_outb(0x00008026, 0x00000001);
+ 	xcode_pciout(0x8000f04c, 0x00000001);
+ 	xcode_pciout(0x8000f018, 0x00010100);
+-	xcode_pciout(0x80000084, 0x07ffffff);
++	xcode_pciout(0x80000084, NXBL_MEMORY_TOP);
+ 
+ 	xcode_pciout(0x8000f020, 0x0ff00f00);
+ 	xcode_pciout(0x8000f024, 0xf7f0f000);
+@@ -62,7 +62,7 @@
+ 	xcode_poke(0x0f0010d8, 0x00000000);
+ 	xcode_poke(0x0f0010dc, 0xa0423635);
+ 	xcode_poke(0x0f0010e8, 0x0c6558c6);
+-	xcode_poke(0x0f100200, 0x03070103);
++	xcode_poke(0x0f100200, NXBL_PFB_TIMING);
+ 	xcode_poke(0x0f100410, 0x11000016);
+ 	xcode_poke(0x0f100330, 0x84848888);
+ 	xcode_poke(0x0f10032c, 0xffffcfff);
+@@ -197,7 +197,7 @@
+ 	xcode_pciout(0x8000036c, 0x01230801);
+ 	xcode_goto(1);
+ 	xcode_goto(1);
+-	xcode_poke(0x0f100200, 0x03070103);
++	xcode_poke(0x0f100200, NXBL_PFB_TIMING);
+ 	xcode_poke(0x0f100204, 0x11448000);
+ 	xcode_pciout(0x8000103c, 0x00000000);
+ 
+diff --git a/hal/halx86/xbox/pci.c b/hal/halx86/xbox/pci.c
+index 56a597a4..49bde6fa 100644
+--- a/hal/halx86/xbox/pci.c
++++ b/hal/halx86/xbox/pci.c
+@@ -17,6 +17,7 @@
+ /* INCLUDES *****************************************************************/
+ 
+ #include "halxbox.h"
++#include "../../../boot/nxldr/boot-layout.h"
+ 
+ #define NDEBUG
+ #include <debug.h>
+@@ -258,9 +259,8 @@ NxConfigurePciDevices(VOID)
+  * VA (void*)(64*1024*1024) = PA 0x04000000 -- which is exactly where the
+  * kernel image lives.  Running the probe in this configuration would
+  * overwrite the running kernel mid-boot.  We instead trust the
+- * kernel-shrink prerequisite gate
+- * (xbox_ram set statically to 128 in xbox-video-support.c) and keep the
+- * surrounding register writes verbatim.
++ * selected firmware capacity (xbox_ram in xbox-video-support.c). The
++ * separate 64 MiB artifact also avoids probing absent upper RAM.
+  */
+ extern unsigned int xbox_ram;
+ 
+@@ -268,13 +268,11 @@ VOID
+ NxConfigurePciDevicesLate(VOID)
+ {
+     /* NV2A PFB timing config -- matches cromwell BootDetectMemorySize. */
+-    WRITE_REGISTER_ULONG((PULONG)0xFD100200, 0x03070103);
++    WRITE_REGISTER_ULONG((PULONG)0xFD100200, NXBL_PFB_TIMING);
+     WRITE_REGISTER_ULONG((PULONG)0xFD100204, 0x11448000);
+ 
+-    /* Host bridge 0:0.0 reg 0x84: memory-top.  Cromwell opens with the
+-     * 128 MiB value, runs the probe, then writes the final value based on
+-     * what was detected.  We skip the probe but keep the final write. */
+-    PciCfgWrite32(0, 0, 0, 0x84, 0x07FFFFFF);    /* opening: 128 MiB */
++    /* Host bridge 0:0.0 reg 0x84: memory-top. No runtime pattern probe. */
++    PciCfgWrite32(0, 0, 0, 0x84, NXBL_MEMORY_TOP);
+ 
+     if (xbox_ram == 64)
+         PciCfgWrite32(0, 0, 0, 0x84, 0x03FFFFFF);
+diff --git a/hal/halx86/xbox/video/xbox-video-support.c b/hal/halx86/xbox/video/xbox-video-support.c
+index 52ec730a..d361ef36 100644
+--- a/hal/halx86/xbox/video/xbox-video-support.c
++++ b/hal/halx86/xbox/video/xbox-video-support.c
+@@ -7,19 +7,14 @@
+ 
+ #include "xbox-video-compat.h"
+ #include "BootVideo.h"
++#include "../../../../boot/nxldr/boot-layout.h"
+ 
+ /* Definitions for the globals exported by xbox-video-compat.h. */
+ unsigned int video_encoder = 0;
+ u8 VIDEO_AV_MODE = 0;
+ 
+-/* 128 MiB devkit (kernel IMAGEBASE 0x84000000, PA 0x04000000 = the 64 MiB
+- * mark, only valid on a 128 MiB box).  Cromwell branches on this in
+- * BootVgaInitialization to pick PFB
+- * timing (0x03070103 for 128 MiB vs 0x03070003 for 64 MiB).  When the
+- * kernel later shrinks back to PA 0x10000 and the build can run on the
+- * 64 MiB retail config, this becomes runtime-detected -- see
+- * BootDetectMemorySize in xbox/pci-bringup/cromwell-pci.c. */
+-unsigned int xbox_ram = 128;
++/* Firmware capacity is selected at build time; no destructive RAM probe. */
++unsigned int xbox_ram = XBOX_RAM_MIB;
+ 
+ /* 256-byte EEPROM shadow.  BootVgaInitializationKernelNG fills this from
+  * SMBus slave 0x54 before referencing eeprom[0x96] (widescreen flag). */
+diff --git a/ntoskrnl/xb/mm/init.c b/ntoskrnl/xb/mm/init.c
+index 506e89a5..e5d08082 100644
+--- a/ntoskrnl/xb/mm/init.c
++++ b/ntoskrnl/xb/mm/init.c
+@@ -23,6 +23,7 @@
+ #include <xb-debug.h>
+ 
+ #include "mm.h"
++#include "../../../boot/nxldr/boot-layout.h"
+ 
+ /* CR3 / PDE / PTE PRIMITIVES ***********************************************/
+ 
+@@ -54,6 +55,10 @@ volatile LONG NxInitFreesDone = 0;
+ BOOLEAN
+ NxkMmRetailShapedMap(VOID)
+ {
++#if XBOX_RAM_MIB == 64
++    /* Physical layout, independent of the retained high kernel VA. */
++    return TRUE;
++#else
+     static LONG Cached = -1;
+ 
+     if (Cached < 0)
+@@ -68,6 +73,7 @@ NxkMmRetailShapedMap(VOID)
+         Cached = Shaped ? 1 : 0;
+     }
+     return (BOOLEAN)Cached;
++#endif
+ }
+ 
+ /* RESERVATION + RECLAIM ****************************************************/
+@@ -399,7 +405,7 @@ NxkMmReserveXboxWindows(VOID)
+             /* Free pages inside the kernel high zone are NT's bring-up
+              * carve (MxFreeDescriptor) on the split layout -- the only
+              * free memory NT gets on 64 MB.  Leave them alone. */
+-            if (NxkIsRetailBase() &&
++            if ((XBOX_RAM_MIB == 64 || NxkIsRetailBase()) &&
+                 Desc->BasePage >= (NXK_HIGH_ZONE_BASE >> PAGE_SHIFT) &&
+                 DescEnd <= (NXK_HIGH_ZONE_LIMIT >> PAGE_SHIFT))
+             {
+@@ -736,10 +742,10 @@ NxkMmEnsureXboxWindows(VOID)
+      * KSEG0 PTs were just replaced by the PSE paint; on the retail-
+      * shaped map they sit in title-visible RAM at the head of the
+      * loader cluster -- hand the 20 pages back.  (The PCR PT and the
+-     * descriptor tables that follow them stay live.)  Keyed to the
+-     * image base, NOT the map shape: the cluster PA belongs to the
+-     * split layout; the DBG hybrid keeps its devkit cluster above the
+-     * title world and these PAs are ordinary free RAM there. */
++     * final kernel-image PT and PCR PT stay live.) The selected 64 MiB
++     * artifact retains all 22 pages: resetting rewrites them, so they must
++     * never become valid title allocations that can request persistence.
++     * Keep the old retail-base behavior separate from this physical layout. */
+     if (NxkIsRetailBase())
+     {
+         extern VOID NTAPI NxkPageSupplyReturn(PFN_NUMBER Page);
+diff --git a/ntoskrnl/xb/mm/persistence.c b/ntoskrnl/xb/mm/persistence.c
+index ea6fd57a..c5353d8c 100644
+--- a/ntoskrnl/xb/mm/persistence.c
++++ b/ntoskrnl/xb/mm/persistence.c
+@@ -8,11 +8,17 @@
+ #include <ntoskrnl.h>
+ #include <mm/ARM3/miarm.h>
+ #include "mm.h"
++#include "../../../boot/nxldr/boot-layout.h"
+ #define PM_PAGES (NXK_KSEG0_RAM_SIZE / PAGE_SIZE)
+ #define PM_BYTES (PM_PAGES / 8)
+ #define PM_VA (NXK_KSEG0_BASE | 0xD000)
+ #define PM_MAGIC 0x4D50584EUL /* independently chosen format tag: NXPM */
++/* Same kernel VA does not imply the same physical warm-reset layout. */
++#if XBOX_RAM_MIB == 64
++#define PM_VERSION 2
++#else
+ #define PM_VERSION 1
++#endif
+ #define PM_LAUNCH_VA (NXK_KSEG0_BASE | 0xE000)
+ #define PM_LAUNCH_MAGIC 0x6E78436CUL /* existing kernel launch protocol */
+ #define PM_LAUNCH_BYTES 3616
+@@ -25,6 +31,21 @@ C_ASSERT(sizeof(PM_HANDOFF) <= PAGE_SIZE);
+ static UCHAR PmSelected[PM_BYTES];
+ static UCHAR PmRestored[PM_BYTES];
+ 
++#if XBOX_RAM_MIB == 64
++static BOOLEAN PmBootCollision(PFN_NUMBER First, PFN_NUMBER Last)
++{
++    /* Defense in depth for permanently boot-owned frames. Actual image
++     * ownership comes from LoaderSystemCode, not its whole virtual window.
++     * A warm handoff across different kernel images is not guaranteed. */
++    return (First < (NXBL_LOADER_LIMIT_PA >> PAGE_SHIFT) &&
++            Last >= (NXBL_LOADER_PA >> PAGE_SHIFT)) ||
++           (First < ((NXBL_SCRATCH_PA + NXBL_SCRATCH_BYTES) >> PAGE_SHIFT) &&
++            Last >= (NXBL_SCRATCH_PA >> PAGE_SHIFT)) ||
++           (First < ((NXBL_PT_PCR_PA + PAGE_SIZE) >> PAGE_SHIFT) &&
++            Last >= (NXBL_PT_LOW_PA >> PAGE_SHIFT));
++}
++#endif
++
+ static BOOLEAN PmBit(const UCHAR *Map, PFN_NUMBER Page)
+ { return Page < PM_PAGES && (Map[Page >> 3] & (1 << (Page & 7))) != 0; }
+ static VOID PmSet(UCHAR *Map, PFN_NUMBER Page, BOOLEAN Set)
+@@ -71,6 +92,9 @@ VOID NxkMmReadPersistence(PLOADER_PARAMETER_BLOCK Lb)
+         PLIST_ENTRY e;
+         BOOLEAN allowed = FALSE;
+         if (!PmBit(slot->Pages, p)) continue;
++#if XBOX_RAM_MIB == 64
++        if (PmBootCollision(p, p)) return;
++#endif
+         for (e = Lb->MemoryDescriptorListHead.Flink;
+              e != &Lb->MemoryDescriptorListHead; e = e->Flink) {
+             PMEMORY_ALLOCATION_DESCRIPTOR d = CONTAINING_RECORD(e,
+@@ -115,6 +139,9 @@ VOID NxkMmSetPersistentPages(ULONG_PTR Pa, SIZE_T Size, BOOLEAN Persist)
+         (first < 0x11 && last >= 0xD) ||
+         (first < 0x42 && last >= 0x30) ||
+         last >= (NXK_NV2A_INSTANCE_BASE >> PAGE_SHIFT)) return;
++#if XBOX_RAM_MIB == 64
++    if (PmBootCollision(first, last)) return;
++#endif
+     irql = MiAcquirePfnLock();
+     for (p = first; p <= last; ++p) PmSet(PmSelected, p, Persist);
+     MiReleasePfnLock(irql);
+diff --git a/ntoskrnl/xb/nxldr-entry.c b/ntoskrnl/xb/nxldr-entry.c
+index fe778413..ac4798b4 100644
+--- a/ntoskrnl/xb/nxldr-entry.c
++++ b/ntoskrnl/xb/nxldr-entry.c
+@@ -307,11 +307,11 @@ NxldrBuildLoaderBlock(VOID)
+     Ldr->LoadCount = 1;
+     InsertTailList(&Lb->LoadOrderListHead, &Ldr->InLoadOrderLinks);
+ 
+-    /* Memory descriptors (devkit layout, 128 MB).  Keep the low-PA arena
++    /* Memory descriptors for the selected physical capacity. Keep the low-PA arena
+      * mostly LoaderFree for the title heap; pin the live structures (PCR
+      * backing, page tables) as LoaderMemoryData.  See boot-layout.h. */
+     KernelPages = (KernelSize + PAGE_SIZE - 1) >> PAGE_SHIFT;
+-    KernelEnd = 0x4000 + KernelPages;
++    KernelEnd = (NXBL_IMAGE_PA >> PAGE_SHIFT) + KernelPages;
+     HighBase = NXBL_PT_LOW_PA >> PAGE_SHIFT;
+     HighCount = 4 + NXBL_PT_KSEG0_COUNT + 1;
+ 
+@@ -322,13 +322,28 @@ NxldrBuildLoaderBlock(VOID)
+     AddMd(Lb, &Cursor, LoaderMemoryData, NXBL_PCR_REGION_PA >> PAGE_SHIFT, 16); /* PCR backing */
+     AddMd(Lb, &Cursor, LoaderOsloaderHeap, 0x040, 2);            /* LoaderBlock + Aux */
+     AddMd(Lb, &Cursor, LoaderFree, 0x042, 0x100 - 0x042);
+-    AddMd(Lb, &Cursor, LoaderFree, 0x100, 0x100); /* loader moved above title RAM */
++    AddMd(Lb, &Cursor, LoaderFree, 0x100, 0x100); /* no loader in title RAM */
++#if XBOX_RAM_MIB == 64
++    AddMd(Lb, &Cursor, LoaderFree, 0x200, (NXBL_IMAGE_PA >> PAGE_SHIFT) - 0x200);
++    AddMd(Lb, &Cursor, LoaderSystemCode, NXBL_IMAGE_PA >> PAGE_SHIFT, KernelPages);
++    AddMd(Lb, &Cursor, LoaderFree, KernelEnd, (NXBL_LOADER_PA >> PAGE_SHIFT) - KernelEnd);
++    /* Permanent bootstrap ownership: a title must never obtain a frame that
++     * the next reset overwrites before checking its persistent bitmap. */
++    AddMd(Lb, &Cursor, LoaderMemoryData, NXBL_LOADER_PA >> PAGE_SHIFT,
++          (NXBL_LOADER_LIMIT_PA - NXBL_LOADER_PA) >> PAGE_SHIFT);
++    AddMd(Lb, &Cursor, LoaderMemoryData, NXBL_SCRATCH_PA >> PAGE_SHIFT,
++          NXBL_SCRATCH_BYTES >> PAGE_SHIFT);
++    AddMd(Lb, &Cursor, LoaderMemoryData, HighBase, HighCount);
++    AddMd(Lb, &Cursor, LoaderFree, HighBase + HighCount, 0x3C00 - (HighBase + HighCount));
++    AddMd(Lb, &Cursor, LoaderFirmwarePermanent, 0x3C00, 0x400);
++#else
+     AddMd(Lb, &Cursor, LoaderFree, 0x200, 0x3C00 - 0x200);       /* title arena */
+     AddMd(Lb, &Cursor, LoaderFirmwarePermanent, 0x3C00, 0x400);  /* FB + NV2A reserve */
+     AddMd(Lb, &Cursor, LoaderSystemCode, 0x4000, KernelPages);
+     AddMd(Lb, &Cursor, LoaderFree, KernelEnd, HighBase - KernelEnd);
+     AddMd(Lb, &Cursor, LoaderMemoryData, HighBase, HighCount);   /* page tables */
+     AddMd(Lb, &Cursor, LoaderFree, HighBase + HighCount, 0x8000 - (HighBase + HighCount));
++#endif
+ 
+     NxkMmReadPersistence(Lb);
+ 
+diff --git a/tests/host/boot-layout/README.md b/tests/host/boot-layout/README.md
+new file mode 100644
+index 00000000..ddbace71
+--- /dev/null
++++ b/tests/host/boot-layout/README.md
+@@ -0,0 +1,52 @@
++# Selected Xbox boot layout
++
++Run `python3 tests/host/boot-layout/check.py OUTPUT_DIRECTORY` from any directory.
++The fixture compiles actual loader paging, PE placement, boot descriptors,
++memory-map shape, HAL capacity/timing and warm handoff code for both
++`XBOX_RAM_MIB=64` and `128`. The scratch selection/size check uses the actual
++decompression control flow with a host decoder stub that writes the selected
++physical scratch alias. Real XZ code is compiled and linked in the loader check
++below. The actual PFN descriptor population and post-paint PT-return block
++verify ownership; the actual user-PDE clear verifies the loader identity map
++does not survive into title mappings. Flash admission checks prove oversized
++PE files/images are refused before invoking compression.
++Only physical pointer accesses use host RAM; paging-enable instructions and
++CPU descriptor setup are not executed. It also compiles and links the real
++release loader using its maintained CMake rules and checks emitted Xcodes,
++code/BSS placement, stack bounds and ROM size. Full debug BIOS builds require
++the normal build environment's 32-bit system headers.
++
++The default remains 128 MiB. These are separate artifacts, with no runtime RAM
++detector. Both retain kernel VA `0x84000000` and System PTE floor `0x84400000`.
++The physical comparison is against the prior open-source 128 MiB layout and
++the existing source's retail-shaped 52..60 MiB kernel zone, not an inspected
++proprietary firmware implementation:
++
++| Boot object | 128 MiB default | 64 MiB artifact |
++| --- | --- | --- |
++| Kernel image | 64 MiB + actual `SizeOfImage` | 52 MiB + actual `SizeOfImage` |
++| Loader/code/BSS/stack | 125..127 MiB | 56..57 MiB, permanently reserved |
++| Decompressed PE scratch | 112..120 MiB | 57..59.75 MiB, permanently reserved |
++| Bootstrap PTs | 127 MiB + 22 pages | 59.75 MiB + 22 pages, all permanently reserved |
++| Initial graphics descriptor | 60..64 MiB | 60..64 MiB |
++
++The existing graphics split later releases memory below the NV2A instance
++tail at `0x03fe0000`; this behavior is unchanged. Memory after the actual
++64 MiB image and before 56 MiB remains free for the normal NT bring-up carve.
++The temporary 56..60 MiB loader identity PSE is cleared by MM's user-PDE clear,
++after the kernel switches to its own stack.
++
++Title pages at 1 MiB and 32 MiB remain ordinary allocatable/persistent RAM;
++the existing warm-reboot guest's 32 MiB data placement is unchanged. Permanent
++bootstrap reservations prevent titles acquiring frames that the next reset
++must overwrite. Collision checks are defense in depth, not an allocation
++policy substitute. Retaining the 20 formerly reclaimed PT pages costs 80 KiB.
++The 2.75 MiB scratch bound accommodates the current release PE (432,128 bytes)
++and debug PE (649,728 bytes), and is enforced both during flash assembly and
++before runtime decompression.
++
++A distinct warm format version prevents cross-capacity restoration despite
++the identical virtual image base. Persistence across different kernel images
++is not guaranteed; actual current image descriptors reject a bitmap that
++collides with image growth. The 128 MiB handoff format and physical bootstrap
++layout remain unchanged.
+diff --git a/tests/host/boot-layout/check-image-bounds.py b/tests/host/boot-layout/check-image-bounds.py
+new file mode 100644
+index 00000000..af141230
+--- /dev/null
++++ b/tests/host/boot-layout/check-image-bounds.py
+@@ -0,0 +1,64 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise actual flash assembly admission before its compressor is called."""
++from contextlib import redirect_stdout
++import importlib.util
++import io
++from pathlib import Path
++import struct
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++sys.dont_write_bytecode = True
++spec = importlib.util.spec_from_file_location('flash', root/'boot/nxldr/gen-flash-bin.py')
++flash = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(flash)
++loader = out/'loader.bin'
++loader.write_bytes(bytes([255]) * 0x40000)
++(out/'loader.elf').write_bytes(b'fixture symbols supplied below')
++failures = 0
++checks = 0
++for capacity, scratch in ((128, 0x800000), (64, 0x2c0000)):
++    flash.read_linker_symbols = lambda *args: {
++        'KernelPayloadOffset': 0x4000, 'KernelPayloadMaxSize': 0x3be00,
++        'KernelScratchMaxSize': scratch, 'KernelImageMaxSize': 0x400000}
++    def image(file_size=0x1000, image_size=0x77000):
++        b = bytearray(file_size)
++        if file_size >= 0x100:
++            b[:2] = b'MZ'
++            struct.pack_into('<I', b, 0x3c, 0x40)
++            b[0x40:0x44] = b'PE\0\0'
++            struct.pack_into('<H', b, 0x58, 0x10b)
++            struct.pack_into('<I', b, 0x90, image_size)
++        return b
++    for label, raw, reject in (
++        ('current release', image(0x69800), False),
++        ('current debug', image(0x9ea00, 0xb8000), False),
++        ('file exceeds physical scratch', image(scratch + 1), True),
++        ('image exceeds mapped physical placement', image(image_size=0x400001), True),
++        ('zero image span', image(image_size=0), True),
++    ):
++        compressed = []
++        def compress(data):
++            compressed.append(len(data))
++            return b'fixture-compressed-data'
++        flash.xz_compress = compress
++        kernel = out/'kernel.exe'
++        kernel.write_bytes(raw)
++        sys.argv = ['gen-flash-bin.py', '--nxldr', str(loader), '--kernel', str(kernel),
++                    '--out', str(out/'flash.bin')]
++        rejected = False
++        with redirect_stdout(io.StringIO()):
++            try:
++                flash.main()
++            except SystemExit:
++                rejected = True
++        good = rejected == reject and (not compressed if reject else compressed == [len(raw)])
++        checks += 1
++        if not good:
++            failures += 1
++            print(f'FAIL {capacity}MiB: {label}, rejected={rejected}, compressor calls={len(compressed)}')
++print(f'flash admission: {checks-failures}/{checks} checks passed')
++sys.exit(bool(failures))
+diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
+new file mode 100644
+index 00000000..13123835
+--- /dev/null
++++ b/tests/host/boot-layout/check.py
+@@ -0,0 +1,300 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Compile the real loader mappings, descriptor construction and persistence.
++
++Only physical dereferences in PagingInit/PeLoad use a host RAM facade. The
++production control flow, PTE values, PE parser, descriptors and warm handoff
++functions are retained. Privileged paging-enable/CPU descriptor code is not run.
++"""
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++
++
++def function(text, name):
++    start = text.index(name + '(')
++    opening = text.index('{', start)
++    depth = 1
++    end = opening + 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[start:end]
++
++
++paging = 'void ' + function((root/'boot/nxldr/paging.c').read_text(), 'PagingInit')
++paging = paging.replace('(ULONG *)PD_PA', 'host_page(PD_PA)')
++paging = paging.replace('(ULONG *)(NXBL_PT_LOW_PA + i * PAGE_SIZE)', 'host_page(NXBL_PT_LOW_PA + i * PAGE_SIZE)')
++paging = paging.replace('(ULONG *)(NXBL_PT_KSEG0_PA + i * PAGE_SIZE)', 'host_page(NXBL_PT_KSEG0_PA + i * PAGE_SIZE)')
++paging = paging.replace('((ULONG)PtId) | PTE_FLAGS', '(NXBL_PT_LOW_PA + i * PAGE_SIZE) | PTE_FLAGS')
++paging = paging.replace('((ULONG)PtKseg0) | PTE_FLAGS', '(NXBL_PT_KSEG0_PA + i * PAGE_SIZE) | PTE_FLAGS')
++paging = paging.replace('(ULONG *)NXBL_PT_PCR_PA', 'host_page(NXBL_PT_PCR_PA)')
++paging = paging.replace('(void *)NXBL_PCR_REGION_PA', 'host_page(NXBL_PCR_REGION_PA)')
++pe = (root/'boot/nxldr/pe.c').read_text()
++pe = '\n'.join(line for line in pe.splitlines() if not line.startswith('#include'))
++pe = pe.replace('memset(', 'physical_zero(').replace('memcpy(', 'physical_copy(')
++entry = (root/'ntoskrnl/xb/nxldr-entry.c').read_text()
++descriptors = entry[entry.index('    KernelPages = (KernelSize'):entry.index('    NxkMmReadPersistence(Lb);')]
++persistence = (root/'ntoskrnl/xb/mm/persistence.c').read_text()
++persistence = '\n'.join(line for line in persistence.splitlines() if not line.startswith('#include'))
++shape = 'BOOLEAN ' + function((root/'ntoskrnl/xb/mm/init.c').read_text(), 'NxkMmRetailShapedMap')
++init_source = (root/'ntoskrnl/xb/mm/init.c').read_text()
++cluster_start = init_source.index('    if (NxkIsRetailBase())', init_source.index('NxkMmEnsureXboxWindows('))
++cluster = init_source[cluster_start:]
++cluster = cluster[:cluster.index('\n    /* The loader backs all 16 pages')]
++population = function((root/'ntoskrnl/mm/ARM3/mminit.c').read_text(), 'MiInitializePfnDatabase')
++population = 'VOID ' + population[:population.index('#else')] + '\n#endif\n}\n'
++machine = (root/'ntoskrnl/mm/ARM3/i386/init.c').read_text()
++user_clear = machine[machine.index('    StartPde = MiAddressToPde(0);'):]
++user_clear = user_clear[:user_clear.index('\n\n')]
++hal = 'VOID ' + function((root/'hal/halx86/xbox/pci.c').read_text(), 'NxConfigurePciDevicesLate')
++video = (root/'hal/halx86/xbox/video/xbox-video-support.c').read_text()
++ram_global = next(line for line in video.splitlines() if line.startswith('unsigned int xbox_ram ='))
++decompress = 'static const void *' + function((root/'boot/nxldr/loader.c').read_text(), 'DecompressKernel')
++loader_types = (root/'boot/nxldr/nxldr.h').read_text()
++loader_types = loader_types[loader_types.index('#define NXKRNL_XZ_MAGIC'):loader_types.index('#endif /* NXLDR_H */')]
++
++shim = r'''
++#define _GNU_SOURCE
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++#include "boot-layout.h"
++#include "xz/xz.h"
++typedef uint32_t ULONG, PFN_NUMBER; typedef uintptr_t ULONG_PTR;
++typedef ULONG *PULONG;
++typedef uint8_t UCHAR; typedef UCHAR *PUCHAR;
++typedef unsigned short USHORT; typedef unsigned long SIZE_T;
++typedef int BOOLEAN, KIRQL; typedef void VOID; typedef void *PVOID;
++typedef int32_t LONG;
++#define IN
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define PAGE_SIZE 4096u
++#define PAGE_SHIFT 12
++#define PD_PA 0xf000u
++#define KSEG0_BASE 0x80000000u
++#define PCR_REGION_PAGES 16
++#define PCR_REGION_VA 0xffdf0000u
++#define PTE_FLAGS 3u
++#define PD_INDEX(v) ((v)>>22)
++#define PT_INDEX(v) (((v)>>12)&1023)
++#define NXK_KSEG0_RAM_SIZE 0x04000000u
++#define NXK_KSEG0_BASE 0x80000000u
++#define NXK_NV2A_INSTANCE_BASE 0x03fe0000u
++#define MAXULONG_PTR UINTPTR_MAX
++#define FIELD_OFFSET(T,F) offsetof(T,F)
++#define C_ASSERT(x) _Static_assert(x,#x)
++#define dprintf(...) ((void)0)
++#define RtlCopyMemory memcpy
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define KeMemoryBarrier() __sync_synchronize()
++static int failures, checks, outside;
++static unsigned char ram[128u*1024*1024];
++static void check(int good,const char *label) { checks++; if(!good) { failures++; printf("FAIL %dMiB: %s\n",XBOX_RAM_MIB,label); } }
++static ULONG *host_page(ULONG pa) { if(pa+PAGE_SIZE>XBOX_RAM_MIB*1024u*1024)outside++; return (ULONG *)(ram+pa); }
++typedef ULONG MMPTE;
++static MMPTE *MiAddressToPde(uintptr_t va) {return (MMPTE *)(ram+PD_PA)+(va>>22);}
++static void physical_zero(void *dst,int value,SIZE_T size) { uintptr_t pa=(uintptr_t)dst; if(pa+size>XBOX_RAM_MIB*1024u*1024)outside++; memset(ram+pa,value,size); }
++static void physical_copy(void *dst,const void *src,SIZE_T size) { uintptr_t pa=(uintptr_t)dst; if(pa+size>XBOX_RAM_MIB*1024u*1024)outside++; memcpy(ram+pa,src,size); }
++static ULONG LoaderPhase,LoaderFailCode,LoaderKernelSize;
++static ULONG pfb_timing,memory_top;static unsigned top_writes;
++static void register_write(PULONG address,ULONG value) {if((uintptr_t)address==0xfd100200)pfb_timing=value;}
++#define WRITE_REGISTER_ULONG register_write
++#define DPRINT1(...) ((void)0)
++static void PciCfgWrite32(unsigned bus,unsigned dev,unsigned fn,unsigned off,ULONG value) {
++ (void)bus;(void)dev;(void)fn;if(off==0x84){memory_top=value;top_writes++;}
++}
++static void BootDetectMemorySize(void) {}
++struct xz_dec {int unused;};static struct xz_dec decoder;
++void xz_crc32_init(void) {}
++struct xz_dec *xz_dec_init(enum xz_mode mode,uint32_t max) {(void)mode;(void)max;return &decoder;}
++static int write_scratch;
++enum xz_ret xz_dec_run(struct xz_dec *d,struct xz_buf *b) {(void)d;if(write_scratch)memset((void *)(NXBL_KSEG0_BASE+(uintptr_t)b->out),0x5a,b->out_size);b->out_pos=b->out_size;return XZ_STREAM_END;}
++typedef struct list {struct list *Flink,*Blink;} LIST_ENTRY,*PLIST_ENTRY;
++typedef enum {LoaderMemoryData,LoaderFree,LoaderOsloaderHeap,LoaderFirmwarePermanent,LoaderSystemCode,LoaderLoadedProgram,LoaderFirmwareTemporary,LoaderOsloaderStack} TYPE_OF_MEMORY;
++typedef struct md {LIST_ENTRY ListEntry; TYPE_OF_MEMORY MemoryType; PFN_NUMBER BasePage,PageCount;} MEMORY_ALLOCATION_DESCRIPTOR,*PMEMORY_ALLOCATION_DESCRIPTOR;
++typedef struct lb {LIST_ENTRY MemoryDescriptorListHead;const char *LoadOptions;} LOADER_PARAMETER_BLOCK,*PLOADER_PARAMETER_BLOCK;
++static PLOADER_PARAMETER_BLOCK KeLoaderBlock;
++#define NxkIsRetailBase() FALSE
++#define CONTAINING_RECORD(p,T,F) ((T *)((char *)(p)-offsetof(T,F)))
++static MEMORY_ALLOCATION_DESCRIPTOR md[32];static unsigned md_count;
++static void AddMd(PLOADER_PARAMETER_BLOCK lb,PUCHAR *cursor,TYPE_OF_MEMORY type,PFN_NUMBER base,PFN_NUMBER count) {
++ (void)cursor;MEMORY_ALLOCATION_DESCRIPTOR *m=&md[md_count++]; m->MemoryType=type;m->BasePage=base;m->PageCount=count;
++ LIST_ENTRY *h=&lb->MemoryDescriptorListHead,*e=&m->ListEntry;e->Flink=h;e->Blink=h->Blink;h->Blink->Flink=e;h->Blink=e;
++}
++static void build_descriptors(PLOADER_PARAMETER_BLOCK Lb,ULONG KernelSize) {
++ PUCHAR Cursor=NULL;ULONG KernelPages,KernelEnd,HighBase,HighCount;
++ md_count=0;Lb->MemoryDescriptorListHead.Flink=Lb->MemoryDescriptorListHead.Blink=&Lb->MemoryDescriptorListHead;
++'''
++shim += descriptors + r'''}
++static UCHAR __ImageBase[1];
++static KIRQL MiAcquirePfnLock(void) {return 0;}
++static void MiReleasePfnLock(KIRQL irql) {(void)irql;}
++static BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER p) {(void)p;return FALSE;}
++static unsigned returned[0x8000];static PFN_NUMBER MmHighestPhysicalPage;
++static void NxkPageSupplyReturn(PFN_NUMBER p) {returned[p]++;}
++#define NXK_MM_PHYS
++#define LockQueuePfnLock 0
++static KIRQL KeAcquireQueuedSpinLock(unsigned q) {(void)q;return 0;}
++static void KeReleaseQueuedSpinLock(unsigned q,KIRQL irql) {(void)q;(void)irql;}
++''' + persistence + '\n' + paging + '\n' + pe + '\n' + shape + '\n' + population
++shim += '\nstatic void reclaim_boot_pts(void) {\n' + cluster + '\n}\n'
++shim += '\nstatic void clear_user_maps(void) {MMPTE *StartPde,*EndPde;\n' + user_clear + '\n}\n'
++shim += '\n' + ram_global + '\n' + hal + '\n' + loader_types
++shim += '\nstatic UCHAR KernelPayloadVa[sizeof(NXKRNL_XZ_HEADER)+1];\n' + decompress
++
++cases = r'''
++static TYPE_OF_MEMORY type_at(unsigned pfn) {
++ for(unsigned i=0;i<md_count;i++)if(pfn>=md[i].BasePage&&pfn-md[i].BasePage<md[i].PageCount)return md[i].MemoryType;
++ return (TYPE_OF_MEMORY)-1;
++}
++int main(void) {
++ const unsigned imagepa=XBOX_RAM_MIB==64?0x03400000:0x04000000;
++ const unsigned ptpa=XBOX_RAM_MIB==64?0x03bc0000:0x07f00000;
++ PagingInit();ULONG *pd=(ULONG *)(ram+PD_PA);
++ check(!outside,"paging writes only installed RAM");
++ check((pd[0]&~4095u)==ptpa,"selected low PT physical base");
++ check((pd[0x210]&~4095u)==ptpa+20*PAGE_SIZE,"kernel PT physical base");
++ check((pd[0x3ff]&~4095u)==ptpa+21*PAGE_SIZE,"PCR PT physical base");
++ for(unsigned i=0;i<16;i++) {
++  ULONG *pt=(ULONG *)(ram+(pd[0x200+i]&~4095u));
++  check(pt[0]==i*0x400000u+3&&pt[1023]==i*0x400000u+1023*PAGE_SIZE+3,"identity title alias retained");
++ }
++ ULONG *kernelpt=(ULONG *)(ram+(pd[0x210]&~4095u));
++ check(kernelpt[0]==imagepa+3&&kernelpt[1023]==imagepa+1023*PAGE_SIZE+3,"kernel virtual base maps selected physical backing");
++ check(XBOX_RAM_MIB==128?pd[0x1f]==0x07c00083u:pd[0x1f]==0&&pd[0xe]==0x03800083u,"loader identity PSE fits installed memory");
++ check(pd[0x300]==PD_PA+3,"recursive PD remains retail address");
++ ULONG retained_kernel_pd=pd[0x210];clear_user_maps();
++ check(pd[0xe]==0&&pd[0x1f]==0&&pd[0x210]==retained_kernel_pd,"actual MM user-PDE clear removes loader identity while retaining kernel map");
++ LOADER_PARAMETER_BLOCK lb;build_descriptors(&lb,0x77000);
++ unsigned cursor=0;
++ for(unsigned i=0;i<md_count;i++){check(md[i].BasePage==cursor&&md[i].PageCount>0,"descriptors form sorted disjoint coverage");cursor=md[i].BasePage+md[i].PageCount;}
++ check(cursor==XBOX_RAM_MIB*256u,"descriptors end at installed memory");
++ check(type_at(imagepa/PAGE_SIZE)==LoaderSystemCode&&type_at((imagepa+0x76000)/PAGE_SIZE)==LoaderSystemCode,"whole image excluded from free supply");
++ check(type_at(ptpa/PAGE_SIZE)==LoaderMemoryData&&type_at(ptpa/PAGE_SIZE+21)==LoaderMemoryData,"live PT cluster reserved");
++ check(type_at(0x100)==LoaderFree&&type_at(0x2000)==LoaderFree,"1MiB and32MiB remain ordinary title RAM as on128MiB BIOS");
++ check(XBOX_RAM_MIB==128||(type_at(0x3800)==LoaderMemoryData&&type_at(0x3900)==LoaderMemoryData&&type_at(0x3bbf)==LoaderMemoryData),"64 loader/stack/scratch reserved throughout runtime");
++ check(type_at(0xd)==LoaderMemoryData&&type_at(0x10)==LoaderMemoryData&&type_at(0x30)==LoaderMemoryData,"low bootstrap reservations retained");
++ check(NXBL_PAGES_SPANNED==0x4400,"virtual System PTE floor stays above kernel VA");
++ check(NxkMmRetailShapedMap()==(XBOX_RAM_MIB==64),"allocation policy follows physical layout, independently of image VA");
++ NxConfigurePciDevicesLate();
++ check(xbox_ram==XBOX_RAM_MIB&&pfb_timing==(XBOX_RAM_MIB==64?0x03070003:0x03070103),"real HAL uses selected capacity and known PFB timing");
++ check(top_writes==2&&memory_top==(XBOX_RAM_MIB==64?0x03ffffff:0x07ffffff),"real HAL host bridge capacity matches artifact");
++ NXKRNL_XZ_HEADER *compressed=(NXKRNL_XZ_HEADER *)KernelPayloadVa;
++ compressed->Magic=NXKRNL_XZ_MAGIC;compressed->CompressedSize=1;compressed->DecompressedSize=NXBL_SCRATCH_BYTES;
++ check((uintptr_t)DecompressKernel()==(XBOX_RAM_MIB==64?0x03900000:0x07000000),"scratch is in64 kernel zone or above128 title RAM");
++ compressed->DecompressedSize=NXBL_SCRATCH_BYTES+1;LoaderFailCode=0;
++ check(!DecompressKernel()&&LoaderFailCode==0x585a,"decompression rejects overflow of scratch reservation");
++ static unsigned char image[0x3000];
++ image[0]='M';image[1]='Z';*(ULONG *)(image+0x3c)=0x40;*(ULONG *)(image+0x40)=0x4550;*(USHORT *)(image+0x46)=1;*(USHORT *)(image+0x54)=0xe0;
++ *(USHORT *)(image+0x58)=0x10b;*(ULONG *)(image+0x68)=0x1000;*(ULONG *)(image+0x74)=0x84000000;*(ULONG *)(image+0x90)=0x77000;*(ULONG *)(image+0x94)=0x400;
++ *(ULONG *)(image+0x138+8)=0x1000;*(ULONG *)(image+0x138+12)=0x1000;*(ULONG *)(image+0x138+16)=0x1000;*(ULONG *)(image+0x138+20)=0x1000;memset(image+0x1000,0x5a,0x1000);
++ outside=0;LoaderFailCode=0;check(PeLoad(image)==0x84001000&&LoaderFailCode==0,"PE entry VA unchanged");
++ check(!outside&&ram[imagepa]=='M'&&ram[imagepa+0x1000]==0x5a,"production PE copies to selected physical image");
++ unsigned badsizes[]={0,0x400001,0xfffff000};
++ for(unsigned i=0;i<3;i++) {*(ULONG *)(image+0x90)=badsizes[i];LoaderFailCode=0;check(PeLoad(image)==0&&LoaderFailCode==7,"PE rejects zero/oversized image before physical copy");}
++ *(ULONG *)(image+0x90)=0x77000;*(ULONG *)(image+0x138+12)=0xfffff000;LoaderFailCode=0;
++ check(PeLoad(image)==0&&LoaderFailCode==10,"PE rejects wrapping section span");
++ *(ULONG *)(image+0x138+12)=0x1000;
++ void *alias=mmap((void *)NXK_KSEG0_BASE,XBOX_RAM_MIB*1024u*1024,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);if(alias==MAP_FAILED){perror("mmap persistence alias");return 2;}
++ unsigned ranges[][2]={{0x3800000,0x1000},{0x3900000,0x1000},{0x37ff000,0x2000},{0x3bbf000,0x2000},{0x3bc0000,0x1000}};
++ for(unsigned i=0;i<5;i++){
++  memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(ranges[i][0],ranges[i][1],TRUE);
++  unsigned selected=0;for(unsigned j=0;j<PM_BYTES;j++)selected+=PmSelected[j]!=0;
++  check((selected!=0)==(XBOX_RAM_MIB==128),"64 warm selection cannot select reserved loader/scratch/PT;128 unchanged");
++ }
++ memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(0x1000000,0x1000,TRUE);check(PmBit(PmSelected,0x1000),"ordinary title page can persist");
++ NxkMmPublishPersistence(TRUE);NxkMmReadPersistence(&lb);check(PmBit(PmRestored,0x1000)&&((PM_HANDOFF *)PM_VA)->Magic==0,"valid warm handoff restored and consumed");
++ memset(PmRestored,0,sizeof(PmRestored));NxkMmReadPersistence(&lb);check(!PmBit(PmRestored,0x1000),"handoff consumed only once");
++ unsigned ordinary[]={0x100,0x2001,0x37ff};
++ for(unsigned i=0;i<3;i++) {
++  unsigned p=ordinary[i];UCHAR *bytes=(UCHAR *)(NXK_KSEG0_BASE+(uintptr_t)p*PAGE_SIZE);memset(bytes,0xa6,PAGE_SIZE);
++  memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(p*PAGE_SIZE+17,20,TRUE);check(PmBit(PmSelected,p),"ordinary allocated title page can be selected at1MiB/32MiB/image padding");
++  NxkMmPublishPersistence(TRUE);compressed->DecompressedSize=0x9ea00;write_scratch=1;DecompressKernel();write_scratch=0;
++  memset(PmRestored,0,sizeof(PmRestored));NxkMmReadPersistence(&lb);
++  check(PmBit(PmRestored,p)&&bytes[0]==0xa6&&bytes[PAGE_SIZE-1]==0xa6,"valid title persistence survives actual scratch materialization and boot reservations");
++ }
++ memset(returned,0,sizeof(returned));MmHighestPhysicalPage=XBOX_RAM_MIB*256-1;MiInitializePfnDatabase(&lb);
++ check(returned[0x100]==1&&returned[0x2001]==1,"actual PFN descriptor walk admits ordinary title RAM");
++ check(XBOX_RAM_MIB==128||(!returned[0x3800]&&!returned[0x3900]&&!returned[0x3bbf]),"actual PFN descriptor walk does not release64 bootstrap storage");
++ for(unsigned p=ptpa/PAGE_SIZE;p<ptpa/PAGE_SIZE+22;p++)check(!returned[p],"actual PFN descriptor walk reserves every bootstrap PT");
++ memset(returned,0,sizeof(returned));reclaim_boot_pts();
++ for(unsigned p=ptpa/PAGE_SIZE;p<ptpa/PAGE_SIZE+22;p++)check(!returned[p],"64 keeps bootstrap PTs reserved after PSE paint;128 behavior unchanged");
++ memset(PmSelected,0,sizeof(PmSelected));PmSet(PmSelected,0x1000,TRUE);NxkMmPublishPersistence(TRUE);
++ PM_HANDOFF *slot=(PM_HANDOFF *)PM_VA;slot->Version=XBOX_RAM_MIB==64?1:2;slot->Checksum=PmChecksum(slot);
++ memset(PmRestored,0,sizeof(PmRestored));NxkMmReadPersistence(&lb);
++ check(!PmBit(PmRestored,0x1000)&&slot->Magic==0,"cross-capacity handoff rejected and consumed despite identical image VA");
++ memset(PmSelected,0,sizeof(PmSelected));PmSet(PmSelected,0x3500,TRUE);NxkMmPublishPersistence(TRUE);
++ build_descriptors(&lb,0x101000);memset(PmRestored,0,sizeof(PmRestored));NxkMmReadPersistence(&lb);
++ check(PmBit(PmRestored,0x3500)==(XBOX_RAM_MIB==128)&&slot->Magic==0,"64 image growth rejects actual SystemCode collision;128 title page unchanged");
++ printf("%dMiB: %d checks, %d failures\n",XBOX_RAM_MIB,checks,failures);return failures!=0;
++}
++'''
++(out/'layout.c').write_text(shim+cases)
++failures = 0
++for capacity in (128, 64):
++    exe = out/f'layout-{capacity}'
++    subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Wno-unused-variable',
++                    '-Wno-pointer-to-int-cast', '-Wno-int-to-pointer-cast',
++                    f'-DXBOX_RAM_MIB={capacity}', '-I'+str(root/'boot/nxldr'),
++                    str(out/'layout.c'), '-o', str(exe)], check=True)
++    failures += subprocess.run([str(exe)]).returncode != 0
++invalid = subprocess.run(['cc', '-x', 'c', '-fsyntax-only', '-DXBOX_RAM_MIB=72',
++                          '-I'+str(root/'boot/nxldr'), '-'],
++                         input='#include "boot-layout.h"\n', text=True,
++                         capture_output=True)
++print('unsupported capacity rejected:', invalid.returncode != 0)
++failures += invalid.returncode == 0
++
++# Use the maintained loader CMake rules, including its real assembly, Xcodes,
++# XZ arena and linker script. SARCH=host omits only the kernel/flash target.
++loader_project = out/'loader-project'
++loader_project.mkdir(exist_ok=True)
++(loader_project/'CMakeLists.txt').write_text(
++    'cmake_minimum_required(VERSION 3.17)\nproject(LoaderLayoutCheck NONE)\n'
++    'set(SARCH host)\nadd_subdirectory("'+str(root/'boot/nxldr')+'" loader)\n')
++for capacity in (128, 64):
++    # Release is fully freestanding. Debug also needs the build environment's
++    # 32-bit system headers for nanoprintf and is qualified by full BIOS builds.
++    for debug in (0,):
++        build = out/f'loader-{capacity}-{debug}'
++        with (out/f'loader-{capacity}-{debug}.log').open('w') as log:
++            subprocess.run(['cmake', '-S', str(loader_project), '-B', str(build),
++                            f'-DXBOX_RAM_MIB={capacity}', f'-DDBG={debug}'],
++                           stdout=log, stderr=subprocess.STDOUT, check=True)
++            subprocess.run(['cmake', '--build', str(build), '--target', 'nxldr', '-j2'],
++                           stdout=log, stderr=subprocess.STDOUT, check=True)
++        symbols = {}
++        for line in subprocess.check_output(['nm', '-n', str(build/'loader/nxldr.elf')], text=True).splitlines():
++            fields = line.split()
++            if len(fields) == 3:
++                symbols[fields[2]] = int(fields[0], 16)
++        start = 0x3800000 if capacity == 64 else 0x7d00000
++        limit = 0x3900000 if capacity == 64 else 0x7f00000
++        assert symbols['RamStart'] == start
++        assert symbols['RamCopyDst'] == start
++        assert symbols['StackTop'] == limit - 16
++        assert symbols['BssEnd'] <= symbols['StackTop'] - 0x10000
++        assert symbols['KernelScratchMaxSize'] == (0x2c0000 if capacity == 64 else 0x800000)
++        assert symbols['KernelImageMaxSize'] == 0x400000
++        blob = (build/'loader/nxldr.bin').read_bytes()
++        # Real emitted Xcode instructions: PCI memory top and both PFB writes.
++        memory_top = 0x3ffffff if capacity == 64 else 0x7ffffff
++        timing = 0x3070003 if capacity == 64 else 0x3070103
++        pci = bytes([4]) + (0x80000084).to_bytes(4, 'little') + memory_top.to_bytes(4, 'little')
++        pfb = bytes([3]) + (0xf100200).to_bytes(4, 'little') + timing.to_bytes(4, 'little')
++        assert blob.count(pci) == 1 and blob.count(pfb) == 2
++        assert len(blob) == (0x80000 if debug else 0x40000)
++        print(f'{capacity}MiB DBG={debug}: real loader linked, BSS end={symbols["BssEnd"]:#x}, stack={symbols["StackTop"]:#x}, Xcodes selected')
++subprocess.run([sys.executable, str(root/'tests/host/boot-layout/check-image-bounds.py'),
++                str(out/'image-bounds')], check=True)
++sys.exit(bool(failures))

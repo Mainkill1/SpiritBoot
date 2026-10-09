@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 from tools.firmware import grade_tap, sha256
-from tools.kernel_performance import BASELINE, WORKLOADS, analyze
+from tools.kernel_performance import BASELINE, WORKLOADS, analyze, capture
 
 
 class AnalyzerTests(unittest.TestCase):
@@ -65,6 +65,33 @@ class AnalyzerTests(unittest.TestCase):
     def mutate_serial(self,change, regrade=True):
         p=self.root/'c0/serial.log'; serial=change(p.read_text()); p.write_text(serial)
         if regrade: self.mutate_run(lambda r:r.update(tap=grade_tap(serial)))
+
+    def test_explicit_64_mib_capture(self):
+        self.mutate_run(lambda r: r.update(memory_mib=64))
+        result = capture(self.root / 'c0', {}, expected_memory_mib=64)
+        self.assertEqual(result['memory_mib'], 64)
+        self.assertEqual(len(result['workloads']), 41)
+
+    def test_default_capture_still_requires_128_mib(self):
+        self.assertEqual(capture(self.root / 'c0', {})['memory_mib'], 128)
+        self.mutate_run(lambda r: r.update(memory_mib=64))
+        with self.assertRaisesRegex(ValueError, 'runtime configuration mismatch'):
+            capture(self.root / 'c0', {})
+        with self.assertRaisesRegex(ValueError, 'runtime configuration mismatch'):
+            self.report()
+
+    def test_explicit_capacity_must_match_record(self):
+        with self.assertRaisesRegex(ValueError, 'runtime configuration mismatch'):
+            capture(self.root / 'c0', {}, expected_memory_mib=64)
+        self.mutate_run(lambda r: r.update(memory_mib=64))
+        with self.assertRaisesRegex(ValueError, 'runtime configuration mismatch'):
+            capture(self.root / 'c0', {}, expected_memory_mib=128)
+
+    def test_capture_rejects_unsupported_capacity(self):
+        for capacity in (72, True, '64', 64.0, None):
+            with self.subTest(capacity=capacity):
+                with self.assertRaisesRegex(ValueError, 'unsupported expected memory capacity'):
+                    capture(self.root / 'c0', {}, expected_memory_mib=capacity)
 
     def test_valid_seven_pairs_and_positive_threshold(self):
         report=self.report(); row=report['workloads']['pin-1']
