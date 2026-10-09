@@ -47,11 +47,12 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 65c3ac26da80eadfbe7788930cd7736db01f7507
+            test "$actual_tree" = f43fbf22e259c7914592ca700b94873b673900fb
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-unwind.py" "$output/cache-pin-unwind" >"$output/cache-pin-unwind.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-arguments.py" "$output/cache-pin-arguments" >"$output/cache-pin-arguments.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/cache/check-pin-reuse.py" "$output/cache-pin-reuse" >"$output/cache-pin-reuse.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-writeback.py" "$output/cache-writeback" >"$output/cache-writeback.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-shrink.py" "$output/cache-shrink" >"$output/cache-shrink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-fatx32.py" "$output/fatx32" >"$output/fatx32.log" 2>&1
