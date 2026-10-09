@@ -1,25 +1,50 @@
-From b4133e25493ecb6e5c176322e19342e7bcf65a10 Mon Sep 17 00:00:00 2001
+From 4eed3ea59fe363a0d726b58643e269a3fe7d9550 Mon Sep 17 00:00:00 2001
 From: Mainkill1 <Mainkill1@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 09:19:18 -0700
 Subject: [PATCH] MM: retain page ownership and count PT-backed MDL pins
 
 ---
- ntoskrnl/mm/ARM3/mdlsup.c    | 39 ++++--------------------------
- ntoskrnl/mm/ARM3/miarm.h     |  3 +++
- tests/host/mdl-pins/cases.c  | 15 ++++++++++++
- tests/host/mdl-pins/check.py | 28 +++++++++++++++++++++
- tests/host/mdl-pins/shim.h   | 47 ++++++++++++++++++++++++++++++++++++
- 5 files changed, 98 insertions(+), 34 deletions(-)
+ ntoskrnl/mm/ARM3/mdlsup.c    | 50 +++++++++++---------------------
+ ntoskrnl/mm/ARM3/miarm.h     |  3 ++
+ tests/host/mdl-pins/cases.c  | 15 ++++++++++
+ tests/host/mdl-pins/check.py | 31 ++++++++++++++++++++
+ tests/host/mdl-pins/shim.h   | 55 ++++++++++++++++++++++++++++++++++++
+ 5 files changed, 120 insertions(+), 34 deletions(-)
  create mode 100644 tests/host/mdl-pins/cases.c
  create mode 100644 tests/host/mdl-pins/check.py
  create mode 100644 tests/host/mdl-pins/shim.h
 
 diff --git a/ntoskrnl/mm/ARM3/mdlsup.c b/ntoskrnl/mm/ARM3/mdlsup.c
-index b1d0d68b..62d7df6c 100644
+index b1d0d68b..197a3f8d 100644
 --- a/ntoskrnl/mm/ARM3/mdlsup.c
 +++ b/ntoskrnl/mm/ARM3/mdlsup.c
-@@ -1418,11 +1418,8 @@ MmProbeAndLockPages(IN PMDL Mdl,
+@@ -1239,10 +1239,17 @@ MmProbeAndLockPages(IN PMDL Mdl,
+         //
+         Mdl->Process = CurrentProcess;
+ 
++#ifdef NXK_MM_PHYS
++        /* Xbox page ownership and DMA pins use the page-supply PFN lock,
++         * including title addresses; a working-set lock cannot protect them. */
++        UsePfnLock = TRUE;
++        OldIrql = MiAcquirePfnLock();
++#else
+         /* Lock the process working set */
+         MiLockProcessWorkingSet(CurrentProcess, PsGetCurrentThread());
+         UsePfnLock = FALSE;
+         OldIrql = MM_NOIRQL;
++#endif
+     }
+ 
+     //
+@@ -1415,14 +1422,15 @@ MmProbeAndLockPages(IN PMDL Mdl,
+          * MI_IS_PHYSICAL_ADDRESS above; we never reach here with a
+          * non-PFN page. */
+         ASSERT(Pfn1 != NULL);
++#ifdef NXK_MM_PHYS
++        ASSERT(UsePfnLock);
++#else
          ASSERT(CurrentProcess == NULL || UsePfnLock == FALSE);
++#endif
          MiReferenceProbedPageAndBumpLockCount(Pfn1);
  #ifdef NXK_MM_PHYS
 -        /* MDL-locked pages are DMA targets: the device captures the
@@ -32,7 +57,7 @@ index b1d0d68b..62d7df6c 100644
  #endif
  #else
          if (Pfn1)
-@@ -1581,35 +1578,6 @@ MmUnlockPages(IN PMDL Mdl)
+@@ -1581,35 +1589,6 @@ MmUnlockPages(IN PMDL Mdl)
          return;
      }
  
@@ -68,7 +93,7 @@ index b1d0d68b..62d7df6c 100644
  #ifndef SARCH_XBOX
      /* MDL_IO_SPACE is set when MmProbeAndLockPages walks a non-PFN page;
       * on Xbox MMIO is PSE-mapped and caught by MI_IS_PHYSICAL_ADDRESS, so
-@@ -1731,6 +1699,9 @@ MmUnlockPages(IN PMDL Mdl)
+@@ -1731,6 +1710,9 @@ MmUnlockPages(IN PMDL Mdl)
          /* Get the current entry and reference count */
          Pfn1 = (PMMPFN)*MdlPages;
          MiDereferencePfnAndDropLockCount(Pfn1);
@@ -115,10 +140,10 @@ index 00000000..c68a7bc2
 +}
 diff --git a/tests/host/mdl-pins/check.py b/tests/host/mdl-pins/check.py
 new file mode 100644
-index 00000000..388b8ab8
+index 00000000..5b99f693
 --- /dev/null
 +++ b/tests/host/mdl-pins/check.py
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,31 @@
 +#!/usr/bin/env python3
 +# SPDX-License-Identifier: GPL-2.0-or-later
 +"""Actual MDL unlock and page-reference NXK branches with modeled PFN tables.
@@ -143,16 +168,19 @@ index 00000000..388b8ab8
 + return body[a:b]+'\n#endif\n'
 +ref='static void MiReferenceProbedPageAndBumpLockCount(PMMPFN Pfn1){\n'+pin_body('MiReferenceProbedPageAndBumpLockCount')+'}\n'
 +drop='static void MiDereferencePfnAndDropLockCount(PMMPFN Pfn1){\n'+pin_body('MiDereferencePfnAndDropLockCount')+'}\n'
-+lock='static void lock_page(PFN_NUMBER PageFrameIndex){KIRQL old=MiAcquirePfnLock();MiReferenceProbedPageAndBumpLockCount(MiGetPfnEntry(PageFrameIndex));\n'+hook+'MiReleasePfnLock(old); }\n'
++begin=source.index('if (Base > MM_HIGHEST_USER_ADDRESS)',source.index('MmProbeAndLockPages'))
++end=source.index('    //\n    // Get the last PTE',begin)
++selection=source[begin:end]
++lock='static void lock_page(PFN_NUMBER PageFrameIndex){KIRQL OldIrql;BOOLEAN UsePfnLock;ULONG TotalPages=1;PVOID Base=(void*)0x10000;PEPROCESS CurrentProcess=&process;MDL mdl={0};PMDL Mdl=&mdl;int Operation=0;\n'+selection+'(void)Operation;MiReferenceProbedPageAndBumpLockCount(MiGetPfnEntry(PageFrameIndex));\n'+hook+'if(UsePfnLock)MiReleasePfnLock(OldIrql);else MiUnlockProcessWorkingSet(CurrentProcess,PsGetCurrentThread()); }\n'
 +(out/'mdl.c').write_text((here/'shim.h').read_text()+ref+drop+lock+unlock+(here/'cases.c').read_text())
 +subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function',str(out/'mdl.c'),'-o',str(out/'mdl')],check=True)
 +subprocess.run([str(out/'mdl')],check=True)
 diff --git a/tests/host/mdl-pins/shim.h b/tests/host/mdl-pins/shim.h
 new file mode 100644
-index 00000000..cd755fab
+index 00000000..119ba879
 --- /dev/null
 +++ b/tests/host/mdl-pins/shim.h
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,55 @@
 +
 +#include <stdint.h>
 +#include <stddef.h>
@@ -186,6 +214,14 @@ index 00000000..cd755fab
 +#define PAGE_SIZE 4096
 +#define MI_IS_PHYSICAL_ADDRESS(p) ((uintptr_t)(p)==0xff000000)
 +#define ADDRESS_AND_SIZE_TO_SPAN_PAGES(p,n) (((uintptr_t)(p)%4096+(n)+4095)/4096)
++#define MM_HIGHEST_USER_ADDRESS ((void*)0x7fffffff)
++#define MM_NOIRQL 0
++#define IoReadAccess 0
++static EPROCESS process;
++static PEPROCESS PsGetCurrentProcess(void){return &process;}
++static void *PsGetCurrentThread(void){return NULL;}
++static void MiLockProcessWorkingSet(PEPROCESS p,void*t){(void)p;(void)t;}
++static void MiUnlockProcessWorkingSet(PEPROCESS p,void*t){(void)p;(void)t;}
 +static MMPFN pfns[16];static ULONG_PTR owners[16];static unsigned pins[16];
 +static MMPTE pte={{{1,0,3}}},pde={{{1,0,0}}};static int held;
 +static KIRQL MiAcquirePfnLock(void){assert(!held);held=1;return 0;}
