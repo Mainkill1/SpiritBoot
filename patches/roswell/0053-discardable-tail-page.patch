@@ -13,6 +13,43 @@ index 8c8b33ae..dbf3c548 100755
          donated += max(0, (end // 4096) - ((start + 4095) // 4096))
          i = last + 1
      require(donated + workspace <= capacity, 'warm persistence staging capacity exceeded')
+diff --git a/boot/nxldr/warm-stage.h b/boot/nxldr/warm-stage.h
+index 48d160a2..a7b5e69d 100644
+--- a/boot/nxldr/warm-stage.h
++++ b/boot/nxldr/warm-stage.h
+@@ -97,8 +97,8 @@ static inline int NxWarmPlan(const unsigned char *Bitmap, unsigned ImageBytes,
+     return 1;
+ }
+ /* Match the whole pages freed by MiFindInitializationCode and the Xbox
+- * donor: following discardable sections join the run; a final partial
+- * section is not rounded up. The caller supplies the validated mapped PE. */
++ * donor: following discardable sections join the run, including the final
++ * owned padding page. The caller supplies the validated mapped PE. */
+ static inline unsigned NxWarmU16(const unsigned char *P)
+ { return P[0] | ((unsigned)P[1] << 8); }
+ static inline unsigned NxWarmU32(const unsigned char *P)
+@@ -107,6 +107,7 @@ static inline int NxWarmDonated(const unsigned char *Image, unsigned Bytes,
+                                unsigned PageOffset)
+ {
+     unsigned pe, table, sections, i;
++    if (PageOffset >= Bytes / 4096) return 0;
+     if (Bytes < 64 || Image[0] != 'M' || Image[1] != 'Z') return 0;
+     pe = NxWarmU32(Image + 0x3c);
+     if (pe > Bytes - 24 || NxWarmU32(Image + pe) != 0x4550) return 0;
+@@ -128,9 +129,10 @@ static inline int NxWarmDonated(const unsigned char *Image, unsigned Bytes,
+         end = NxWarmU32(section + 12);
+         if (start > Bytes || end > Bytes || size > Bytes - end) return 0;
+         end += size;
+-        if (last + 1 < sections) end = (end + 4095) & ~4095u;
+-        if ((PageOffset << 12) >= ((start + 4095) & ~4095u) &&
+-            (PageOffset << 12) < (end & ~4095u)) return 1;
++        /* Compare page numbers to avoid overflowing rounded byte bounds.
++         * The initial check clamps admission to complete mapped image pages. */
++        if (PageOffset >= start / 4096 + (start % 4096 != 0) &&
++            PageOffset < end / 4096 + (end % 4096 != 0)) return 1;
+         i = last;
+     }
+     return 0;
 diff --git a/ntoskrnl/mm/ARM3/sysldr.c b/ntoskrnl/mm/ARM3/sysldr.c
 index a3b99dba..9612b055 100644
 --- a/ntoskrnl/mm/ARM3/sysldr.c
@@ -54,6 +91,54 @@ index 5b819de3..8552efb6 100644
      def test_actual_runtime_validator_does_not_remap(self):
          with tempfile.TemporaryDirectory() as tmp:
              tmp = Path(tmp)
+diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
+index 10948e1c..44a3bad7 100644
+--- a/tests/host/boot-layout/check.py
++++ b/tests/host/boot-layout/check.py
+@@ -283,17 +283,20 @@ int main(void) {
+  sh+=40;memcpy(sh,".rsrc",6);*(ULONG *)(sh+8)=0xac8;
+  *(ULONG *)(sh+12)=0x77000;*(ULONG *)(sh+16)=0xc00;*(ULONG *)(sh+36)=0x02000000;
+  check(NxWarmDonated(__ImageBase,0x78000,0x66)&&NxWarmDonated(__ImageBase,0x78000,0x76),"actual grouped whole INIT pages admitted");
+- check(!NxWarmDonated(__ImageBase,0x78000,0x65)&&!NxWarmDonated(__ImageBase,0x78000,0x77),"resident code and partial final resource page excluded");
+- for(unsigned malformed=0;malformed<4;malformed++){
++ check(!NxWarmDonated(__ImageBase,0x78000,0x65)&&NxWarmDonated(__ImageBase,0x78000,0x77),"resident code excluded and complete final resource padding page admitted");
++ check(!NxWarmDonated(__ImageBase,0x78000,0x78)&&!NxWarmDonated(__ImageBase,0x78000,0x100077),"mapped image end and overflowing page index rejected");
++ for(unsigned scenario=0;scenario<5;scenario++){
++  unsigned malformed=scenario>=2?scenario-1:0;
++  unsigned original=scenario==1?0x3477:0x3466;
+   build_descriptors(&lb,0x78000);memset(PmSelected,0,sizeof(PmSelected));memset(PmRestored,0,sizeof(PmRestored));
+-  PmSet(PmSelected,0x3466,TRUE);PmSet(PmSelected,0x1000,TRUE);NxkMmPublishPersistence(TRUE);
+-  slot->StageCount=1;slot->Stages[0].Original=0x3466;slot->Stages[0].Temporary=0x200;
+-  if(malformed==1)slot->Stages[0].Original=0x3477;
++  PmSet(PmSelected,original,TRUE);PmSet(PmSelected,0x1000,TRUE);NxkMmPublishPersistence(TRUE);
++  slot->StageCount=1;slot->Stages[0].Original=original;slot->Stages[0].Temporary=0x200;
++  if(malformed==1)slot->Stages[0].Original=0x3465;
+   if(malformed==2)slot->Stages[0].Temporary=0x1000;
+   if(malformed==3)slot->Stages[0].Temporary=0x3800;
+   slot->Checksum=PmChecksum(slot);NxkMmReadPersistence(&lb);
+   if(malformed){check(!PmBit(PmRestored,0x1000)&&slot->StageCount==0,"bad staging rejected before ownership publication");continue;}
+-  check(PmBit(PmRestored,0x3466)&&PmBit(PmRestored,0x1000),"INIT and ordinary control ownership restored together");
++  check(PmBit(PmRestored,original)&&PmBit(PmRestored,0x1000),"INIT and ordinary control ownership restored together");
+   check(PmDescriptor(&lb,0x200)->MemoryType==LoaderMemoryData,"staging protected before allocator initialization");
+   check(PmDescriptor(&lb,0x1ff)->MemoryType==LoaderFree&&PmDescriptor(&lb,0x201)->MemoryType==LoaderFree,"split preserves both adjacent free spans");
+   memset(returned,0,sizeof(returned));KeLoaderBlock=&lb;MiInitializePfnDatabase(&lb);
+@@ -303,11 +306,11 @@ int main(void) {
+   if(recursive==MAP_FAILED){perror("mmap recursive facade");return 2;}
+   ULONG *pdes=(ULONG *)0xc0300000;
+   for(unsigned i=0;i<16;i++)pdes[0x200+i]=(i<<22)|0x83;
+-  memset((void *)0x80200000,0xa6,PAGE_SIZE);memset((void *)0x83466000,0x5a,PAGE_SIZE);
+-  NxkMmRestoreInitPages(0x3466000,1);NxkMmFinishWarmRestore();
+-  check(!memcmp((void *)0x80200000,(void *)0x83466000,PAGE_SIZE),"actual restore copies every byte through validated identity alias");
+-  check(returned[0x200]==1&&!returned[0x3466]&&PmBit(PmRestored,0x3466)&&!slot->StageCount,"staging returned exactly once, title page stays reserved, handoff drained");
+-  NxkMmRestoreInitPages(0x3466000,1);
++  memset((void *)0x80200000,0xa6,PAGE_SIZE);memset((void *)(NXK_KSEG0_BASE+(uintptr_t)original*PAGE_SIZE),0x5a,PAGE_SIZE);
++  NxkMmRestoreInitPages(original*PAGE_SIZE,1);NxkMmFinishWarmRestore();
++  check(!memcmp((void *)0x80200000,(void *)(NXK_KSEG0_BASE+(uintptr_t)original*PAGE_SIZE),PAGE_SIZE),"actual restore copies every byte through validated identity alias");
++  check(returned[0x200]==1&&!returned[original]&&PmBit(PmRestored,original)&&!slot->StageCount,"staging returned exactly once, title page stays reserved, handoff drained");
++  NxkMmRestoreInitPages(original*PAGE_SIZE,1);
+   check(returned[0x200]==1,"repeated restore cannot return the temporary page twice");
+   munmap(recursive,0x400000);
+  }
 diff --git a/tests/host/discardable-sections/check.py b/tests/host/discardable-sections/check.py
 new file mode 100644
 index 00000000..153fd949
