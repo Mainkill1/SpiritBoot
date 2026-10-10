@@ -1,5 +1,23 @@
+diff --git a/ntoskrnl/ex/init.c b/ntoskrnl/ex/init.c
+index cba2d24f..52f6d5f8 100644
+--- a/ntoskrnl/ex/init.c
++++ b/ntoskrnl/ex/init.c
+@@ -2170,6 +2170,13 @@ Phase1Initialization(IN PVOID Context)
+         NxkMmFinishWarmRestore();
+     }
+ 
++#ifdef NXK_MM_POOL
++    {
++        extern VOID NxPoolStartIdleTrim(VOID);
++        NxPoolStartIdleTrim();
++    }
++#endif
++
+     /* Run the XBE title in place of smss.  Spawns the title's threads on
+      * the painted map and returns; system falls into MmZeroPageThread. */
+     {
 diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
-index 7d30a054..87d28602 100644
+index 7d30a054..9eced5d5 100644
 --- a/ntoskrnl/xb/mm/pool.c
 +++ b/ntoskrnl/xb/mm/pool.c
 @@ -14,8 +14,9 @@
@@ -8,13 +26,13 @@ index 7d30a054..87d28602 100644
   * nonpaged backend -- there is no paging, only the API distinction.
 - * Pages are never returned to the system: pool footprint is bounded
 - * by peak usage, which on this machine is what retail does too.
-+ * One empty bucket page per class/domain is retained for quick reuse.
-+ * Surplus empty pages are returned, and allocation pressure can reclaim
-+ * the reserve too. Live allocations are never relocated.
++ * Recent bucket-page demand is retained for quick burst reuse. A bounded
++ * idle DPC trims surplus to one warm page per class/domain; allocation
++ * pressure can reclaim the reserve too. Live blocks are never relocated.
   *
   * One spinlock covers the class lists and the big-block table, so
   * every path is DISPATCH_LEVEL-safe and never waits.  Cache-aligned
-@@ -85,23 +86,25 @@ C_ASSERT(sizeof(NXP_HEADER) == 8);
+@@ -85,23 +86,38 @@ C_ASSERT(sizeof(NXP_HEADER) == 8);
  typedef struct _NXP_FREE
  {
      struct _NXP_FREE *Next;
@@ -26,7 +44,20 @@ index 7d30a054..87d28602 100644
  /* (block bytes + 15) >> 4 -> class index; 4096 >> 4 entries + 1. */
  static UCHAR NxpClassMap[(PAGE_SIZE >> 4) + 1];
  static NXP_FREE *NxpFreeLists[NXP_BUCKET_LISTS];
-+static UCHAR NxpEmptyPages[NXP_BUCKET_LISTS];
++static USHORT NxpEmptyPages[NXP_BUCKET_LISTS];
++static USHORT NxpBusyPages[NXP_BUCKET_LISTS];
++static USHORT NxpPeakPages[NXP_BUCKET_LISTS];
++static USHORT NxpPriorPeakPages[NXP_BUCKET_LISTS];
++C_ASSERT(NXK_POOL_WINDOW_PAGES < 0x10000);
++
++#define NXP_TRIM_PERIOD_MS 100
++#define NXP_TRIM_SCAN_PAGES 64
++#define NXP_DEMAND_EPOCH (2ULL * 10000000)
++static KTIMER NxpTrimTimer;
++static KDPC NxpTrimDpc;
++static ULONGLONG NxpDemandEpoch;
++static ULONG NxpTrimCursor;
++static BOOLEAN NxpTrimStarted;
  static KSPIN_LOCK NxpLock;
  
  /* Per-window-page state for sub-page bucket pages.  One byte per page:
@@ -39,22 +70,27 @@ index 7d30a054..87d28602 100644
 - * IO.  Instead NxpReclaimEmptyBucketPages sweeps them back to the
 - * supply when a whole-page allocation can't be satisfied: capacity is
 - * elastic at the exhaustion edge, steady-state stays fast. */
-+ * thus an empty-but-still-mapped bucket page. One such page per class
-+ * is retained: transient IRPs reuse it without page allocation/free.
++ * thus an empty-but-still-mapped bucket page. Recent peak demand keeps
++ * burst backing reusable; quiet classes decay to one warm empty page.
 + * The doubly linked free blocks let an empty page detach by visiting
 + * only that page's blocks. Physical release happens outside NxpLock. */
  #define NXP_NOT_BUCKET 0xFF
  static UCHAR NxpPageState[NXK_POOL_WINDOW_PAGES];
  #define NXP_PAGE_INDEX(P) \
-@@ -152,6 +155,7 @@ InitializePool(IN POOL_TYPE PoolType,
+@@ -152,6 +168,12 @@ InitializePool(IN POOL_TYPE PoolType,
  
      /* No page is a bucket page yet (0 would read as an empty bucket). */
      RtlFillMemory(NxpPageState, sizeof(NxpPageState), NXP_NOT_BUCKET);
 +    RtlZeroMemory(NxpEmptyPages, sizeof(NxpEmptyPages));
++    RtlZeroMemory(NxpBusyPages, sizeof(NxpBusyPages));
++    RtlZeroMemory(NxpPeakPages, sizeof(NxpPeakPages));
++    RtlZeroMemory(NxpPriorPeakPages, sizeof(NxpPriorPeakPages));
++    NxpTrimCursor = 0;
++    NxpTrimStarted = FALSE;
  
      /* Map every 16-byte block-size step to the smallest fitting class. */
      c = 0;
-@@ -231,6 +235,34 @@ ExInitializePoolDescriptor(IN PPOOL_DESCRIPTOR PoolDescriptor,
+@@ -231,6 +253,104 @@ ExInitializePoolDescriptor(IN PPOOL_DESCRIPTOR PoolDescriptor,
  
  ULONG NxpReclaimEmptyBucketPages(VOID);
  
@@ -86,20 +122,103 @@ index 7d30a054..87d28602 100644
 +    NxpPageState[NXP_PAGE_INDEX(PageVa)] = NXP_NOT_BUCKET;
 +}
 +
++/* Keep timer work bounded and off the allocation/free hot path. A delayed
++ * callback rotates only once, so it cannot expire freshly observed demand.
++ * No live page moves. Detached pages leave the lists before backend release. */
++static VOID
++NTAPI
++NxpTrimIdleDpc(PKDPC Dpc, PVOID Context, PVOID Arg1, PVOID Arg2)
++{
++    ULONGLONG Now = KeQueryInterruptTime();
++    KIRQL OldIrql;
++    PVOID EmptyPage = NULL;
++
++    UNREFERENCED_PARAMETER(Dpc);
++    UNREFERENCED_PARAMETER(Context);
++    UNREFERENCED_PARAMETER(Arg1);
++    UNREFERENCED_PARAMETER(Arg2);
++    KeAcquireSpinLock(&NxpLock, &OldIrql);
++    if (Now - NxpDemandEpoch >= NXP_DEMAND_EPOCH)
++    {
++        for (ULONG Class = 0; Class < NXP_BUCKET_LISTS; Class++)
++        {
++            NxpPriorPeakPages[Class] = NxpPeakPages[Class];
++            NxpPeakPages[Class] = NxpBusyPages[Class];
++        }
++        NxpDemandEpoch = Now;
++    }
++    for (ULONG Scan = 0; Scan < NXP_TRIM_SCAN_PAGES; Scan++)
++    {
++        ULONG Idx = NxpTrimCursor++;
++        ULONG_PTR PageVa;
++        ULONG Class, Peak, Keep;
++
++        if (NxpTrimCursor == NXK_POOL_WINDOW_PAGES) NxpTrimCursor = 0;
++        if (NxpPageState[Idx] != 0) continue;
++        PageVa = NXK_POOL_WINDOW_BASE + ((ULONG_PTR)Idx << PAGE_SHIFT);
++        Class = ((NXP_HEADER *)PageVa)->ClassIndex;
++        Peak = max(NxpPeakPages[Class], NxpPriorPeakPages[Class]);
++        ASSERT(Peak >= NxpBusyPages[Class]);
++        Keep = max(1, Peak - NxpBusyPages[Class]);
++        if (NxpEmptyPages[Class] <= Keep) continue;
++        NxpDetachEmptyBucketPage(PageVa);
++        EmptyPage = (PVOID)PageVa;
++        break;
++    }
++    KeReleaseSpinLock(&NxpLock, OldIrql);
++    if (EmptyPage != NULL) NXP_PAGES_FREE(EmptyPage);
++}
++
++/* Phase1 calls this after dispatcher/MM setup and warm restoration. The
++ * timer and its address-taken callback remain resident; no worker stack. */
++VOID
++NxPoolStartIdleTrim(VOID)
++{
++    KIRQL OldIrql;
++    LARGE_INTEGER Due;
++
++    KeAcquireSpinLock(&NxpLock, &OldIrql);
++    if (NxpTrimStarted)
++    {
++        KeReleaseSpinLock(&NxpLock, OldIrql);
++        return;
++    }
++    NxpTrimStarted = TRUE;
++    NxpDemandEpoch = KeQueryInterruptTime();
++    KeReleaseSpinLock(&NxpLock, OldIrql);
++    KeInitializeDpc(&NxpTrimDpc, NxpTrimIdleDpc, NULL);
++    KeInitializeTimer(&NxpTrimTimer);
++    Due.QuadPart = -(LONGLONG)NXP_TRIM_PERIOD_MS * 10000;
++    KeSetTimerEx(&NxpTrimTimer, Due, NXP_TRIM_PERIOD_MS, &NxpTrimDpc);
++}
++
  static VOID
  NxpAllocFailed(IN POOL_TYPE PoolType,
                 IN SIZE_T NumberOfBytes)
-@@ -302,6 +334,9 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+@@ -302,6 +422,13 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
      if (Blk != NULL)
      {
          NxpFreeLists[Class] = Blk->Next;
 +        if (Blk->Next != NULL) Blk->Next->Prev = NULL;
 +        if (NxpPageState[NXP_PAGE_INDEX(Blk)] == 0)
++        {
 +            NxpEmptyPages[Class]--;
++            if (++NxpBusyPages[Class] > NxpPeakPages[Class])
++                NxpPeakPages[Class] = NxpBusyPages[Class];
++        }
          NxpPageState[NXP_PAGE_INDEX(Blk)]++;
          KeReleaseSpinLock(&NxpLock, OldIrql);
          ASSERT((((NXP_HEADER *)Blk) - 1)->Magic == NXP_MAGIC_FREE);
-@@ -336,6 +371,8 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+@@ -328,6 +455,8 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+         KeAcquireSpinLock(&NxpLock, &OldIrql);
+         /* Mark as a bucket page with one live block in a single write. */
+         NxpPageState[NXP_PAGE_INDEX(Page)] = 1;
++        if (++NxpBusyPages[Class] > NxpPeakPages[Class])
++            NxpPeakPages[Class] = NxpBusyPages[Class];
+         for (ULONG i = 1; i < Count; i++)
+         {
+             NXP_HEADER *H = (NXP_HEADER *)(Page + i * Size);
+@@ -336,6 +465,8 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
              H->ClassIndex = (USHORT)Class;
              H->Magic = NXP_MAGIC_FREE;
              F->Next = NxpFreeLists[Class];
@@ -108,15 +227,15 @@ index 7d30a054..87d28602 100644
              NxpFreeLists[Class] = F;
          }
          KeReleaseSpinLock(&NxpLock, OldIrql);
-@@ -390,6 +427,7 @@ ExFreePoolWithTag(IN PVOID P,
+@@ -390,7 +521,6 @@ ExFreePoolWithTag(IN PVOID P,
      NXP_HEADER *Hdr;
      NXP_FREE *Blk;
      KIRQL OldIrql;
-+    PVOID EmptyPage = NULL;
- 
+-
      if (P == NULL)
      {
-@@ -442,10 +480,18 @@ ExFreePoolWithTag(IN PVOID P,
+         KeBugCheckEx(BAD_POOL_CALLER, 0x46, 0, 0, 0);
+@@ -442,9 +572,16 @@ ExFreePoolWithTag(IN PVOID P,
  
      KeAcquireSpinLock(&NxpLock, &OldIrql);
      Blk->Next = NxpFreeLists[Hdr->ClassIndex];
@@ -125,18 +244,16 @@ index 7d30a054..87d28602 100644
      NxpFreeLists[Hdr->ClassIndex] = Blk;
  
 -    NxpPageState[NXP_PAGE_INDEX(P)]--;
-+    if (--NxpPageState[NXP_PAGE_INDEX(P)] == 0 &&
-+        ++NxpEmptyPages[Hdr->ClassIndex] > 1)
++    if (--NxpPageState[NXP_PAGE_INDEX(P)] == 0)
 +    {
-+        EmptyPage = PAGE_ALIGN(P);
-+        NxpDetachEmptyBucketPage((ULONG_PTR)EmptyPage);
++        ASSERT(NxpBusyPages[Hdr->ClassIndex] != 0);
++        NxpBusyPages[Hdr->ClassIndex]--;
++        NxpEmptyPages[Hdr->ClassIndex]++;
 +    }
      KeReleaseSpinLock(&NxpLock, OldIrql);
-+    if (EmptyPage != NULL) NXP_PAGES_FREE(EmptyPage);
  }
  
- /* Sweep empty bucket pages back to the supply.  Called when a
-@@ -460,8 +506,6 @@ NxpReclaimEmptyBucketPages(VOID)
+@@ -460,8 +597,6 @@ NxpReclaimEmptyBucketPages(VOID)
      for (Idx = 0; Idx < NXK_POOL_WINDOW_PAGES; Idx++)
      {
          ULONG_PTR PageVa;
@@ -145,7 +262,7 @@ index 7d30a054..87d28602 100644
  
          /* Only empty bucket pages (state == 0) are reclaimable; a
           * non-bucket page reads NXP_NOT_BUCKET and a live one reads > 0. */
-@@ -476,16 +520,7 @@ NxpReclaimEmptyBucketPages(VOID)
+@@ -476,16 +611,7 @@ NxpReclaimEmptyBucketPages(VOID)
          }
  
          PageVa = NXK_POOL_WINDOW_BASE + ((ULONG_PTR)Idx << PAGE_SHIFT);
@@ -165,21 +282,30 @@ index 7d30a054..87d28602 100644
          NXP_PAGES_FREE((PVOID)PageVa);
 diff --git a/tests/host/pool-idle/cases.c b/tests/host/pool-idle/cases.c
 new file mode 100644
-index 00000000..416c7ae4
+index 00000000..ffac2428
 --- /dev/null
 +++ b/tests/host/pool-idle/cases.c
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,172 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +static void reset(void) {
 +    assert(!pool_lock_held);
 +    memset(used,0,sizeof(used));memset(runs,0,sizeof(runs));
 +    memset(NxpFreeLists,0,sizeof(NxpFreeLists));committed=peak=allocations=releases=0;
-+    allow_pages=1;page_limit=NXK_POOL_WINDOW_PAGES;InitializePool(NonPagedPool,0);
++    allow_pages=1;page_limit=NXK_POOL_WINDOW_PAGES;
++    fake_time=0;scheduled_dpc=NULL;timer_submissions=timer_fires=0;
++    InitializePool(NonPagedPool,0);
++#if HAS_TRIM
++    NxPoolStartIdleTrim();NxPoolStartIdleTrim();
++    assert(timer_submissions==1);
++#endif
 +}
 +static void invariant(void) {
 +    unsigned seen[NXK_POOL_WINDOW_PAGES]={0};
 +#if HAS_EMPTY
 +    unsigned empty[NXP_BUCKET_LISTS]={0};
++#if HAS_TRIM
++    unsigned busy[NXP_BUCKET_LISTS]={0};
++#endif
 +#endif
 +    for(unsigned c=0;c<NXP_BUCKET_LISTS;c++) {
 +        NXP_FREE *prev=NULL;
@@ -204,11 +330,19 @@ index 00000000..416c7ae4
 +        assert(seen[i]+NxpPageState[i]==total);
 +#if HAS_EMPTY
 +        if(NxpPageState[i]==0)empty[h->ClassIndex]++;
++#if HAS_TRIM
++        else busy[h->ClassIndex]++;
++#endif
 +#endif
 +    }
 +#if HAS_EMPTY
 +    for(unsigned c=0;c<NXP_BUCKET_LISTS;c++)
-+        assert(empty[c]==NxpEmptyPages[c]&&empty[c]<=1);
++        {
++        assert(empty[c]==NxpEmptyPages[c]);
++#if HAS_TRIM
++        assert(busy[c]==NxpBusyPages[c]&&NxpPeakPages[c]>=busy[c]);
++#endif
++    }
 +#endif
 +}
 +static void wave(unsigned request, int title, unsigned seed) {
@@ -229,11 +363,56 @@ index 00000000..416c7ae4
 +        ExFreePoolWithTag(p[i],seed+i);invariant();
 +    }
 +}
++static void repeat_burst(unsigned request, unsigned count, unsigned waves, int title) {
++    void *p[640];assert(count<=640);
++    for(unsigned wave_index=0;wave_index<waves;wave_index++) {
++        unsigned before_alloc=allocations,before_free=releases;
++        for(unsigned i=0;i<count;i++) {
++            p[i]=title?NxTitleAllocatePoolWithTag(request,900+i):ExAllocatePoolWithTag(NonPagedPool,request,900+i);
++            assert(p[i]);memset(p[i],(int)(i%251),request);
++        }
++        for(unsigned i=0;i<count;i++) {
++            for(unsigned b=0;b<request;b++)assert(((unsigned char*)p[i])[b]==i%251);
++            ExFreePoolWithTag(p[i],900+i);
++        }
++        invariant();
++        if(wave_index>0&&(allocations!=before_alloc||releases!=before_free)) {
++            fprintf(stderr,"FAIL active burst rebuilds backing: request=%u alloc=%u free=%u\n",request,allocations-before_alloc,releases-before_free);
++            exit(1);
++        }
++        advance_ms(500);invariant();
++    }
++}
 +int main(void) {
 +    arena=aligned_alloc(PAGE_SIZE,NXK_POOL_WINDOW_PAGES*PAGE_SIZE);assert(arena);
 +    static const unsigned sizes[]={1,32,64,128,256,512,1024,2040};
++    reset();repeat_burst(1024,128,16,0);assert(committed==64);
++    advance_ms(20000);invariant();assert(committed==1);
++    puts("PASS recent bursts reuse backing; quiet surplus eventually trims");
++    reset();repeat_burst(1024,128,1,0);
++    /* A late callback must not age several windows of freshly seen demand. */
++    fake_time += 200000000;
++    next_due = fake_time + 1000000;
++    repeat_burst(1024,128,4,0);assert(committed==64);
++    advance_ms(20000);invariant();assert(committed==1);
++    puts("PASS delayed callback preserves recent demand, then permits idle trim");
++    reset();repeat_burst(1024,600,3,0);assert(committed==300);
++    advance_ms(60000);invariant();assert(committed==1);
++    puts("PASS more than255 empty pages preserve accounting and trim safely");
++#if XBOX_RESERVE_UPPER_RAM
++    reset();repeat_burst(1024,600,1,0);
++    repeat_burst(1024,128,32,1);invariant();
++    unsigned burst_class=NxpClassMap[(1024+sizeof(NXP_HEADER)+15)>>4];
++    assert(NxpEmptyPages[burst_class+NXP_CLASSES]==64);
++    /* Kernel peak can decay without evicting the title's recent backing. */
++    assert(NxpEmptyPages[burst_class]<300);
++    advance_ms(60000);invariant();assert(committed==2);
++    puts("PASS asymmetric kernel/title demand budgets and title burst reuse");
++#endif
 +    reset();
 +    for(unsigned i=0;i<RTL_NUMBER_OF(sizes);i++)wave(sizes[i],0,1000+i*1000);
++    assert(committed>=4*NXP_CLASSES);
++    advance_ms(20000);invariant();
 +    printf("idle after four-page waves: committed=%u peak=%u\n",committed,peak);
 +    if(committed>NXP_CLASSES) {
 +        fprintf(stderr,"FAIL: unbounded empty-page retention (%u > %lu)\n",committed,(unsigned long)NXP_CLASSES);
@@ -249,20 +428,20 @@ index 00000000..416c7ae4
 +    assert(allocations==before);invariant();
 +    assert(NxpReclaimEmptyBucketPages()==NXP_CLASSES&&committed==0);invariant();
 +    puts("PASS all classes: bounded backing, original data/tag/capacity, reserve reuse, pressure release");
-+    reset();wave(64,0,1);
++    reset();wave(64,0,1);advance_ms(20000);
 +#if XBOX_RESERVE_UPPER_RAM
-+    wave(64,1,1001);assert(committed==2);
++    wave(64,1,1001);advance_ms(20000);assert(committed==2);
 +    for(unsigned i=0;i<RTL_NUMBER_OF(sizes);i++)wave(sizes[i],1,2000+i*1000);
-+    assert(committed==NXP_CLASSES+1);
++    advance_ms(20000);assert(committed==NXP_CLASSES+1);
 +#else
-+    wave(64,1,1001);assert(committed==1);
++    wave(64,1,1001);advance_ms(20000);assert(committed==1);
 +#endif
 +    invariant();NxpReclaimEmptyBucketPages();assert(committed==0);
 +    reset();
 +    void *live=ExAllocatePoolWithTag(NonPagedPool,64,50);assert(live);memset(live,77,64);
-+    wave(64,0,1001);invariant();assert(committed<=2);
++    wave(64,0,1001);advance_ms(20000);invariant();assert(committed==2);
 +    for(unsigned i=0;i<64;i++)assert(((unsigned char*)live)[i]==77);
-+    ExFreePoolWithTag(live,50);invariant();assert(committed==1);
++    ExFreePoolWithTag(live,50);advance_ms(20000);invariant();assert(committed==1);
 +    void *large=ExAllocatePoolWithTag(NonPagedPool,8192,7);assert(large);
 +    assert(ExQueryPoolBlockSize(large,NULL)==8192);memset(large,88,8192);
 +    assert(NxpReclaimEmptyBucketPages()==1&&committed==2);
@@ -281,10 +460,10 @@ index 00000000..416c7ae4
 +}
 diff --git a/tests/host/pool-idle/check.py b/tests/host/pool-idle/check.py
 new file mode 100644
-index 00000000..eafa1d36
+index 00000000..d174a823
 --- /dev/null
 +++ b/tests/host/pool-idle/check.py
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,41 @@
 +#!/usr/bin/env python3
 +# SPDX-License-Identifier: GPL-2.0-or-later
 +"""Execute production pool allocation/free/reclaim with modeled page boundaries."""
@@ -306,7 +485,7 @@ index 00000000..eafa1d36
 +names = ("InitializePool", "NxpAllocFailed", "NxpDetachEmptyBucketPage",
 +         "NxpAllocatePoolWithTag", "ExAllocatePoolWithTag", "NxTitleAllocatePoolWithTag",
 +         "NxTitleAllocatePool", "ExAllocatePool", "ExFreePoolWithTag",
-+         "NxpReclaimEmptyBucketPages", "ExQueryPoolBlockSize")
++         "NxpReclaimEmptyBucketPages", "NxpTrimIdleDpc", "NxPoolStartIdleTrim", "ExQueryPoolBlockSize")
 +bodies = "".join(m.function(pool, name) for name in names
 +                 if re.search(r"\b" + name + r"\s*\([^;]*?\)\s*\{", pool))
 +for reserve in (0, 1):
@@ -320,6 +499,7 @@ index 00000000..eafa1d36
 +                         else "\n#define HAS_PREV 0\n")
 +                      + ("\n#define HAS_EMPTY 1\n" if "NxpEmptyPages[" in definitions
 +                         else "\n#define HAS_EMPTY 0\n")
++                      + ("\n#define HAS_TRIM 1\n" if "NxpTrimTimer" in definitions else "\n#define HAS_TRIM 0\n")
 +                      + (root / "tests/host/pool-idle/cases.c").read_text())
 +    binary = source.with_suffix("")
 +    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
@@ -327,10 +507,10 @@ index 00000000..eafa1d36
 +    subprocess.run([str(binary)], check=True)
 diff --git a/tests/host/pool-idle/shim.c b/tests/host/pool-idle/shim.c
 new file mode 100644
-index 00000000..8b3c00af
+index 00000000..f8762350
 --- /dev/null
 +++ b/tests/host/pool-idle/shim.c
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,130 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include <assert.h>
 +#include <stdint.h>
@@ -425,6 +605,41 @@ index 00000000..8b3c00af
 +}
 +static size_t NxPoolPagesQueryRunBytes(void *p) {
 +    assert(!pool_lock_held);return (size_t)runs[((unsigned char *)p-arena)/PAGE_SIZE]*PAGE_SIZE;
++}
++
++/* Kernel timer boundary only; pool allocation/reclamation bodies remain real. */
++typedef uint64_t ULONGLONG;
++typedef int64_t LONGLONG;
++#define max(a,b) ((a)>(b)?(a):(b))
++typedef union { int64_t QuadPart; } LARGE_INTEGER;
++typedef struct _KDPC KDPC, *PKDPC;
++struct _KDPC { void (*Routine)(PKDPC,PVOID,PVOID,PVOID); PVOID Context; };
++typedef struct { unsigned unused; } KTIMER;
++static ULONGLONG fake_time;
++static PKDPC scheduled_dpc;
++static ULONGLONG next_due;
++static unsigned timer_period, timer_submissions, timer_fires;
++static ULONGLONG KeQueryInterruptTime(void) __attribute__((unused));
++static ULONGLONG KeQueryInterruptTime(void) { return fake_time; }
++static void KeInitializeDpc(PKDPC d, void (*fn)(PKDPC,PVOID,PVOID,PVOID), PVOID ctx) __attribute__((unused));
++static void KeInitializeDpc(PKDPC d, void (*fn)(PKDPC,PVOID,PVOID,PVOID), PVOID ctx) {d->Routine=fn;d->Context=ctx;}
++static void KeInitializeTimer(KTIMER *t) __attribute__((unused));
++static void KeInitializeTimer(KTIMER *t) {t->unused=0;}
++static BOOLEAN KeSetTimerEx(KTIMER *t,LARGE_INTEGER due,int period,PKDPC d) __attribute__((unused));
++static BOOLEAN KeSetTimerEx(KTIMER *t,LARGE_INTEGER due,int period,PKDPC d) {
++    (void)t;assert(!pool_lock_held&&due.QuadPart<0&&period>0);
++    scheduled_dpc=d;next_due=fake_time+(ULONGLONG)-due.QuadPart;
++    timer_period=(unsigned)period;timer_submissions++;return FALSE;
++}
++static void advance_ms(unsigned ms) {
++    ULONGLONG end=fake_time+(ULONGLONG)ms*10000;
++    while(scheduled_dpc&&next_due<=end) {
++        fake_time=next_due;next_due+=(ULONGLONG)timer_period*10000;
++        unsigned before=releases;timer_fires++;
++        scheduled_dpc->Routine(scheduled_dpc,scheduled_dpc->Context,NULL,NULL);
++        assert(releases-before<=1); /* Bounded physical work per callback. */
++    }
++    fake_time=end;
 +}
 diff --git a/tests/host/upper-ram-reservation/check.py b/tests/host/upper-ram-reservation/check.py
 index 23aff2d9..81dfcbb7 100644
