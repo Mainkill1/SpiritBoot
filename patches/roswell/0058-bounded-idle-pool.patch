@@ -642,15 +642,42 @@ index 00000000..f8762350
 +    fake_time=end;
 +}
 diff --git a/tests/host/upper-ram-reservation/check.py b/tests/host/upper-ram-reservation/check.py
-index 23aff2d9..81dfcbb7 100644
+index 23aff2d9..c4af9daf 100644
 --- a/tests/host/upper-ram-reservation/check.py
 +++ b/tests/host/upper-ram-reservation/check.py
-@@ -241,7 +241,7 @@ static LONG InterlockedCompareExchange(LONG *p,LONG v,LONG old) {
+@@ -187,6 +187,23 @@ pool_shim = r'''
+ typedef uint8_t *PUCHAR, *PBOOLEAN;
+ typedef int KSPIN_LOCK;
+ typedef ULONG POOL_TYPE;
++/* OS timer boundary: routing tests do not advance time. The dedicated
++ * pool-idle fixture drives this same production DPC with a fake clock. */
++typedef uint64_t ULONGLONG;
++typedef int64_t LONGLONG;
++typedef union { LONGLONG QuadPart; } LARGE_INTEGER;
++typedef struct _KDPC KDPC, *PKDPC;
++struct _KDPC { void (*Routine)(PKDPC,PVOID,PVOID,PVOID); PVOID Context; };
++typedef struct { int unused; } KTIMER;
++#define max(a,b) ((a)>(b)?(a):(b))
++static ULONGLONG KeQueryInterruptTime(void) { return 0; }
++static void KeInitializeDpc(PKDPC d,void (*fn)(PKDPC,PVOID,PVOID,PVOID),PVOID ctx) {
++    d->Routine=fn;d->Context=ctx;
++}
++static void KeInitializeTimer(KTIMER *t) { t->unused=0; }
++static BOOLEAN KeSetTimerEx(KTIMER *t,LARGE_INTEGER due,int period,PKDPC d) {
++    (void)t;(void)due;(void)period;(void)d;return 0;
++}
+ #define NXK_MM_POOLPAGES 1
+ #define DBG 0
+ #define NXK_POOL_WINDOW_BASE 0xc1000000u
+@@ -241,9 +258,9 @@ static LONG InterlockedCompareExchange(LONG *p,LONG v,LONG old) {
  definitions = pool[pool.index("static const USHORT NxpClassSize"):pool.index("/* BIG-BLOCK TABLE")]
  page_macros = pool[pool.index("#ifdef NXK_MM_POOLPAGES"):pool.index("/* SIZE CLASSES")]
  functions = []
 -for name in ("InitializePool", "NxpAllocFailed", "NxpAllocatePoolWithTag",
 +for name in ("InitializePool", "NxpDetachEmptyBucketPage", "NxpAllocFailed", "NxpAllocatePoolWithTag",
               "ExAllocatePoolWithTag", "NxTitleAllocatePoolWithTag", "NxTitleAllocatePool", "ExAllocatePool",
-              "ExFreePoolWithTag", "NxpReclaimEmptyBucketPages", "ExQueryPoolBlockSize"):
+-             "ExFreePoolWithTag", "NxpReclaimEmptyBucketPages", "ExQueryPoolBlockSize"):
++             "ExFreePoolWithTag", "NxpReclaimEmptyBucketPages", "NxpTrimIdleDpc", "NxPoolStartIdleTrim", "ExQueryPoolBlockSize"):
      if re.search(r"\b" + name + r"\s*\([^;]*?\)\s*\{", pool):
+         functions.append(function(pool, name))
+ pool_main = r'''
