@@ -274,43 +274,72 @@ index 0000000000000000000000000000000000000000..a8ad2866b3e374a53bafb551ab0a18af
 +include $(NXDK_DIR)/Makefile
 diff --git a/tests/xbe/performance-counter/README.md b/tests/xbe/performance-counter/README.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..5afb1c224bc614360739ea38df1312dbeab21003
+index 0000000000000000000000000000000000000000..45e880945a671803091ff11210f96d72707a31d9
 --- /dev/null
 +++ b/tests/xbe/performance-counter/README.md
-@@ -0,0 +1,7 @@
+@@ -0,0 +1,9 @@
 +# Performance counter quiet-interval regression
 +
-+An owned public-API guest compares performance-counter elapsed time with interrupt time across 250 ms, 6 s and 11 s intervals without querying the counter during the waits. It produces 13 TAP checks over COM1 and requests normal SMC shutdown.
++An owned guest compares public performance-counter elapsed ticks with independently accumulated read-only PM-timer port samples across 250 ms, 6 s and 11 s intervals. It does not query the public performance counter during a wait. Raw port reads do not update the production extension state. It produces 13 TAP checks over COM1 and requests normal SMC shutdown. No commercial kernel code is read.
 +
-+Build with `NXDK_DIR=/path/to/nxdk PATH=/path/to/nxdk/bin:$PATH make`. Run on a disposable HDD/EEPROM copy with the same emulator configuration for each BIOS. The guest reads no commercial kernel code.
++Build with `NXDK_DIR=/path/to/nxdk PATH=/path/to/nxdk/bin:$PATH make`. Run on a disposable HDD/EEPROM copy with identical emulator configuration for each BIOS.
 +
-+The one-percent tolerance plus two clock ticks covers sample ordering and the unchanged published frequency's calibration difference. This is a correctness test, not a frame-rate benchmark.
++Raw-before/counter/raw-after brackets at both endpoints define exact lower and upper hardware-tick bounds; each bracket must be shorter than 10 ms at the reported frequency. Every 250 ms raw sampling gap must remain below one hardware wrap (approximately 4.97 s); this 24-bit observer cannot recover multiple unseen wraps. Interrupt-time elapsed values remain diagnostics and verify that the requested delays completed, but are not the PM-timer calibration oracle: the two clocks diverged under shared CI load.
++
++This tests timer extension correctness, not wall-clock calibration or frame rate.
 diff --git a/tests/xbe/performance-counter/main.c b/tests/xbe/performance-counter/main.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..46daada9128c7f569b7507d13419b4b2cd3cf98c
+index 0000000000000000000000000000000000000000..f2fa9a1769be420877e023049e06d725e1d30021
 --- /dev/null
 +++ b/tests/xbe/performance-counter/main.c
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,80 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include <xboxkrnl/xboxkrnl.h>
 +#include "../regression.h"
 +
++static ULONG timer_low(void)
++{
++    ULONG value;
++    __asm__ __volatile__("inl %1, %0" : "=a"(value) : "Nd"((USHORT)0x8008)
++                         : "memory");
++    return value & 0x00ffffff;
++}
++
++static ULONG timer_delta(ULONG later, ULONG earlier)
++{
++    return (later - earlier) & 0x00ffffff;
++}
++
 +static void quiet_interval(unsigned milliseconds, ULONGLONG frequency)
 +{
-+    LARGE_INTEGER delay = { .QuadPart = -(LONGLONG)milliseconds * 10000 };
++    LARGE_INTEGER delay = { .QuadPart = -2500000 };
 +    ULONGLONG interrupt_start = KeQueryInterruptTime();
++    ULONG raw_start_before = timer_low();
 +    ULONGLONG counter_start = KeQueryPerformanceCounter();
-+    NTSTATUS status = KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    ULONG raw_start_after = timer_low(), previous = raw_start_after;
++    ULONGLONG reference = 0;
++    NTSTATUS status = STATUS_SUCCESS;
++    /* Raw reads never call the public counter or update its extension.
++     * Every sampling gap must remain shorter than a hardware timer wrap. */
++    for (unsigned waited = 0; waited < milliseconds; waited += 250) {
++        NTSTATUS wait = KeDelayExecutionThread(KernelMode, FALSE, &delay);
++        if (!NT_SUCCESS(wait)) status = wait;
++        ULONG current = timer_low();
++        reference += timer_delta(current, previous);
++        previous = current;
++    }
 +    ULONGLONG counter_end = KeQueryPerformanceCounter();
++    ULONG raw_end_after = timer_low();
 +    ULONGLONG interrupt_end = KeQueryInterruptTime();
 +    ULONGLONG counter_delta = counter_end - counter_start;
 +    ULONGLONG interrupt_delta = interrupt_end - interrupt_start;
-+    ULONGLONG observed = counter_delta * 10000000ULL;
-+    ULONGLONG expected = interrupt_delta * frequency;
-+    ULONGLONG error = observed > expected ? observed - expected : expected - observed;
-+    /* One-percent allowance plus two clock ticks covers sample order and
-+     * the published frequency's small calibration difference. */
-+    ULONGLONG tolerance = expected / 100 + frequency * 20000ULL;
++    ULONG start_bracket = timer_delta(raw_start_after, raw_start_before);
++    ULONG end_bracket = timer_delta(raw_end_after, previous);
++    ULONGLONG upper = reference + start_bracket + end_bracket;
++    /* The actual counter samples lie between their adjacent raw reads.
++     * Bound that uncertainty; a delayed bracket cannot hide a lost wrap. */
++    int narrow_brackets = start_bracket <= frequency / 100 &&
++                          end_bracket <= frequency / 100;
 +    tap_comment("quiet_ms=%u status=%08lx frequency=%llu counter_start=%llu "
 +                "counter_end=%llu counter_delta=%llu interrupt_100ns=%llu",
 +                milliseconds, (unsigned long)status,
@@ -319,13 +348,18 @@ index 0000000000000000000000000000000000000000..46daada9128c7f569b7507d13419b4b2
 +                (unsigned long long)counter_end,
 +                (unsigned long long)counter_delta,
 +                (unsigned long long)interrupt_delta);
++    tap_comment("raw_reference quiet_ms=%u lower=%llu upper=%llu "
++                "start_bracket=%lu end_bracket=%lu", milliseconds,
++                (unsigned long long)reference, (unsigned long long)upper,
++                (unsigned long)start_bracket, (unsigned long)end_bracket);
 +    regression_check(NT_SUCCESS(status), "quiet delay returns successfully");
 +    regression_check(interrupt_delta >= (ULONGLONG)milliseconds * 10000,
 +                     "independent interrupt time covers requested wait");
 +    regression_check(counter_end > counter_start,
 +                     "performance counter advances across quiet interval");
-+    regression_check(error <= tolerance,
-+                     "performance counter retains every elapsed timer wrap");
++    regression_check(narrow_brackets && counter_delta >= reference &&
++                     counter_delta <= upper,
++                     "performance counter matches independently accumulated timer ticks");
 +}
 +
 +int main(void)
