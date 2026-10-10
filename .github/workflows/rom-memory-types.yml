@@ -1,0 +1,37 @@
+name: ROM memory-type diagnostic
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/rom-memory-types.yml'
+      - 'tests/xbe/rom-memory-types/**'
+      - 'tests/host/test_rom_memory_types.py'
+      - 'tools/rom_memory_types.py'
+  push:
+    paths:
+      - '.github/workflows/rom-memory-types.yml'
+      - 'tests/xbe/rom-memory-types/**'
+      - 'tests/host/test_rom_memory_types.py'
+      - 'tools/rom_memory_types.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check architectural interpretation and capture validation
+        run: python3 -m unittest tests/host/test_rom_memory_types.py -v
+      - name: Build diagnostic guest using pinned nxdk
+        run: |
+          docker run --rm \
+            --mount "type=bind,src=$PWD/tests/xbe/rom-memory-types,dst=/work" \
+            -w /work \
+            ghcr.io/xboxdev/nxdk@sha256:bab707b7ed2544e9956d51e7b411a4575ab66120bd608b3237698495203d15f7 \
+            make -j2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rom-memory-types-guest
+          path: |
+            tests/xbe/rom-memory-types/bin/default.xbe
+            tests/xbe/rom-memory-types/rom-memory-types.iso
