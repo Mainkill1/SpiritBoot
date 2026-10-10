@@ -90,10 +90,12 @@ def patch_inputs(patches):
 
 def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                    media_policy="emulator-file-media", metadata_counters=False,
-                   memory_mib=128, reserve_upper_ram=False):
+                   memory_mib=128, reserve_upper_ram=False, rom_resident=False):
     source, output = Path(source).resolve(), Path(output).resolve()
     if variant not in ("release", "debug"):
         raise ValueError("variant must be release or debug")
+    if not isinstance(rom_resident, bool) or (rom_resident and variant != "release"):
+        raise ValueError("ROM residency requires a release build and boolean selection")
     if media_policy not in ("strict", "emulator-file-media"):
         raise ValueError("invalid media policy")
     if not isinstance(metadata_counters, bool):
@@ -112,6 +114,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
     manifest = {"schema": 1, "status": "failed", "variant": variant,
                 "media_policy": media_policy, "memory_mib": memory_mib,
                 "reserve_upper_ram": reserve_upper_ram,
+                "rom_resident": rom_resident,
                 "metadata_counters": metadata_counters,
                 "source": str(source), "source_directory": str(source), "output_directory": str(output),
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -180,14 +183,16 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                  "-DCMAKE_BUILD_TYPE=Release", f"-DDBG={int(variant == 'debug')}", "-DKDBG=FALSE",
                  f"-DXBOX_RAM_MIB={memory_mib}",
                  "-DXBOX_RESERVE_UPPER_RAM=" + ("ON" if reserve_upper_ram else "OFF"),
+                 "-DNXK_ROM_KERNEL=" + ("ON" if rom_resident else "OFF"),
                  "-DXBOX_EMULATOR_FILE_MEDIA=" +
                  ("ON" if media_policy == "emulator-file-media" else "OFF"),
                  "-DNXK_METADATA_COUNTERS=" +
                  ("ON" if metadata_counters else "OFF")])
             run(["cmake", "--build", str(build), "--clean-first", "--target", "flash", "--parallel", "4"])
         image = build / "flash.bin"
-        if image.stat().st_size != FLASH_SIZES[variant]:
-            raise ValueError(f"invalid flash size: expected {FLASH_SIZES[variant]} bytes")
+        expected_size = 512 * 1024 if rom_resident else FLASH_SIZES[variant]
+        if image.stat().st_size != expected_size:
+            raise ValueError(f"invalid flash size: expected {expected_size} bytes")
         shutil.copyfile(image, published)
         manifest.update(status="built", flash_size=published.stat().st_size,
                         flash_sha256=sha256(published))

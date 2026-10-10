@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [release, debug]
+        variant: [release, debug, release-rom]
         memory_mib: [64, 128]
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +43,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             spiritboot-toolchain python3 scripts/build-firmware.py \
             --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
-            --variant ${{ matrix.variant }} --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
+            --variant ${{ matrix.variant == 'release-rom' && 'release' || matrix.variant }} ${{ matrix.variant == 'release-rom' && '--rom-resident' || '' }} --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
       - name: Check the built source identity and actual kernel work
         run: |
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
@@ -54,7 +54,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 6e7666c73c916a235d29ec793dc9ee0920df299b
+            test "$actual_tree" = 217d95a9f06cea8505ea87fd58db66acac1c9d6c
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check.py" "$output/upper-ram-reservation" >"$output/upper-ram-reservation.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" >"$output/upper-ram-config.log" 2>&1
@@ -70,6 +70,10 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/boot-image/check.py" >"$output/boot-image.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/discardable-sections/check.py" "$output/discardable-sections" >"$output/discardable-sections.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check.py" "$output/boot-layout" >"$output/boot-layout.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/rom-kernel/test-image.py" >"$output/rom-image.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/rom-kernel/check-table.py" "$output/rom-table" >"$output/rom-table.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/rom-kernel/check-boot.py" "$output/rom-boot" >"$output/rom-boot.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/rom-kernel/check-loader.py" "$output/rom-loader" >"$output/rom-loader.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-layout/check-image-bounds.py" "$output/image-bounds" >"$output/image-bounds.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
@@ -116,15 +120,15 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '6e7666c73c916a235d29ec793dc9ee0920df299b', result
+          assert result['source_tree'] == '217d95a9f06cea8505ea87fd58db66acac1c9d6c', result
           PY
       - name: Verify clean release rebuild
-        if: matrix.variant == 'release'
+        if: startsWith(matrix.variant, 'release')
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             spiritboot-toolchain python3 scripts/build-firmware.py \
-            --source .reference/roswell --output artifacts/firmware-repeat --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
-          cmp artifacts/firmware-release-${{ matrix.memory_mib }}mib/flash.bin artifacts/firmware-repeat/flash.bin
+            --source .reference/roswell --output artifacts/firmware-repeat ${{ matrix.variant == 'release-rom' && '--rom-resident' || '' }} --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
+          cmp artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/flash.bin artifacts/firmware-repeat/flash.bin
       - name: Prepare pinned open runtime fixtures
         run: |
           python3 - <<'PY'
@@ -199,6 +203,38 @@ jobs:
                            expected_memory_mib=${{ matrix.memory_mib }})
           assert len(result['workloads']) == 41, result
           PY
+      - name: Qualify exact ROM shadow through native warm reboot
+        if: matrix.variant == 'release-rom' && matrix.memory_mib == 64
+        run: |
+          python3 - <<'PYCODE'
+          import lzma, pathlib, struct
+          flash = pathlib.Path('artifacts/firmware-release-rom-64mib/flash.bin').read_bytes()
+          offsets = [p for p in range(len(flash)-18) if flash[p:p+4] == b'NXIR' and flash[p+12:p+18] == b'\xfd7zXZ\0']
+          assert len(offsets) == 1, offsets
+          p = offsets[0]; compressed = struct.unpack_from('<I', flash, p+4)[0]
+          image = lzma.decompress(flash[p+12:p+12+compressed])
+          count = struct.unpack_from('<I', image, 0x808)[0]
+          spans = [struct.unpack_from('<IIII', image, 0x810+i*16) for i in range(count)]
+          assert any(rva <= 0x3000 < rva+pages*4096 for rva,pages,physical,crc in spans), spans
+          PYCODE
+          guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-release-rom-64mib/build.json"))["source_directory"])')
+          nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
+            -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -w "$guest_source/tests/xbe/rom-shadow-persistence" \
+            "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
+          docker run --init --rm -v "$PWD:/work" spiritboot-toolchain xvfb-run -a \
+            python3 scripts/run-firmware.py --xemu artifacts/squashfs-root/usr/bin/xemu \
+            --flash artifacts/firmware-release-rom-64mib/flash.bin \
+            --hdd artifacts/xbox_hdd.qcow2 \
+            --dvd "$guest_source/tests/xbe/rom-shadow-persistence/rom-shadow-persistence.iso" \
+            --memory-mib 64 --output artifacts/rom-shadow-release-rom-64mib --timeout 45 --expect-tap
+          python3 - <<'PYCODE'
+          import json
+          result = json.load(open('artifacts/rom-shadow-release-rom-64mib/run.json'))
+          assert result['status'] == 'passed' and result['tap']['ok'] == result['tap']['plan'] == 7, result
+          assert result['tap']['todo'] == result['tap']['failed'] == result['tap']['skipped'] == 0, result
+          PYCODE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -223,4 +259,5 @@ jobs:
             artifacts/firmware-upper-reserve/flash.bin
             artifacts/firmware-upper-reserve/build.json
             artifacts/firmware-upper-reserve/build.log
+            artifacts/rom-shadow-release-rom-64mib/
             LICENSE

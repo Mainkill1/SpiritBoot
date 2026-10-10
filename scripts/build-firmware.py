@@ -25,13 +25,16 @@ def main():
     parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
     parser.add_argument("--metadata-counters", action="store_true",
                         help="enable aggregate directory-update diagnostics; not a performance build")
+    parser.add_argument("--rom-resident", action="store_true",
+                        help="experimental release kernel with immutable pages in ROM")
     args = parser.parse_args()
     try:
         result = build_firmware(args.source, args.output, args.variant, args.lock,
                                 args.media_policy,
                                 metadata_counters=args.metadata_counters,
                                 memory_mib=args.memory_mib,
-                                reserve_upper_ram=args.reserve_upper_ram)
+                                reserve_upper_ram=args.reserve_upper_ram,
+                                rom_resident=args.rom_resident)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"build failed: {error}", file=sys.stderr)
         return 1
