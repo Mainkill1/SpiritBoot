@@ -1,0 +1,180 @@
+diff --git a/ntoskrnl/xb/ordinals.map b/ntoskrnl/xb/ordinals.map
+index 1302186e..0ae18a5c 100644
+--- a/ntoskrnl/xb/ordinals.map
++++ b/ntoskrnl/xb/ordinals.map
+@@ -188,7 +188,7 @@
+ 141  KeRundownQueue
+ 142  KeSaveFloatingPointState
+ 140  KeResumeThread                    # returns the pre-resume count
+-143  KeSetBasePriorityThread
++143  XeKeSetBasePriorityThread       # resolve public thread shadow before native setter
+ 144  KeSetDisableBoostThread           # ThreadFlags bit 1; returns the old setting
+ 145  KeSetEvent
+ 146  KeSetEventBoostPriority
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index 0f442f1c..bbb6f87c 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -3001,6 +3001,33 @@ XeResolveThread(_In_opt_ PVOID Thread)
+     return Resolved;
+ }
+ 
++/* The Xbox public thread pointer is a shadow, not an NT KTHREAD.  Keep
++ * object-manager pointers valid too, as for the APC entry points. */
++LONG NTAPI
++XeKeSetBasePriorityThread(PVOID Thread, LONG Increment)
++{
++    PKTHREAD Native = XeResolveThread(Thread);
++    LONG Previous;
++
++    if (Native == NULL)
++        return 0;
++
++    Previous = KeSetBasePriorityThread(Native, Increment);
++    if (Native->XeXboxFs4)
++    {
++        /* On the single-CPU Xbox, prevent a concurrent setter or DPC from
++         * changing a field between its load and public-shadow store. Keep
++         * the native setter's own scheduling boundary unchanged. */
++        KIRQL OldIrql = KeRaiseIrqlToDpcLevel();
++        /* Public Xbox offsets also used by NxkPublishThreadProcess.  Do not
++         * republish the whole shadow: its APC queues may already be live. */
++        Native->XeXboxShadow[0x32] = (UCHAR)Native->Priority;
++        Native->XeXboxShadow[0x70] = (UCHAR)Native->BasePriority;
++        KeLowerIrql(OldIrql);
++    }
++    return Previous;
++}
++
+ static VOID NTAPI
+ XeApcKernelTrampoline(PKAPC Apc,
+                         PKNORMAL_ROUTINE *NormalRoutine,
+diff --git a/tests/xbe/thread-base-priority/Makefile b/tests/xbe/thread-base-priority/Makefile
+new file mode 100644
+index 00000000..eac3b518
+--- /dev/null
++++ b/tests/xbe/thread-base-priority/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = THREAD-BASE-PRIORITY
++GEN_XISO = thread-base-priority.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../.reference/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/thread-base-priority/main.c b/tests/xbe/thread-base-priority/main.c
+new file mode 100644
+index 00000000..93a8b939
+--- /dev/null
++++ b/tests/xbe/thread-base-priority/main.c
+@@ -0,0 +1,111 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Public thread shadow and object-manager priority compatibility. */
++#include <stdio.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include "../regression.h"
++
++static void exercise_current_thread(void)
++{
++    PKTHREAD public_thread = KeGetCurrentThread();
++    PKTHREAD native_thread = NULL;
++    regression_require(public_thread != NULL, "current thread is available");
++    NTSTATUS status = ObReferenceObjectByHandle(NtCurrentThread(),
++        &PsThreadObjectType, (PVOID *)&native_thread);
++    regression_require(NT_SUCCESS(status) && native_thread != NULL,
++        "current-thread handle resolves to a referenced thread");
++    const SCHAR initial = public_thread->BasePriority;
++    /* Object-manager pointers remain supported; shadow pointers are equally
++     * valid Xbox inputs. Start with the former to expose publication too. */
++    PKTHREAD targets[] = { native_thread, public_thread };
++    for (unsigned i = 0; i < 2; ++i) {
++        tap_comment("priority path=%u initial=%d", i, initial);
++        tap_drain();
++        LONG previous = KeSetBasePriorityThread(targets[i], 1);
++        regression_check(previous == 0, "raise returns previous zero increment");
++        regression_check(public_thread->BasePriority == initial + 1,
++            "public base priority reflects raised native priority");
++        previous = KeSetBasePriorityThread(targets[i], 0);
++        regression_check(previous == 1, "restore returns previous raised increment");
++        regression_check(public_thread->BasePriority == initial,
++            "public base priority reflects restored native priority");
++        previous = KeSetBasePriorityThread(targets[i], 0);
++        regression_check(previous == 0, "unchanged base returns zero increment");
++        LARGE_INTEGER delay = { .QuadPart = -100000 };
++        status = KeDelayExecutionThread(KernelMode, FALSE, &delay);
++        regression_check(NT_SUCCESS(status), "thread remains schedulable after setters");
++    }
++    ObfDereferenceObject(native_thread);
++}
++
++static DWORD WINAPI worker(LPVOID argument)
++{
++    (void)argument;
++    exercise_current_thread();
++    return 0;
++}
++
++static HANDLE parked_ready, parked_release;
++static PKTHREAD parked_public;
++
++static DWORD WINAPI parked_worker(LPVOID argument)
++{
++    (void)argument;
++    parked_public = KeGetCurrentThread();
++    SetEvent(parked_ready);
++    WaitForSingleObject(parked_release, 5000);
++    return 0;
++}
++
++static void exercise_other_thread(void)
++{
++    parked_ready = CreateEvent(NULL, TRUE, FALSE, NULL);
++    parked_release = CreateEvent(NULL, TRUE, FALSE, NULL);
++    regression_require(parked_ready != NULL, "create worker-ready event");
++    regression_require(parked_release != NULL, "create worker-release event");
++    HANDLE handle = CreateThread(NULL, 0, parked_worker, NULL, 0, NULL);
++    regression_require(handle != NULL, "start independent target thread");
++    regression_require(WaitForSingleObject(parked_ready, 5000) == WAIT_OBJECT_0,
++        "target publishes its public pointer");
++    regression_require(parked_public != NULL, "target public thread is available");
++    PKTHREAD native = NULL;
++    NTSTATUS status = ObReferenceObjectByHandle(handle, &PsThreadObjectType,
++        (PVOID *)&native);
++    regression_require(NT_SUCCESS(status) && native != NULL,
++        "target handle resolves to a referenced thread");
++    SCHAR target_base = parked_public->BasePriority;
++    SCHAR caller_base = KeGetCurrentThread()->BasePriority;
++    PKTHREAD targets[] = { native, parked_public };
++    for (unsigned i = 0; i < 2; ++i) {
++        LONG previous = KeSetBasePriorityThread(targets[i], 1);
++        regression_check(previous == 0, "other-thread raise returns zero increment");
++        regression_check(parked_public->BasePriority == target_base + 1,
++            "other thread receives raised base priority");
++        regression_check(KeGetCurrentThread()->BasePriority == caller_base,
++            "setting another thread preserves caller base priority");
++        previous = KeSetBasePriorityThread(targets[i], 0);
++        regression_check(previous == 1, "other-thread restore returns raised increment");
++        regression_check(parked_public->BasePriority == target_base,
++            "other thread receives restored base priority");
++    }
++    regression_require(SetEvent(parked_release), "release target worker");
++    regression_require(WaitForSingleObject(handle, 5000) == WAIT_OBJECT_0,
++        "target worker completes after priority updates");
++    ObfDereferenceObject(native);
++    CloseHandle(handle);
++    CloseHandle(parked_ready);
++    CloseHandle(parked_release);
++}
++
++int main(void)
++{
++    regression_begin();
++    exercise_current_thread();
++    HANDLE handle = CreateThread(NULL, 0, worker, NULL, 0, NULL);
++    regression_require(handle != NULL, "start registered title worker");
++    regression_require(WaitForSingleObject(handle, 5000) == WAIT_OBJECT_0,
++        "worker priority checks finish");
++    CloseHandle(handle);
++    exercise_other_thread();
++    regression_finish();
++}
