@@ -1,0 +1,441 @@
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index 7d30a054..87d28602 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -14,8 +14,9 @@
+  * tracked by VA for ExQueryPoolBlockSize, which titles reach through
+  * the pool-size ordinal).  PagedPool requests are served by the same
+  * nonpaged backend -- there is no paging, only the API distinction.
+- * Pages are never returned to the system: pool footprint is bounded
+- * by peak usage, which on this machine is what retail does too.
++ * One empty bucket page per class/domain is retained for quick reuse.
++ * Surplus empty pages are returned, and allocation pressure can reclaim
++ * the reserve too. Live allocations are never relocated.
+  *
+  * One spinlock covers the class lists and the big-block table, so
+  * every path is DISPATCH_LEVEL-safe and never waits.  Cache-aligned
+@@ -85,23 +86,25 @@ C_ASSERT(sizeof(NXP_HEADER) == 8);
+ typedef struct _NXP_FREE
+ {
+     struct _NXP_FREE *Next;
++    struct _NXP_FREE *Prev;
+ } NXP_FREE;
+ 
++C_ASSERT(sizeof(NXP_FREE) <= 32 - sizeof(NXP_HEADER));
++
+ /* (block bytes + 15) >> 4 -> class index; 4096 >> 4 entries + 1. */
+ static UCHAR NxpClassMap[(PAGE_SIZE >> 4) + 1];
+ static NXP_FREE *NxpFreeLists[NXP_BUCKET_LISTS];
++static UCHAR NxpEmptyPages[NXP_BUCKET_LISTS];
+ static KSPIN_LOCK NxpLock;
+ 
+ /* Per-window-page state for sub-page bucket pages.  One byte per page:
+  * NXP_NOT_BUCKET means the page isn't a bucket page; 0..128 is the live
+  * sub-page block count (the smallest 32-byte class fits 128 blocks, so
+  * 129..254 are spare and 0xFF is free as the sentinel).  A count of 0 is
+- * thus an empty-but-still-mapped bucket page.  Empty bucket pages are NOT
+- * freed on the spot -- hot pools (IRPs during streaming) alloc/free a
+- * single object and a per-free release would thrash a fresh page per
+- * IO.  Instead NxpReclaimEmptyBucketPages sweeps them back to the
+- * supply when a whole-page allocation can't be satisfied: capacity is
+- * elastic at the exhaustion edge, steady-state stays fast. */
++ * thus an empty-but-still-mapped bucket page. One such page per class
++ * is retained: transient IRPs reuse it without page allocation/free.
++ * The doubly linked free blocks let an empty page detach by visiting
++ * only that page's blocks. Physical release happens outside NxpLock. */
+ #define NXP_NOT_BUCKET 0xFF
+ static UCHAR NxpPageState[NXK_POOL_WINDOW_PAGES];
+ #define NXP_PAGE_INDEX(P) \
+@@ -152,6 +155,7 @@ InitializePool(IN POOL_TYPE PoolType,
+ 
+     /* No page is a bucket page yet (0 would read as an empty bucket). */
+     RtlFillMemory(NxpPageState, sizeof(NxpPageState), NXP_NOT_BUCKET);
++    RtlZeroMemory(NxpEmptyPages, sizeof(NxpEmptyPages));
+ 
+     /* Map every 16-byte block-size step to the smallest fitting class. */
+     c = 0;
+@@ -231,6 +235,34 @@ ExInitializePoolDescriptor(IN PPOOL_DESCRIPTOR PoolDescriptor,
+ 
+ ULONG NxpReclaimEmptyBucketPages(VOID);
+ 
++/* NxpLock is held. Every block belongs to this empty page's free list;
++ * detach them without scanning other pages of the same size class. */
++static VOID
++NxpDetachEmptyBucketPage(ULONG_PTR PageVa)
++{
++    NXP_HEADER *Hdr0 = (NXP_HEADER *)PageVa;
++    ULONG Class = Hdr0->ClassIndex;
++    ULONG Size = NxpClassSize[NXP_SIZE_CLASS(Class)];
++    ULONG Count = PAGE_SIZE / Size;
++
++    ASSERT(NxpPageState[NXP_PAGE_INDEX(PageVa)] == 0);
++    ASSERT(NxpEmptyPages[Class] != 0);
++    for (ULONG i = 0; i < Count; i++)
++    {
++        NXP_HEADER *Hdr = (NXP_HEADER *)(PageVa + i * Size);
++        NXP_FREE *Blk = (NXP_FREE *)(Hdr + 1);
++        ASSERT(Hdr->Magic == NXP_MAGIC_FREE && Hdr->ClassIndex == Class);
++        if (Blk->Prev != NULL)
++            Blk->Prev->Next = Blk->Next;
++        else
++            NxpFreeLists[Class] = Blk->Next;
++        if (Blk->Next != NULL)
++            Blk->Next->Prev = Blk->Prev;
++    }
++    NxpEmptyPages[Class]--;
++    NxpPageState[NXP_PAGE_INDEX(PageVa)] = NXP_NOT_BUCKET;
++}
++
+ static VOID
+ NxpAllocFailed(IN POOL_TYPE PoolType,
+                IN SIZE_T NumberOfBytes)
+@@ -302,6 +334,9 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+     if (Blk != NULL)
+     {
+         NxpFreeLists[Class] = Blk->Next;
++        if (Blk->Next != NULL) Blk->Next->Prev = NULL;
++        if (NxpPageState[NXP_PAGE_INDEX(Blk)] == 0)
++            NxpEmptyPages[Class]--;
+         NxpPageState[NXP_PAGE_INDEX(Blk)]++;
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+         ASSERT((((NXP_HEADER *)Blk) - 1)->Magic == NXP_MAGIC_FREE);
+@@ -336,6 +371,8 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+             H->ClassIndex = (USHORT)Class;
+             H->Magic = NXP_MAGIC_FREE;
+             F->Next = NxpFreeLists[Class];
++            F->Prev = NULL;
++            if (F->Next != NULL) F->Next->Prev = F;
+             NxpFreeLists[Class] = F;
+         }
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+@@ -390,6 +427,7 @@ ExFreePoolWithTag(IN PVOID P,
+     NXP_HEADER *Hdr;
+     NXP_FREE *Blk;
+     KIRQL OldIrql;
++    PVOID EmptyPage = NULL;
+ 
+     if (P == NULL)
+     {
+@@ -442,10 +480,18 @@ ExFreePoolWithTag(IN PVOID P,
+ 
+     KeAcquireSpinLock(&NxpLock, &OldIrql);
+     Blk->Next = NxpFreeLists[Hdr->ClassIndex];
++    Blk->Prev = NULL;
++    if (Blk->Next != NULL) Blk->Next->Prev = Blk;
+     NxpFreeLists[Hdr->ClassIndex] = Blk;
+ 
+-    NxpPageState[NXP_PAGE_INDEX(P)]--;
++    if (--NxpPageState[NXP_PAGE_INDEX(P)] == 0 &&
++        ++NxpEmptyPages[Hdr->ClassIndex] > 1)
++    {
++        EmptyPage = PAGE_ALIGN(P);
++        NxpDetachEmptyBucketPage((ULONG_PTR)EmptyPage);
++    }
+     KeReleaseSpinLock(&NxpLock, OldIrql);
++    if (EmptyPage != NULL) NXP_PAGES_FREE(EmptyPage);
+ }
+ 
+ /* Sweep empty bucket pages back to the supply.  Called when a
+@@ -460,8 +506,6 @@ NxpReclaimEmptyBucketPages(VOID)
+     for (Idx = 0; Idx < NXK_POOL_WINDOW_PAGES; Idx++)
+     {
+         ULONG_PTR PageVa;
+-        NXP_HEADER *Hdr0;
+-        NXP_FREE **Link;
+ 
+         /* Only empty bucket pages (state == 0) are reclaimable; a
+          * non-bucket page reads NXP_NOT_BUCKET and a live one reads > 0. */
+@@ -476,16 +520,7 @@ NxpReclaimEmptyBucketPages(VOID)
+         }
+ 
+         PageVa = NXK_POOL_WINDOW_BASE + ((ULONG_PTR)Idx << PAGE_SHIFT);
+-        Hdr0 = (NXP_HEADER *)PageVa;
+-        Link = &NxpFreeLists[Hdr0->ClassIndex];
+-        while (*Link != NULL)
+-        {
+-            if (((ULONG_PTR)*Link & ~(ULONG_PTR)(PAGE_SIZE - 1)) == PageVa)
+-                *Link = (*Link)->Next;
+-            else
+-                Link = &(*Link)->Next;
+-        }
+-        NxpPageState[Idx] = NXP_NOT_BUCKET;
++        NxpDetachEmptyBucketPage(PageVa);
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+ 
+         NXP_PAGES_FREE((PVOID)PageVa);
+diff --git a/tests/host/pool-idle/cases.c b/tests/host/pool-idle/cases.c
+new file mode 100644
+index 00000000..416c7ae4
+--- /dev/null
++++ b/tests/host/pool-idle/cases.c
+@@ -0,0 +1,110 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++static void reset(void) {
++    assert(!pool_lock_held);
++    memset(used,0,sizeof(used));memset(runs,0,sizeof(runs));
++    memset(NxpFreeLists,0,sizeof(NxpFreeLists));committed=peak=allocations=releases=0;
++    allow_pages=1;page_limit=NXK_POOL_WINDOW_PAGES;InitializePool(NonPagedPool,0);
++}
++static void invariant(void) {
++    unsigned seen[NXK_POOL_WINDOW_PAGES]={0};
++#if HAS_EMPTY
++    unsigned empty[NXP_BUCKET_LISTS]={0};
++#endif
++    for(unsigned c=0;c<NXP_BUCKET_LISTS;c++) {
++        NXP_FREE *prev=NULL;
++        unsigned traversed=0;
++        for(NXP_FREE *f=NxpFreeLists[c];f;f=f->Next) {
++            assert(++traversed<=NXK_POOL_WINDOW_PAGES*128u);
++            unsigned page=NXP_PAGE_INDEX(f);
++            assert(page<NXK_POOL_WINDOW_PAGES&&used[page]);
++            NXP_HEADER *h=((NXP_HEADER*)f)-1;
++            assert(h->Magic==NXP_MAGIC_FREE&&h->ClassIndex==c);
++#if HAS_PREV
++            assert(f->Prev==prev);
++#endif
++            prev=f;seen[page]++;
++        }
++        (void)prev;
++    }
++    for(unsigned i=0;i<NXK_POOL_WINDOW_PAGES;i++) {
++        if(NxpPageState[i]==NXP_NOT_BUCKET)continue;
++        assert(used[i]);NXP_HEADER *h=(NXP_HEADER*)(arena+i*PAGE_SIZE);
++        unsigned total=PAGE_SIZE/NxpClassSize[NXP_SIZE_CLASS(h->ClassIndex)];
++        assert(seen[i]+NxpPageState[i]==total);
++#if HAS_EMPTY
++        if(NxpPageState[i]==0)empty[h->ClassIndex]++;
++#endif
++    }
++#if HAS_EMPTY
++    for(unsigned c=0;c<NXP_BUCKET_LISTS;c++)
++        assert(empty[c]==NxpEmptyPages[c]&&empty[c]<=1);
++#endif
++}
++static void wave(unsigned request, int title, unsigned seed) {
++    void *p[512];unsigned n;
++    void *one=title?NxTitleAllocatePoolWithTag(request,seed):ExAllocatePoolWithTag(NonPagedPool,request,seed);
++    assert(one);size_t capacity=ExQueryPoolBlockSize(one,NULL);
++    assert(capacity>=request);ExFreePoolWithTag(one,seed);
++    n=4*(PAGE_SIZE/(unsigned)(capacity+sizeof(NXP_HEADER)));assert(n<=512);
++    for(unsigned i=0;i<n;i++) {
++        p[i]=title?NxTitleAllocatePoolWithTag(request,seed+i):ExAllocatePoolWithTag(NonPagedPool,request,seed+i);
++        assert(p[i]);memset(p[i],(int)(i%251),request);
++    }
++    invariant();
++    /* Visit every block in a non-page order (n is a power of two). */
++    for(unsigned k=0;k<n;k++) {
++        unsigned i=(k*17+3)%n;
++        for(unsigned b=0;b<request;b++)assert(((unsigned char*)p[i])[b]==i%251);
++        ExFreePoolWithTag(p[i],seed+i);invariant();
++    }
++}
++int main(void) {
++    arena=aligned_alloc(PAGE_SIZE,NXK_POOL_WINDOW_PAGES*PAGE_SIZE);assert(arena);
++    static const unsigned sizes[]={1,32,64,128,256,512,1024,2040};
++    reset();
++    for(unsigned i=0;i<RTL_NUMBER_OF(sizes);i++)wave(sizes[i],0,1000+i*1000);
++    printf("idle after four-page waves: committed=%u peak=%u\n",committed,peak);
++    if(committed>NXP_CLASSES) {
++        fprintf(stderr,"FAIL: unbounded empty-page retention (%u > %lu)\n",committed,(unsigned long)NXP_CLASSES);
++        free(arena);
++        return 1;
++    }
++    assert(committed==NXP_CLASSES);
++    unsigned before=allocations;allow_pages=0;
++    for(unsigned i=0;i<RTL_NUMBER_OF(sizes);i++) {
++        void *p=ExAllocatePoolWithTag(NonPagedPool,sizes[i],42);assert(p);
++        ExFreePoolWithTag(p,42);
++    }
++    assert(allocations==before);invariant();
++    assert(NxpReclaimEmptyBucketPages()==NXP_CLASSES&&committed==0);invariant();
++    puts("PASS all classes: bounded backing, original data/tag/capacity, reserve reuse, pressure release");
++    reset();wave(64,0,1);
++#if XBOX_RESERVE_UPPER_RAM
++    wave(64,1,1001);assert(committed==2);
++    for(unsigned i=0;i<RTL_NUMBER_OF(sizes);i++)wave(sizes[i],1,2000+i*1000);
++    assert(committed==NXP_CLASSES+1);
++#else
++    wave(64,1,1001);assert(committed==1);
++#endif
++    invariant();NxpReclaimEmptyBucketPages();assert(committed==0);
++    reset();
++    void *live=ExAllocatePoolWithTag(NonPagedPool,64,50);assert(live);memset(live,77,64);
++    wave(64,0,1001);invariant();assert(committed<=2);
++    for(unsigned i=0;i<64;i++)assert(((unsigned char*)live)[i]==77);
++    ExFreePoolWithTag(live,50);invariant();assert(committed==1);
++    void *large=ExAllocatePoolWithTag(NonPagedPool,8192,7);assert(large);
++    assert(ExQueryPoolBlockSize(large,NULL)==8192);memset(large,88,8192);
++    assert(NxpReclaimEmptyBucketPages()==1&&committed==2);
++    for(unsigned i=0;i<8192;i++)assert(((unsigned char*)large)[i]==88);
++    ExFreePoolWithTag(large,7);assert(committed==0);
++    reset();wave(64,0,1001);page_limit=2;before=allocations;
++    large=ExAllocatePoolWithTag(NonPagedPool,8192,7);assert(large);
++    assert(allocations==before+2&&committed==2);
++    memset(large,91,8192);invariant();
++    for(unsigned i=0;i<8192;i++)assert(((unsigned char*)large)[i]==91);
++    ExFreePoolWithTag(large,7);assert(committed==0);invariant();
++    reset();wave(64,0,1001);allow_pages=0;
++    assert(ExAllocatePoolWithTag(NonPagedPool,8192,0)==NULL&&committed==0);invariant();
++    puts("PASS domain isolation, live-page exclusion, large allocations and successful/failed pressure retry");
++    free(arena);return 0;
++}
+diff --git a/tests/host/pool-idle/check.py b/tests/host/pool-idle/check.py
+new file mode 100644
+index 00000000..eafa1d36
+--- /dev/null
++++ b/tests/host/pool-idle/check.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Execute production pool allocation/free/reclaim with modeled page boundaries."""
++import importlib.util
++from pathlib import Path
++import re
++import subprocess
++import sys
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location("extract", root / "tests/host/kernel-performance/check.py")
++m = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(m)
++pool = (root / "ntoskrnl/xb/mm/pool.c").read_text()
++macros = pool[pool.index("#ifdef NXK_MM_POOLPAGES"):pool.index("/* SIZE CLASSES")]
++definitions = pool[pool.index("static const USHORT NxpClassSize"):pool.index("/* BIG-BLOCK TABLE")]
++names = ("InitializePool", "NxpAllocFailed", "NxpDetachEmptyBucketPage",
++         "NxpAllocatePoolWithTag", "ExAllocatePoolWithTag", "NxTitleAllocatePoolWithTag",
++         "NxTitleAllocatePool", "ExAllocatePool", "ExFreePoolWithTag",
++         "NxpReclaimEmptyBucketPages", "ExQueryPoolBlockSize")
++bodies = "".join(m.function(pool, name) for name in names
++                 if re.search(r"\b" + name + r"\s*\([^;]*?\)\s*\{", pool))
++for reserve in (0, 1):
++    source = out / f"pool-idle-{reserve}.c"
++    source.write_text((root / "tests/host/pool-idle/shim.c").read_text()
++                      + f"\n#define XBOX_RESERVE_UPPER_RAM {reserve}\n"
++                      + macros + definitions
++                      + "\nULONG NxpReclaimEmptyBucketPages(void);\n"
++                      + bodies
++                      + ("\n#define HAS_PREV 1\n" if "struct _NXP_FREE *Prev;" in definitions
++                         else "\n#define HAS_PREV 0\n")
++                      + ("\n#define HAS_EMPTY 1\n" if "NxpEmptyPages[" in definitions
++                         else "\n#define HAS_EMPTY 0\n")
++                      + (root / "tests/host/pool-idle/cases.c").read_text())
++    binary = source.with_suffix("")
++    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
++                    "-fsanitize=address,undefined", str(source), "-o", str(binary)], check=True)
++    subprocess.run([str(binary)], check=True)
+diff --git a/tests/host/pool-idle/shim.c b/tests/host/pool-idle/shim.c
+new file mode 100644
+index 00000000..8b3c00af
+--- /dev/null
++++ b/tests/host/pool-idle/shim.c
+@@ -0,0 +1,95 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <assert.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++#include <sanitizer/asan_interface.h>
++typedef uint32_t ULONG, POOL_TYPE;
++typedef uint16_t USHORT;
++typedef uint8_t UCHAR, BOOLEAN, KIRQL, *PBOOLEAN;
++typedef uintptr_t ULONG_PTR;
++typedef size_t SIZE_T;
++typedef void VOID, *PVOID;
++typedef unsigned char *PUCHAR;
++typedef int KSPIN_LOCK;
++#define IN
++#define OUT
++#define NTAPI
++#define UNREFERENCED_PARAMETER(p) ((void)(p))
++#define FALSE 0
++#define TRUE 1
++#define DBG 0
++#define ASSERT assert
++#define NXK_MM_POOLPAGES 1
++#define PAGE_SHIFT 12
++#define PAGE_SIZE 4096u
++#define NXK_POOL_WINDOW_PAGES 4096u
++static unsigned char *arena;
++#define NXK_POOL_WINDOW_BASE ((uintptr_t)arena)
++#define RTL_NUMBER_OF(a) (sizeof(a) / sizeof((a)[0]))
++#define C_ASSERT(a) _Static_assert(a, #a)
++#define NonPagedPool 0
++#define BASE_POOL_TYPE_MASK 1
++#define MUST_SUCCEED_POOL_MASK 0x100
++#define POOL_RAISE_IF_ALLOCATION_FAILURE 0x10
++#define MUST_SUCCEED_POOL_EMPTY 1
++#define BAD_POOL_CALLER 2
++#define BAD_POOL_HEADER 3
++#define STATUS_INSUFFICIENT_RESOURCES 4
++#define TAG_NONE 0x656e6f4e
++#define PAGE_ALIGN(p) ((void *)((uintptr_t)(p) & ~(uintptr_t)(PAGE_SIZE - 1)))
++#define RtlFillMemory(p,n,v) memset(p,v,n)
++#define RtlZeroMemory(p,n) memset(p,0,n)
++static unsigned char used[NXK_POOL_WINDOW_PAGES];
++static unsigned short runs[NXK_POOL_WINDOW_PAGES];
++static unsigned committed, peak, allocations, releases;
++static unsigned page_limit = NXK_POOL_WINDOW_PAGES;
++static int pool_lock_held, allow_pages = 1;
++static void KeInitializeSpinLock(KSPIN_LOCK *p) { *p = 0; }
++static void KeAcquireSpinLock(KSPIN_LOCK *p, KIRQL *old) {
++    assert(!pool_lock_held && !*p); pool_lock_held = 1; *p = 1; *old = 0;
++}
++static void KeReleaseSpinLock(KSPIN_LOCK *p, KIRQL old) {
++    (void)old; assert(pool_lock_held && *p); pool_lock_held = 0; *p = 0;
++}
++static void KeBugCheckEx(ULONG b, ULONG_PTR a, ULONG_PTR c, ULONG_PTR d, ULONG_PTR e) {
++    (void)b;(void)a;(void)c;(void)d;(void)e;assert(!"unexpected bugcheck");
++}
++static void ExRaiseStatus(ULONG status) { (void)status;assert(!"unexpected raise"); }
++static void *pages_alloc(size_t bytes, int title) {
++    assert(!pool_lock_held); allocations++;
++    if (!allow_pages) return NULL;
++    unsigned count = (unsigned)((bytes + PAGE_SIZE - 1) / PAGE_SIZE);
++    if (count > page_limit || committed > page_limit - count) return NULL;
++    unsigned first = title ? 0 : NXK_POOL_WINDOW_PAGES / 2;
++    unsigned end = title ? NXK_POOL_WINDOW_PAGES / 2 : NXK_POOL_WINDOW_PAGES;
++    for (unsigned i = first; i + count <= end; i++) {
++        unsigned j;
++        for (j = 0; j < count && !used[i+j]; j++) {}
++        if (j != count) continue;
++        memset(used+i, 1, count); runs[i] = (unsigned short)count;
++        __asan_unpoison_memory_region(arena+i*PAGE_SIZE, count*PAGE_SIZE);
++        memset(arena+i*PAGE_SIZE, 0xcc, count*PAGE_SIZE);
++        committed += count; if (committed > peak) peak = committed;
++        return arena+i*PAGE_SIZE;
++    }
++    return NULL;
++}
++static void *NxPoolPagesAlloc(size_t bytes) { return pages_alloc(bytes, 0); }
++static void *NxPoolPagesAllocTitle(size_t bytes) __attribute__((unused));
++static void *NxPoolPagesAllocTitle(size_t bytes) { return pages_alloc(bytes, 1); }
++static void NxPoolPagesFree(void *p) {
++    assert(!pool_lock_held && PAGE_ALIGN(p) == p);
++    unsigned i = (unsigned)(((unsigned char *)p-arena)/PAGE_SIZE), n = runs[i];
++    assert(n); for(unsigned j=0;j<n;j++)assert(used[i+j]);
++    memset(used+i,0,n);runs[i]=0;committed-=n;releases++;
++    memset(p,0xdd,n*PAGE_SIZE);
++    __asan_poison_memory_region(p,n*PAGE_SIZE);
++}
++static int NxPoolPagesOwns(void *p) {
++    return (uintptr_t)p >= (uintptr_t)arena && (uintptr_t)p < (uintptr_t)arena+NXK_POOL_WINDOW_PAGES*PAGE_SIZE;
++}
++static size_t NxPoolPagesQueryRunBytes(void *p) {
++    assert(!pool_lock_held);return (size_t)runs[((unsigned char *)p-arena)/PAGE_SIZE]*PAGE_SIZE;
++}
+diff --git a/tests/host/upper-ram-reservation/check.py b/tests/host/upper-ram-reservation/check.py
+index 23aff2d9..81dfcbb7 100644
+--- a/tests/host/upper-ram-reservation/check.py
++++ b/tests/host/upper-ram-reservation/check.py
+@@ -241,7 +241,7 @@ static LONG InterlockedCompareExchange(LONG *p,LONG v,LONG old) {
+ definitions = pool[pool.index("static const USHORT NxpClassSize"):pool.index("/* BIG-BLOCK TABLE")]
+ page_macros = pool[pool.index("#ifdef NXK_MM_POOLPAGES"):pool.index("/* SIZE CLASSES")]
+ functions = []
+-for name in ("InitializePool", "NxpAllocFailed", "NxpAllocatePoolWithTag",
++for name in ("InitializePool", "NxpDetachEmptyBucketPage", "NxpAllocFailed", "NxpAllocatePoolWithTag",
+              "ExAllocatePoolWithTag", "NxTitleAllocatePoolWithTag", "NxTitleAllocatePool", "ExAllocatePool",
+              "ExFreePoolWithTag", "NxpReclaimEmptyBucketPages", "ExQueryPoolBlockSize"):
+     if re.search(r"\b" + name + r"\s*\([^;]*?\)\s*\{", pool):
