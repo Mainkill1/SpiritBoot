@@ -1,0 +1,119 @@
+diff --git a/tests/host/init-audit-data/check.py b/tests/host/init-audit-data/check.py
+new file mode 100644
+index 00000000..285eee35
+--- /dev/null
++++ b/tests/host/init-audit-data/check.py
+@@ -0,0 +1,47 @@
++#!/usr/bin/env python3
++"""Real PE fixtures distinguish constant data from executable references."""
++from pathlib import Path
++import os
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++output = Path(sys.argv[1]).resolve()
++output.mkdir(parents=True, exist_ok=True)
++compiler = "i686-w64-mingw32-gcc"
++linker_script = root / "sdk/cmake/xbox-kernel.lds"
++allow = output / "empty.allow"
++allow.write_text("")
++
++cases = {
++    "fake-data-branch": (False, False, "PAGECONS", 0),
++    "actual-data-pointer": (True, False, "PAGECONS", 1),
++    "actual-code-branch": (False, True, "PAGECONS", 1),
++    "unknown-span": (False, False, "PAGEUNKNOWN", 1),
++}
++for name, (pointer, code_branch, section, expected) in cases.items():
++    directory = output / name
++    directory.mkdir(exist_ok=True)
++    source = directory / "fixture.S"
++    source.write_text(
++        '.text\n.globl _entry\n_entry: ret\n'
++        '.section PAGE,"x"\n.globl _runtime\n_runtime:\n' +
++        ('call _discarded\n' if code_branch else '') +
++        'ret\n.section INIT,"x"\n.globl _discarded\n_discarded: ret\n' +
++        f'.section {section},"dr"\n.p2align 2\n.globl _table\n_table:\n' +
++        ('.long _discarded\n' if pointer else
++         '.byte 0xe9\n.long _discarded - . - 4\n'))
++    exe = directory / "fixture.exe"
++    subprocess.run([compiler, "-nostdlib", "-Wl,--entry,_entry",
++                    "-Wl,--image-base,0x84000000", "-Wl,-T," + str(linker_script),
++                    str(source), "-o", str(exe)], check=True)
++    result = subprocess.run([sys.executable, str(root / "tools/init-audit.py"),
++                             "--check", str(exe), "--allow", str(allow)],
++                            capture_output=True, text=True)
++    (directory / "audit.log").write_text(result.stdout + result.stderr)
++    assert result.returncode == expected, name + ":\n" + result.stdout + result.stderr
++    if expected:
++        kind = "data" if pointer else "code"
++        assert "[" + kind + "]" in result.stdout + result.stderr, (
++            result.stdout + result.stderr)
++    print(name + ": expected audit outcome")
+diff --git a/tools/init-audit.py b/tools/init-audit.py
+index 61ffeac3..f4b2fcaf 100755
+--- a/tools/init-audit.py
++++ b/tools/init-audit.py
+@@ -215,6 +215,32 @@ if check_mode:
+         a, n = all_syms[idx]
+         return f"{n}+0x{va - a:x}" if va != a else n
+ 
++    # PAGE contains code and original PAGECONS/PAGEDATA input sections.
++    # nm follows the output execute flag, so even constant tables look like
++    # functions. COFF section definitions retain their exact data extents.
++    # Type zero alone is not evidence of data: assembly can use it for code.
++    symbol_lines = subprocess.check_output([objdump, "-t", exe]).decode(
++        "latin-1").splitlines()
++    data_marker = re.compile(
++        r"^\[\s*\d+\]\(sec\s+(\d+)\)\(fl[^)]*\)"
++        r"\(ty\s+0\)\(scl\s+3\)\s*\(nx\s+1\)\s+"
++        r"0x([0-9a-f]+)\s+(?:PAGECONS|PAGEDATA)$")
++    data_spans = []
++    for i, line in enumerate(symbol_lines[:-1]):
++        marker = data_marker.match(line)
++        length = re.match(r"^AUX scnlen 0x([0-9a-f]+)\b",
++                          symbol_lines[i + 1]) if marker else None
++        if not length:
++            continue
++        index, offset = int(marker[1]), int(marker[2], 16)
++        size = int(length[1], 16)
++        if not 1 <= index <= len(sections):
++            continue
++        section = sections[index - 1]
++        if size and offset + size <= section[2]:
++            data_spans.append((section[1] + offset,
++                               section[1] + offset + size))
++
+     allow = set()
+     if os.path.exists(allow_file):
+         for line in open(allow_file):
+@@ -254,6 +280,8 @@ if check_mode:
+         src_sec = section_of(insn_va)
+         if src_sec is None or is_discardable(src_sec):
+             continue
++        if any(lo <= insn_va < hi for lo, hi in data_spans):
++            continue
+         mnem, ops = m.group(2).strip(), m.group(3)
+         targets = []
+         if mnem.startswith(("call", "jmp", "j", "loop")):
+@@ -281,12 +309,18 @@ if check_mode:
+     #    metadata, not loaded state -- skip.
+     for s in sections:
+         name, va, vsize, rawoff, rawsz, chars = s
+-        if chars & 0x20000000 or is_discardable(s):
++        if is_discardable(s):
+             continue
+         if name.startswith((".debug", ".edata", ".idata")):
+             continue
+         blob = data[rawoff:rawoff + min(vsize, rawsz)]
+         for off in range(0, len(blob) - 3, 4):
++            # Executable sections still contain proven input data spans.
++            # Keep genuine pointers in those spans under the data gate.
++            if chars & 0x20000000 and not any(
++                    lo <= va + off and va + off + 4 <= hi
++                    for lo, hi in data_spans):
++                continue
+             v = struct.unpack_from("<I", blob, off)[0]
+             dsec = in_discard(v)
+             if not dsec:
