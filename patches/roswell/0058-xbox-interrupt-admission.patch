@@ -1,0 +1,303 @@
+diff --git a/hal/halx86/pic/pic.c b/hal/halx86/pic/pic.c
+index 0133c6fe..f26e00fd 100644
+--- a/hal/halx86/pic/pic.c
++++ b/hal/halx86/pic/pic.c
+@@ -962,6 +962,12 @@ HalEnableSystemInterrupt(IN ULONG Vector,
+     PKPCR Pcr = KeGetPcr();
+     PIC_MASK PicMask;
+ 
++#ifdef SARCH_XBOX
++    /* Only the sixteen PIC vectors are installed in the Xbox IDT. */
++    if ((Vector < PRIMARY_VECTOR_BASE) ||
++        (Vector >= PRIMARY_VECTOR_BASE + 16)) return FALSE;
++#endif
++
+     /* Validate the IRQ */
+     Irq = Vector - PRIMARY_VECTOR_BASE;
+     if (Irq >= CLOCK2_LEVEL) return FALSE;
+@@ -1010,6 +1016,12 @@ HalDisableSystemInterrupt(IN ULONG Vector,
+     ULONG IrqMask;
+     PIC_MASK PicMask;
+ 
++#ifdef SARCH_XBOX
++    /* Reject before the vector subtraction and IRQ mask shift. */
++    if ((Vector < PRIMARY_VECTOR_BASE) ||
++        (Vector >= PRIMARY_VECTOR_BASE + 16)) return;
++#endif
++
+     /* Compute new combined IRQ mask */
+     IrqMask = 1 << (Vector - PRIMARY_VECTOR_BASE);
+ 
+@@ -1045,6 +1057,12 @@ HalBeginSystemInterrupt(IN KIRQL Irql,
+ {
+     ULONG Irq;
+ 
++#ifdef SARCH_XBOX
++    /* The dismiss tables contain one entry per PIC line. */
++    if ((Vector < PRIMARY_VECTOR_BASE) ||
++        (Vector >= PRIMARY_VECTOR_BASE + 16)) return FALSE;
++#endif
++
+     /* Get the IRQ and call the proper routine to handle it */
+     Irq = Vector - PRIMARY_VECTOR_BASE;
+     return HalpSpecialDismissTable[Irq](Irql, Irq, OldIrql);
+@@ -1270,7 +1288,11 @@ HalpGetRootInterruptVector(IN ULONG BusInterruptLevel,
+     UCHAR SystemVector;
+ 
+     /* Validate the IRQ */
++#ifdef SARCH_XBOX
++    if (BusInterruptLevel >= 16)
++#else
+     if (BusInterruptLevel > 23)
++#endif
+     {
+         /* Invalid vector */
+         DPRINT1("IRQ %lx is too high!\n", BusInterruptLevel);
+diff --git a/ntoskrnl/ke/i386/irqobj.c b/ntoskrnl/ke/i386/irqobj.c
+index f5997207..bf018486 100644
+--- a/ntoskrnl/ke/i386/irqobj.c
++++ b/ntoskrnl/ke/i386/irqobj.c
+@@ -404,6 +404,12 @@ KeConnectInterrupt(IN PKINTERRUPT Interrupt)
+     Vector = Interrupt->Vector;
+     Irql = Interrupt->Irql;
+ 
++#ifdef SARCH_XBOX
++    /* Hardware interrupts occupy IDT entries 0x30 through 0x3f only.
++     * Validate the full ULONG before HAL's UCHAR IDT conversion can wrap. */
++    if ((Vector < 0x30) || (Vector >= 0x40)) return FALSE;
++#endif
++
+     /* Validate the settings */
+     if ((Irql > HIGH_LEVEL) ||
+         (Number >= KeNumberProcessors) ||
+@@ -503,6 +509,12 @@ KeDisconnectInterrupt(IN PKINTERRUPT Interrupt)
+     PKINTERRUPT NextInterrupt;
+     BOOLEAN State;
+ 
++#ifdef SARCH_XBOX
++    /* Guard caller-owned settings before affinity shifts or IDT lookup. */
++    if ((Interrupt->Vector < 0x30) || (Interrupt->Vector >= 0x40) ||
++        ((UCHAR)Interrupt->Number >= KeNumberProcessors)) return FALSE;
++#endif
++
+     /* Set the affinity */
+     KeSetSystemAffinityThread(1 << Interrupt->Number);
+ 
+diff --git a/tests/host/interrupt-admission/README.md b/tests/host/interrupt-admission/README.md
+new file mode 100644
+index 00000000..5113fba3
+--- /dev/null
++++ b/tests/host/interrupt-admission/README.md
+@@ -0,0 +1,15 @@
++# Xbox interrupt admission regression
++
++`python3 check.py OUTPUT` compiles the current production bodies for root PIC
++translation, enable/disable/begin, native connect/disconnect, and Xbox shadow
++connect/disconnect. Only OS affinity/dispatcher boundaries, port I/O, IDT dispatch
++queries and shadow lookup are modeled. Assertions use the installed Xbox IDT
++hardware domain 0x30–0x3f and sixteen PIC lines as independent expected inputs.
++
++The untouched tree fails translation and pre-dispatch rejection first; those
++failures stop the baseline fixture before deliberately invalid PIC indexes can
++cause host undefined behavior. With those boundaries repaired, the same fixture
++executes every invalid PIC and disconnect case under UBSan, plus all sixteen
++valid connect/disconnect and interrupt-begin paths, sharing-chain handoff and
++borrowed driver lifecycle. This is a host semantic fixture, not a native interrupt
++or real hardware qualification. Exception IDT query/register APIs are unmodified.
+diff --git a/tests/host/interrupt-admission/cases.c b/tests/host/interrupt-admission/cases.c
+new file mode 100644
+index 00000000..a1286e56
+--- /dev/null
++++ b/tests/host/interrupt-admission/cases.c
+@@ -0,0 +1,74 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#define CHECK(x) do { ++checks; if (!(x)) { ++failures; fprintf(stderr,"FAIL line %u: %s\n",__LINE__,#x); } } while(0)
++static void reset(void) {
++ effects=dismiss_calls=0; memset(&pcr,0,sizeof(pcr)); memset(installed,0,sizeof(installed));
++ memset(&shadow,0,sizeof(shadow)); shadow_present=FALSE; current_irql=0;
++ for(unsigned i=0;i<16;++i) HalpSpecialDismissTable[i]=HalpSpecialDismissLevelTable[i]=dismiss;
++}
++static KINTERRUPT object(ULONG v) { KINTERRUPT i={0}; i.Vector=v; i.Irql=i.SynchronizeIrql=12; i.Mode=LevelSensitive; i.ShareVector=TRUE; return i; }
++int main(void) {
++ KIRQL old,irql; KAFFINITY affinity;
++ reset();
++ for(ULONG irq=0;irq<16;++irq) {
++  irql=99; affinity=99;
++  CHECK(HalpGetRootInterruptVector(irq,irq,&irql,&affinity)==48+irq);
++  CHECK(irql==27-irq && affinity==1);
++ }
++ const ULONG invalid_irq[]={16,23,24,255,256,UINT32_MAX};
++ for(unsigned n=0;n<sizeof(invalid_irq)/sizeof(*invalid_irq);++n) {
++  irql=99; affinity=99;
++  CHECK(HalpGetRootInterruptVector(invalid_irq[n],invalid_irq[n],&irql,&affinity)==0);
++  CHECK(irql==99 && affinity==99 && effects==0);
++ }
++ /* Invalid connect must reject before affinity, dispatch arithmetic or IDT lookup. */
++ const ULONG invalid_vector[]={0,47,64,71,75,76,255,256,304,UINT32_MAX};
++ for(unsigned n=0;n<sizeof(invalid_vector)/sizeof(*invalid_vector);++n) {
++  reset(); KINTERRUPT i=object(invalid_vector[n]),before=i;
++  CHECK(!KeConnectInterrupt(&i)); CHECK(effects==0 && memcmp(&i,&before,sizeof(i))==0);
++ }
++ /* Do not run invalid PIC indexes on unfixed code; connect/translation already
++  * fail red above. Each entry runs after the admitted source domain is fixed. */
++ if (failures) { fprintf(stderr,"%u failures (%u assertions), baseline boundary defect reproduced\n",failures,checks); return 1; }
++ for(unsigned n=0;n<sizeof(invalid_vector)/sizeof(*invalid_vector);++n) {
++  reset(); KIRQL untouched=99;
++  CHECK(!HalEnableSystemInterrupt(invalid_vector[n],12,LevelSensitive));
++  HalDisableSystemInterrupt(invalid_vector[n],12);
++  CHECK(!HalBeginSystemInterrupt(12,invalid_vector[n],&untouched));
++  CHECK(effects==0 && dismiss_calls==0 && untouched==99 && pcr.IDR==0);
++  KINTERRUPT i=object(invalid_vector[n]); i.Connected=TRUE;
++  CHECK(!KeDisconnectInterrupt(&i) && effects==0 && i.Connected);
++ }
++ for(ULONG v=48;v<64;++v) {
++  reset(); KINTERRUPT i=object(v);
++  CHECK(KeConnectInterrupt(&i) && i.Connected && installed[v].Type==NormalConnect);
++  CHECK(!(pcr.IDR & (1u<<(v-48))));
++  old=99; CHECK(HalBeginSystemInterrupt(12,v,&old) && old==0 && dismiss_calls==1);
++  CHECK(!KeConnectInterrupt(&i));
++  CHECK(KeDisconnectInterrupt(&i) && !i.Connected && installed[v].Type==NoConnect);
++  CHECK(pcr.IDR==(1u<<(v-48)));
++ }
++ for(ULONG v=48;v<64;++v) {
++  reset(); KINTERRUPT i=object(v); i.Mode=Latched;
++  CHECK(KeConnectInterrupt(&i) && i.Connected);
++  CHECK(KeDisconnectInterrupt(&i) && !i.Connected);
++ }
++ reset(); KINTERRUPT bad_processor=object(63); bad_processor.Number=-1;
++ CHECK(!KeConnectInterrupt(&bad_processor) && effects==0);
++ bad_processor.Connected=TRUE;
++ CHECK(!KeDisconnectInterrupt(&bad_processor) && effects==0 && bad_processor.Connected);
++ reset(); KINTERRUPT first=object(63),second=object(63);
++ CHECK(KeConnectInterrupt(&first) && KeConnectInterrupt(&second));
++ CHECK(installed[63].Type==ChainConnect && first.InterruptListEntry.Flink==&second.InterruptListEntry);
++ CHECK(KeDisconnectInterrupt(&first) && second.Connected && installed[63].Interrupt==&second && installed[63].Type==NormalConnect);
++ CHECK(KeDisconnectInterrupt(&second) && !second.Connected);
++ reset(); KINTERRUPT title=object(64),borrowed=object(63);
++ CHECK(!XeKeConnectInterrupt(&title) && !XeKeDisconnectInterrupt(&title));
++ shadow_present=TRUE; shadow.Native=object(64);
++ CHECK(!XeKeConnectInterrupt(&title) && effects==0);
++ shadow.DriverOwned=TRUE; shadow.BorrowedInterrupt=&borrowed; borrowed.Connected=TRUE;
++ CHECK(XeKeConnectInterrupt(&title) && effects==0 && current_irql==0);
++ CHECK(!XeKeDisconnectInterrupt(&title) && borrowed.Connected && effects==0);
++ borrowed.Connected=FALSE; CHECK(!XeKeConnectInterrupt(&title));
++ shadow.BorrowedInterrupt=NULL; CHECK(!XeKeConnectInterrupt(&title));
++ printf("%u assertions, %u failures\n",checks,failures); return failures ? 1 : 0;
++}
+diff --git a/tests/host/interrupt-admission/check.py b/tests/host/interrupt-admission/check.py
+new file mode 100644
+index 00000000..adf1dcb4
+--- /dev/null
++++ b/tests/host/interrupt-admission/check.py
+@@ -0,0 +1,29 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Run real PIC admission and interrupt lifecycle bodies against bounded OS shims."""
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location('extract', root/'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++here = Path(__file__).resolve().parent
++source = (here/'shim.c').read_text()
++for path, names in (
++    ('hal/halx86/pic/pic.c', ('HalpGetRootInterruptVector', 'HalEnableSystemInterrupt', 'HalDisableSystemInterrupt', 'HalBeginSystemInterrupt')),
++    ('ntoskrnl/ke/i386/irqobj.c', ('KeConnectInterrupt', 'KeDisconnectInterrupt')),
++    ('ntoskrnl/xb/interrupt.c', ('XeKeConnectInterrupt', 'XeKeDisconnectInterrupt'))):
++    text = (root/path).read_text()
++    for name in names:
++        source += extract.function(text, name)
++source += (here/'cases.c').read_text()
++(out/'production.c').write_text(source)
++subprocess.run(['cc', '-std=c11', '-DSARCH_XBOX', '-Wall', '-Wextra', '-Werror',
++                '-Wno-unused-parameter', '-fsanitize=undefined', '-fno-sanitize-recover=all',
++                str(out/'production.c'), '-o', str(out/'fixture')], check=True)
++subprocess.run([str(out/'fixture')], check=True)
+diff --git a/tests/host/interrupt-admission/shim.c b/tests/host/interrupt-admission/shim.c
+new file mode 100644
+index 00000000..5df2c598
+--- /dev/null
++++ b/tests/host/interrupt-admission/shim.c
+@@ -0,0 +1,76 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <string.h>
++#include <assert.h>
++typedef uint32_t ULONG, KAFFINITY, *PKAFFINITY;
++typedef uint8_t BOOLEAN, UCHAR, KIRQL, *PKIRQL;
++typedef void VOID;
++typedef enum {LevelSensitive, Latched} KINTERRUPT_MODE;
++#define IN
++#define OUT
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define ASSERT assert
++#define DPRINT1(...) ((void)0)
++#define XbDbg(...) ((void)0)
++#define PRIMARY_VECTOR_BASE 48u
++#define CLOCK2_LEVEL 28
++#define HIGH_LEVEL 31
++#define IPI_LEVEL 29
++#define DISPATCH_LEVEL 2
++#define HalpIrqToVector(irq) ((irq)+PRIMARY_VECTOR_BASE)
++#define HalpVectorToIrql(vector) (27-((vector)-PRIMARY_VECTOR_BASE))
++#define PIC1_DATA_PORT 0x21
++#define PIC2_DATA_PORT 0xa1
++#define CONTAINING_RECORD(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
++typedef struct LIST_ENTRY { struct LIST_ENTRY *Flink,*Blink; } LIST_ENTRY;
++typedef struct KINTERRUPT {
++ int8_t Number; ULONG Vector; KIRQL Irql,SynchronizeIrql;
++ BOOLEAN FloatingSave,Connected,ShareVector; KINTERRUPT_MODE Mode;
++ LIST_ENTRY InterruptListEntry;
++} KINTERRUPT,*PKINTERRUPT;
++typedef enum {NoConnect,NormalConnect,ChainConnect,UnknownConnect} CONNECT_TYPE;
++typedef struct { CONNECT_TYPE Type; PKINTERRUPT Interrupt; } DISPATCH_INFO;
++typedef struct { ULONG IDR; KIRQL Irql; } KPCR,*PKPCR;
++typedef union { uint16_t Both; struct { UCHAR Master,Slave; }; } PIC_MASK;
++static KPCR pcr;
++static unsigned effects, dismiss_calls, failures, checks;
++static ULONG KiI8259MaskTable[32], HalpDefaultInterruptAffinity=1;
++static UCHAR ports[2];
++static int8_t KeNumberProcessors=1;
++static DISPATCH_INFO installed[64];
++static KIRQL current_irql;
++static PKPCR KeGetPcr(void) { return &pcr; }
++static void _disable(void) { ++effects; }
++static void _enable(void) { ++effects; }
++static void __outbyte(unsigned port,UCHAR value) { ++effects; ports[port==PIC2_DATA_PORT]=value; }
++static UCHAR __inbyte(unsigned port) { ++effects; return ports[port==PIC2_DATA_PORT]; }
++static BOOLEAN dismiss(KIRQL irql,ULONG irq,PKIRQL old) { assert(irq<16); ++dismiss_calls; *old=pcr.Irql; pcr.Irql=irql; return TRUE; }
++static BOOLEAN (*HalpSpecialDismissTable[16])(KIRQL,ULONG,PKIRQL);
++static BOOLEAN (*HalpSpecialDismissLevelTable[16])(KIRQL,ULONG,PKIRQL);
++static void InitializeListHead(LIST_ENTRY *p) { p->Flink=p->Blink=p; }
++static void InsertTailList(LIST_ENTRY *h,LIST_ENTRY *p) { p->Flink=h; p->Blink=h->Blink; h->Blink->Flink=p; h->Blink=p; }
++static void RemoveEntryList(LIST_ENTRY *p) { p->Blink->Flink=p->Flink; p->Flink->Blink=p->Blink; }
++static void KeSetSystemAffinityThread(ULONG a) { assert(a==1); ++effects; }
++static void KeRevertToUserAffinityThread(void) { ++effects; }
++static KIRQL KiAcquireDispatcherLock(void) { ++effects; return 0; }
++static void KiReleaseDispatcherLock(KIRQL i) { ++effects; }
++static void KiGetVectorDispatch(ULONG v,DISPATCH_INFO *d) {
++ ++effects;
++ /* Model the unsafe downstream IDT contract without invoking host OOB. */
++ if (v<48 || v>63) { ++failures; d->Type=UnknownConnect; d->Interrupt=NULL; return; }
++ *d=installed[v];
++}
++static void KiConnectVectorToInterrupt(PKINTERRUPT i,CONNECT_TYPE t) { assert(i->Vector>=48 && i->Vector<64); ++effects; installed[i->Vector].Type=t; installed[i->Vector].Interrupt=i; }
++BOOLEAN KeDisconnectInterrupt(PKINTERRUPT i);
++typedef struct { BOOLEAN DriverOwned; PKINTERRUPT BorrowedInterrupt; KINTERRUPT Native; } XBE_INTERRUPT_SHADOW;
++static XBE_INTERRUPT_SHADOW shadow;
++static BOOLEAN shadow_present;
++static XBE_INTERRUPT_SHADOW *XeInterruptGetShadow(PKINTERRUPT i,BOOLEAN create) { return shadow_present ? &shadow : NULL; }
++static PKINTERRUPT XeInterruptNative(XBE_INTERRUPT_SHADOW *s) { return s->BorrowedInterrupt ? s->BorrowedInterrupt : &s->Native; }
++static KIRQL KeGetCurrentIrql(void) { return current_irql; }
++static void KeRaiseIrql(KIRQL next,PKIRQL old) { *old=current_irql; current_irql=next; }
++static void KeLowerIrql(KIRQL next) { current_irql=next; }
