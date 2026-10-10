@@ -1,0 +1,375 @@
+diff --git a/ntoskrnl/ke/time.c b/ntoskrnl/ke/time.c
+index 5c6f33c60d69de5c26891b0ed9253b56e79f727f..94a0de72c9ddb545a844867cf01fbfdf912c4f29 100644
+--- a/ntoskrnl/ke/time.c
++++ b/ntoskrnl/ke/time.c
+@@ -24,6 +24,8 @@ BOOLEAN KiTimeAdjustmentEnabled = FALSE;
+ volatile KSYSTEM_TIME KeInterruptTime = { 0, 0, 0 };
+ volatile KSYSTEM_TIME KeSystemTime = { 0, 0, 0 };
+ 
++VOID NTAPI NxkUpdatePerformanceCounter(ULONGLONG InterruptTime);
++
+ /* FUNCTIONS ******************************************************************/
+ 
+ FORCEINLINE
+@@ -82,6 +84,7 @@ KeUpdateSystemTime(IN PKTRAP_FRAME TrapFrame,
+     InterruptTime.QuadPart += Increment;
+     KiWriteSystemTime(&SharedUserData->InterruptTime, InterruptTime);
+     KiWriteSystemTime(&KeInterruptTime, InterruptTime);
++    NxkUpdatePerformanceCounter(InterruptTime.QuadPart);
+ 
+     /* Check for timer expiration */
+     KiCheckForTimerExpiration(Prcb, TrapFrame, InterruptTime);
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index 2f51e58397edf008c88dabf07bddb85eb615ae55..0f442f1cd5ec4ad31fd8de9bf0d45f918b9054f0 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -1050,34 +1050,49 @@ ULONGLONG NTAPI XeKeQueryInterruptTime(VOID)
+  * we match the published value exactly so any title that hardcodes it
+  * compares equal.
+  *
+- * The counter is only 24 bits wide so it wraps every ~4.97 s.  Extend to
+- * 64 bits by detecting wrap-around relative to the last sample. */
++ * The counter is only 24 bits wide so it wraps every ~4.97 s. Extend to
++ * 64 bits on queries and on one-second clock-interrupt samples so quiet
++ * callers do not lose whole wraps. */
+ #define XB_PMT_PORT       ((PULONG)0x8008)
+ #define XB_PMT_MASK       0x00FFFFFFUL
+ #define XB_PMT_FREQUENCY  3374488ULL
+ 
+ static volatile ULONGLONG NxkPmtHigh = 0;
+ static volatile ULONG     NxkPmtLastLow = 0;
++static ULONGLONG          NxkPmtNextSample = 10000000ULL;
+ 
+ static ULONGLONG NxkReadPmt(VOID)
+ {
+-    KIRQL OldIrql;
++    ULONG Flags;
+     ULONG cur, last;
+     ULONGLONG result;
+ 
+-    /* Serialize the read+wrap-detect against other CPUs / interrupts.
+-     * Single-CPU box, so DISPATCH_LEVEL keeps DPCs and lower-IRQL code out. */
+-    KeRaiseIrql(DISPATCH_LEVEL, &OldIrql);
++    /* Xbox is single-CPU. Exclude the clock ISR as well as other queries,
++     * preserving an already-disabled caller and its current IRQL. */
++    Flags = __readeflags();
++    _disable();
+     cur  = READ_PORT_ULONG(XB_PMT_PORT) & XB_PMT_MASK;
+     last = NxkPmtLastLow;
+     if (cur < last)
+         NxkPmtHigh += (XB_PMT_MASK + 1ULL);
+     NxkPmtLastLow = cur;
+     result = NxkPmtHigh | cur;
+-    KeLowerIrql(OldIrql);
++    __writeeflags(Flags);
+     return result;
+ }
+ 
++VOID NTAPI NxkUpdatePerformanceCounter(ULONGLONG InterruptTime)
++{
++    /* Called only by the clock ISR; NxkReadPmt excludes IRQs itself. The
++     * elapsed-time deadline is independent of the clock tick increment.
++     * Normal sampling must occur within one hardware wrap; a debugger or
++     * an IRQ-disabled interval longer than that cannot recover lost wraps. */
++    if (InterruptTime < NxkPmtNextSample)
++        return;
++    NxkPmtNextSample = InterruptTime + 10000000ULL;
++    NxkReadPmt();
++}
++
+ ULONGLONG NTAPI XeKeQueryPerformanceCounter(VOID)
+ {
+     return NxkReadPmt();
+diff --git a/tests/host/performance-counter/check.py b/tests/host/performance-counter/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a8ee78aebd06ab85844a68f6f7ce1ea707afc27
+--- /dev/null
++++ b/tests/host/performance-counter/check.py
+@@ -0,0 +1,35 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the actual PM timer extension and clock interrupt bodies."""
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++xbe = (root / "ntoskrnl/xb/xbe.c").read_text()
++start = xbe.index("#define XB_PMT_PORT")
++end = xbe.index("/* Xbox ExQueryPoolBlockSize", start)
++pmt = xbe[start:end]
++time_source = (root / "ntoskrnl/ke/time.c").read_text()
++start = time_source.index("VOID\nFASTCALL\nKeUpdateSystemTime(")
++brace = time_source.index("{", start)
++end = brace + 1
++depth = 1
++while depth:
++    depth += (time_source[end] == "{") - (time_source[end] == "}")
++    end += 1
++clock = time_source[start:end]
++fixture = Path(__file__).with_name("fixture.c").read_text()
++fixture = fixture.replace("/* PRODUCTION_PMT */", pmt)
++fixture = fixture.replace("/* PRODUCTION_CLOCK */", clock)
++fixture = fixture.replace("/* RESET_SAMPLE_DEADLINE */",
++    "NxkPmtNextSample = 10000000ULL;" if "NxkPmtNextSample" in pmt else "")
++(out / "counter.c").write_text(fixture)
++subprocess.run(["cc", "-std=c11", "-O2", "-g", "-fsanitize=undefined,address",
++                "-fno-omit-frame-pointer", "-Wall", "-Wextra", "-Werror",
++                "-Wno-unused-parameter", "-Wno-unused-function", "-fno-strict-aliasing",
++                str(out / "counter.c"),
++                "-o", str(out / "counter")], check=True)
++subprocess.run([str(out / "counter")], check=True)
+diff --git a/tests/host/performance-counter/fixture.c b/tests/host/performance-counter/fixture.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..16d8b949996eb868bd7a60828e14cd9233eab803
+--- /dev/null
++++ b/tests/host/performance-counter/fixture.c
+@@ -0,0 +1,133 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#define VOID void
++#define NTAPI
++#define FASTCALL
++#define IN
++#define _M_IX86
++#define DISPATCH_LEVEL 2
++#define FALSE false
++#define EFLAGS_INTERRUPT_MASK 0x200u
++#define DbgPrint(...) ((void)0)
++typedef uint8_t KIRQL;
++typedef uint32_t ULONG, *PULONG, ULONG_PTR;
++typedef int32_t LONG;
++typedef uint64_t ULONGLONG, ULONG64;
++typedef union { struct { ULONG LowPart; LONG HighPart; }; int64_t QuadPart; } LARGE_INTEGER;
++/* Match the host's uint64_t alignment for production counter loads. */
++typedef struct { ULONG LowPart; LONG High1Time; LONG High2Time; }
++    __attribute__((aligned(8))) KSYSTEM_TIME;
++typedef struct { bool SkipTick; unsigned InterruptCount; } PRCB, *PKPRCB;
++typedef void *PKTRAP_FRAME;
++static PRCB prcb;
++static struct { KSYSTEM_TIME InterruptTime, SystemTime, TickCount; } shared;
++#define SharedUserData (&shared)
++static KSYSTEM_TIME KeInterruptTime, KeSystemTime, KeTickCount;
++static LONG KiTickOffset = 10000;
++static ULONG KeTimeAdjustment = 10000, KeMaximumIncrement = 10000;
++static bool KdDebuggerEnabled;
++static uint64_t hardware;
++static uint32_t flags = EFLAGS_INTERRUPT_MASK | 2;
++static KIRQL irql;
++static unsigned port_reads;
++static bool clock_entry_irq_enabled;
++static ULONG __readeflags(void) { return flags; }
++static void _disable(void) { flags &= ~EFLAGS_INTERRUPT_MASK; }
++static void __writeeflags(ULONG value) { flags = value; }
++static void KeRaiseIrql(KIRQL value, KIRQL *old) { *old = irql; irql = value; }
++static void KeLowerIrql(KIRQL old) { irql = old; }
++static ULONG READ_PORT_ULONG(PULONG port)
++{
++    assert((uintptr_t)port == 0x8008);
++    assert(!(flags & EFLAGS_INTERRUPT_MASK));
++    ++port_reads;
++    return hardware & 0x00ffffffu;
++}
++static PKPRCB KeGetCurrentPrcb(void) { return &prcb; }
++static void KiWriteSystemTime(KSYSTEM_TIME *p, LARGE_INTEGER t)
++{ p->High2Time = t.HighPart; p->LowPart = t.LowPart; p->High1Time = t.HighPart; }
++static void KiCheckForTimerExpiration(PKPRCB p, PKTRAP_FRAME f, LARGE_INTEGER t) { }
++static LONG InterlockedExchangeAdd(LONG *p, LONG v) { LONG old = *p; *p += v; return old; }
++static bool KdPollBreakIn(void) { return false; }
++static void DbgBreakPointWithStatus(unsigned value) { }
++#define DBG_STATUS_CONTROL_C 1
++static void KeUpdateRunTime(PKTRAP_FRAME f, KIRQL i) { }
++static void KiEndInterrupt(KIRQL i, PKTRAP_FRAME f) { }
++/* PRODUCTION_PMT */
++/* PRODUCTION_CLOCK */
++
++static void reset(uint64_t start)
++{
++    memset(&shared, 0, sizeof(shared));
++    memset(&KeInterruptTime, 0, sizeof(KeInterruptTime));
++    memset(&KeSystemTime, 0, sizeof(KeSystemTime));
++    memset(&KeTickCount, 0, sizeof(KeTickCount));
++    memset(&prcb, 0, sizeof(prcb));
++    KiTickOffset = 10000;
++    NxkPmtHigh = 0; NxkPmtLastLow = 0;
++    /* RESET_SAMPLE_DEADLINE */
++    hardware = start; port_reads = 0;
++    flags = EFLAGS_INTERRUPT_MASK | 2; irql = 0;
++}
++
++static void clock_tick(unsigned increment)
++{
++    ULONG old_flags = flags;
++    KIRQL old_irql = irql;
++    hardware += 3375000ULL * increment / 10000000;
++    if (clock_entry_irq_enabled) flags |= EFLAGS_INTERRUPT_MASK;
++    else _disable();
++    ULONG clock_flags = flags;
++    irql = 28;
++    KeUpdateSystemTime(NULL, increment, old_irql);
++    assert(flags == clock_flags);
++    assert(irql == 28);
++    flags = old_flags; irql = old_irql;
++}
++
++static void quiet(unsigned milliseconds, unsigned increment)
++{
++    uint64_t before = XeKeQueryPerformanceCounter();
++    uint64_t physical_before = hardware;
++    unsigned steps = milliseconds * 10000u / increment;
++    for (unsigned i = 0; i < steps; ++i) clock_tick(increment);
++    uint64_t delta = XeKeQueryPerformanceCounter() - before;
++    uint64_t expected = hardware - physical_before;
++    printf("quiet=%u ms increment=%u counter=%llu expected=%llu reads=%u\n",
++           milliseconds, increment, (unsigned long long)delta,
++           (unsigned long long)expected, port_reads);
++    fflush(stdout);
++    assert(delta == expected);
++}
++
++int main(void)
++{
++    reset(0);
++    quiet(250, 10000);
++    quiet(6000, 10000);
++    quiet(11000, 10000);
++    assert(port_reads <= 25); /* No port read for each 1 ms tick. */
++    reset(0x00ffffffu - 1000);
++    quiet(6000, 10000);
++    reset(0);
++    quiet(11000, 100000); /* Deadline is elapsed time, not tick count. */
++    reset(0); clock_entry_irq_enabled = true;
++    quiet(11000, 10000); /* HAL enables IRQs before the clock body. */
++    for (unsigned level = 0; level <= 31; level += 2) {
++        for (unsigned enabled = 0; enabled < 2; ++enabled) {
++            irql = level; flags = 2 | (enabled ? EFLAGS_INTERRUPT_MASK : 0);
++            ULONG saved_flags = flags;
++            uint64_t a = XeKeQueryPerformanceCounter();
++            hardware += 3375;
++            assert(XeKeQueryPerformanceCounter() == a + 3375);
++            assert(flags == saved_flags && irql == level);
++        }
++    }
++    assert(KeQueryPerformanceFrequency() == 3374488);
++    puts("PASS: production clock/query sparse intervals, wraps and IRQ state");
++    return 0;
++}
+diff --git a/tests/xbe/performance-counter/Makefile b/tests/xbe/performance-counter/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..a8ad2866b3e374a53bafb551ab0a18af8630be24
+--- /dev/null
++++ b/tests/xbe/performance-counter/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = PMT-QUIET-GAP
++GEN_XISO = pmt-quiet-gap.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/performance-counter/README.md b/tests/xbe/performance-counter/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..45e880945a671803091ff11210f96d72707a31d9
+--- /dev/null
++++ b/tests/xbe/performance-counter/README.md
+@@ -0,0 +1,9 @@
++# Performance counter quiet-interval regression
++
++An owned guest compares public performance-counter elapsed ticks with independently accumulated read-only PM-timer port samples across 250 ms, 6 s and 11 s intervals. It does not query the public performance counter during a wait. Raw port reads do not update the production extension state. It produces 13 TAP checks over COM1 and requests normal SMC shutdown. No commercial kernel code is read.
++
++Build with `NXDK_DIR=/path/to/nxdk PATH=/path/to/nxdk/bin:$PATH make`. Run on a disposable HDD/EEPROM copy with identical emulator configuration for each BIOS.
++
++Raw-before/counter/raw-after brackets at both endpoints define exact lower and upper hardware-tick bounds; each bracket must be shorter than 10 ms at the reported frequency. Every 250 ms raw sampling gap must remain below one hardware wrap (approximately 4.97 s); this 24-bit observer cannot recover multiple unseen wraps. Interrupt-time elapsed values remain diagnostics and verify that the requested delays completed, but are not the PM-timer calibration oracle: the two clocks diverged under shared CI load.
++
++This tests timer extension correctness, not wall-clock calibration or frame rate.
+diff --git a/tests/xbe/performance-counter/main.c b/tests/xbe/performance-counter/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..f2fa9a1769be420877e023049e06d725e1d30021
+--- /dev/null
++++ b/tests/xbe/performance-counter/main.c
+@@ -0,0 +1,80 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <xboxkrnl/xboxkrnl.h>
++#include "../regression.h"
++
++static ULONG timer_low(void)
++{
++    ULONG value;
++    __asm__ __volatile__("inl %1, %0" : "=a"(value) : "Nd"((USHORT)0x8008)
++                         : "memory");
++    return value & 0x00ffffff;
++}
++
++static ULONG timer_delta(ULONG later, ULONG earlier)
++{
++    return (later - earlier) & 0x00ffffff;
++}
++
++static void quiet_interval(unsigned milliseconds, ULONGLONG frequency)
++{
++    LARGE_INTEGER delay = { .QuadPart = -2500000 };
++    ULONGLONG interrupt_start = KeQueryInterruptTime();
++    ULONG raw_start_before = timer_low();
++    ULONGLONG counter_start = KeQueryPerformanceCounter();
++    ULONG raw_start_after = timer_low(), previous = raw_start_after;
++    ULONGLONG reference = 0;
++    NTSTATUS status = STATUS_SUCCESS;
++    /* Raw reads never call the public counter or update its extension.
++     * Every sampling gap must remain shorter than a hardware timer wrap. */
++    for (unsigned waited = 0; waited < milliseconds; waited += 250) {
++        NTSTATUS wait = KeDelayExecutionThread(KernelMode, FALSE, &delay);
++        if (!NT_SUCCESS(wait)) status = wait;
++        ULONG current = timer_low();
++        reference += timer_delta(current, previous);
++        previous = current;
++    }
++    ULONGLONG counter_end = KeQueryPerformanceCounter();
++    ULONG raw_end_after = timer_low();
++    ULONGLONG interrupt_end = KeQueryInterruptTime();
++    ULONGLONG counter_delta = counter_end - counter_start;
++    ULONGLONG interrupt_delta = interrupt_end - interrupt_start;
++    ULONG start_bracket = timer_delta(raw_start_after, raw_start_before);
++    ULONG end_bracket = timer_delta(raw_end_after, previous);
++    ULONGLONG upper = reference + start_bracket + end_bracket;
++    /* The actual counter samples lie between their adjacent raw reads.
++     * Bound that uncertainty; a delayed bracket cannot hide a lost wrap. */
++    int narrow_brackets = start_bracket <= frequency / 100 &&
++                          end_bracket <= frequency / 100;
++    tap_comment("quiet_ms=%u status=%08lx frequency=%llu counter_start=%llu "
++                "counter_end=%llu counter_delta=%llu interrupt_100ns=%llu",
++                milliseconds, (unsigned long)status,
++                (unsigned long long)frequency,
++                (unsigned long long)counter_start,
++                (unsigned long long)counter_end,
++                (unsigned long long)counter_delta,
++                (unsigned long long)interrupt_delta);
++    tap_comment("raw_reference quiet_ms=%u lower=%llu upper=%llu "
++                "start_bracket=%lu end_bracket=%lu", milliseconds,
++                (unsigned long long)reference, (unsigned long long)upper,
++                (unsigned long)start_bracket, (unsigned long)end_bracket);
++    regression_check(NT_SUCCESS(status), "quiet delay returns successfully");
++    regression_check(interrupt_delta >= (ULONGLONG)milliseconds * 10000,
++                     "independent interrupt time covers requested wait");
++    regression_check(counter_end > counter_start,
++                     "performance counter advances across quiet interval");
++    regression_check(narrow_brackets && counter_delta >= reference &&
++                     counter_delta <= upper,
++                     "performance counter matches independently accumulated timer ticks");
++}
++
++int main(void)
++{
++    regression_begin();
++    ULONGLONG frequency = KeQueryPerformanceFrequency();
++    regression_require(frequency >= 3000000 && frequency <= 4000000,
++                       "published Xbox performance frequency is plausible");
++    quiet_interval(250, frequency);
++    quiet_interval(6000, frequency);
++    quiet_interval(11000, frequency);
++    regression_finish();
++}
