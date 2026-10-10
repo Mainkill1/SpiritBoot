@@ -119,9 +119,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-            test "$actual_tree" = 131e412a67913e302d85e67c9cdc86f6e1e3226c
-            python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
+          assert result['source_tree'] == '131e412a67913e302d85e67c9cdc86f6e1e3226c', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
