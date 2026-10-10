@@ -1,0 +1,293 @@
+diff --git a/hal/halx86/generic/dma.c b/hal/halx86/generic/dma.c
+index f27339ea..e1242d0b 100644
+--- a/hal/halx86/generic/dma.c
++++ b/hal/halx86/generic/dma.c
+@@ -464,11 +464,14 @@ HalpDmaAllocateMasterAdapter(VOID)
+ 
+     RtlZeroMemory(MasterAdapter->MapRegisterBase,
+                   SizeOfBitmap * sizeof(ROS_MAP_REGISTER_ENTRY));
++#ifndef SARCH_XBOX
++    /* Xbox hardware scatter/gather uses the original MDL pages. */
+     if (!HalpGrowMapBuffers(MasterAdapter, 0x10000))
+     {
+         ExFreePool(MasterAdapter);
+         return NULL;
+     }
++#endif
+ 
+     return MasterAdapter;
+ }
+@@ -1705,7 +1708,8 @@ IoFreeAdapterChannel(IN PADAPTER_OBJECT AdapterObject)
+         AdapterObject->CurrentWcb = WaitContextBlock;
+         AdapterObject->NumberOfMapRegisters = WaitContextBlock->NumberOfMapRegisters;
+ 
+-        if ((WaitContextBlock->NumberOfMapRegisters) && (AdapterObject->MasterAdapter))
++        if ((WaitContextBlock->NumberOfMapRegisters) &&
++            (AdapterObject->NeedsMapRegisters) && (AdapterObject->MasterAdapter))
+         {
+             KeAcquireSpinLock(&MasterAdapter->SpinLock, &OldIrql);
+ 
+diff --git a/tests/host/dma-channel/cases.c b/tests/host/dma-channel/cases.c
+new file mode 100644
+index 00000000..dba8804a
+--- /dev/null
++++ b/tests/host/dma-channel/cases.c
+@@ -0,0 +1,93 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++typedef struct { unsigned Id, Action; BOOLEAN NeedsMap; } EXPECTED;
++static ULONG callback(PVOID device, PVOID irp, PVOID map, PVOID context) {
++    (void)device; (void)irp; EXPECTED *e=context;
++    assert(!locks && callbacks<8); callback_order[callbacks++]=e->Id;
++    if (!!map != e->NeedsMap) {
++        fprintf(stderr,"FAIL callback %u: expected %s registers, got %s\n",e->Id,
++                e->NeedsMap ? "bounce" : "no", map ? "bounce" : "none");
++        ++failures;
++    }
++    return e->Action;
++}
++static void channel_case(BOOLEAN needs, ULONG action, BOOLEAN pending_master) {
++    int initial_failures=failures;
++    ADAPTER_OBJECT master={0}, adapter={0};
++    ROS_MAP_REGISTER_ENTRY entries[64]={0}; uint64_t bits=UINT64_MAX << 16;
++    RTL_BITMAP bitmap={64,&bits}; LIST_ENTRY pending;
++    InitializeListHead(&master.AdapterQueue);
++    master.MapRegisters=&bitmap; master.MapRegisterBase=entries;
++    adapter.MasterAdapter=&master; adapter.ScatterGather=TRUE;
++    adapter.NeedsMapRegisters=needs; adapter.MapRegistersPerChannel=16;
++    EXPECTED e[3]={{0,KeepObject,needs},{1,action,needs},{2,DeallocateObject,needs}};
++    WAIT_CONTEXT_BLOCK w[3]={0};
++    bitmap_calls=free_calls=grow_calls=callbacks=0;
++    for (unsigned i=0;i<3;++i) w[i].DeviceContext=&e[i];
++    assert(HalAllocateAdapterChannel(&adapter,&w[0],2,callback)==STATUS_SUCCESS);
++    assert(HalAllocateAdapterChannel(&adapter,&w[1],2,callback)==STATUS_SUCCESS);
++    assert(HalAllocateAdapterChannel(&adapter,&w[2],2,callback)==STATUS_SUCCESS);
++    assert(callbacks==1 && adapter.ChannelWaitQueue.Busy);
++    if (pending_master) InsertTailList(&master.AdapterQueue,&pending);
++    IoFreeAdapterChannel(&adapter);
++    if (action==KeepObject) {
++        assert(callbacks==2 && adapter.ChannelWaitQueue.Busy);
++        IoFreeAdapterChannel(&adapter);
++    }
++    assert(callbacks==3 && !adapter.ChannelWaitQueue.Busy);
++    assert(callback_order[0]==0 && callback_order[1]==1 && callback_order[2]==2);
++    assert(!pending_work && !locks);
++    if (!needs && bitmap_calls) {
++        fprintf(stderr,"FAIL HW-SG touched bounce bitmap %u times\n",bitmap_calls); ++failures;
++    }
++    if (!needs && (IsListEmpty(&master.AdapterQueue) == pending_master)) {
++        fprintf(stderr,"FAIL HW-SG changed master queue\n"); ++failures;
++    }
++    if (!needs && adapter.NumberOfMapRegisters) {
++        fprintf(stderr,"FAIL HW-SG retained bounce count\n"); ++failures;
++    }
++    if (needs) assert(bitmap_calls==3 && free_calls==(action==DeallocateObjectKeepRegisters?2u:3u));
++    printf("%s channels needs=%u action=%u pending_master=%u\n",
++           failures==initial_failures?"PASS":"FAIL",needs,action,pending_master);
++}
++static void master_case(void) {
++    int initial_failures=failures;
++    alloc_calls=live_allocs=fail_alloc=grow_calls=grow_bytes=0;
++    PADAPTER_OBJECT m=HalpDmaAllocateMasterAdapter(); assert(m && m->MapRegisterBase);
++#ifdef SARCH_XBOX
++    if (grow_calls || grow_bytes || m->NumberOfMapRegisters) {
++        fprintf(stderr,"FAIL Xbox eagerly reserved %u bounce bytes\n",grow_bytes); ++failures;
++    }
++#else
++    assert(grow_calls==1 && grow_bytes==65536 && m->NumberOfMapRegisters==16);
++#endif
++    ExFreePool(m->MapRegisterBase); ExFreePool(m); assert(!live_allocs);
++    for (unsigned failure=1;failure<=2;++failure) {
++        alloc_calls=live_allocs=0; fail_alloc=failure;
++        assert(!HalpDmaAllocateMasterAdapter()); assert(!live_allocs);
++    }
++    fail_alloc=0;
++    printf("%s master allocation and metadata OOM\n",failures==initial_failures?"PASS":"FAIL");
++}
++#ifdef SARCH_XBOX
++static void transfer_case(void) {
++    MDL m={.StartVa=(PVOID)0x10000,.Pfns={0x123,0x124,0x128}};
++    ULONG n=3*PAGE_SIZE-128;
++    PHYSICAL_ADDRESS p=IoMapTransfer(NULL,&m,NULL,(PVOID)0x10080,&n,TRUE);
++    assert(p.QuadPart==((uint64_t)0x123<<12)+128 && n==2*PAGE_SIZE-128);
++    n=256; p=IoMapTransfer(NULL,&m,NULL,(PVOID)0x10080,&n,FALSE);
++    assert(p.QuadPart==((uint64_t)0x123<<12)+128 && n==256);
++    puts("PASS actual IoMapTransfer original PFNs, fragmentation, offset and short length");
++}
++#endif
++int main(void) {
++    master_case();
++    for (unsigned action=KeepObject;action<=DeallocateObjectKeepRegisters;++action) {
++        channel_case(FALSE,action,FALSE);
++        channel_case(FALSE,action,TRUE);
++        channel_case(TRUE,action,FALSE);
++    }
++#ifdef SARCH_XBOX
++    transfer_case();
++#endif
++    return failures ? 1 : 0;
++}
+diff --git a/tests/host/dma-channel/check.py b/tests/host/dma-channel/check.py
+new file mode 100644
+index 00000000..575ffb03
+--- /dev/null
++++ b/tests/host/dma-channel/check.py
+@@ -0,0 +1,31 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Execute the production master/channel functions, modeling only OS boundaries."""
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "production_extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++text = (root / "hal/halx86/generic/dma.c").read_text()
++here = Path(__file__).resolve().parent
++source = (here / "shim.c").read_text()
++for name in ("HalpDmaAllocateMasterAdapter", "HalAllocateAdapterChannel",
++             "IoFreeAdapterChannel"):
++    source += extract.function(text, name)
++source += "\n#ifdef SARCH_XBOX\n" + extract.function(text, "IoMapTransfer") + "\n#endif\n"
++source += (here / "cases.c").read_text()
++(out / "actual-dma.c").write_text(source)
++for target, flags in (("xbox", ["-DSARCH_XBOX"]), ("generic", [])):
++    binary = out / target
++    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
++                    "-Wno-unused-variable", "-Wno-unused-parameter",
++                    *flags, str(out / "actual-dma.c"), "-o", str(binary)], check=True)
++    subprocess.run([str(binary)], check=True)
+diff --git a/tests/host/dma-channel/shim.c b/tests/host/dma-channel/shim.c
+new file mode 100644
+index 00000000..64c7fb08
+--- /dev/null
++++ b/tests/host/dma-channel/shim.c
+@@ -0,0 +1,122 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++typedef uint32_t ULONG, *PULONG, PFN_NUMBER, *PPFN_NUMBER;
++typedef uintptr_t ULONG_PTR;
++typedef unsigned char BOOLEAN, KIRQL;
++typedef int NTSTATUS;
++typedef void VOID, *PVOID;
++typedef struct { uint32_t unused; } DMA_MODE;
++typedef union { uint64_t QuadPart; struct { uint32_t LowPart, HighPart; }; } PHYSICAL_ADDRESS;
++#define IN
++#define OUT
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define ASSERT assert
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define PAGE_SHIFT 12
++#define PAGE_SIZE 4096u
++#define BYTE_OFFSET(p) ((ULONG_PTR)(p) & (PAGE_SIZE - 1))
++#define NonPagedPool 0
++#define TAG_DMA 0
++#define MAXULONG UINT32_MAX
++#define MAX_MAP_REGISTERS 64
++#define MAP_BASE_SW_SG 1
++#define DISPATCH_LEVEL 2
++#define DelayedWorkQueue 0
++#define STATUS_SUCCESS 0
++#define STATUS_INSUFFICIENT_RESOURCES ((int)0xc000009a)
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define CONTAINING_RECORD(p,t,m) ((t *)((char *)(p) - offsetof(t,m)))
++typedef struct LIST_ENTRY { struct LIST_ENTRY *Flink, *Blink; } LIST_ENTRY;
++typedef struct { ULONG SizeOfBitMap; uint64_t *Buffer; } RTL_BITMAP;
++typedef struct { PVOID VirtualAddress; PHYSICAL_ADDRESS PhysicalAddress; ULONG Counter; } ROS_MAP_REGISTER_ENTRY, *PROS_MAP_REGISTER_ENTRY;
++typedef struct KDEVICE_QUEUE_ENTRY { struct KDEVICE_QUEUE_ENTRY *Next; } KDEVICE_QUEUE_ENTRY, *PKDEVICE_QUEUE_ENTRY;
++typedef struct { BOOLEAN Busy; PKDEVICE_QUEUE_ENTRY First, Last; } KDEVICE_QUEUE;
++enum { KeepObject, DeallocateObject, DeallocateObjectKeepRegisters };
++typedef ULONG (*PDRIVER_CONTROL)(PVOID, PVOID, PVOID, PVOID);
++typedef struct { KDEVICE_QUEUE_ENTRY WaitQueueEntry; PDRIVER_CONTROL DeviceRoutine;
++    ULONG NumberOfMapRegisters; PVOID DeviceObject, CurrentIrp, DeviceContext;
++} WAIT_CONTEXT_BLOCK, *PWAIT_CONTEXT_BLOCK;
++typedef struct ADAPTER_OBJECT {
++    unsigned SpinLock;
++    LIST_ENTRY AdapterQueue;
++    RTL_BITMAP *MapRegisters;
++    PROS_MAP_REGISTER_ENTRY MapRegisterBase;
++    ULONG NumberOfMapRegisters, CommittedMapRegisters, MapRegistersPerChannel;
++    BOOLEAN NeedsMapRegisters, ScatterGather;
++    struct ADAPTER_OBJECT *MasterAdapter;
++    KDEVICE_QUEUE ChannelWaitQueue;
++    PWAIT_CONTEXT_BLOCK CurrentWcb;
++} ADAPTER_OBJECT, *PADAPTER_OBJECT;
++typedef struct { void (*Routine)(PVOID); PVOID Context; } WORK_QUEUE_ITEM;
++typedef struct { WORK_QUEUE_ITEM WorkQueueItem; PADAPTER_OBJECT AdapterObject;
++    ULONG NumberOfMapRegisters; } GROW_WORK_ITEM, *PGROW_WORK_ITEM;
++typedef struct { PVOID StartVa; PFN_NUMBER Pfns[4]; } MDL, *PMDL;
++#define MmGetMdlPfnArray(m) ((m)->Pfns)
++static unsigned bitmap_calls, grow_calls, grow_bytes, free_calls, locks, alloc_calls, live_allocs, fail_alloc;
++static unsigned callbacks, callback_order[8];
++static int failures;
++static WORK_QUEUE_ITEM *pending_work;
++static void InitializeListHead(LIST_ENTRY *p) { p->Flink = p->Blink = p; }
++static int IsListEmpty(LIST_ENTRY *p) { return p->Flink == p; }
++static void InsertTailList(LIST_ENTRY *head, LIST_ENTRY *p) {
++    p->Flink=head; p->Blink=head->Blink; head->Blink->Flink=p; head->Blink=p;
++}
++static void KeInitializeSpinLock(unsigned *p) { *p=0; }
++static KIRQL KeGetCurrentIrql(void) { return DISPATCH_LEVEL; }
++static void KeAcquireSpinLock(unsigned *p, KIRQL *old) { assert(!*p); *p=1; *old=DISPATCH_LEVEL; ++locks; }
++static void KeReleaseSpinLock(unsigned *p, KIRQL old) { (void)old; assert(*p); *p=0; --locks; }
++static BOOLEAN KeInsertDeviceQueue(KDEVICE_QUEUE *q, PKDEVICE_QUEUE_ENTRY e) {
++    if (!q->Busy) { q->Busy=TRUE; return FALSE; }
++    e->Next=NULL; if (q->Last) q->Last->Next=e; else q->First=e;
++    q->Last=e; return TRUE;
++}
++static PKDEVICE_QUEUE_ENTRY KeRemoveDeviceQueue(KDEVICE_QUEUE *q) {
++    PKDEVICE_QUEUE_ENTRY e=q->First;
++    if (!e) { q->Busy=FALSE; return NULL; }
++    q->First=e->Next; if (!q->First) q->Last=NULL; return e;
++}
++static void RtlInitializeBitMap(RTL_BITMAP *b, PULONG storage, ULONG count) {
++    b->SizeOfBitMap=count; b->Buffer=(uint64_t *)storage;
++}
++static void RtlSetAllBits(RTL_BITMAP *b) { *b->Buffer=UINT64_MAX; }
++static ULONG RtlFindClearBitsAndSet(RTL_BITMAP *b, ULONG count, ULONG start) {
++    ++bitmap_calls;
++    for (ULONG i=start; count && i+count<=b->SizeOfBitMap; ++i) {
++        uint64_t mask=((UINT64_C(1)<<count)-1)<<i;
++        if (!(*b->Buffer & mask)) { *b->Buffer |= mask; return i; }
++    }
++    return MAXULONG;
++}
++static PVOID ExAllocatePoolWithTag(int pool, size_t size, int tag) {
++    (void)pool; (void)tag; ++alloc_calls;
++    if (alloc_calls==fail_alloc) return NULL;
++    PVOID p=malloc(size); assert(p); ++live_allocs; return p;
++}
++static void ExFreePool(PVOID p) { if (p) { assert(live_allocs); --live_allocs; free(p); } }
++static BOOLEAN __attribute__((unused)) HalpGrowMapBuffers(PADAPTER_OBJECT m, ULONG bytes) {
++    ++grow_calls; grow_bytes+=bytes;
++    m->NumberOfMapRegisters=bytes/PAGE_SIZE;
++    *m->MapRegisters->Buffer=UINT64_MAX << m->NumberOfMapRegisters;
++    return TRUE;
++}
++static VOID IoFreeMapRegisters(PADAPTER_OBJECT a, PVOID base, ULONG count) {
++    if (!base) return;
++    assert(a->MasterAdapter); ++free_calls;
++    PROS_MAP_REGISTER_ENTRY real=(PROS_MAP_REGISTER_ENTRY)((ULONG_PTR)base & ~(ULONG_PTR)MAP_BASE_SW_SG);
++    size_t i=real-a->MasterAdapter->MapRegisterBase;
++    assert(i+count<=64);
++    *a->MasterAdapter->MapRegisters->Buffer &= ~(((UINT64_C(1)<<count)-1)<<i);
++}
++static void ExInitializeWorkItem(WORK_QUEUE_ITEM *w, void (*routine)(PVOID), PVOID context) {
++    w->Routine=routine; w->Context=context;
++}
++static void ExQueueWorkItem(WORK_QUEUE_ITEM *w, int queue) { (void)queue; assert(!pending_work); pending_work=w; }
++static VOID HalpGrowMapBufferWorker(PVOID p) { (void)p; }
++VOID NTAPI IoFreeAdapterChannel(PADAPTER_OBJECT);
