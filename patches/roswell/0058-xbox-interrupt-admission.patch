@@ -54,7 +54,7 @@ index 0133c6fe..f26e00fd 100644
          /* Invalid vector */
          DPRINT1("IRQ %lx is too high!\n", BusInterruptLevel);
 diff --git a/ntoskrnl/ke/i386/irqobj.c b/ntoskrnl/ke/i386/irqobj.c
-index f5997207..3c6ccf7a 100644
+index f5997207..bf018486 100644
 --- a/ntoskrnl/ke/i386/irqobj.c
 +++ b/ntoskrnl/ke/i386/irqobj.c
 @@ -404,6 +404,12 @@ KeConnectInterrupt(IN PKINTERRUPT Interrupt)
@@ -77,7 +77,7 @@ index f5997207..3c6ccf7a 100644
 +#ifdef SARCH_XBOX
 +    /* Guard caller-owned settings before affinity shifts or IDT lookup. */
 +    if ((Interrupt->Vector < 0x30) || (Interrupt->Vector >= 0x40) ||
-+        (Interrupt->Number >= KeNumberProcessors)) return FALSE;
++        ((UCHAR)Interrupt->Number >= KeNumberProcessors)) return FALSE;
 +#endif
 +
      /* Set the affinity */
@@ -106,7 +106,7 @@ index 00000000..5113fba3
 +or real hardware qualification. Exception IDT query/register APIs are unmodified.
 diff --git a/tests/host/interrupt-admission/cases.c b/tests/host/interrupt-admission/cases.c
 new file mode 100644
-index 00000000..8c267ac3
+index 00000000..a1286e56
 --- /dev/null
 +++ b/tests/host/interrupt-admission/cases.c
 @@ -0,0 +1,74 @@
@@ -164,7 +164,7 @@ index 00000000..8c267ac3
 +  CHECK(KeConnectInterrupt(&i) && i.Connected);
 +  CHECK(KeDisconnectInterrupt(&i) && !i.Connected);
 + }
-+ reset(); KINTERRUPT bad_processor=object(63); bad_processor.Number=255;
++ reset(); KINTERRUPT bad_processor=object(63); bad_processor.Number=-1;
 + CHECK(!KeConnectInterrupt(&bad_processor) && effects==0);
 + bad_processor.Connected=TRUE;
 + CHECK(!KeDisconnectInterrupt(&bad_processor) && effects==0 && bad_processor.Connected);
@@ -221,7 +221,7 @@ index 00000000..adf1dcb4
 +subprocess.run([str(out/'fixture')], check=True)
 diff --git a/tests/host/interrupt-admission/shim.c b/tests/host/interrupt-admission/shim.c
 new file mode 100644
-index 00000000..a27f058e
+index 00000000..5df2c598
 --- /dev/null
 +++ b/tests/host/interrupt-admission/shim.c
 @@ -0,0 +1,76 @@
@@ -255,7 +255,7 @@ index 00000000..a27f058e
 +#define CONTAINING_RECORD(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
 +typedef struct LIST_ENTRY { struct LIST_ENTRY *Flink,*Blink; } LIST_ENTRY;
 +typedef struct KINTERRUPT {
-+ UCHAR Number; ULONG Vector; KIRQL Irql,SynchronizeIrql;
++ int8_t Number; ULONG Vector; KIRQL Irql,SynchronizeIrql;
 + BOOLEAN FloatingSave,Connected,ShareVector; KINTERRUPT_MODE Mode;
 + LIST_ENTRY InterruptListEntry;
 +} KINTERRUPT,*PKINTERRUPT;
@@ -267,7 +267,7 @@ index 00000000..a27f058e
 +static unsigned effects, dismiss_calls, failures, checks;
 +static ULONG KiI8259MaskTable[32], HalpDefaultInterruptAffinity=1;
 +static UCHAR ports[2];
-+static unsigned KeNumberProcessors=1;
++static int8_t KeNumberProcessors=1;
 +static DISPATCH_INFO installed[64];
 +static KIRQL current_irql;
 +static PKPCR KeGetPcr(void) { return &pcr; }
