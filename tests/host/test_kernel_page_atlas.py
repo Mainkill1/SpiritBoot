@@ -43,11 +43,13 @@ class PageAtlasTests(unittest.TestCase):
                                       executable=name == ".text",
                                       discardable=False))
         (self.root / "kernel.exe").write_bytes(pe)
+        (self.root / "shipped.exe").write_bytes(pe)
         (self.root / "flash.bin").write_bytes(b"fixture ROM")
         self.identity = dict(source_tree="a"*40,
                              pe_sha256=hashlib.sha256(pe).hexdigest(),
                              flash_sha256=hashlib.sha256(b"fixture ROM").hexdigest())
-        self.inventory = dict(schema=2, **self.identity, sections=self.sections,
+        self.inventory = dict(schema=2, **self.identity,
+                              shipped_pe_sha256=self.identity["pe_sha256"], sections=self.sections,
                               functions_and_input_extents=[
                                   self.extent("foo", 8176, 48),
                                   self.extent("foo.clone", 8176, 48),
@@ -88,6 +90,7 @@ class PageAtlasTests(unittest.TestCase):
                                "--inventory", str(self.root/"inventory.json"),
                                "--build", str(self.root/"build.json"),
                                "--kernel", str(self.root/"kernel.exe"),
+                               "--shipped-kernel", str(self.root/"shipped.exe"),
                                "--flash", str(self.root/"flash.bin"),
                                "--capture", str(self.root/"capture.json"),
                                "--output", str(self.root/"report.json")],
@@ -199,6 +202,29 @@ class PageAtlasTests(unittest.TestCase):
         result = self.run_tool()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("certified compiler extent", result.stderr)
+
+    def test_runtime_section_cannot_be_omitted_or_reclassified(self):
+        self.sections.pop()
+        result = self.run_tool()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shipped", result.stderr)
+
+    def test_shipped_flags_cannot_be_replaced_with_consistent_booleans(self):
+        self.sections[1].update(flags=0x40000040)
+        result = self.run_tool()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shipped", result.stderr)
+
+    def test_shipped_pe_identity_is_required(self):
+        (self.root/"shipped.exe").write_bytes(b"wrong image")
+        result = self.run_tool()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("shipped", result.stderr)
+
+    def test_crlf_capture_verifies_original_bytes(self):
+        self.capture = self.capture.replace("\n", "\r\n")
+        report = self.report()
+        self.assertEqual(report["coverage"][0]["total_weight"], 22)
 
 
 if __name__ == "__main__":

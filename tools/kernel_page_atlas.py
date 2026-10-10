@@ -48,9 +48,10 @@ def pe_layout(data):
             address = optional + size + index*40
             name = data[address:address+8].rstrip(b"\0").decode("ascii")
             length, rva = struct.unpack_from("<II", data, address+8)
+            flags = struct.unpack_from("<I", data, address+36)[0]
             if name in sections or rva % PAGE or rva+length > image_size:
                 raise ValueError("invalid PE section")
-            sections[name] = (base+rva, length)
+            sections[name] = (base+rva, length, flags)
         return base, headers, sections
     except (struct.error, UnicodeDecodeError) as error:
         raise ValueError("truncated or malformed PE") from error
@@ -62,7 +63,7 @@ def identity_matches(value, identity):
             raise ValueError(f"mismatched {key}")
 
 
-def build_atlas(inventory, build, kernel, flash, captures):
+def build_atlas(inventory, build, kernel, shipped, flash, captures):
     if inventory.get("schema") != 2 or build.get("status") not in ("built", "complete"):
         raise ValueError("requires schema2 compiler inventory and completed build")
     identity = dict(source_tree=build["source_tree"], pe_sha256=sha(kernel),
@@ -72,21 +73,31 @@ def build_atlas(inventory, build, kernel, flash, captures):
     if build.get("flash_sha256") != identity["flash_sha256"]:
         raise ValueError("flash differs from completed build")
     identity_matches(inventory, identity)
-    base, headers, pe_sections = pe_layout(kernel)
+    if inventory.get("shipped_pe_sha256") != sha(shipped):
+        raise ValueError("mismatched shipped PE identity")
+    base, _, pe_sections = pe_layout(kernel)
+    shipped_base, headers, shipped_sections = pe_layout(shipped)
+    if shipped_base != base:
+        raise ValueError("shipped image base differs from compiler image")
     sections = [dict(name="PE headers", start=base, virtual_bytes=headers,
                      flags=0, executable=False, discardable=False)]
     names = set()
     for section in inventory["sections"]:
         name = section["name"]
         start, length = integer(section["start"]), integer(section["virtual_bytes"])
-        if name in names or pe_sections.get(name) != (start, length):
+        compiler = pe_sections.get(name)
+        if name in names or compiler is None or compiler[:2] != (start, length):
             raise ValueError("section ledger differs from exact PE")
         names.add(name)
         flags = integer(section["flags"])
+        if shipped_sections.get(name) != (start, length, flags):
+            raise ValueError("section ledger differs from shipped PE geometry/attributes")
         if (bool(flags & 0x20000000) != section["executable"] or
                 bool(flags & 0x02000000) != section["discardable"]):
             raise ValueError("inconsistent section attributes")
         sections.append(section)
+    if names != set(shipped_sections):
+        raise ValueError("section ledger omits a shipped section")
     claims = inventory["functions_and_input_extents"] + inventory["sizeof_proved_tables"]
     extents = {}
     aliases = {}
@@ -187,7 +198,8 @@ def build_atlas(inventory, build, kernel, flash, captures):
                              complete_coverage=not footer["dropped_translations"]))
     hot = [p for p in pages if p["resident"] and p["executable"] and p["phase_weights"].get("title", 0)]
     candidate = max(hot, key=lambda p: p["phase_weights"]["title"]) if hot else None
-    return dict(schema=1, identity=identity, page_bytes=PAGE, pages=pages, coverage=coverage,
+    return dict(schema=1, identity={**identity, "shipped_pe_sha256": sha(shipped)},
+                page_bytes=PAGE, pages=pages, coverage=coverage,
                 candidate_hot_page=candidate["rva"] if candidate else None,
                 candidate_cold_page=None,
                 confidence_limits="No title phase evidence means no gameplay hot-page claim. "
@@ -200,7 +212,7 @@ def build_atlas(inventory, build, kernel, flash, captures):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for option in ("inventory", "build", "kernel", "flash", "output"):
+    for option in ("inventory", "build", "kernel", "shipped-kernel", "flash", "output"):
         parser.add_argument("--"+option, type=Path, required=True)
     parser.add_argument("--capture", type=Path, action="append", default=[])
     args = parser.parse_args()
@@ -208,10 +220,10 @@ def main():
         captures = []
         for path in args.capture:
             meta = json.loads(path.read_text())
-            captures.append((meta, (path.parent/meta["capture"]).read_text()))
+            captures.append((meta, (path.parent/meta["capture"]).read_bytes().decode("utf-8")))
         report = build_atlas(json.loads(args.inventory.read_text()),
                              json.loads(args.build.read_text()), args.kernel.read_bytes(),
-                             args.flash.read_bytes(), captures)
+                             args.shipped_kernel.read_bytes(), args.flash.read_bytes(), captures)
         with args.output.open("x") as stream:
             json.dump(report, stream, indent=2)
             stream.write("\n")

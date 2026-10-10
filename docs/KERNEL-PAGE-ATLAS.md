@@ -8,7 +8,8 @@ configuration or release instrumentation. Related investigation: #136.
 ```sh
 python3 tools/kernel_page_atlas.py \
   --inventory inventory.json --build build.json \
-  --kernel xboxkrnl.unstripped.exe --flash flash.bin \
+  --kernel xboxkrnl.unstripped.exe --shipped-kernel xboxkrnl.exe \
+  --flash flash.bin \
   --capture capture-identity.json --output page-atlas.json
 ```
 
@@ -20,8 +21,9 @@ Output creation is exclusive; an earlier report is never overwritten.
 The completed firmware build manifest supplies `source_tree`, `flash_sha256`
 and `status`. The tool hashes the supplied PE and flash, rejects a different
 flash from that build, and requires the inventory and every recording sidecar
-to match the same source tree, PE and flash. It validates section addresses and
-virtual sizes against the actual PE32 section table.
+to match the same source tree, PE and flash. It also hashes the shipped PE against
+the ledger's `shipped_pe_sha256`, requires its complete section set and final
+attributes, and checks section geometry against the unstripped compiler image.
 
 The schema2 inventory supplies `sections`, `functions_and_input_extents` and
 `sizeof_proved_tables`. Section records contain `name`, `start`, `virtual_bytes`,
@@ -33,9 +35,9 @@ remain optional provenance. This consumes the supplied compiler ledger; it does
 not recompile source or independently prove every ledger claim. Next-symbol
 intervals are rejected as certified function sizes.
 
-The load ledger determines included sections and final section attributes;
+The shipped PE determines included sections and final section attributes;
 unstripped debug sections are not automatically treated as runtime allocations.
-It must come from the same shipped image. Read-only section flags establish
+Read-only section flags establish
 only a placement candidate, never safe ROM execution or actual physical backing.
 
 A capture sidecar is JSON:
