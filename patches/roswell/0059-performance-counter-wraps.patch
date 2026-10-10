@@ -20,7 +20,7 @@ index 5c6f33c60d69de5c26891b0ed9253b56e79f727f..94a0de72c9ddb545a844867cf01fbfdf
      /* Check for timer expiration */
      KiCheckForTimerExpiration(Prcb, TrapFrame, InterruptTime);
 diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
-index 2f51e58397edf008c88dabf07bddb85eb615ae55..0c03dd327086adddde414bb2f36abf3b9d85abf1 100644
+index 2f51e58397edf008c88dabf07bddb85eb615ae55..0f442f1cd5ec4ad31fd8de9bf0d45f918b9054f0 100644
 --- a/ntoskrnl/xb/xbe.c
 +++ b/ntoskrnl/xb/xbe.c
 @@ -1050,34 +1050,49 @@ ULONGLONG NTAPI XeKeQueryInterruptTime(VOID)
@@ -67,8 +67,8 @@ index 2f51e58397edf008c88dabf07bddb85eb615ae55..0c03dd327086adddde414bb2f36abf3b
  
 +VOID NTAPI NxkUpdatePerformanceCounter(ULONGLONG InterruptTime)
 +{
-+    /* Called only by the clock ISR, with IRQs disabled. The elapsed-time
-+     * deadline is independent of the configured clock tick increment.
++    /* Called only by the clock ISR; NxkReadPmt excludes IRQs itself. The
++     * elapsed-time deadline is independent of the clock tick increment.
 +     * Normal sampling must occur within one hardware wrap; a debugger or
 +     * an IRQ-disabled interval longer than that cannot recover lost wraps. */
 +    if (InterruptTime < NxkPmtNextSample)
@@ -123,10 +123,10 @@ index 0000000000000000000000000000000000000000..3a8ee78aebd06ab85844a68f6f7ce1ea
 +subprocess.run([str(out / "counter")], check=True)
 diff --git a/tests/host/performance-counter/fixture.c b/tests/host/performance-counter/fixture.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..e7a55ce52b18ca965cc196bd748c5da37e5200c1
+index 0000000000000000000000000000000000000000..16d8b949996eb868bd7a60828e14cd9233eab803
 --- /dev/null
 +++ b/tests/host/performance-counter/fixture.c
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,133 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include <assert.h>
 +#include <stdbool.h>
@@ -163,6 +163,7 @@ index 0000000000000000000000000000000000000000..e7a55ce52b18ca965cc196bd748c5da3
 +static uint32_t flags = EFLAGS_INTERRUPT_MASK | 2;
 +static KIRQL irql;
 +static unsigned port_reads;
++static bool clock_entry_irq_enabled;
 +static ULONG __readeflags(void) { return flags; }
 +static void _disable(void) { flags &= ~EFLAGS_INTERRUPT_MASK; }
 +static void __writeeflags(ULONG value) { flags = value; }
@@ -171,6 +172,7 @@ index 0000000000000000000000000000000000000000..e7a55ce52b18ca965cc196bd748c5da3
 +static ULONG READ_PORT_ULONG(PULONG port)
 +{
 +    assert((uintptr_t)port == 0x8008);
++    assert(!(flags & EFLAGS_INTERRUPT_MASK));
 +    ++port_reads;
 +    return hardware & 0x00ffffffu;
 +}
@@ -206,9 +208,12 @@ index 0000000000000000000000000000000000000000..e7a55ce52b18ca965cc196bd748c5da3
 +    ULONG old_flags = flags;
 +    KIRQL old_irql = irql;
 +    hardware += 3375000ULL * increment / 10000000;
-+    _disable(); irql = 28;
++    if (clock_entry_irq_enabled) flags |= EFLAGS_INTERRUPT_MASK;
++    else _disable();
++    ULONG clock_flags = flags;
++    irql = 28;
 +    KeUpdateSystemTime(NULL, increment, old_irql);
-+    assert(!(flags & EFLAGS_INTERRUPT_MASK));
++    assert(flags == clock_flags);
 +    assert(irql == 28);
 +    flags = old_flags; irql = old_irql;
 +}
@@ -239,6 +244,8 @@ index 0000000000000000000000000000000000000000..e7a55ce52b18ca965cc196bd748c5da3
 +    quiet(6000, 10000);
 +    reset(0);
 +    quiet(11000, 100000); /* Deadline is elapsed time, not tick count. */
++    reset(0); clock_entry_irq_enabled = true;
++    quiet(11000, 10000); /* HAL enables IRQs before the clock body. */
 +    for (unsigned level = 0; level <= 31; level += 2) {
 +        for (unsigned enabled = 0; enabled < 2; ++enabled) {
 +            irql = level; flags = 2 | (enabled ? EFLAGS_INTERRUPT_MASK : 0);

@@ -54,7 +54,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = da40b71ca0ba18d0672096e97d2e84cb57afc167
+            test "$actual_tree" = 5f4126e10db98de4e5b502cc0568ad1d64c60032
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check.py" "$output/upper-ram-reservation" >"$output/upper-ram-reservation.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" >"$output/upper-ram-config.log" 2>&1
@@ -117,7 +117,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'da40b71ca0ba18d0672096e97d2e84cb57afc167', result
+          assert result['source_tree'] == '5f4126e10db98de4e5b502cc0568ad1d64c60032', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
