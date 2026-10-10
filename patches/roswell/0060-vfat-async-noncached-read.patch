@@ -1,0 +1,171 @@
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index 62d983fb..b96b1b0a 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -800,6 +800,17 @@ VfatRead(
+         }
+     }
+ 
++#ifdef SARCH_XBOX
++    /* Noncached file reads wait for disk children in VfatReadFileData.
++     * An asynchronous issuer must post that work before entering this path.
++     * The existing queue pins its buffer and grants the worker CANWAIT. */
++    if (NoCache && !PagingIo && !IsVolume && !CanWait)
++    {
++        Status = STATUS_PENDING;
++        goto ByeBye;
++    }
++#endif
++
+     if (IsVolume)
+     {
+         Resource = &IrpContext->DeviceExt->DirResource;
+diff --git a/tests/xbe/io-completion-probe/Makefile b/tests/xbe/io-completion-probe/Makefile
+new file mode 100644
+index 00000000..3ab3092d
+--- /dev/null
++++ b/tests/xbe/io-completion-probe/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = IO-COMPLETION-PROBE
++GEN_XISO = completion-probe.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/io-completion-probe/main.c b/tests/xbe/io-completion-probe/main.c
+new file mode 100644
+index 00000000..e1781cc3
+--- /dev/null
++++ b/tests/xbe/io-completion-probe/main.c
+@@ -0,0 +1,131 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Public-ABI async noncached completion regression, not an FPS benchmark. */
++#include <stdio.h>
++#include <stdint.h>
++#include <string.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <nxdk/mount.h>
++#include "../regression.h"
++
++#define BYTES 16384
++#define READS 32
++static unsigned char data[BYTES] __attribute__((aligned(4096)));
++static IO_STATUS_BLOCK iosb;
++static volatile LONG stop_worker, callbacks, callback_errors;
++static volatile ULONG work_sink;
++
++static unsigned char expected(unsigned position)
++{
++    return (unsigned char)(position ^ (position >> 8));
++}
++
++static DWORD WINAPI busy(LPVOID context)
++{
++    ULONG value = 1;
++    (void)context;
++    while (!stop_worker) {
++        for (unsigned i = 0; i < 256; ++i)
++            value = value * 1664525 + 1013904223;
++        work_sink = value;
++    }
++    return 0;
++}
++
++static void NTAPI completed(DWORD error, DWORD bytes, PVOID context)
++{
++    if (error || bytes != BYTES || context != &iosb)
++        InterlockedIncrement(&callback_errors);
++    InterlockedIncrement(&callbacks);
++}
++
++int main(void)
++{
++    regression_begin();
++    if (!nxIsDriveMounted('E'))
++        nxMountDrive('E', "\\Device\\Harddisk0\\Partition1");
++    HANDLE writer = CreateFile("E:\\completion-probe.bin", GENERIC_WRITE, 0,
++        NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
++    regression_require(writer != INVALID_HANDLE_VALUE, "open private fixture writer");
++    for (unsigned block = 0; block < READS; ++block) {
++        for (unsigned i = 0; i < BYTES; ++i)
++            data[i] = expected(block * BYTES + i);
++        DWORD bytes = 0;
++        regression_require(WriteFile(writer, data, BYTES, &bytes, NULL) && bytes == BYTES,
++            "write exact fixture block");
++    }
++    regression_require(CloseHandle(writer), "close fixture writer");
++
++    HANDLE reader = CreateFile("E:\\completion-probe.bin", GENERIC_READ,
++        FILE_SHARE_READ, NULL, OPEN_EXISTING,
++        FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, NULL);
++    regression_require(reader != INVALID_HANDLE_VALUE, "open async noncached reader");
++    HANDLE event = CreateEvent(NULL, TRUE, FALSE, NULL);
++    regression_require(event != NULL, "create per-request event");
++    for (unsigned mode = 0; mode < 3; ++mode) {
++        HANDLE worker = NULL;
++        stop_worker = 0;
++        if (mode) {
++            worker = CreateThread(NULL, 0, busy, NULL, 0, NULL);
++            regression_require(worker != NULL, "start independent CPU load");
++            regression_require(SetThreadPriority(worker, THREAD_PRIORITY_NORMAL),
++                "set CPU load to normal priority");
++        }
++        ULONG total = 0, api_max = 0, publish_max = 0, api_total = 0;
++        unsigned pending_count = 0, mismatches = 0;
++        DWORD begin_mode = GetTickCount();
++        for (unsigned block = 0; block < READS; ++block) {
++            memset(data, 0xcc, sizeof(data));
++            callbacks = callback_errors = 0;
++            iosb.Status = STATUS_PENDING;
++            iosb.Information = 0;
++            ResetEvent(event);
++            LARGE_INTEGER offset = { .QuadPart = block * BYTES };
++            DWORD begin = GetTickCount();
++            NTSTATUS status = NtReadFile(reader, mode == 2 ? NULL : event,
++                mode == 2 ? (PIO_APC_ROUTINE)NtUserIoApcDispatcher : NULL,
++                mode == 2 ? (PVOID)completed : NULL, &iosb, data, BYTES, &offset);
++            DWORD returned = GetTickCount();
++            if (!NT_SUCCESS(status))
++                regression_require(0, "read rejected; stop without buffer reuse");
++            pending_count += status == STATUS_PENDING;
++            DWORD wait_result = WAIT_OBJECT_0;
++            if (mode == 2) {
++                DWORD deadline = returned + 5000;
++                while (!callbacks && (LONG)(deadline - GetTickCount()) > 0)
++                    SleepEx(50, TRUE);
++            } else {
++                wait_result = WaitForSingleObject(event, 5000);
++            }
++            DWORD published = GetTickCount();
++            regression_require(NT_SUCCESS(status), "read accepted");
++            regression_require(mode == 2 ? callbacks == 1 && !callback_errors :
++                wait_result == WAIT_OBJECT_0, "completion observed before timeout");
++            regression_require(NT_SUCCESS(iosb.Status) && iosb.Information == BYTES,
++                "successful full-length completion");
++            for (unsigned i = 0; i < BYTES; ++i)
++                mismatches += data[i] != expected(block * BYTES + i);
++            total += published - begin;
++            api_total += returned - begin;
++            if (returned - begin > api_max) api_max = returned - begin;
++            if (published - returned > publish_max) publish_max = published - returned;
++        }
++        DWORD mode_ms = GetTickCount() - begin_mode;
++        if (worker) {
++            InterlockedExchange(&stop_worker, 1);
++            regression_require(WaitForSingleObject(worker, 5000) == WAIT_OBJECT_0,
++                "CPU load terminates");
++            CloseHandle(worker);
++        }
++        regression_check(pending_count == READS, "noncached asynchronous reads are posted");
++        regression_check(!mismatches, "every byte and offset matches");
++        /* Output after measurements, never inside the timed read interval. */
++        tap_comment("completion_probe mode=%u reads=%u pending=%u read_sum_ms=%lu "
++            "api_sum_ms=%lu api_max_ms=%lu publish_max_ms=%lu phase_ms=%lu mismatch=%u",
++            mode, READS, pending_count, total, api_total, api_max, publish_max,
++            mode_ms, mismatches);
++    }
++    CloseHandle(event);
++    CloseHandle(reader);
++    regression_finish();
++}
