@@ -460,11 +460,11 @@ shutil.copyfile(sys.argv[-2], sys.argv[-1])
         self.converter.chmod(0o755)
 
     def launch(self, tap=False, preserve_hdd=False, tb_plugin=None,
-               memory_mib=128, **env):
+               memory_mib=128, timeout_seconds=2, **env):
         args = [sys.executable, str(ROOT / "scripts/run-firmware.py"),
                 "--xemu", str(self.xemu), "--flash", str(self.flash),
                 "--hdd", str(self.hdd), "--dvd", str(self.dvd),
-                "--output", str(self.output), "--timeout", "0.2"]
+                "--output", str(self.output), "--timeout", str(timeout_seconds)]
         if tap:
             args.append("--expect-tap")
         if preserve_hdd:
@@ -491,6 +491,19 @@ shutil.copyfile(sys.argv[-2], sys.argv[-1])
         self.assertEqual(manifest["status"], "captured")
         self.assertEqual(manifest["assets"]["dvd"]["sha256"], hashlib.sha256(b"open fixture").hexdigest())
         self.assertIn("emulator diagnostic", (self.output / "emulator.log").read_text())
+
+    def test_capture_allows_delayed_stub_startup(self):
+        # Model scheduler/import delay in the identity fixture. This is not
+        # the intentional timeout test below.
+        stub = self.xemu.read_text()
+        self.xemu.write_text(stub.replace(
+            "if '--version' in sys.argv:",
+            "time.sleep(0.3)\nif '--version' in sys.argv:"))
+        result = self.launch(memory_mib=64)
+        manifest = json.loads((self.output / "run.json").read_text())
+        self.assertEqual(result.returncode, 0, manifest)
+        self.assertEqual(manifest["status"], "captured")
+        self.assertEqual(manifest["memory_mib"], 64)
 
     def test_missing_media_does_not_launch(self):
         self.dvd.unlink()
@@ -571,7 +584,7 @@ shutil.copyfile(sys.argv[-2], sys.argv[-1])
         self.assertEqual(manifest["returncode"], 7)
 
     def test_timeout_is_a_failure_with_retained_manifest(self):
-        result = self.launch(SLEEP="1")
+        result = self.launch(timeout_seconds=0.2, SLEEP="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(json.loads((self.output / "run.json").read_text())["status"], "timeout")
 
