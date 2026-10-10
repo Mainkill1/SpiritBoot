@@ -18,11 +18,11 @@ jobs:
         run: |
           docker run --rm -v "$PWD/tests/dashboard:/work" -w /work \
             ghcr.io/xboxdev/nxdk@sha256:bab707b7ed2544e9956d51e7b411a4575ab66120bd608b3237698495203d15f7 make -j2
-          cp tests/dashboard/bin/default.xbe tests/dashboard/bin/xboxdash.xbe
+          sudo cp tests/dashboard/bin/default.xbe tests/dashboard/bin/xboxdash.xbe
           docker run --rm -v "$PWD/tests/dashboard:/work" -w /work \
             ghcr.io/xboxdev/nxdk@sha256:bab707b7ed2544e9956d51e7b411a4575ab66120bd608b3237698495203d15f7 \
             sh -c 'rm -f main.obj main.exe bin/default.xbe; make -j2 DVD_LAUNCH=1'
-          cp tests/dashboard/bin/default.xbe tests/dashboard/bin/xboxdash-launch-dvd.xbe
+          sudo cp tests/dashboard/bin/default.xbe tests/dashboard/bin/xboxdash-launch-dvd.xbe
       - uses: actions/upload-artifact@v4
         with:
           name: dashboard-memory-probe

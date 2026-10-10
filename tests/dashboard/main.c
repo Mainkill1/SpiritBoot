@@ -40,10 +40,40 @@ int main(void)
     delay_ms(5000);
 
 #ifdef DASHBOARD_LAUNCH_DVD
-    /* A separate launch build adds no marker buffers or framebuffer. */
-    tap_puts("DASH_LAUNCH_REQUEST path=D:\\default.xbe\n");
+    /* D: can name the HDD title directory. Resolve the optical device itself. */
+    static const char target[] = "\\Device\\CdRom0\\default.xbe";
+    ANSI_STRING path;
+    OBJECT_ATTRIBUTES attributes;
+    IO_STATUS_BLOCK io = {0};
+    HANDLE file = NULL;
+    RtlInitAnsiString(&path, target);
+    InitializeObjectAttributes(&attributes, &path, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    NTSTATUS opened = NtOpenFile(&file, GENERIC_READ | SYNCHRONIZE,
+        &attributes, &io, FILE_SHARE_READ,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT);
+    tap_comment("DASH_DVD_OPEN status=%08lx", U(opened));
+    if (opened < 0) {
+        tap_puts("DASH_LAUNCH_BLOCKED reason=dvd_open_failed\n");
+        tap_drain();
+        for (;;) delay_ms(1000);
+    }
+    char magic[4] = {0};
+    LARGE_INTEGER offset = { .QuadPart = 0 };
+    NTSTATUS read = NtReadFile(file, NULL, NULL, NULL, &io,
+                              magic, sizeof(magic), &offset);
+    NTSTATUS closed = NtClose(file);
+    tap_comment("DASH_DVD_READ status=%08lx bytes=%lu close=%08lx",
+                U(read), U(io.Information), U(closed));
+    if (read < 0 || io.Information != sizeof(magic) ||
+        magic[0] != 'X' || magic[1] != 'B' || magic[2] != 'E' || magic[3] != 'H' ||
+        closed < 0) {
+        tap_puts("DASH_LAUNCH_BLOCKED reason=invalid_xbe_or_io\n");
+        tap_drain();
+        for (;;) delay_ms(1000);
+    }
+    tap_puts("DASH_LAUNCH_REQUEST path=\\Device\\CdRom0\\default.xbe\n");
     tap_drain();
-    XLaunchXBE("D:\\default.xbe");
+    XLaunchXBE(target);
     tap_puts("DASH_LAUNCH_RETURN unexpected=1\n");
     tap_drain();
     for (;;) delay_ms(1000);

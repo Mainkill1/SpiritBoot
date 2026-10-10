@@ -39,7 +39,12 @@ docker run --rm -v "$PWD/tests/dashboard:/work" -w /work \
   sh -c 'rm -f main.obj main.exe bin/default.xbe; make -j2 DVD_LAUNCH=1'
 ```
 
-This build requests `D:\default.xbe` through nxdk's public `XLaunchXBE` API.
+This build opens `\Device\CdRom0\default.xbe` through public kernel APIs,
+checks that its first four bytes are the XBE signature, closes the file,
+then requests that native optical path through nxdk's public `XLaunchXBE`
+API. It avoids a `D:` mapping inherited from the HDD dashboard directory.
+An open/read/signature/close failure emits `DASH_LAUNCH_BLOCKED` and keeps
+the diagnostic session available without attempting the reboot.
 It allocates neither the observation buffers nor a framebuffer before
 handoff. It is not a general-purpose file browser. A returned launch is
 recorded as `DASH_LAUNCH_RETURN unexpected=1`, then held for diagnosis.
