@@ -1,0 +1,77 @@
+diff --git a/tests/host/lto-relink/check.py b/tests/host/lto-relink/check.py
+new file mode 100644
+index 00000000..a080d6e7
+--- /dev/null
++++ b/tests/host/lto-relink/check.py
+@@ -0,0 +1,51 @@
++#!/usr/bin/env python3
++"""Check changed callee code reaches a repeated saved-temps firmware link."""
++from pathlib import Path
++import os
++import re
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++output = Path(sys.argv[1]).resolve()
++output.mkdir(parents=True, exist_ok=True)
++compiler = "i686-w64-mingw32-gcc"
++objdump = "i686-w64-mingw32-objdump"
++env = dict(os.environ)
++env.pop("LTO_INIT_FINDTOOL", None)
++
++def run(arguments):
++    result = subprocess.run(arguments, cwd=output, env=env,
++                            capture_output=True, text=True)
++    if result.returncode:
++        raise RuntimeError(result.stdout + result.stderr)
++    return result.stdout
++
++(output / "caller.c").write_text("extern int value(void); int entry(void) { return value(); }\n")
++run([compiler, "-Os", "-flto", "-ffunction-sections", "-c", "caller.c", "-o", "caller.obj"])
++preserved = {"other.ltrans0.ltrans.o": b"other output",
++             "xboxkrnl.ltrans-not-generated.ltrans.o": b"not a generated partition",
++             "xboxkrnl.ltrans0.source.c": b"source input"}
++for name, content in preserved.items():
++    (output / name).write_bytes(content)
++
++for expected in (1, 2):
++    (output / "leaf.c").write_text(
++        f"__attribute__((noinline)) int value(void) {{ return {expected}; }}\n")
++    run([compiler, "-Os", "-flto", "-ffunction-sections", "-c", "leaf.c", "-o", "leaf.obj"])
++    run([sys.executable, str(root / "tools/lto-init-relink.py"), compiler,
++         "-nostdlib", "-flto=2", "-Wl,--entry,_entry", "-o", "xboxkrnl.exe",
++         "caller.obj", "leaf.obj"])
++    assembly = run([objdump, "-d", "xboxkrnl.exe"])
++    (output / f"link-{expected}.asm").write_text(assembly)
++    symbols = run(["i686-w64-mingw32-nm", "-n", "xboxkrnl.exe"])
++    match = re.search(r"^([0-9a-f]+) [tT] _value$", symbols, re.M)
++    assert match, symbols
++    address = int(match[1], 16)
++    instruction = re.search(rf"^\s*{address:x}:.*$", assembly, re.M)
++    assert instruction, assembly
++    assert re.search(rf"mov\s+\$0x{expected:x},%eax", instruction[0]), (
++        f"Repeated link kept stale callee instead of value {expected}:\n{instruction[0]}")
++    for name, content in preserved.items():
++        assert (output / name).read_bytes() == content, name
++    print(f"link {expected}: fresh callee and unrelated inputs preserved")
+diff --git a/tools/lto-init-relink.py b/tools/lto-init-relink.py
+index f471a44a..f38583f9 100755
+--- a/tools/lto-init-relink.py
++++ b/tools/lto-init-relink.py
+@@ -77,6 +77,15 @@ ar = os.environ.get("AR", "i686-w64-mingw32-ar")
+ # -save-temps leaves `<output base>.ltrans<N>.ltrans.o` in the link directory.
+ # GCC deletes them otherwise, and only GCC 16's -flto-incremental cache keeps
+ # them anywhere else -- CI's GCC 13 has no cache, so ask for them explicitly.
++# GCC's generated LTRANS makefile can reuse a previous saved object despite
++# regenerated partition IR. Remove only this output's numbered saved codegen
++# files so a repeated link cannot silently retain old function bodies.
++output_base = os.path.splitext(os.path.abspath(out))[0]
++saved_codegen = re.compile(re.escape(os.path.basename(output_base)) +
++                           r"\.ltrans[0-9]+\.ltrans\.(?:o|s)\Z")
++for path in glob.glob(output_base + ".ltrans*.ltrans.*"):
++    if saved_codegen.fullmatch(os.path.basename(path)):
++        os.unlink(path)
+ rc = run(LINK + ["-save-temps"])
+ if rc != 0:
+     sys.exit(rc)
