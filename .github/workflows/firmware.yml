@@ -54,8 +54,9 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 1361228227590c1099c633e7198b2cb20e4aa14b
+            test "$actual_tree" = 131e412a67913e302d85e67c9cdc86f6e1e3226c
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check.py" "$output/upper-ram-reservation" >"$output/upper-ram-reservation.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" >"$output/upper-ram-config.log" 2>&1
@@ -118,7 +119,9 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '1361228227590c1099c633e7198b2cb20e4aa14b', result
+            test "$actual_tree" = 131e412a67913e302d85e67c9cdc86f6e1e3226c
+            python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
