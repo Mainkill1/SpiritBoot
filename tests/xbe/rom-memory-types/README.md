@@ -46,8 +46,10 @@ Analyze the completed serial capture from the repository root:
 python3 tools/rom_memory_types.py serial.log
 ```
 
-The analyzer requires a single complete PASS block, all reported variable MSRs
-and actual present page mappings. Intel SDM volume 3A tables 11-7/11-11 define
+The analyzer requires a single complete PASS block, all reported variable MSRs,
+four unique translation-consistent page records, supported CPU/paging mode,
+and all 17 ordered sample rounds with the exact workload/checksum. Intel SDM
+volume 3A tables 11-7/11-11 define
 the MTRR/PAT combination. Ambiguous overlaps, fixed ranges below 1 MiB, invalid
 types and non-normal CR0 cache mode remain UNKNOWN. This tool reports the page
 being accessed, not the cacheability of the temporary page-table alias.
@@ -59,6 +61,11 @@ Guest RDTSC intervals under xemu reflect its virtual clock and host scheduling;
 they are not exclusive host CPU cycles, title frame time or game FPS. Retain
 exact BIOS/xemu/guest identities, serial results and run order outside product
 main. Run balanced fresh processes for emulator-cost comparisons.
+
+The RAM crossing copy spans a **4 KiB instruction alignment**. The observed
+RAM mappings use one 4 MiB PDE, so these captures do not cross a guest
+translation-page boundary. xemu's TCG translation blocks use 4 KiB boundaries;
+keep that execution boundary distinct from guest page-table geometry.
 
 Physical hardware, cold I-cache/working-set eviction and ROM page-crossing
 execution still require separate qualification. This guest does not map or

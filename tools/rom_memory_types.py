@@ -84,6 +84,26 @@ def parse_capture(text):
             samples.append(values)
     if cpu is None or control is None or not pages:
         raise ValueError("Missing CPU, control or page records")
+    features = int(cpu["edx"], 16)
+    required_features = (1 << 4) | (1 << 5) | (1 << 12) | (1 << 16)
+    if features & required_features != required_features:
+        raise ValueError("CPU lacks required diagnostic capabilities")
+    if not 32 <= int(cpu["phys_bits"]) <= 52:
+        raise ValueError("Unsupported physical address width")
+    if set(control) != {"cr0", "cr3", "cr4"} or any(not 0 <= v < 2**32 for v in control.values()):
+        raise ValueError("Invalid control register readback")
+    if not control["cr0"] & (1 << 31) or control["cr4"] & (1 << 5):
+        raise ValueError("Only paged non-PAE captures supported")
+    if len(pages) != 4 or {p.get("label") for p in pages} != {"kernel", "ram", "ram-cross", "ram-cross-next"}:
+        raise ValueError("Four unique diagnostic pages required")
+    if len(samples) != 17 or [int(s["round"]) for s in samples] != list(range(17)):
+        raise ValueError("Complete ordered rounds 0 through 16 required")
+    tick_fields = {"overhead", "kernel", "ram", "cross", "table_kernel", "table_ram"}
+    for sample in samples:
+        if int(sample["calls"]) != 32768 or sample["checksum"] != "da090000":
+            raise ValueError("Unexpected workload or checksum")
+        if any(not 0 <= int(sample[key]) < 2**64 for key in tick_fields):
+            raise ValueError("Invalid timestamp interval")
     required = {0xFE, 0x2FF, 0x277}
     if not required <= msrs.keys():
         raise ValueError("Missing capability/default/PAT MSRs")
@@ -96,13 +116,28 @@ def parse_capture(text):
     ranges = [(msrs[0x200 + i * 2], msrs[0x201 + i * 2]) for i in range(count)]
     result = []
     for page in pages:
-        pa, entry = int(page["pa"], 16), int(page["entry"], 16)
+        va, pa, entry = (int(page[key], 16) for key in ("va", "pa", "entry"))
+        if any(not 0 <= value < 2**32 for value in (va, pa, entry)) or page["large"] not in ("0", "1"):
+            raise ValueError("Invalid page readback")
+        large = page["large"] == "1"
         if not entry & 1:
             raise ValueError("Non-present measured page")
+        if large:
+            if not control["cr4"] & 0x10 or not entry & 0x80 or entry & 0x3FE000:
+                raise ValueError("Unsupported or contradictory large-page entry")
+            translated = (entry & 0xFFC00000) | (va & 0x3FFFFF)
+        else:
+            translated = (entry & 0xFFFFF000) | (va & 0xFFF)
+        if pa != translated:
+            raise ValueError("Physical address disagrees with page walk")
         mtrr = mtrr_type(pa, msrs[0x2FF], ranges, int(cpu["phys_bits"]))
-        pat = pat_type(msrs[0x277], entry, large=bool(int(page["large"])))
+        pat = pat_type(msrs[0x277], entry, large=large)
         result.append({**page, "mtrr_type": mtrr, "pat_type": pat,
                        "effective_type": effective_type(mtrr, pat, control["cr0"])})
+    by_label = {page["label"]: page for page in result}
+    ram = int(by_label["ram"]["va"], 16)
+    if ram & 4095 or int(by_label["ram-cross"]["va"], 16) != ram + 4094 or int(by_label["ram-cross-next"]["va"], 16) != ram + 4096:
+        raise ValueError("RAM control addresses disagree with diagnostic layout")
     return {"schema": 1, "cpu": cpu, "control": control, "msrs": msrs,
             "pages": result, "samples": samples,
             "limitation": "TCG timing is not physical flash latency; no game performance claim."}
