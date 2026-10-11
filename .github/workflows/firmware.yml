@@ -54,7 +54,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 3fc6e4eb16b2d1cc315c3d4c3bfcb60044871963
+            test "$actual_tree" = 7282aee501d65d92aaeeffe4852e1bcce6db9d95
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -82,6 +82,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/cache/check-shrink.py" "$output/cache-shrink" >"$output/cache-shrink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-fatx32.py" "$output/fatx32" >"$output/fatx32.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-chain-walk.py" "$output/fat-chain-walk" >"$output/fat-chain-walk.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/fatx/check-read-eof.py" "$output/fatx-read-eof" >"$output/fatx-read-eof.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/metadata/check.py" "$output/metadata" >"$output/metadata.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/zero-reuse/check.py" "$output/zero-reuse" >"$output/zero-reuse.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-lifetime/check.py" "$output/dma-lifetime" >"$output/dma-lifetime.log" 2>&1
@@ -119,7 +120,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '3fc6e4eb16b2d1cc315c3d4c3bfcb60044871963', result
+          assert result['source_tree'] == '7282aee501d65d92aaeeffe4852e1bcce6db9d95', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
@@ -227,6 +228,7 @@ jobs:
             artifacts/thread-base-priority-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/thread-current-priority-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/thread-base-query-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/fatx-noncached-eof-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/kernel-host-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/firmware-upper-reserve/flash.bin
             artifacts/firmware-upper-reserve/build.json
