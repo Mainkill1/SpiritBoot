@@ -1,0 +1,44 @@
+From 26558df081fa24570ff39198479a35874ea09949 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 19:59:54 -0700
+Subject: [PATCH] tests: probe GPU instance ownership directly
+
+---
+ tests/xbe/gpu-instance/main.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/tests/xbe/gpu-instance/main.c b/tests/xbe/gpu-instance/main.c
+index f516fc8..07a2760 100644
+--- a/tests/xbe/gpu-instance/main.c
++++ b/tests/xbe/gpu-instance/main.c
+@@ -37,6 +37,7 @@ int main(void)
+ {
+     SIZE_T padding = 0;
+     ULONG before, free_before_probe, free_after_probe;
++    bool all_owned = true;
+     PVOID idle[4] = {0};
+     PVOID held = NULL, duplicate = NULL, base;
+     tap_puts("== gpu-instance BEGIN schema=1 ==\n");
+@@ -90,10 +91,17 @@ int main(void)
+     check(idle[0] && idle[1] && idle[2] && idle[3],
+           "slab interference fixture acquires four small objects");
+     if (!idle[0] || !idle[1] || !idle[2] || !idle[3]) goto done;
+-    before = available();
+     check(MmClaimGpuInstanceMemory(16384, NULL) == (PVOID)0x83ff0000,
+           "growth succeeds after owner release");
+-    check(available() + 4 == before, "successful growth owns all four pages");
++    for (ULONG pa = 0x03fec000; pa <= 0x03fef000; pa += 4096) {
++        duplicate = pin(pa);
++        if (duplicate != NULL) {
++            all_owned = false;
++            break;
++        }
++    }
++    check(all_owned, "successful growth owns all four pages");
++    if (!all_owned) goto done;
+     for (unsigned i = 0; i < 4; ++i) { ExFreePool(idle[i]); idle[i] = NULL; }
+     free_before_probe = available();
+     duplicate = pin(0x03fed000);
+-- 
+2.47.3
+
