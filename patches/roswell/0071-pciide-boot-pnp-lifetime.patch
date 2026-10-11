@@ -1,0 +1,502 @@
+diff --git a/drivers/storage/ide/pciidex/pciidex.c b/drivers/storage/ide/pciidex/pciidex.c
+index f3060ccfc5f48bd4d787ad02fe45e56f1ffd9fea..68fb5b1e55fdb85afb5dfd36be1d9439f48fe80c 100644
+--- a/drivers/storage/ide/pciidex/pciidex.c
++++ b/drivers/storage/ide/pciidex/pciidex.c
+@@ -567,6 +567,9 @@ PciIdeXInitialize(
+     DriverExtension->MiniControllerExtensionSize = ExtensionSize;
+     DriverExtension->HwGetControllerProperties = HwGetControllerProperties;
+ 
++#ifdef SARCH_XBOX
++    PciIdeXInitializeBootPnp();
++#endif
+     DriverObject->MajorFunction[IRP_MJ_PNP] = PciIdeXDispatchPnp;
+ #ifndef SARCH_XBOX /* ntoskrnl/po is unlinked; no Po* exports */
+     DriverObject->MajorFunction[IRP_MJ_POWER] = PciIdeXDispatchPower;
+diff --git a/drivers/storage/ide/pciidex/pciidex.h b/drivers/storage/ide/pciidex/pciidex.h
+index 970e1e5cf55e69024c5b1af6bf63f3009a03d7e6..f94f90a90f5653852b30cd6697d804f7e0cb95d8 100644
+--- a/drivers/storage/ide/pciidex/pciidex.h
++++ b/drivers/storage/ide/pciidex/pciidex.h
+@@ -564,6 +564,10 @@ PciIdeXPnpQueryPnpDeviceState(
+ 
+ _Dispatch_type_(IRP_MJ_PNP)
+ DRIVER_DISPATCH_PAGED PciIdeXDispatchPnp;
++#ifdef SARCH_XBOX
++VOID PciIdeXInitializeBootPnp(VOID);
++VOID PciIdeXSealBootPnp(VOID);
++#endif
+ 
+ CODE_SEG("PAGE")
+ NTSTATUS
+diff --git a/drivers/storage/ide/pciidex/pdo.c b/drivers/storage/ide/pciidex/pdo.c
+index 002c4cef6fb874445b9d783a5b4174116002d328..45f59a99ec1d924ad5788481d992a643e147f6de 100644
+--- a/drivers/storage/ide/pciidex/pdo.c
++++ b/drivers/storage/ide/pciidex/pdo.c
+@@ -1095,11 +1095,63 @@ PciIdeXPdoDispatchPnp(
+     return Status;
+ }
+ 
+-NTSTATUS
+-NTAPI
+-PciIdeXDispatchPnp(
+-    _In_ PDEVICE_OBJECT DeviceObject,
+-    _Inout_ PIRP Irp)
++#ifdef SARCH_XBOX
++/* Xbox boot-PnP admission. Saved entry pointers must remain safe after seal. */
++static KSPIN_LOCK PciIdeXBootPnpLock;
++static KEVENT PciIdeXBootPnpDrained;
++static LONG PciIdeXBootPnpActive;
++static BOOLEAN PciIdeXBootPnpInitialized;
++static BOOLEAN PciIdeXBootPnpSealed;
++
++VOID
++PciIdeXInitializeBootPnp(VOID)
++{
++    ASSERT(!PciIdeXBootPnpInitialized);
++    KeInitializeSpinLock(&PciIdeXBootPnpLock);
++    KeInitializeEvent(&PciIdeXBootPnpDrained, NotificationEvent, TRUE);
++    PciIdeXBootPnpInitialized = TRUE;
++}
++
++VOID
++PciIdeXSealBootPnp(VOID)
++{
++    KIRQL OldIrql;
++    LARGE_INTEGER Timeout;
++    NTSTATUS Status;
++    LONG Active;
++
++    /* Failed registration may never publish this callback. */
++    if (!PciIdeXBootPnpInitialized)
++        return;
++
++    ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL);
++    KeAcquireSpinLock(&PciIdeXBootPnpLock, &OldIrql);
++    PciIdeXBootPnpSealed = TRUE;
++    KeReleaseSpinLock(&PciIdeXBootPnpLock, OldIrql);
++
++    /* This wait is outside the lock. Failure must stop initialization before
++     * it can donate code with a live return address. */
++    Timeout.QuadPart = -5LL * 10000000;
++    Status = KeWaitForSingleObject(&PciIdeXBootPnpDrained, Executive,
++                                   KernelMode, FALSE, &Timeout);
++    if (Status != STATUS_SUCCESS)
++    {
++        KeAcquireSpinLock(&PciIdeXBootPnpLock, &OldIrql);
++        Active = PciIdeXBootPnpActive;
++        KeReleaseSpinLock(&PciIdeXBootPnpLock, OldIrql);
++        KeBugCheckEx(PROCESS1_INITIALIZATION_FAILED, 0x504e5049,
++                     Status, Active, 0);
++    }
++}
++#endif
++
++/* Only this unexported body is retired. Channel/completion callbacks and the
++ * guarded public entry keep their existing resident placement. */
++#ifdef SARCH_XBOX
++CODE_SEG("INIT")
++#endif
++static DECLSPEC_NOINLINE NTSTATUS
++PciIdeXBootDispatchPnp(PDEVICE_OBJECT DeviceObject, PIRP Irp)
+ {
+     PAGED_CODE();
+ 
+@@ -1108,3 +1160,39 @@ PciIdeXDispatchPnp(
+     else
+         return PciIdeXPdoDispatchPnp(DeviceObject->DeviceExtension, Irp);
+ }
++
++NTSTATUS
++NTAPI
++PciIdeXDispatchPnp(
++    _In_ PDEVICE_OBJECT DeviceObject,
++    _Inout_ PIRP Irp)
++{
++#ifdef SARCH_XBOX
++    KIRQL OldIrql;
++    NTSTATUS Status;
++
++    KeAcquireSpinLock(&PciIdeXBootPnpLock, &OldIrql);
++    if (PciIdeXBootPnpSealed)
++    {
++        KeReleaseSpinLock(&PciIdeXBootPnpLock, OldIrql);
++        Irp->IoStatus.Status = STATUS_INVALID_DEVICE_REQUEST;
++        Irp->IoStatus.Information = 0;
++        IoCompleteRequest(Irp, IO_NO_INCREMENT);
++        return STATUS_INVALID_DEVICE_REQUEST;
++    }
++    if (PciIdeXBootPnpActive++ == 0)
++        KeClearEvent(&PciIdeXBootPnpDrained);
++    KeReleaseSpinLock(&PciIdeXBootPnpLock, OldIrql);
++
++    Status = PciIdeXBootDispatchPnp(DeviceObject, Irp);
++
++    KeAcquireSpinLock(&PciIdeXBootPnpLock, &OldIrql);
++    ASSERT(PciIdeXBootPnpActive > 0);
++    if (--PciIdeXBootPnpActive == 0)
++        KeSetEvent(&PciIdeXBootPnpDrained, IO_NO_INCREMENT, FALSE);
++    KeReleaseSpinLock(&PciIdeXBootPnpLock, OldIrql);
++    return Status;
++#else
++    return PciIdeXBootDispatchPnp(DeviceObject, Irp);
++#endif
++}
+diff --git a/ntoskrnl/io/iomgr/driver.c b/ntoskrnl/io/iomgr/driver.c
+index d63683599d67434d3e46d98130cdf9f47c57b002..2d8e2e7bbfc78eb667da72a57376f013e76d3396 100644
+--- a/ntoskrnl/io/iomgr/driver.c
++++ b/ntoskrnl/io/iomgr/driver.c
+@@ -1092,6 +1092,14 @@ IopSealBootDriverPnp(VOID)
+ {
+     ULONG i;
+ 
++#ifdef SARCH_XBOX
++    /* Revoke the resident PCIIDE entry and drain its boot body first. */
++    {
++        extern VOID PciIdeXSealBootPnp(VOID);
++        PciIdeXSealBootPnp();
++    }
++#endif
++
+     for (i = 0; i < RTL_NUMBER_OF(IopSealedPnpDrivers); i++)
+     {
+         UNICODE_STRING Name;
+diff --git a/tests/host/pciide-pnp-lifetime/check.py b/tests/host/pciide-pnp-lifetime/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..7bbea9a2356ecd36374437ab92a8a2c4920d2762
+--- /dev/null
++++ b/tests/host/pciide-pnp-lifetime/check.py
+@@ -0,0 +1,59 @@
++#!/usr/bin/env python3
++"""Exercise the real boot seal and PCIIDE dispatch with a saved caller pointer."""
++from pathlib import Path
++import re
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++
++def body(path, name):
++    text = (root / path).read_text()
++    match = re.search(r'\n' + re.escape(name) + r'\s*\(', text)
++    if not match:
++        raise ValueError('Missing production function: ' + name)
++    start = text.index('{', match.end())
++    end, depth = start + 1, 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[start:end]
++
++driver = 'ntoskrnl/io/iomgr/driver.c'
++text = (root / driver).read_text()
++start = text.index('static const PCWSTR IopSealedPnpDrivers[]')
++end = text.index(';', start) + 1
++production = text[start:end] + '\n'
++pdo = (root / 'drivers/storage/ide/pciidex/pdo.c').read_text()
++marker = '/* Xbox boot-PnP admission.'
++if marker in pdo:
++    begin = pdo.index(marker)
++    end = pdo.index('\nVOID\nPciIdeXInitializeBootPnp', begin)
++    production += pdo[begin:end] + '\n'
++    for name in ['PciIdeXInitializeBootPnp', 'PciIdeXSealBootPnp']:
++        production += 'VOID ' + name + '(VOID)\n' + body(
++            'drivers/storage/ide/pciidex/pdo.c', name) + '\n'
++    production += 'NTSTATUS PciIdeXBootDispatchPnp(PDEVICE_OBJECT DeviceObject, PIRP Irp)\n'
++    production += body('drivers/storage/ide/pciidex/pdo.c', 'PciIdeXBootDispatchPnp') + '\n'
++else:
++    production += 'VOID PciIdeXInitializeBootPnp(VOID) {}\n'
++production += 'NTSTATUS IopInvalidDeviceRequest(PDEVICE_OBJECT DeviceObject, PIRP Irp)\n'
++production += body(driver, 'IopInvalidDeviceRequest') + '\n'
++production += 'NTSTATUS PciIdeXDispatchPnp(PDEVICE_OBJECT DeviceObject, PIRP Irp)\n'
++production += body('drivers/storage/ide/pciidex/pdo.c', 'PciIdeXDispatchPnp') + '\n'
++production += 'VOID IopSealBootDriverPnp(VOID)\n'
++production += body(driver, 'IopSealBootDriverPnp') + '\n'
++fixture = Path(__file__).with_name('fixture.c').read_text()
++source = out / 'check.c'
++source.write_text(fixture.replace('/* PRODUCTION BODIES */', production))
++exe = out / 'check'
++subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
++                '-Wno-unused-parameter', '-Wno-unused-function', '-pthread',
++                str(source), '-o', str(exe)], check=True)
++failed = False
++for scenario in ['cached', 'drain', 'unregistered', 'timeout']:
++    result = subprocess.run([str(exe), scenario], timeout=10)
++    failed |= result.returncode != (42 if scenario == 'timeout' else 0)
++raise SystemExit(int(failed))
+diff --git a/tests/host/pciide-pnp-lifetime/fixture.c b/tests/host/pciide-pnp-lifetime/fixture.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..1062f869161b22926dd072e9a0d9ba7e4c60e31b
+--- /dev/null
++++ b/tests/host/pciide-pnp-lifetime/fixture.c
+@@ -0,0 +1,251 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++/* A caller may fetch the dispatch pointer before the boot seal completes. */
++#define _POSIX_C_SOURCE 200809L
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <wchar.h>
++#include <pthread.h>
++#include <stdlib.h>
++#include <time.h>
++
++typedef void VOID, *PVOID;
++typedef uint32_t ULONG;
++typedef int32_t NTSTATUS;
++typedef int BOOLEAN, KIRQL;
++typedef int32_t LONG;
++typedef pthread_mutex_t KSPIN_LOCK;
++typedef struct { pthread_mutex_t Lock; pthread_cond_t Changed;
++                 BOOLEAN Signaled; } KEVENT;
++typedef struct { int64_t QuadPart; } LARGE_INTEGER;
++typedef const wchar_t *PCWSTR;
++typedef struct { PCWSTR Buffer; } UNICODE_STRING;
++typedef struct { struct { NTSTATUS Status; uintptr_t Information; } IoStatus;
++                 unsigned Completed; } IRP, *PIRP;
++typedef struct { void *DeviceExtension; } DEVICE_OBJECT, *PDEVICE_OBJECT;
++typedef NTSTATUS (*DISPATCH)(PDEVICE_OBJECT, PIRP);
++typedef struct { void *AddDevice; } DRIVER_EXTENSION;
++typedef struct { DISPATCH MajorFunction[28];
++                 DRIVER_EXTENSION *DriverExtension; } DRIVER_OBJECT,
++                 *PDRIVER_OBJECT;
++#define IRP_MJ_PNP 27
++#define STATUS_SUCCESS 0
++#define STATUS_INVALID_DEVICE_REQUEST ((int32_t)0xc0000010)
++#define STATUS_OBJECT_NAME_NOT_FOUND ((int32_t)0xc0000034)
++#define NT_SUCCESS(s) ((s) >= 0)
++#define IO_NO_INCREMENT 0
++#define OBJ_CASE_INSENSITIVE 0
++#define KernelMode 0
++#define RTL_NUMBER_OF(a) (sizeof(a) / sizeof((a)[0]))
++#define PAGED_CODE() ((void)0)
++#define IS_FDO(extension) ((extension) != NULL)
++#define SARCH_XBOX 1
++#define TRUE 1
++#define FALSE 0
++#define ASSERT assert
++#define Executive 0
++#define NotificationEvent 0
++#define PASSIVE_LEVEL 0
++#define PROCESS1_INITIALIZATION_FAILED 0x6b
++#define STATUS_TIMEOUT 0x102
++static DRIVER_OBJECT driver;
++static DRIVER_EXTENSION extension;
++static PVOID IoDriverObjectType;
++static unsigned references;
++static pthread_mutex_t test_lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t test_changed = PTHREAD_COND_INITIALIZER;
++static int block_body, body_entered, release_body, seal_wait_entered, seal_done;
++static int force_timeout;
++
++static VOID KeInitializeSpinLock(KSPIN_LOCK *lock)
++{ assert(!pthread_mutex_init(lock, NULL)); }
++static VOID KeAcquireSpinLock(KSPIN_LOCK *lock, KIRQL *old)
++{ *old = 0; assert(!pthread_mutex_lock(lock)); }
++static VOID KeReleaseSpinLock(KSPIN_LOCK *lock, KIRQL old)
++{ assert(!pthread_mutex_unlock(lock)); }
++static KIRQL KeGetCurrentIrql(void) { return 0; }
++static VOID KeInitializeEvent(KEVENT *e, int type, BOOLEAN state)
++{
++    assert(!pthread_mutex_init(&e->Lock, NULL));
++    assert(!pthread_cond_init(&e->Changed, NULL));
++    e->Signaled = state;
++}
++static VOID KeClearEvent(KEVENT *e)
++{ pthread_mutex_lock(&e->Lock); e->Signaled = 0; pthread_mutex_unlock(&e->Lock); }
++static LONG KeSetEvent(KEVENT *e, int boost, BOOLEAN wait)
++{
++    pthread_mutex_lock(&e->Lock);
++    e->Signaled = 1;
++    pthread_cond_broadcast(&e->Changed);
++    pthread_mutex_unlock(&e->Lock);
++    return 0;
++}
++static NTSTATUS KeWaitForSingleObject(KEVENT *e, int reason, int mode,
++                                      BOOLEAN alertable, LARGE_INTEGER *timeout)
++{
++    pthread_mutex_lock(&test_lock);
++    seal_wait_entered = 1;
++    pthread_cond_broadcast(&test_changed);
++    pthread_mutex_unlock(&test_lock);
++    if (force_timeout) return STATUS_TIMEOUT;
++    struct timespec deadline;
++    clock_gettime(CLOCK_REALTIME, &deadline);
++    deadline.tv_sec += -timeout->QuadPart / 10000000;
++    pthread_mutex_lock(&e->Lock);
++    int r = 0;
++    while (!e->Signaled && !r)
++        r = pthread_cond_timedwait(&e->Changed, &e->Lock, &deadline);
++    pthread_mutex_unlock(&e->Lock);
++    return r ? STATUS_TIMEOUT : STATUS_SUCCESS;
++}
++static VOID KeBugCheckEx(ULONG code, uintptr_t a, uintptr_t b,
++                         uintptr_t c, uintptr_t d)
++{
++    if (force_timeout)
++    {
++        assert(code == PROCESS1_INITIALIZATION_FAILED);
++        assert(a == 0x504e5049 && b == STATUS_TIMEOUT && c == 1 && d == 0);
++        puts("PASS: timeout prevents donation with an active return address");
++        fflush(stdout);
++        _Exit(42);
++    }
++    fprintf(stderr, "Unexpected initialization bugcheck\n");
++    abort();
++}
++
++static VOID RtlInitUnicodeString(UNICODE_STRING *name, PCWSTR text)
++{ name->Buffer = text; }
++static NTSTATUS ObReferenceObjectByName(UNICODE_STRING *name, ULONG flags,
++    PVOID access, ULONG desired, PVOID type, ULONG mode, PVOID parse,
++    PVOID *result)
++{
++    if (wcscmp(name->Buffer, L"\\Driver\\pciide"))
++        return STATUS_OBJECT_NAME_NOT_FOUND;
++    if (driver.MajorFunction[IRP_MJ_PNP] == NULL)
++        return STATUS_OBJECT_NAME_NOT_FOUND;
++    *result = &driver;
++    references++;
++    return STATUS_SUCCESS;
++}
++static VOID ObDereferenceObject(PVOID object)
++{ assert(object == &driver && references); references--; }
++static VOID IoCompleteRequest(PIRP irp, ULONG boost)
++{ irp->Completed++; }
++/* The OS request boundary is controlled; the dispatch and seal remain real. */
++static NTSTATUS PciIdeXFdoDispatchPnp(PVOID device_extension, PIRP irp)
++{
++    pthread_mutex_lock(&test_lock);
++    body_entered = 1;
++    pthread_cond_broadcast(&test_changed);
++    while (block_body && !release_body)
++        pthread_cond_wait(&test_changed, &test_lock);
++    pthread_mutex_unlock(&test_lock);
++    irp->IoStatus.Status = STATUS_SUCCESS;
++    irp->IoStatus.Information = 0x1234;
++    IoCompleteRequest(irp, 0);
++    return STATUS_SUCCESS;
++}
++static NTSTATUS PciIdeXPdoDispatchPnp(PVOID device_extension, PIRP irp)
++{ return PciIdeXFdoDispatchPnp(device_extension, irp); }
++
++/* PRODUCTION BODIES */
++
++static void *call_body(void *unused)
++{
++    DEVICE_OBJECT device = { (PVOID)1 };
++    IRP irp = {0};
++    assert(PciIdeXDispatchPnp(&device, &irp) == STATUS_SUCCESS);
++    assert(irp.Completed == 1);
++    return NULL;
++}
++static void *seal(void *unused)
++{
++    IopSealBootDriverPnp();
++    pthread_mutex_lock(&test_lock);
++    seal_done = 1;
++    pthread_cond_broadcast(&test_changed);
++    pthread_mutex_unlock(&test_lock);
++    return NULL;
++}
++
++int main(int argc, char **argv)
++{
++    assert(argc == 2);
++    if (!strcmp(argv[1], "unregistered"))
++    {
++        IopSealBootDriverPnp();
++        assert(references == 0);
++        puts("PASS: failed registration needs no device/event lifetime");
++        return 0;
++    }
++    DEVICE_OBJECT device = { (PVOID)1 };
++    IRP before = {0}, published = {0}, cached = {0};
++    driver.DriverExtension = &extension;
++    extension.AddDevice = (PVOID)1;
++    driver.MajorFunction[IRP_MJ_PNP] = PciIdeXDispatchPnp;
++    PciIdeXInitializeBootPnp();
++    if (!strcmp(argv[1], "drain") || !strcmp(argv[1], "timeout"))
++    {
++        pthread_t caller, sealer;
++        block_body = 1;
++        pthread_create(&caller, NULL, call_body, NULL);
++        pthread_mutex_lock(&test_lock);
++        while (!body_entered) pthread_cond_wait(&test_changed, &test_lock);
++        pthread_mutex_unlock(&test_lock);
++        force_timeout = !strcmp(argv[1], "timeout");
++        pthread_create(&sealer, NULL, seal, NULL);
++        pthread_mutex_lock(&test_lock);
++        /* Observe the actual drain boundary, not a scheduling delay. Old
++         * code returns instead, preserving the fixture's red-phase failure. */
++        while (!seal_wait_entered && !seal_done)
++            pthread_cond_wait(&test_changed, &test_lock);
++        int premature = seal_done;
++        if (!premature && !force_timeout)
++        {
++            pthread_mutex_unlock(&test_lock);
++            IRP late = {0};
++            assert(PciIdeXDispatchPnp(&device, &late) == STATUS_INVALID_DEVICE_REQUEST);
++            assert(late.Completed == 1 && late.IoStatus.Information == 0);
++            pthread_mutex_lock(&test_lock);
++        }
++        release_body = 1;
++        pthread_cond_broadcast(&test_changed);
++        pthread_mutex_unlock(&test_lock);
++        pthread_join(caller, NULL);
++        pthread_join(sealer, NULL);
++        if (premature)
++        {
++            fputs("FAIL: boot seal returned with a PCIIDE body still active\n", stderr);
++            return 1;
++        }
++        assert(seal_done && references == 0);
++        puts("PASS: seal drains the active PCIIDE body before returning");
++        return 0;
++    }
++    DISPATCH fetched_before_seal = driver.MajorFunction[IRP_MJ_PNP];
++    assert(fetched_before_seal(&device, &before) == STATUS_SUCCESS);
++    assert(before.IoStatus.Information == 0x1234 && before.Completed == 1);
++
++    IopSealBootDriverPnp();
++    assert(driver.DriverExtension->AddDevice == NULL && references == 0);
++    assert(driver.MajorFunction[IRP_MJ_PNP](&device, &published) ==
++           STATUS_INVALID_DEVICE_REQUEST);
++    assert(published.IoStatus.Status == STATUS_INVALID_DEVICE_REQUEST);
++    assert(published.IoStatus.Information == 0 && published.Completed == 1);
++    puts("PASS: public post-seal dispatch rejects the request");
++    fflush(stdout);
++
++    NTSTATUS status = fetched_before_seal(&device, &cached);
++    if (status != STATUS_INVALID_DEVICE_REQUEST ||
++        cached.IoStatus.Status != STATUS_INVALID_DEVICE_REQUEST ||
++        cached.IoStatus.Information != 0 || cached.Completed != 1)
++    {
++        fprintf(stderr, "FAIL: a saved pre-seal dispatch pointer still enters "
++                        "the PCIIDE body (status=0x%08x, information=%lu)\n",
++                (unsigned)status, (unsigned long)cached.IoStatus.Information);
++        return 1;
++    }
++    puts("PASS: saved dispatch cannot enter retired PCIIDE code");
++    return 0;
++}
+diff --git a/tools/init-ref.allow b/tools/init-ref.allow
+index 901256932fd012969b5e25de5da161e17d045062..6ecaa61097bd1b01204faf9b9358d2bee0980a14 100644
+--- a/tools/init-ref.allow
++++ b/tools/init-ref.allow
+@@ -28,6 +28,14 @@ Phase1Initialization
+ # exported-shape helper, standalone on DBG builds).
+ PciIdeXInitialize
+ 
++# PCIIDE retains this entry for every saved/public caller. Its spinlock gate
++# admits the unexported boot body only before sealing. The boot orchestrator
++# closes admission and drains every admitted stack before INIT donation;
++# timeout stops initialization. Later calls complete INVALID_DEVICE_REQUEST
++# from resident code. The boot body is noinline; asynchronous channel and IRP
++# completion callbacks retain their original resident definitions.
++PciIdeXDispatchPnp
++
+ # KdInitSystem's INIT targets are first-call-only: the
+ # KdRegisterDebuggerDataBlock call is guarded by the data-list head not
+ # yet existing, and the KdDebuggerInitialize0 call needs EnableKd, which

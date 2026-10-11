@@ -54,7 +54,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = fcc900f7b8c51a044ae3dccd0088b10e607b0f17
+            test "$actual_tree" = d648430c2ad686c2100c7833eeda87ec080b9c76
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -66,6 +66,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/mdl-pins/check.py" "$output/mdl-pins" >"$output/mdl-pins.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/physical-address/check.py" "$output/physical-address" >"$output/physical-address.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/bootvid-lifetime/check.py" "$output/bootvid-lifetime" >"$output/bootvid-lifetime.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/pciide-pnp-lifetime/check.py" "$output/pciide-pnp-lifetime" >"$output/pciide-pnp-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/contig-retry/check.py" "$output/contig-retry" >"$output/contig-retry.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-overwrite.py" "$output/fatx-overwrite" >"$output/fatx-overwrite.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-directory-slots.py" "$output/fatx-directory-slots" >"$output/fatx-directory-slots.log" 2>&1
@@ -121,7 +122,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'fcc900f7b8c51a044ae3dccd0088b10e607b0f17', result
+          assert result['source_tree'] == 'd648430c2ad686c2100c7833eeda87ec080b9c76', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
