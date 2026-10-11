@@ -1,0 +1,392 @@
+From 7fd30e1dcbd0f24b8b2a1bba0f64c7df7d24ce4f Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 17:33:22 -0700
+Subject: [PATCH] FATX: enforce noncached buffer alignment
+
+---
+ drivers/filesystems/vfatfs/fsctl.c            |   6 +
+ drivers/filesystems/vfatfs/rw.c               |  17 ++
+ drivers/storage/partmgr/partition.c           |   2 +
+ tests/xbe/fatx-noncached-alignment/Makefile   |   6 +
+ tests/xbe/fatx-noncached-alignment/cases.h    |  25 +++
+ tests/xbe/fatx-noncached-alignment/main.c     | 209 ++++++++++++++++++
+ .../xbe/fatx-noncached-alignment/regression.h |  41 ++++
+ 7 files changed, 306 insertions(+)
+ create mode 100644 tests/xbe/fatx-noncached-alignment/Makefile
+ create mode 100644 tests/xbe/fatx-noncached-alignment/cases.h
+ create mode 100644 tests/xbe/fatx-noncached-alignment/main.c
+ create mode 100644 tests/xbe/fatx-noncached-alignment/regression.h
+
+diff --git a/drivers/filesystems/vfatfs/fsctl.c b/drivers/filesystems/vfatfs/fsctl.c
+index 579e42fd..aac66309 100644
+--- a/drivers/filesystems/vfatfs/fsctl.c
++++ b/drivers/filesystems/vfatfs/fsctl.c
+@@ -701,6 +701,12 @@ VfatMount(
+     DeviceExt->StorageDevice->Vpb->RealDevice = DeviceExt->StorageDevice;
+     DeviceExt->StorageDevice->Vpb->Flags |= VPB_MOUNTED;
+     DeviceObject->StackSize = DeviceExt->StorageDevice->StackSize + 1;
++    if (DeviceExt->StorageDevice->AlignmentRequirement >
++        DeviceObject->AlignmentRequirement)
++    {
++        DeviceObject->AlignmentRequirement =
++            DeviceExt->StorageDevice->AlignmentRequirement;
++    }
+     DeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
+ 
+     DPRINT("FsDeviceObject %p\n", DeviceObject);
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index f039a6b5..de048758 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -727,6 +727,7 @@ VfatRead(
+ {
+     NTSTATUS Status;
+     PVFATFCB Fcb;
++    PVOID UserBuffer;
+     ULONG Length = 0;
+     PERESOURCE Resource = NULL;
+     LARGE_INTEGER ByteOffset;
+@@ -824,6 +825,22 @@ VfatRead(
+         Status = STATUS_PENDING;
+         goto ByeBye;
+     }
++
++    /* Xbox user-buffer probing is intentionally smaller than the desktop
++     * I/O manager path, so enforce the mounted device's direct-I/O alignment
++     * here.  Keep this after the asynchronous post decision: Complex returns
++     * STATUS_PENDING to an asynchronous issuer, then completes an unaligned
++     * request with STATUS_INVALID_PARAMETER on the filesystem worker. */
++    UserBuffer = IrpContext->Irp->MdlAddress ?
++        MmGetMdlVirtualAddress(IrpContext->Irp->MdlAddress) :
++        IrpContext->Irp->UserBuffer;
++    if (NoCache && !PagingIo && !IsVolume &&
++        ((ULONG_PTR)UserBuffer &
++         IrpContext->DeviceObject->AlignmentRequirement) != 0)
++    {
++        Status = STATUS_INVALID_PARAMETER;
++        goto ByeBye;
++    }
+ #endif
+ 
+     if (IsVolume)
+diff --git a/drivers/storage/partmgr/partition.c b/drivers/storage/partmgr/partition.c
+index 49ec76cc..e6b769ee 100644
+--- a/drivers/storage/partmgr/partition.c
++++ b/drivers/storage/partmgr/partition.c
+@@ -69,6 +69,8 @@ PartitionCreateDevice(
+     // partitionDevice->DeviceType = /*fdoExtension->LowerDevice*/FDObject->DeviceType;
+ 
+     partitionDevice->StackSize = FDObject->StackSize;
++    partitionDevice->AlignmentRequirement = FDObject->AlignmentRequirement;
++    partitionDevice->SectorSize = FDObject->SectorSize;
+     partitionDevice->Flags |= DO_DIRECT_IO;
+ 
+     if (PartitionStyle == PARTITION_STYLE_MBR)
+diff --git a/tests/xbe/fatx-noncached-alignment/Makefile b/tests/xbe/fatx-noncached-alignment/Makefile
+new file mode 100644
+index 00000000..2d5eda73
+--- /dev/null
++++ b/tests/xbe/fatx-noncached-alignment/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = FATX-NONCACHED-ALIGNMENT
++GEN_XISO = fatx-noncached-alignment.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/fatx-noncached-alignment/cases.h b/tests/xbe/fatx-noncached-alignment/cases.h
+new file mode 100644
+index 00000000..009e5620
+--- /dev/null
++++ b/tests/xbe/fatx-noncached-alignment/cases.h
+@@ -0,0 +1,25 @@
++/* Deterministic public-ABI alignment characterization. */
++#define FIXTURE_BYTES (65536 + 37)
++static const struct ReadCase cases[] = {
++    {0x179u, 0, 0, 0, 512, 512, 0, 1},
++    {0x179u, 0, 1, 0, 512, 512, 1, 1},
++    {0x179u, 0, 2, 0, 512, 512, 2, 1},
++    {0x179u, 0, 3, 0, 512, 512, 3, 1},
++    {0x179u, 0, 4, 0, 512, 512, 4, 1},
++    {0x179u, 0, 5, 0, 512, 512, 8, 1},
++    {0x179u, 0, 6, 0, 512, 512, 16, 1},
++    {0x179u, 1, 0, 0, 512, 512, 0, 1},
++    {0x179u, 1, 1, 0, 512, 512, 1, 1},
++    {0x179u, 1, 2, 0, 512, 512, 2, 1},
++    {0x179u, 1, 3, 0, 512, 512, 3, 1},
++    {0x179u, 1, 4, 0, 512, 512, 4, 1},
++    {0x179u, 1, 5, 0, 512, 512, 8, 1},
++    {0x179u, 1, 6, 0, 512, 512, 16, 1},
++    {0x179u, 2, 0, 0, 512, 512, 0, 1},
++    {0x179u, 2, 1, 0, 512, 512, 1, 1},
++    {0x179u, 2, 2, 0, 512, 512, 2, 1},
++    {0x179u, 2, 3, 0, 512, 512, 3, 1},
++    {0x179u, 2, 4, 0, 512, 512, 4, 1},
++    {0x179u, 2, 5, 0, 512, 512, 8, 1},
++    {0x179u, 2, 6, 0, 512, 512, 16, 1},
++};
+diff --git a/tests/xbe/fatx-noncached-alignment/main.c b/tests/xbe/fatx-noncached-alignment/main.c
+new file mode 100644
+index 00000000..7f4ca853
+--- /dev/null
++++ b/tests/xbe/fatx-noncached-alignment/main.c
+@@ -0,0 +1,209 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Seeded public-ABI observations, independent of either BIOS implementation.
++ * Each request owns its buffer, event and IOSB until completion is observed.
++ */
++#include <stdio.h>
++#include <stdint.h>
++#include <string.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <nxdk/mount.h>
++#include "regression.h"
++
++struct ReadCase {
++    uint32_t seed;
++    unsigned mode, batch, slot;
++    int offset;
++    unsigned length, shift, reopen;
++};
++#include "cases.h"
++#ifndef CASE_LIMIT
++#define CASE_LIMIT (sizeof(cases) / sizeof(cases[0]))
++#endif
++#define CAPACITY (32768 + 8192)
++#define SENTINEL ((unsigned char)0xcc)
++static unsigned char buffers[4][CAPACITY] __attribute__((aligned(4096)));
++static IO_STATUS_BLOCK iosbs[4];
++static volatile LONG callbacks[4];
++static DWORD callback_errors[4], callback_bytes[4];
++static HANDLE events[4];
++static NTSTATUS issued[4];
++static DWORD start_times[4];
++static unsigned char write_buffer[4096];
++
++static unsigned char pattern(unsigned position)
++{
++    return (unsigned char)(position ^ (position >> 8));
++}
++
++static void NTAPI native_completed(PVOID context, PIO_STATUS_BLOCK iosb,
++                                  ULONG reserved)
++{
++    unsigned slot = (unsigned)(uintptr_t)context;
++    (void)reserved;
++    if (slot >= 4 || iosb != &iosbs[slot]) return;
++    callback_errors[slot] = (DWORD)iosb->Status;
++    callback_bytes[slot] = iosb->Information;
++    InterlockedIncrement(&callbacks[slot]);
++}
++
++static HANDLE open_reader(unsigned mode)
++{
++    DWORD flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING;
++    if (mode) flags |= FILE_FLAG_OVERLAPPED;
++    return CreateFile("E:\\io-alignment.bin", GENERIC_READ,
++        FILE_SHARE_READ, NULL, OPEN_EXISTING, flags, NULL);
++}
++
++static void issue(unsigned i, HANDLE reader)
++{
++    const struct ReadCase *c = &cases[i];
++    unsigned slot = c->slot;
++    memset(buffers[slot], SENTINEL, CAPACITY);
++    iosbs[slot].Status = STATUS_PENDING;
++    iosbs[slot].Information = 0;
++    callbacks[slot] = 0;
++    callback_errors[slot] = callback_bytes[slot] = 0;
++    ResetEvent(events[slot]);
++    LARGE_INTEGER offset = { .QuadPart = c->offset };
++    unsigned apc = c->mode == 2;
++    start_times[slot] = GetTickCount();
++    issued[slot] = NtReadFile(reader, c->mode && !apc ? events[slot] : NULL,
++        apc ? native_completed : NULL,
++        apc ? (PVOID)(uintptr_t)slot : NULL, &iosbs[slot],
++        buffers[slot] + 4096 + c->shift, c->length, &offset);
++}
++
++static int observe(unsigned i)
++{
++    const struct ReadCase *c = &cases[i];
++    unsigned slot = c->slot;
++    unsigned apc = c->mode == 2;
++    int observed = issued[slot] != STATUS_PENDING;
++    if (NT_SUCCESS(issued[slot]) && c->mode) {
++        if (apc) {
++            DWORD end = GetTickCount() + 1000;
++            while (!callbacks[slot] && (LONG)(end - GetTickCount()) > 0)
++                SleepEx(10, TRUE);
++            observed = callbacks[slot] == 1;
++        } else {
++            observed = WaitForSingleObject(events[slot], 1000) == WAIT_OBJECT_0;
++        }
++    }
++    DWORD elapsed = GetTickCount() - start_times[slot];
++    unsigned actual = iosbs[slot].Information;
++    unsigned safe = actual <= c->length ? actual : c->length;
++    unsigned mismatch = actual > c->length;
++    uint32_t digest = 2166136261u;
++    const unsigned char *data = buffers[slot] + 4096 + c->shift;
++    for (unsigned j = 0; j < safe; ++j) {
++        digest = (digest ^ data[j]) * 16777619u;
++        if (data[j] != pattern(c->offset + j)) ++mismatch;
++    }
++    unsigned guard = 0;
++    for (unsigned j = 0; j < 4096 + c->shift; ++j)
++        guard += buffers[slot][j] != SENTINEL;
++    for (unsigned j = 4096 + c->shift + c->length; j < CAPACITY; ++j)
++        guard += buffers[slot][j] != SENTINEL;
++    char line[768];
++    snprintf(line, sizeof(line), "# io_fuzz {\"case\":%u,\"seed\":%lu,"
++        "\"mode\":%u,\"offset\":%d,\"length\":%u,\"shift\":%u,"
++        "\"issueStatus\":\"%08lx\",\"status\":\"%08lx\",\"bytes\":%u,"
++        "\"digest\":\"%08lx\",\"mismatch\":%u,\"guard\":%u,"
++        "\"callbacks\":%ld,\"callbackError\":%lu,\"callbackBytes\":%lu,"
++        "\"completed\":%s,\"elapsedMs\":%lu}\n", i, (unsigned long)c->seed,
++        c->mode, c->offset, c->length, c->shift, (unsigned long)issued[slot],
++        (unsigned long)iosbs[slot].Status, actual, (unsigned long)digest,
++        mismatch, guard, callbacks[slot], callback_errors[slot],
++        callback_bytes[slot], observed ? "true" : "false", elapsed);
++    tap_puts(line);
++    if (c->shift & 1) {
++        regression_check(actual == 0 && mismatch == 0 && guard == 0,
++                         "odd address publishes no bytes");
++        if (c->mode == 0) {
++            regression_check(issued[slot] == (NTSTATUS)STATUS_INVALID_PARAMETER &&
++                             iosbs[slot].Status == STATUS_PENDING &&
++                             callbacks[slot] == 0,
++                             "synchronous odd address is rejected at issue");
++        } else if (apc) {
++            regression_check(issued[slot] == STATUS_PENDING &&
++                             iosbs[slot].Status == (NTSTATUS)STATUS_INVALID_PARAMETER &&
++                             callbacks[slot] == 1 &&
++                             callback_errors[slot] == STATUS_INVALID_PARAMETER &&
++                             callback_bytes[slot] == 0,
++                             "APC odd address completes invalid");
++        } else {
++            regression_check(issued[slot] == STATUS_PENDING &&
++                             iosbs[slot].Status == (NTSTATUS)STATUS_INVALID_PARAMETER &&
++                             callbacks[slot] == 0,
++                             "event odd address completes invalid");
++        }
++    } else {
++        regression_check(iosbs[slot].Status == STATUS_SUCCESS &&
++                         actual == c->length && mismatch == 0 && guard == 0,
++                         "even address returns the requested payload");
++        regression_check(c->mode == 0 ? issued[slot] == STATUS_SUCCESS :
++                                          issued[slot] == STATUS_PENDING,
++                         "valid request preserves issue semantics");
++        if (apc) {
++            regression_check(callbacks[slot] == 1 &&
++                             callback_errors[slot] == STATUS_SUCCESS &&
++                             callback_bytes[slot] == c->length,
++                             "valid APC reports successful completion");
++        }
++    }
++    /* A pending generation is never reused following an observation timeout. */
++    return observed || !NT_SUCCESS(issued[slot]);
++}
++
++int main(void)
++{
++    regression_begin();
++    if (!nxIsDriveMounted('E'))
++        nxMountDrive('E', "\\Device\\Harddisk0\\Partition1");
++    HANDLE writer = CreateFile("E:\\io-alignment.bin", GENERIC_WRITE, 0,
++        NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
++    regression_require(writer != INVALID_HANDLE_VALUE, "fixture writer opens");
++    for (unsigned offset = 0; offset < FIXTURE_BYTES; offset += sizeof(write_buffer)) {
++        unsigned length = FIXTURE_BYTES - offset;
++        if (length > sizeof(write_buffer)) length = sizeof(write_buffer);
++        for (unsigned j = 0; j < length; ++j)
++            write_buffer[j] = pattern(offset + j);
++        DWORD written = 0;
++        regression_require(WriteFile(writer, write_buffer, length, &written, NULL)
++            && written == length, "fixture write completes exactly");
++    }
++    regression_require(CloseHandle(writer), "writer closes before reads");
++    for (unsigned slot = 0; slot < 4; ++slot) {
++        events[slot] = CreateEvent(NULL, TRUE, FALSE, NULL);
++        regression_require(events[slot] != NULL, "independent completion event");
++    }
++    HANDLE reader = INVALID_HANDLE_VALUE;
++    unsigned prior_mode = 99;
++    unsigned prior_seed = 0;
++    for (unsigned i = 0; i < CASE_LIMIT;) {
++        const struct ReadCase *c = &cases[i];
++        if (reader == INVALID_HANDLE_VALUE || c->mode != prior_mode ||
++            c->seed != prior_seed || c->reopen) {
++            if (reader != INVALID_HANDLE_VALUE) CloseHandle(reader);
++            reader = open_reader(c->mode);
++            regression_require(reader != INVALID_HANDLE_VALUE, "reader opens or reopens");
++            prior_mode = c->mode;
++            prior_seed = c->seed;
++        }
++        unsigned end = i + 1;
++        while (end < CASE_LIMIT && cases[end].seed == c->seed &&
++               cases[end].mode == c->mode && cases[end].batch == c->batch) ++end;
++        tap_comment("batch first=%u count=%u seed=%lu mode=%u", i, end-i,
++                    (unsigned long)c->seed, c->mode);
++        /* Queue the whole batch before observing; buffers never overlap. */
++        for (unsigned j = i; j < end; ++j) issue(j, reader);
++        for (unsigned j = i; j < end; ++j)
++            regression_require(observe(j), "completion generation drains before reuse");
++        i = end;
++    }
++    CloseHandle(reader);
++    for (unsigned slot = 0; slot < 4; ++slot) CloseHandle(events[slot]);
++    tap_comment("io_fuzz_finished cases=%u", (unsigned)CASE_LIMIT);
++    regression_finish();
++}
+diff --git a/tests/xbe/fatx-noncached-alignment/regression.h b/tests/xbe/fatx-noncached-alignment/regression.h
+new file mode 100644
+index 00000000..6ec1be42
+--- /dev/null
++++ b/tests/xbe/fatx-noncached-alignment/regression.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include "../api-regression/tap.h"
++#include <xboxkrnl/xboxkrnl.h>
++
++static unsigned regression_checks, regression_failures;
++
++static void regression_begin(void)
++{
++    tap_version(14);
++}
++
++static void regression_check(int passed, const char *description)
++{
++    ++regression_checks;
++    if (passed) {
++        tap_ok(regression_checks, description);
++    } else {
++        ++regression_failures;
++        tap_not_ok(regression_checks, description);
++    }
++}
++
++static void regression_finish(void) __attribute__((noreturn));
++static void regression_finish(void)
++{
++    LARGE_INTEGER delay = { .QuadPart = -5000000 };
++    tap_comment("checks=%u failures=%u", regression_checks, regression_failures);
++    tap_plan(regression_checks);
++    tap_drain();
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    /* A failed shutdown remains a timeout, never a passing capture. */
++    for (;;) __asm__ __volatile__("hlt");
++}
++
++static inline void regression_require(int passed, const char *description)
++{
++    regression_check(passed, description);
++    if (!passed) regression_finish();
++}
+-- 
+2.47.3
+
