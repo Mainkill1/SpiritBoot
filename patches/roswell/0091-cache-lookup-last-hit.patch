@@ -1,0 +1,38 @@
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -138,6 +138,10 @@
+ static LIST_ENTRY NxcLruList;       /* head = oldest */
+ static LIST_ENTRY NxcMapList;
+ static FAST_MUTEX NxcMutex;
++/* Points only into the fixed NxcBlocks array.  Every use revalidates the
++ * descriptor under NxcMutex, so eviction and map reuse cannot make a stale
++ * hint authoritative. */
++static NXC_BLOCK *NxcLookupHint;
+ /* Retain only idle handles; active BCBs remain independently allocated. */
+ #define NXC_FREE_BCB_LIMIT 8
+ static NXC_BCB *NxcFreeBcbs;
+@@ -320,11 +324,24 @@
+     IN NXC_MAP *Map,
+     IN LONGLONG Offset)
+ {
++    if (NxcLookupHint != NULL)
++    {
++        if (NxcLookupHint->Map == Map &&
++            NxcLookupHint->Offset == Offset &&
++            NxcLookupHint->Data != NULL)
++        {
++            return NxcLookupHint;
++        }
++    }
++
+     for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
+     {
+         if (NxcBlocks[i].Map == Map && NxcBlocks[i].Offset == Offset &&
+             NxcBlocks[i].Data != NULL)
++        {
++            NxcLookupHint = &NxcBlocks[i];
+             return &NxcBlocks[i];
++        }
+     }
+     return NULL;
+ }
