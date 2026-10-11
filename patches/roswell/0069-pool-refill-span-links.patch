@@ -1,0 +1,135 @@
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -240,6 +240,24 @@
+     ASSERT(NxpPageState[Index] == 0 && Class < NXP_BUCKET_LISTS);
+     Size = NxpClassSize[NXP_SIZE_CLASS(Class)];
+     Count = PAGE_SIZE / Size;
++    /* Batch frees commonly leave the whole page at the list head. Verify
++     * the complete span before splicing it; interleaved frees use the
++     * individual unlink path below. No partial splice is published. */
++    NXP_FREE *After = NxpFreeLists[Class];
++    for (i = 0; i < Count; ++i)
++    {
++        if (After == NULL || PAGE_ALIGN(After) != Page) break;
++        ASSERT((((NXP_HEADER *)After) - 1)->Magic == NXP_MAGIC_FREE &&
++               (((NXP_HEADER *)After) - 1)->ClassIndex == Class);
++        After = After->Next;
++    }
++    if (i == Count)
++    {
++        NxpFreeLists[Class] = After;
++        if (After) After->Prev = NULL;
++        NxpPageState[Index] = NXP_NOT_BUCKET;
++        return Page;
++    }
+     for (i = 0; i < Count; ++i)
+     {
+         NXP_HEADER *Header = (NXP_HEADER *)(Page + i * Size);
+@@ -259,6 +277,23 @@
+ NxpReuseEmptyBucketPage(ULONG Class)
+ {
+     ULONG i;
++    ULONG FirstClass = 0;
++#if XBOX_RESERVE_UPPER_RAM
++    FirstClass = Class - NXP_SIZE_CLASS(Class);
++#else
++    UNREFERENCED_PARAMETER(Class);
++#endif
++    /* Prefer an empty page already at a compatible list head. Its free
++     * blocks commonly form a single span, avoiding individual unlinks. */
++    for (i = FirstClass; i < FirstClass + NXP_CLASSES; ++i)
++    {
++        NXP_FREE *Head = NxpFreeLists[i];
++        ULONG Index;
++        if (Head == NULL) continue;
++        Index = NXP_PAGE_INDEX(Head);
++        if (NxpPageState[Index] == 0)
++            return NxpDetachEmptyBucketPage(Index);
++    }
+     for (i = 0; i < NXK_POOL_WINDOW_PAGES; ++i)
+     {
+ #if XBOX_RESERVE_UPPER_RAM
+@@ -269,8 +304,6 @@
+         OldClass = ((NXP_HEADER *)(NXK_POOL_WINDOW_BASE +
+                    ((ULONG_PTR)i << PAGE_SHIFT)))->ClassIndex;
+         if (OldClass / NXP_CLASSES != Class / NXP_CLASSES) continue;
+-#else
+-        UNREFERENCED_PARAMETER(Class);
+ #endif
+         return NxpDetachEmptyBucketPage(i);
+     }
+@@ -383,6 +416,9 @@
+         /* Block 0 satisfies this request; chain the rest. */
+         /* Mark as a bucket page with one live block in a single write. */
+         NxpPageState[NXP_PAGE_INDEX(Page)] = 1;
++        NXP_FREE *Head = NxpFreeLists[Class];
++        if (Head)
++            Head->Prev = (NXP_FREE *)(Page + Size + sizeof(NXP_HEADER));
+         for (ULONG i = 1; i < Count; i++)
+         {
+             NXP_HEADER *H = (NXP_HEADER *)(Page + i * Size);
+@@ -390,11 +426,12 @@
+             H->Tag = 0;
+             H->ClassIndex = (USHORT)Class;
+             H->Magic = NXP_MAGIC_FREE;
+-            F->Next = NxpFreeLists[Class];
+-            F->Prev = NULL;
+-            if (F->Next) F->Next->Prev = F;
+-            NxpFreeLists[Class] = F;
+-        }
++            F->Next = Head;
++            F->Prev = (NXP_FREE *)((PUCHAR)F + Size);
++            Head = F;
++        }
++        Head->Prev = NULL;
++        NxpFreeLists[Class] = Head;
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+         Blk = (NXP_FREE *)(Page + sizeof(NXP_HEADER));
+     }
+diff --git a/tests/host/pool-refill/check.py b/tests/host/pool-refill/check.py
+--- a/tests/host/pool-refill/check.py
++++ b/tests/host/pool-refill/check.py
+@@ -11,6 +11,11 @@
+ definitions=pool[pool.index('static const USHORT NxpClassSize'):pool.index('/* BIG-BLOCK TABLE')]
+ names=['InitializePool','NxpAllocFailed','NxpDetachEmptyBucketPage','NxpReuseEmptyBucketPage','NxpAllocatePoolWithTag','ExAllocatePoolWithTag','NxTitleAllocatePoolWithTag','NxTitleAllocatePool','ExFreePoolWithTag','NxpReclaimEmptyBucketPages','ExQueryPoolBlockSize']
+ bodies=''.join(m.function(pool,n) for n in names if re.search(r'\b'+n+r'\s*\([^;]*?\)\s*\{',pool))
++# Count actual production back-link stores; the fixture still executes the
++# allocation bodies and maintains their real list contents.
++bodies=re.sub(r'(\b[A-Za-z_]\w*(?:->\w+)*)->Prev = ([^;]+);',
++              r'CountPrevWrite(&\1->Prev, \2);',bodies)
++counts='\nstatic unsigned prev_writes; static void CountPrevWrite(NXP_FREE **p, NXP_FREE *v) {prev_writes++;*p=v;}\n'
+ for reserve in [0,1]:
+- src=out/f'refill-{reserve}.c';src.write_text((root/'tests/host/pool-refill/shim.c').read_text()+f'\n#define XBOX_RESERVE_UPPER_RAM {reserve}\n'+macros+definitions+'\nULONG NxpReclaimEmptyBucketPages(void);\n'+bodies+(root/'tests/host/pool-refill/cases.c').read_text())
++ src=out/f'refill-{reserve}.c';src.write_text((root/'tests/host/pool-refill/shim.c').read_text()+f'\n#define XBOX_RESERVE_UPPER_RAM {reserve}\n'+macros+definitions+counts+'\nULONG NxpReclaimEmptyBucketPages(void);\n'+bodies+(root/'tests/host/pool-refill/cases.c').read_text())
+  exe=src.with_suffix('');subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',str(src),'-o',str(exe)],check=True);subprocess.run([str(exe)],check=True)
+diff --git a/tests/host/pool-refill/cases.c b/tests/host/pool-refill/cases.c
+--- a/tests/host/pool-refill/cases.c
++++ b/tests/host/pool-refill/cases.c
+@@ -47,6 +47,26 @@
+  }
+  assert(NxpReclaimEmptyBucketPages()==1&&committed==0);
+  puts("PASS 512 retypes, capacity/content/free/list integrity");
++ reset();prev_writes=0;
++ a=ExAllocatePoolWithTag(NonPagedPool,1,7);assert(a);invariant();
++ assert(prev_writes<=128);ExFreePoolWithTag(a,7);
++ NxpReclaimEmptyBucketPages();
++ puts("PASS refill back links are built once per block");
++ reset();void *blocks[256];
++ for(unsigned i=0;i<256;i++){blocks[i]=ExAllocatePoolWithTag(NonPagedPool,1,7);assert(blocks[i]);}
++ for(unsigned i=0;i<256;i++)ExFreePoolWithTag(blocks[i],7);
++ prev_writes=0;a=ExAllocatePoolWithTag(NonPagedPool,1024,9);assert(a);invariant();
++ assert(prev_writes<=4);ExFreePoolWithTag(a,9);
++ assert(NxpReclaimEmptyBucketPages()==2&&committed==0);
++ puts("PASS empty list-head span is retired without per-block link writes");
++ reset();
++ for(unsigned i=0;i<256;i++){blocks[i]=ExAllocatePoolWithTag(NonPagedPool,1,7);assert(blocks[i]);}
++ for(unsigned i=0;i<128;i++){
++  ExFreePoolWithTag(blocks[i],7);ExFreePoolWithTag(blocks[128+i],7);
++ }
++ a=ExAllocatePoolWithTag(NonPagedPool,1024,9);assert(a);invariant();
++ ExFreePoolWithTag(a,9);assert(NxpReclaimEmptyBucketPages()==2&&committed==0);
++ puts("PASS interleaved free spans retain the individual unlink fallback");
+ #if XBOX_RESERVE_UPPER_RAM
+  reset();a=ExAllocatePoolWithTag(NonPagedPool,64,21);ExFreePoolWithTag(a,21);
+  b=NxTitleAllocatePoolWithTag(1024,22);assert(committed==2);
