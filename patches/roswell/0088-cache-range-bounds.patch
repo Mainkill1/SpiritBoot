@@ -1,0 +1,208 @@
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index 6f571358..e3a17cb0 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -843,6 +843,20 @@ CcGetFileSizes(
+     return Result;
+ }
+ 
++/* File offsets are signed 64-bit values while public cache range lengths are
++ * unsigned 32-bit values.  Clamp an overflowing high endpoint to the largest
++ * representable file offset; wrapping it below Start can silently select an
++ * empty or unrelated range. */
++static LONGLONG
++NxcBoundedRangeEnd(
++    IN LONGLONG Start,
++    IN ULONG Length)
++{
++    if (Start > MAXLONGLONG - (LONGLONG)Length)
++        return MAXLONGLONG;
++    return Start + Length;
++}
++
+ BOOLEAN
+ NTAPI
+ CcPurgeCacheSection(
+@@ -884,7 +898,8 @@ CcPurgeCacheSection(
+ 
+     Start = FileOffset != NULL ? FileOffset->QuadPart : 0;
+     End = (Length == 0 || FileOffset == NULL) ? MAXLONGLONG
+-                                              : Start + Length;
++                                              : NxcBoundedRangeEnd(Start,
++                                                                   Length);
+ 
+     /* Purge fails if anything in range is referenced. */
+     for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
+@@ -1506,7 +1521,8 @@ CcFlushCache(
+     {
+         NTSTATUS Status;
+         Start = FileOffset != NULL ? FileOffset->QuadPart : 0;
+-        End = FileOffset != NULL ? Start + Length : MAXLONGLONG;
++        End = FileOffset != NULL ? NxcBoundedRangeEnd(Start, Length)
++                                 : MAXLONGLONG;
+         Status = NxcFlushMap(Map, Start, End, FALSE, IoStatus);
+         if (NT_SUCCESS(Status))
+             NxcTryFinalizeMapLocked(Map);
+diff --git a/tests/host/cache/check-range-bounds.py b/tests/host/cache/check-range-bounds.py
+new file mode 100644
+index 00000000..010b4e9f
+--- /dev/null
++++ b/tests/host/cache/check-range-bounds.py
+@@ -0,0 +1,157 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise production cache range endpoints at signed 64-bit boundaries."""
++
++from pathlib import Path
++import importlib.util
++import os
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++source = (root / "ntoskrnl/xb/mm/cache.c").read_text()
++names = ["NxcBoundedRangeEnd", "CcPurgeCacheSection", "CcFlushCache"]
++body = "\n".join(extract.function(source, name) for name in names)
++
++shim = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++
++typedef void VOID;
++typedef int BOOLEAN;
++typedef uint32_t ULONG;
++typedef int32_t NTSTATUS;
++typedef int64_t LONGLONG;
++typedef struct { LONGLONG QuadPart; } LARGE_INTEGER, *PLARGE_INTEGER;
++typedef struct { NTSTATUS Status; uint64_t Information; }
++    IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
++typedef struct _LIST_ENTRY {
++    struct _LIST_ENTRY *Flink;
++    struct _LIST_ENTRY *Blink;
++} LIST_ENTRY;
++typedef struct { LIST_ENTRY PrivateList; } NXC_MAP;
++typedef struct { NXC_MAP *SharedCacheMap; } SECTION_OBJECT_POINTERS,
++    *PSECTION_OBJECT_POINTERS;
++typedef struct {
++    NXC_MAP *Map;
++    LONGLONG Offset;
++    unsigned char *Data;
++    ULONG RefCount;
++    BOOLEAN Busy;
++} NXC_BLOCK;
++
++#define NTAPI
++#define IN
++#define OUT
++#define OPTIONAL
++#define FALSE 0
++#define TRUE 1
++#define STATUS_SUCCESS 0
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000d)
++#define MAXLONGLONG INT64_MAX
++#define NT_SUCCESS(s) ((s) >= 0)
++#define NXC_TOTAL_BLOCKS 1
++#define NXC_BLOCK_SIZE 16384
++#define CONTAINING_RECORD(address, type, field) \
++    ((type *)((char *)(address) - __builtin_offsetof(type, field)))
++
++typedef struct { LIST_ENTRY PrivateLinks; void *FileObject; } PRIVATE_CACHE_MAP,
++    *PPRIVATE_CACHE_MAP;
++static int NxcMutex;
++static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
++static LONGLONG seen_start, seen_end;
++static int seen_discard, acquired, released, flushes, finalizes;
++
++static int IsListEmpty(const LIST_ENTRY *head) { return head->Flink == head; }
++static void ExAcquireFastMutex(int *mutex) { (void)mutex; ++acquired; }
++static void ExReleaseFastMutex(int *mutex) { (void)mutex; ++released; }
++static BOOLEAN CcUninitializeCacheMap(void *file, PLARGE_INTEGER truncate,
++                                      void *event) {
++    (void)file; (void)truncate; (void)event; return TRUE;
++}
++static NTSTATUS NxcFlushMap(NXC_MAP *map, LONGLONG start, LONGLONG end,
++                            BOOLEAN discard, PIO_STATUS_BLOCK io) {
++    (void)map;
++    ++flushes;
++    seen_start = start;
++    seen_end = end;
++    seen_discard = discard;
++    if (io) { io->Status = STATUS_SUCCESS; io->Information = 0; }
++    return STATUS_SUCCESS;
++}
++static BOOLEAN NxcTryFinalizeMapLocked(NXC_MAP *map) {
++    (void)map; ++finalizes; return FALSE;
++}
++'''
++
++cases = r'''
++static void reset(NXC_MAP *map)
++{
++    map->PrivateList.Flink = map->PrivateList.Blink = &map->PrivateList;
++    NxcBlocks[0] = (NXC_BLOCK){0};
++    seen_start = seen_end = 0;
++    seen_discard = acquired = released = flushes = finalizes = 0;
++}
++
++int main(void)
++{
++    NXC_MAP map;
++    SECTION_OBJECT_POINTERS section = {&map};
++    IO_STATUS_BLOCK io;
++    LARGE_INTEGER offset;
++
++    reset(&map);
++    CcFlushCache(&section, NULL, 0, &io);
++    assert(flushes == 1 && seen_start == 0 && seen_end == MAXLONGLONG);
++    assert(!seen_discard && finalizes == 1 && acquired == released);
++
++    reset(&map);
++    offset.QuadPart = 4096;
++    CcFlushCache(&section, &offset, 8192, &io);
++    assert(flushes == 1 && seen_start == 4096 && seen_end == 12288);
++
++    reset(&map);
++    offset.QuadPart = MAXLONGLONG - 7;
++    CcFlushCache(&section, &offset, 8, &io);
++    assert(flushes == 1 && seen_start == MAXLONGLONG - 7 &&
++           seen_end == MAXLONGLONG);
++
++    reset(&map);
++    assert(CcPurgeCacheSection(&section, NULL, 0, FALSE));
++    assert(flushes == 1 && seen_start == 0 && seen_end == MAXLONGLONG);
++    assert(seen_discard && acquired == released);
++
++    reset(&map);
++    offset.QuadPart = 4096;
++    assert(CcPurgeCacheSection(&section, &offset, 8192, FALSE));
++    assert(flushes == 1 && seen_start == 4096 && seen_end == 12288);
++
++    reset(&map);
++    offset.QuadPart = MAXLONGLONG - 7;
++    assert(CcPurgeCacheSection(&section, &offset, 8, FALSE));
++    assert(flushes == 1 && seen_start == MAXLONGLONG - 7 &&
++           seen_end == MAXLONGLONG);
++
++    puts("cache range endpoints: ordinary, whole-file and saturated PASS");
++    return 0;
++}
++'''
++
++fixture = out / "range-bounds.c"
++fixture.write_text(shim + body + cases)
++binary = out / "range-bounds"
++subprocess.run([
++    "cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
++    "-fsanitize=address,undefined", str(fixture), "-o", str(binary)
++], check=True)
++subprocess.run([str(binary)], check=True,
++               env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0",
++                    "UBSAN_OPTIONS": "halt_on_error=1"})
