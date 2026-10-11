@@ -399,9 +399,14 @@ index 00000000..b1f7b282
 +    }
 +    check(bytes(held, 0xa5), "owner canary survives later shrink");
 +    /* The failed allocation probe may reclaim unrelated empty slabs. */
-+    before = available();
 +    MmFreeContiguousMemory(held); held = NULL;
-+    check(available() == before + 1, "ordinary owner release returns its one page");
++    duplicate = pin(0x03fed000);
++    check(duplicate == (PVOID)0x83fed000,
++          "ordinary owner release makes its frame reusable");
++    if (duplicate != NULL) {
++        MmFreeContiguousMemory(duplicate);
++        duplicate = NULL;
++    }
 +    /* Force unrelated slab reclamation so stale global-count baselines
 +     * cannot accidentally pass depending on background allocation history. */
 +    for (unsigned i = 0; i < 4; ++i) idle[i] = ExAllocatePool(2040);
@@ -422,21 +427,26 @@ index 00000000..b1f7b282
 +                free_before_probe, free_after_probe);
 +    check(duplicate == NULL, "active reservation excludes exact allocations");
 +    if (duplicate != NULL) goto done;
-+    /* Four pages are still GPU-owned; start the next transition after
-+     * the allocator probe, whose pool reclamation is an intended side effect. */
-+    before = free_after_probe + 4;
 +    check(MmClaimGpuInstanceMemory(1, NULL) == (PVOID)0x83ff0000,
 +          "one-byte claim rounds to one page");
-+    check(available() + 1 == before, "shrink returns exactly three pages");
-+    held = pin(0x03fed000);
-+    check(held != NULL, "removed claim page is reusable");
++    held = pin(0x03fec000);
++    check(held == (PVOID)0x83fec000,
++          "shrink releases the former low edge");
 +    if (held != NULL) { MmFreeContiguousMemory(held); held = NULL; }
++    duplicate = pin(0x03fef000);
++    check(duplicate == NULL, "shrink retains the current high-edge claim");
++    if (duplicate != NULL) goto done;
 +    check(MmClaimGpuInstanceMemory(UINT32_MAX - 1, NULL) == (PVOID)0x83ff0000,
 +          "large non-query request retains capped success contract");
-+    check(available() + 16 == before, "large request cannot wrap to zero");
++    duplicate = pin(0x03fe0000);
++    check(duplicate == NULL, "large request owns its low-edge frame");
++    if (duplicate != NULL) goto done;
 +    check(MmClaimGpuInstanceMemory(0, NULL) == (PVOID)0x83ff0000,
 +          "final zero releases complete reservation");
-+    check(available() == before, "final available-page count restored");
++    held = pin(0x03fe0000);
++    check(held == (PVOID)0x83fe0000,
++          "final zero makes the former low edge reusable");
++    if (held != NULL) { MmFreeContiguousMemory(held); held = NULL; }
 +done:
 +    for (unsigned i = 0; i < 4; ++i) if (idle[i]) ExFreePool(idle[i]);
 +    if (held != NULL) MmFreeContiguousMemory(held);
