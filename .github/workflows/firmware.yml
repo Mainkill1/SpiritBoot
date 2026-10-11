@@ -54,7 +54,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = f7552f0d85af41e0bc3b8d83e619ebdaf1d591bd
+            test "$actual_tree" = 625caae70e34fadc90b9de29406455a6a92af093
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -87,6 +87,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/fatx/check-name-bounds.py" "$output/fatx-name-bounds" >"$output/fatx-name-bounds.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-chain-walk.py" "$output/fat-chain-walk" >"$output/fat-chain-walk.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-read-eof.py" "$output/fatx-read-eof" >"$output/fatx-read-eof.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/fatx/check-name-lookup.py" "$output/fatx-name-lookup" >"$output/fatx-name-lookup.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/metadata/check.py" "$output/metadata" >"$output/metadata.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/zero-reuse/check.py" "$output/zero-reuse" >"$output/zero-reuse.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-lifetime/check.py" "$output/dma-lifetime" >"$output/dma-lifetime.log" 2>&1
@@ -125,7 +126,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'f7552f0d85af41e0bc3b8d83e619ebdaf1d591bd', result
+          assert result['source_tree'] == '625caae70e34fadc90b9de29406455a6a92af093', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
