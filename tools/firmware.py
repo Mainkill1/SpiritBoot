@@ -8,6 +8,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -185,6 +186,11 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                  "-DNXK_METADATA_COUNTERS=" +
                  ("ON" if metadata_counters else "OFF")])
             run(["cmake", "--build", str(build), "--clean-first", "--target", "flash", "--parallel", "4"])
+            boot_setup = actual_source / "ntoskrnl/xb/bootsetup_native.c"
+            if boot_setup.exists():
+                run([sys.executable, str(ROOT / "tools/check_boot_setup_placement.py"),
+                     str(build / "ntoskrnl/xboxkrnl.unstripped.exe"),
+                     "--final-kernel", str(build / "ntoskrnl/xboxkrnl.exe")])
         image = build / "flash.bin"
         if image.stat().st_size != FLASH_SIZES[variant]:
             raise ValueError(f"invalid flash size: expected {FLASH_SIZES[variant]} bytes")

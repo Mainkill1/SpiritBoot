@@ -1,0 +1,1564 @@
+From bfb0c2607744032dc5a893eea98fa403646562d2 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sun, 11 Oct 2026 01:34:41 -0700
+Subject: [PATCH] xbox: add pre-title settings menu
+
+---
+ hal/halx86/xbox/video/BootVgaInitialization.c |   4 +
+ ntoskrnl/CMakeLists.txt                       |   3 +
+ ntoskrnl/ex/init.c                            |  12 +-
+ ntoskrnl/inbv/bootanim.rc                     |   5 +-
+ ntoskrnl/inbv/resources/spiritboot.bmp        | Bin 0 -> 32886 bytes
+ ntoskrnl/xb/boot_setup.c                      | 222 +++++
+ ntoskrnl/xb/boot_setup.h                      |  80 ++
+ ntoskrnl/xb/boot_xid.c                        | 106 +++
+ ntoskrnl/xb/boot_xid.h                        |  58 ++
+ ntoskrnl/xb/bootsetup_native.c                | 847 ++++++++++++++++++
+ 10 files changed, 1334 insertions(+), 3 deletions(-)
+ create mode 100644 ntoskrnl/inbv/resources/spiritboot.bmp
+ create mode 100644 ntoskrnl/xb/boot_setup.c
+ create mode 100644 ntoskrnl/xb/boot_setup.h
+ create mode 100644 ntoskrnl/xb/boot_xid.c
+ create mode 100644 ntoskrnl/xb/boot_xid.h
+ create mode 100644 ntoskrnl/xb/bootsetup_native.c
+
+diff --git a/hal/halx86/xbox/video/BootVgaInitialization.c b/hal/halx86/xbox/video/BootVgaInitialization.c
+index 81799d4a..d1334264 100644
+--- a/hal/halx86/xbox/video/BootVgaInitialization.c
++++ b/hal/halx86/xbox/video/BootVgaInitialization.c
+@@ -83,6 +83,10 @@ char *AvCableName(void) {
+ 	}
+ }
+ 
++/* The calibration tables consumed here already live in INITDATA.  Keep the
++ * only routine that references them in the same boot-only lifetime even when
++ * LTO leaves the function out of the automatic INIT closure. */
++CODE_SEG("INIT")
+ void BootVgaInitializationKernelNG(CURRENT_VIDEO_MODE_DETAILS * pvmode) {
+ 	xbox_tv_encoding tv_encoding;
+ 	xbox_av_type av_type;
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index 6f622ab0..8bec7c12 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -150,6 +150,9 @@ list(APPEND PCH_SKIP_SOURCE
+     xb/interrupt.c
+     xb/shutdown.c
+     xb/debugprompt.c
++    xb/boot_setup.c
++    xb/boot_xid.c
++    xb/bootsetup_native.c
+     xb/sizeddata.c
+     xb/scattergather.c
+     xb/exflist.c
+diff --git a/ntoskrnl/ex/init.c b/ntoskrnl/ex/init.c
+index cba2d24f..b346d644 100644
+--- a/ntoskrnl/ex/init.c
++++ b/ntoskrnl/ex/init.c
+@@ -1458,9 +1458,17 @@ Phase1InitializationDiscard(IN PVOID Context)
+     /* Check if GUI boot is enabled */
+     if (!NoGuiBoot)
+     {
+-        /* It is, display the boot logo and enable printing strings */
++        /* Hold the actual SpiritBoot splash at the controller gate before
++         * later initialization can replace it. Setup owns and retires its
++         * temporary OHCI/DMA state before normal boot resumes. */
++        InbvEnableDisplayString(TRUE);
++#ifdef SARCH_XBOX
++        {
++            extern VOID NTAPI NxkBootSetupRun(VOID);
++            NxkBootSetupRun();
++        }
++#endif
+         InbvEnableDisplayString(SosEnabled);
+-        DisplayBootBitmap(SosEnabled);
+     }
+     else
+     {
+diff --git a/ntoskrnl/inbv/bootanim.rc b/ntoskrnl/inbv/bootanim.rc
+index c38ef017..f6b803ef 100644
+--- a/ntoskrnl/inbv/bootanim.rc
++++ b/ntoskrnl/inbv/bootanim.rc
+@@ -17,7 +17,10 @@
+  * variants, the copyright text, the rotating line (INBV_ROTBAR_IMPLEMENTED
+  * is off), and the progress bar -- their code paths are unreachable on
+  * Xbox. */
+-IDB_LOGO_DEFAULT    BITMAP "inbv/resources/nxlogo.bmp"
++/* SpiritBoot uses a compact 4-bit indexed logo so the splash remains cheap
++ * in ROM and in the bootvid backbuffer. Additional animation frames can use
++ * the same format without changing settings-menu timing or input handling. */
++IDB_LOGO_DEFAULT    BITMAP "inbv/resources/spiritboot.bmp"
+ #else
+ IDB_HIBERNATE_BAR   BITMAP "inbv/resources/hibernate.bmp"
+ IDB_SHUTDOWN_MSG    BITMAP "inbv/resources/shutdown.bmp"
+diff --git a/ntoskrnl/inbv/resources/spiritboot.bmp b/ntoskrnl/inbv/resources/spiritboot.bmp
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6b65f8a39707f8c0b7df3c4ad71b3bd12ae0bc9
+GIT binary patch
+literal 32886
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/ntoskrnl/xb/boot_setup.c b/ntoskrnl/xb/boot_setup.c
+new file mode 100644
+index 00000000..40d589c3
+--- /dev/null
++++ b/ntoskrnl/xb/boot_setup.c
+@@ -0,0 +1,222 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Disposable boot setup logic; no allocator, hardware I/O or mutable globals.
++ */
++#include "boot_setup.h"
++
++void sb_boot_gate_init(SbBootGate *g, uint32_t now)
++{
++    *g = (SbBootGate){0};
++    g->start = now;
++}
++
++SbGateResult sb_boot_gate_poll(SbBootGate *g, SbInput in)
++{
++    uint32_t elapsed;
++
++    if (g->result != SB_GATE_WAIT) return g->result;
++    elapsed = in.ms - g->start;
++    if (elapsed >= SB_WINDOW_MS || elapsed > UINT32_MAX / 2u)
++        return g->result = SB_GATE_BOOT;
++    if (in.valid && (in.buttons & SB_X))
++        g->result = SB_GATE_ENTER;
++    return g->result;
++}
++
++/* Public Xbox setting encodings. Unknown/unedited bits must survive. */
++#define WIDE 0x00010000u
++#define LETTERBOX 0x00100000u
++#define TEXT(name, value) static const char name[] SB_INIT_DATA = value
++TEXT(label_language, "Language");
++TEXT(label_shape, "Screen shape");
++TEXT(label_480p, "Allow 480p");
++TEXT(label_720p, "Allow 720p");
++TEXT(label_1080i, "Allow 1080i");
++TEXT(label_pal60, "PAL60 preference");
++TEXT(label_audio, "Audio mode");
++TEXT(label_ac3, "Dolby Digital (AC3)");
++TEXT(label_dts, "DTS");
++TEXT(label_save, "Save and reboot");
++TEXT(label_continue, "Discard and continue");
++TEXT(text_unknown_preserved, "Unknown (preserved)");
++TEXT(text_unknown, "Unknown");
++TEXT(text_unavailable, "Unavailable");
++TEXT(text_english, "English");
++TEXT(text_japanese, "Japanese");
++TEXT(text_german, "German");
++TEXT(text_french, "French");
++TEXT(text_spanish, "Spanish");
++TEXT(text_italian, "Italian");
++TEXT(text_korean, "Korean");
++TEXT(text_chinese, "Chinese");
++TEXT(text_portuguese, "Portuguese");
++TEXT(text_normal, "Normal (4:3)");
++TEXT(text_widescreen, "Widescreen");
++TEXT(text_letterbox, "Letterbox");
++TEXT(text_stereo, "Stereo");
++TEXT(text_mono, "Mono");
++TEXT(text_surround, "Surround");
++TEXT(text_on, "On");
++TEXT(text_off, "Off");
++TEXT(text_review, "Review changes");
++TEXT(text_no_changes, "No changes");
++TEXT(text_no_writes, "No EEPROM writes");
++#undef TEXT
++
++static const char *const labels[SB_ROW_COUNT] SB_INIT_DATA = {
++    label_language, label_shape, label_480p, label_720p, label_1080i,
++    label_pal60, label_audio, label_ac3, label_dts, label_save, label_continue
++};
++static const char *const languages[] SB_INIT_DATA = {
++    text_unknown_preserved, text_english, text_japanese, text_german,
++    text_french, text_spanish, text_italian, text_korean, text_chinese,
++    text_portuguese
++};
++static const uint32_t masks[SB_FIELD_COUNT] SB_INIT_DATA = {
++    0, WIDE|LETTERBOX, 0x00080000u, 0x00020000u, 0x00040000u,
++    0x00400000u, 3u, 0x00010000u, 0x00020000u
++};
++
++void sb_setup_open(SbSetup *s, SbSettings initial, uint32_t supported)
++{
++    *s = (SbSetup){0};
++    s->original = initial;
++    s->edited = initial;
++    s->supported = supported & SB_ALL_FIELDS;
++}
++
++uint32_t sb_setup_changed(const SbSetup *s)
++{
++    return (s->original.language != s->edited.language ? SB_LANGUAGE_WORD : 0u) |
++           (s->original.video != s->edited.video ? SB_VIDEO_WORD : 0u) |
++           (s->original.audio != s->edited.audio ? SB_AUDIO_WORD : 0u);
++}
++
++SB_INIT_CODE static uint32_t
++next_value(uint32_t now, const uint32_t *values, unsigned n, int direction)
++{
++    for (unsigned i=0; i<n; ++i)
++        if (values[i] == now)
++            return values[direction > 0 ? (i+1u)%n : (i+n-1u)%n];
++    return values[direction > 0 ? 0u : n-1u];
++}
++
++SB_INIT_CODE static void edit(SbSetup *s, int direction)
++{
++    static const uint32_t lang[] SB_INIT_DATA = {1,2,3,4,5,6,7,8,9};
++    static const uint32_t aspect[] SB_INIT_DATA = {0,WIDE,LETTERBOX};
++    static const uint32_t audio[] SB_INIT_DATA = {0,1,2};
++    uint32_t *word, value, mask;
++    if ((unsigned)s->row >= SB_FIELD_COUNT || !(s->supported & (1u << s->row))) return;
++    if (s->row == SB_LANGUAGE) {
++        s->edited.language = next_value(s->edited.language,lang,9,direction);
++        return;
++    }
++    word = s->row < SB_AUDIO_MODE ? &s->edited.video : &s->edited.audio;
++    mask = masks[s->row];
++    value = *word & mask;
++    if (s->row == SB_ASPECT) value = next_value(value,aspect,3,direction);
++    else if (s->row == SB_AUDIO_MODE) value = next_value(value,audio,3,direction);
++    else value = value ? 0u : mask;
++    *word = (*word & ~mask) | value;
++}
++
++SB_INIT_CODE static void request_save(SbSetup *s)
++{
++    s->state = sb_setup_changed(s) ? SB_MENU_CONFIRM_SAVE : SB_MENU_CONTINUE;
++}
++
++SB_INIT_CODE static void save(SbSetup *s, const SbSettingsStore *store)
++{
++    bool already_uncertain = s->state == SB_MENU_RECOVERY;
++    s->last_save = store && store->commit ?
++        store->commit(store->context,&s->original,&s->edited,sb_setup_changed(s)) :
++        SB_COMMIT_REJECTED;
++    if (s->last_save == SB_COMMIT_OK) s->state = SB_MENU_REBOOT;
++    else if (s->last_save == SB_COMMIT_REJECTED && !already_uncertain)
++        s->state = SB_MENU_EDIT;
++    else {
++        s->last_save = SB_COMMIT_UNCERTAIN;
++        s->state = SB_MENU_RECOVERY;
++    }
++}
++
++void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
++{
++    uint32_t edges;
++    if (s->state == SB_MENU_REBOOT || s->state == SB_MENU_CONTINUE) return;
++    if (!in.valid) {
++        s->armed = s->source_seen = false;
++        s->previous_buttons = 0;
++        return;
++    }
++    if (!s->source_seen || in.source != s->source) {
++        s->armed = false;
++        s->source_seen = true;
++        s->source = in.source;
++    }
++    if (!s->armed) {
++        if (!in.buttons) s->armed = true;
++        s->previous_buttons = in.buttons;
++        return;
++    }
++    edges = in.buttons & ~s->previous_buttons;
++    s->previous_buttons = in.buttons;
++    if (!edges || (edges & (edges-1u))) return;
++    if (s->state == SB_MENU_RECOVERY) {
++        if (edges == SB_A) save(s,store);
++        return;
++    }
++    if (s->state == SB_MENU_CONFIRM_SAVE || s->state == SB_MENU_CONFIRM_DISCARD) {
++        if (edges == SB_B) s->state = SB_MENU_EDIT;
++        else if (edges == SB_A) {
++            if (s->state == SB_MENU_CONFIRM_SAVE) save(s,store);
++            else s->state = SB_MENU_CONTINUE;
++        }
++        return;
++    }
++    if (s->state != SB_MENU_EDIT) return;
++    if (edges == SB_UP) s->row = (SbSetupRow)((s->row+SB_ROW_COUNT-1u)%SB_ROW_COUNT);
++    else if (edges == SB_DOWN) s->row = (SbSetupRow)((s->row+1u)%SB_ROW_COUNT);
++    else if (edges == SB_B || (edges == SB_A && s->row == SB_CONTINUE))
++        s->state = sb_setup_changed(s) ? SB_MENU_CONFIRM_DISCARD : SB_MENU_CONTINUE;
++    else if (edges == SB_X || (edges == SB_A && s->row == SB_SAVE)) request_save(s);
++    else if (edges == SB_LEFT || edges == SB_RIGHT || edges == SB_A)
++        edit(s,edges == SB_LEFT ? -1 : 1);
++}
++
++const char *sb_setup_field_label(SbSetupRow row)
++{
++    return (unsigned)row < SB_ROW_COUNT ? labels[row] : text_unknown;
++}
++
++SB_INIT_CODE static void text_copy(char *to, size_t capacity, const char *from)
++{
++    size_t i=0;
++    if (!to || !capacity) return;
++    while (i+1u < capacity && from[i]) { to[i]=from[i]; ++i; }
++    to[i]=0;
++}
++
++void sb_setup_field_value(const SbSetup *s, SbSetupRow row, char *out, size_t size)
++{
++    const char *text=text_unknown;
++    uint32_t value;
++    if ((unsigned)row < SB_FIELD_COUNT) {
++        if (!(s->supported & (1u << row))) text=text_unavailable;
++        else if (row == SB_LANGUAGE)
++            text=languages[s->edited.language <= 9u ? s->edited.language : 0u];
++        else {
++            value = (row < SB_AUDIO_MODE ? s->edited.video : s->edited.audio) & masks[row];
++            if (row == SB_ASPECT)
++                text=value==0 ? text_normal : value==WIDE ? text_widescreen :
++                     value==LETTERBOX ? text_letterbox : text_unknown_preserved;
++            else if (row == SB_AUDIO_MODE)
++                text=value==0 ? text_stereo : value==1 ? text_mono :
++                     value==2 ? text_surround : text_unknown_preserved;
++            else text=value ? text_on : text_off;
++        }
++    } else if (row == SB_SAVE)
++        text=sb_setup_changed(s) ? text_review : text_no_changes;
++    else if (row == SB_CONTINUE) text=text_no_writes;
++    text_copy(out,size,text);
++}
+diff --git a/ntoskrnl/xb/boot_setup.h b/ntoskrnl/xb/boot_setup.h
+new file mode 100644
+index 00000000..655808bf
+--- /dev/null
++++ b/ntoskrnl/xb/boot_setup.h
+@@ -0,0 +1,80 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef SPIRITBOOT_BOOT_SETUP_H
++#define SPIRITBOOT_BOOT_SETUP_H
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#if defined(SARCH_XBOX) && defined(__GNUC__)
++#define SB_INIT_CODE __attribute__((section("INIT"), noinline))
++#define SB_INIT_DATA __attribute__((section("INITDATA")))
++#else
++#define SB_INIT_CODE
++#define SB_INIT_DATA
++#endif
++
++#define SB_WINDOW_MS 3000u
++#define SB_PAGE_SIZE 4096u
++
++/* Normalized inputs, NOT Xbox USB packet bits. Source includes device generation. */
++enum { SB_START=1u, SB_UP=2u, SB_DOWN=4u, SB_LEFT=8u, SB_RIGHT=16u,
++       SB_A=32u, SB_B=64u, SB_X=128u };
++typedef struct { uint32_t ms, source, buttons; bool valid; } SbInput;
++typedef enum { SB_GATE_WAIT, SB_GATE_ENTER, SB_GATE_BOOT } SbGateResult;
++typedef struct {
++    uint32_t start;
++    SbGateResult result;
++} SbBootGate;
++SB_INIT_CODE void sb_boot_gate_init(SbBootGate *gate, uint32_t now);
++SB_INIT_CODE SbGateResult sb_boot_gate_poll(SbBootGate *gate, SbInput input);
++
++/* Only standardized setting indices 7/8/9; no factory or key material. */
++typedef struct { uint32_t language, video, audio; } SbSettings;
++enum { SB_LANGUAGE_WORD=1u, SB_VIDEO_WORD=2u, SB_AUDIO_WORD=4u };
++typedef enum {
++    SB_LANGUAGE, SB_ASPECT, SB_480P, SB_720P, SB_1080I, SB_PAL60,
++    SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_FIELD_COUNT,
++    SB_SAVE=SB_FIELD_COUNT, SB_CONTINUE, SB_ROW_COUNT
++} SbSetupRow;
++#define SB_ALL_FIELDS ((1u << SB_FIELD_COUNT) - 1u)
++/* OK requires durable write + independent verification. REJECTED promises no
++ * mutation. Any other outcome is uncertain and prohibits ordinary title launch. */
++typedef enum { SB_COMMIT_OK, SB_COMMIT_REJECTED, SB_COMMIT_UNCERTAIN } SbCommitResult;
++typedef struct {
++    void *context;
++    SbCommitResult (*commit)(void *, const SbSettings *, const SbSettings *, uint32_t);
++} SbSettingsStore;
++typedef enum {
++    SB_MENU_EDIT, SB_MENU_CONFIRM_SAVE, SB_MENU_CONFIRM_DISCARD,
++    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY
++} SbMenuState;
++typedef struct {
++    SbSettings original, edited;
++    uint32_t supported, previous_buttons, source;
++    SbSetupRow row;
++    SbMenuState state;
++    SbCommitResult last_save;
++    bool armed, source_seen;
++} SbSetup;
++SB_INIT_CODE void sb_setup_open(SbSetup *setup, SbSettings initial, uint32_t supported);
++SB_INIT_CODE void sb_setup_input(SbSetup *setup, SbInput input, const SbSettingsStore *store);
++SB_INIT_CODE uint32_t sb_setup_changed(const SbSetup *setup);
++SB_INIT_CODE const char *sb_setup_field_label(SbSetupRow row);
++SB_INIT_CODE void sb_setup_field_value(const SbSetup *setup, SbSetupRow row,
++                                       char *out, size_t size);
++
++/* This descriptor, retirement code/stack, ops and release context must be
++ * OUTSIDE the arena. Return from menu code before invoking the coordinator.
++ * Native adapter must also retire overlay code and extra PTs, not only data. */
++typedef enum { SB_ARENA_LIVE, SB_ARENA_QUIESCED, SB_ARENA_SCRUBBED,
++               SB_ARENA_RELEASED } SbArenaState;
++typedef struct { void *base; size_t bytes; SbArenaState state; } SbBootArena;
++typedef struct {
++    void *context;
++    bool (*quiesce)(void *, void *, size_t); /* drain GPU/USB/DMA + detach callbacks */
++    /* All-or-nothing: false retains ownership of the ENTIRE scrubbed arena;
++     * true returns every page. Preflight before freeing any frame. */
++    bool (*release)(void *, void *, size_t);
++} SbArenaOps;
++bool sb_boot_arena_retire(SbBootArena *arena, const SbArenaOps *ops);
++#endif
+diff --git a/ntoskrnl/xb/boot_xid.c b/ntoskrnl/xb/boot_xid.c
+new file mode 100644
+index 00000000..9796a353
+--- /dev/null
++++ b/ntoskrnl/xb/boot_xid.c
+@@ -0,0 +1,106 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Pure OHCI/XID descriptor helpers. Hardware ownership and MMIO remain in the
++ * native adapter; these bodies are independently host tested.
++ */
++#include "boot_xid.h"
++
++#define OHCI_ED_MPS_SHIFT 16u
++#define OHCI_TD_R (1u << 18)
++#define OHCI_TD_DP_SHIFT 19u
++#define OHCI_TD_DI_7 (7u << 21)
++#define OHCI_TD_DATA0 (2u << 24)
++#define OHCI_TD_DATA1 (3u << 24)
++#define OHCI_TD_CC_NA (SB_OHCI_CC_NOT_ACCESSED << 28)
++#define OHCI_PTR_MASK 0xfffffff0u
++
++SB_INIT_CODE static void put16(uint8_t *p, uint16_t value)
++{
++    p[0] = (uint8_t)value;
++    p[1] = (uint8_t)(value >> 8);
++}
++
++bool sb_ohci_prepare_control(SbOhciControl *c, uint32_t cpa,
++                             uint32_t data_pa, uint8_t address,
++                             uint8_t max_packet, uint8_t request_type,
++                             uint8_t request, uint16_t value,
++                             uint16_t index, uint16_t length)
++{
++    uint32_t td0, td1, td2, tail;
++    bool input;
++
++    if (!c || (cpa & 15u) || (data_pa && (data_pa & 3u)) ||
++        address > 127u ||
++        !(max_packet == 8u || max_packet == 16u ||
++          max_packet == 32u || max_packet == 64u) ||
++        (length && !data_pa))
++        return false;
++
++    *c = (SbOhciControl){0};
++    td0 = cpa + (uint32_t)offsetof(SbOhciControl, td[0]);
++    td1 = cpa + (uint32_t)offsetof(SbOhciControl, td[1]);
++    td2 = cpa + (uint32_t)offsetof(SbOhciControl, td[2]);
++    tail = cpa + (uint32_t)offsetof(SbOhciControl, td[3]);
++    input = (request_type & 0x80u) != 0;
++
++    c->setup[0] = request_type;
++    c->setup[1] = request;
++    put16(c->setup + 2, value);
++    put16(c->setup + 4, index);
++    put16(c->setup + 6, length);
++
++    c->ed.flags = address | ((uint32_t)max_packet << OHCI_ED_MPS_SHIFT);
++    c->ed.head = td0;
++    c->ed.tail = tail;
++
++    c->td[0].flags = OHCI_TD_CC_NA | OHCI_TD_DI_7 | OHCI_TD_DATA0;
++    c->td[0].cbp = cpa + (uint32_t)offsetof(SbOhciControl, setup);
++    c->td[0].be = c->td[0].cbp + 7u;
++    c->td[0].next = length ? td1 : td2;
++
++    if (length) {
++        c->td[1].flags = OHCI_TD_CC_NA | OHCI_TD_DI_7 | OHCI_TD_DATA1 |
++                         ((input ? 2u : 1u) << OHCI_TD_DP_SHIFT) |
++                         (input ? OHCI_TD_R : 0u);
++        c->td[1].cbp = data_pa;
++        c->td[1].be = data_pa + length - 1u;
++        c->td[1].next = td2;
++    }
++
++    c->td[2].flags = OHCI_TD_CC_NA | OHCI_TD_DATA1 |
++                     ((input ? 1u : 2u) << OHCI_TD_DP_SHIFT);
++    c->td[2].next = tail;
++    return true;
++}
++
++bool sb_ohci_control_complete(const SbOhciControl *c, uint16_t length)
++{
++    if (!c || (c->ed.head & 1u) ||
++        (c->ed.head & OHCI_PTR_MASK) != (c->ed.tail & OHCI_PTR_MASK))
++        return false;
++    if ((c->td[0].flags >> 28) != 0u ||
++        (length && (c->td[1].flags >> 28) != 0u) ||
++        (c->td[2].flags >> 28) != 0u)
++        return false;
++    return true;
++}
++
++bool sb_xid_decode_report(const uint8_t *r, size_t bytes, uint32_t *buttons)
++{
++    uint16_t digital;
++    uint32_t out = 0;
++
++    if (!r || !buttons || bytes < SB_XID_REPORT_BYTES ||
++        r[1] < SB_XID_REPORT_BYTES)
++        return false;
++    digital = (uint16_t)r[2] | ((uint16_t)r[3] << 8);
++    if (digital & 0x0010u) out |= SB_START;
++    if (digital & 0x0001u) out |= SB_UP;
++    if (digital & 0x0002u) out |= SB_DOWN;
++    if (digital & 0x0004u) out |= SB_LEFT;
++    if (digital & 0x0008u) out |= SB_RIGHT;
++    if (r[4]) out |= SB_A;
++    if (r[5]) out |= SB_B;
++    if (r[6]) out |= SB_X;
++    *buttons = out;
++    return true;
++}
+diff --git a/ntoskrnl/xb/boot_xid.h b/ntoskrnl/xb/boot_xid.h
+new file mode 100644
+index 00000000..054f911c
+--- /dev/null
++++ b/ntoskrnl/xb/boot_xid.h
+@@ -0,0 +1,58 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef SPIRITBOOT_BOOT_XID_H
++#define SPIRITBOOT_BOOT_XID_H
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#include "boot_setup.h"
++
++#define SB_XID_REPORT_BYTES 20u
++#define SB_OHCI_CC_NOT_ACCESSED 15u
++
++typedef struct {
++    uint32_t flags;
++    uint32_t tail;
++    uint32_t head;
++    uint32_t next;
++} SbOhciEd;
++
++typedef struct {
++    uint32_t flags;
++    uint32_t cbp;
++    uint32_t next;
++    uint32_t be;
++} SbOhciTd;
++
++typedef struct {
++    SbOhciEd ed;
++    SbOhciTd td[4];
++    uint8_t setup[8];
++} SbOhciControl;
++
++/* Builds one endpoint-zero transfer. All supplied physical addresses must be
++ * 32-bit, naturally aligned and owned by the caller until completion. */
++SB_INIT_CODE bool sb_ohci_prepare_control(SbOhciControl *control,
++                             uint32_t control_pa,
++                             uint32_t data_pa,
++                             uint8_t address,
++                             uint8_t max_packet,
++                             uint8_t request_type,
++                             uint8_t request,
++                             uint16_t value,
++                             uint16_t index,
++                             uint16_t length);
++
++/* Success requires every scheduled TD to retire without an OHCI condition
++ * code and the ED to reach its dummy tail. */
++SB_INIT_CODE bool sb_ohci_control_complete(const SbOhciControl *control,
++                                           uint16_t length);
++
++/* Decode the original-Xbox 20-byte XID gamepad input report into the menu's
++ * normalized edge-button model. Analog face buttons are treated as pressed
++ * when their byte is nonzero. */
++SB_INIT_CODE bool sb_xid_decode_report(const uint8_t *report, size_t bytes,
++                                       uint32_t *buttons);
++
++#endif
+diff --git a/ntoskrnl/xb/bootsetup_native.c b/ntoskrnl/xb/bootsetup_native.c
+new file mode 100644
+index 00000000..f3003729
+--- /dev/null
++++ b/ntoskrnl/xb/bootsetup_native.c
+@@ -0,0 +1,847 @@
++/*
++ * PROJECT:     nxkrnl -- a free kernel for the original Xbox
++ * LICENSE:     GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
++ * PURPOSE:     Discardable three-second boot setup prompt and XID adapter.
++ *
++ * This is deliberately a tiny boot owner, not a resident USB stack.  It owns
++ * one OHCI controller at a time, enumerates xemu's Xbox controller hub, polls
++ * endpoint zero, then resets the controller and releases its only DMA page
++ * before title launch.  A missing or unsupported device is a bounded normal
++ * boot, never a reason to strand the console.
++ */
++#include <ntoskrnl.h>
++#define NDEBUG
++#include <debug.h>
++
++#include "boot_setup.h"
++#include "boot_xid.h"
++#include "inbv/logo.h"
++#include "mm/mm.h"
++
++/* Private kernel entry points.  The public Xbox imports are not available to
++ * code linked into ntoskrnl itself, and an implicit declaration would also
++ * lose the stdcall decoration on i386. */
++PVOID NTAPI NxMmAllocateContiguousMemoryEx(SIZE_T NumberOfBytes,
++                                            ULONG_PTR LowestAcceptableAddress,
++                                            ULONG_PTR HighestAcceptableAddress,
++                                            ULONG_PTR Alignment,
++                                            ULONG ProtectionType);
++VOID NTAPI NxMmFreeContiguousMemory(PVOID BaseAddress);
++NTSTATUS NTAPI ExSaveNonVolatileSetting(ULONG ValueIndex, ULONG Type,
++                                         PVOID Value, ULONG ValueLength);
++NTSTATUS NTAPI ExQueryNonVolatileSetting(ULONG ValueIndex, PULONG Type,
++                                          PVOID Value, ULONG ValueLength,
++                                          PULONG ResultLength);
++
++#define BS_USB0_MMIO ((volatile ULONG *)0xFED00000u)
++#define BS_USB1_MMIO ((volatile ULONG *)0xFED08000u)
++#define BS_DMA_BYTES PAGE_SIZE
++#define BS_DMA_HIGH 0x00ffffffu
++#define BS_USB_ADDRESS_HUB 1u
++#define BS_USB_ADDRESS_PAD 2u
++
++#define OHCI_CONTROL 1u
++#define OHCI_COMMAND_STATUS 2u
++#define OHCI_INTERRUPT_STATUS 3u
++#define OHCI_INTERRUPT_DISABLE 5u
++#define OHCI_HCCA 6u
++#define OHCI_CONTROL_HEAD_ED 8u
++#define OHCI_FM_INTERVAL 13u
++#define OHCI_PERIODIC_START 16u
++#define OHCI_LS_THRESHOLD 17u
++#define OHCI_RH_DESCRIPTOR_A 18u
++#define OHCI_RH_PORT_STATUS 21u
++
++#define OHCI_CONTROL_CLE (1u << 4)
++#define OHCI_CONTROL_OPERATIONAL (2u << 6)
++#define OHCI_COMMAND_RESET (1u << 0)
++#define OHCI_COMMAND_CONTROL_FILLED (1u << 1)
++#define OHCI_PORT_CONNECTED (1u << 0)
++#define OHCI_PORT_ENABLED (1u << 1)
++#define OHCI_PORT_RESET (1u << 4)
++#define OHCI_PORT_POWER (1u << 8)
++#define OHCI_PORT_LOW_SPEED (1u << 9)
++#define OHCI_PORT_CHANGE_MASK (0x1fu << 16)
++
++#define USB_DEVICE_DESCRIPTOR 1u
++#define USB_HUB_DESCRIPTOR 0x29u
++#define USB_CLASS_HUB 9u
++#define USB_REQ_GET_STATUS 0u
++#define USB_REQ_CLEAR_FEATURE 1u
++#define USB_REQ_SET_FEATURE 3u
++#define USB_REQ_SET_ADDRESS 5u
++#define USB_REQ_GET_DESCRIPTOR 6u
++#define USB_REQ_SET_CONFIGURATION 9u
++#define USB_HUB_PORT_RESET 4u
++#define USB_HUB_PORT_POWER 8u
++#define BS_MAX_HUB_DEPTH 4u
++#define BS_MAX_HUB_PORTS 8u
++
++#define EEPROM_SLAVE_ADDRESS 0x54u
++#define EEPROM_USER_CHECKSUM 0x60u
++#define EEPROM_USER_FIRST 0x64u
++#define EEPROM_USER_BYTES 0x5cu
++#define EEPROM_LANGUAGE 0x90u
++#define EEPROM_VIDEO 0x94u
++#define EEPROM_AUDIO 0x98u
++#define NVS_DWORD 4u
++
++#define BS_SUPPORTED_FIELDS SB_ALL_FIELDS
++#define BS_INIT CODE_SEG("INIT") DECLSPEC_NOINLINE
++
++/* The HCCA must be 256-byte aligned and the ED/TDs 16-byte aligned.  A page
++ * allocation gives both; the explicit padding fixes the control offset. */
++typedef struct _BS_USB_DMA
++{
++    UCHAR Hcca[256];
++    SbOhciControl Control;
++    UCHAR Data[64];
++} BS_USB_DMA;
++
++typedef struct _BS_PAD
++{
++    PVOID Allocation;
++    BS_USB_DMA *Dma;
++    ULONG Physical;
++    volatile ULONG *Regs;
++    UCHAR Address;
++    UCHAR MaxPacket;
++    BOOLEAN LowSpeed;
++    BOOLEAN Ready;
++    BOOLEAN QuiesceFailed;
++    ULONG TransferDeadline;
++    ULONG Source;
++} BS_PAD;
++
++typedef struct _BS_STORE
++{
++    BOOLEAN Attempted;
++} BS_STORE;
++
++/* Presentation is deliberately isolated from timing, input and EEPROM state.
++ * A future animated boot can replace these INITDATA resources/renderers
++ * without changing the three-second gate or settings transaction. */
++DATA_SEG("INITDATA")
++static const CHAR BsBrand[] = "Spirit Boot";
++DATA_SEG("INITDATA")
++static const CHAR BsPrompt[] = "Hold X to enter setup";
++DATA_SEG("INITDATA")
++static const CHAR BsMenuTitle[] =
++    "\r\n  SpiritBoot Settings\r\n"
++    "  D-pad: move/change   A: select   B: back   X: save\r\n\r\n";
++DATA_SEG("INITDATA")
++static const CHAR BsMenuLine[] = "  %c %-24s %s\r\n";
++DATA_SEG("INITDATA")
++static const CHAR BsBlankLine[] = "\r\n";
++DATA_SEG("INITDATA")
++static const CHAR BsConfirmSave[] =
++    "  Save these settings and reboot?  A=yes, B=no\r\n";
++DATA_SEG("INITDATA")
++static const CHAR BsConfirmDiscard[] =
++    "  Discard changes and continue?  A=yes, B=no\r\n";
++DATA_SEG("INITDATA")
++static const CHAR BsRecovery[] =
++    "  EEPROM write was incomplete. Press A to repair/retry.\r\n";
++
++BS_INIT
++static ULONG
++BsNowMs(VOID)
++{
++    return (ULONG)(KeQueryInterruptTime() / 10000u);
++}
++
++BS_INIT
++static VOID
++BsDelayMs(ULONG Milliseconds)
++{
++    LARGE_INTEGER Delay;
++    Delay.QuadPart = -((LONGLONG)Milliseconds * 10000);
++    KeDelayExecutionThread(KernelMode, FALSE, &Delay);
++}
++
++BS_INIT
++static ULONG
++BsRead(volatile ULONG *Regs, ULONG Index)
++{
++    return READ_REGISTER_ULONG((PULONG)&Regs[Index]);
++}
++
++BS_INIT
++static VOID
++BsWrite(volatile ULONG *Regs, ULONG Index, ULONG Value)
++{
++    WRITE_REGISTER_ULONG((PULONG)&Regs[Index], Value);
++    KeMemoryBarrier();
++}
++
++BS_INIT
++static BOOLEAN
++BsOhciStop(volatile ULONG *Regs)
++{
++    ULONG i;
++
++    if (Regs == NULL)
++        return TRUE;
++    BsWrite(Regs, OHCI_INTERRUPT_DISABLE, 0xffffffffu);
++    BsWrite(Regs, OHCI_CONTROL, 0);
++    BsWrite(Regs, OHCI_CONTROL_HEAD_ED, 0);
++    BsWrite(Regs, OHCI_HCCA, 0);
++    BsWrite(Regs, OHCI_COMMAND_STATUS, OHCI_COMMAND_RESET);
++    for (i = 0; i < 100; ++i)
++    {
++        if (!(BsRead(Regs, OHCI_COMMAND_STATUS) & OHCI_COMMAND_RESET))
++            break;
++        KeStallExecutionProcessor(100);
++    }
++    if (i == 100)
++        return FALSE;
++    BsWrite(Regs, OHCI_CONTROL, 0);
++    BsWrite(Regs, OHCI_CONTROL_HEAD_ED, 0);
++    BsWrite(Regs, OHCI_HCCA, 0);
++    return !(BsRead(Regs, OHCI_COMMAND_STATUS) & OHCI_COMMAND_RESET) &&
++           BsRead(Regs, OHCI_CONTROL) == 0 &&
++           BsRead(Regs, OHCI_CONTROL_HEAD_ED) == 0 &&
++           BsRead(Regs, OHCI_HCCA) == 0;
++}
++
++BS_INIT
++static BOOLEAN
++BsOhciStart(BS_PAD *Pad, volatile ULONG *Regs)
++{
++    ULONG i, Ports;
++
++    Pad->Regs = Regs;
++    Pad->Ready = FALSE;
++    if (!BsOhciStop(Regs))
++    {
++        Pad->QuiesceFailed = TRUE;
++        return FALSE;
++    }
++
++    RtlZeroMemory(Pad->Dma, BS_DMA_BYTES);
++    BsWrite(Regs, OHCI_INTERRUPT_DISABLE, 0xffffffffu);
++    BsWrite(Regs, OHCI_INTERRUPT_STATUS, 0xffffffffu);
++    BsWrite(Regs, OHCI_HCCA, Pad->Physical);
++    BsWrite(Regs, OHCI_FM_INTERVAL, 0xa7782edfu);
++    BsWrite(Regs, OHCI_PERIODIC_START, 0x2a2fu);
++    BsWrite(Regs, OHCI_LS_THRESHOLD, 0x0628u);
++    BsWrite(Regs, OHCI_CONTROL, OHCI_CONTROL_OPERATIONAL | OHCI_CONTROL_CLE);
++
++    Ports = BsRead(Regs, OHCI_RH_DESCRIPTOR_A) & 0xffu;
++    if (Ports == 0 || Ports > 15)
++        return FALSE;
++    for (i = 0; i < Ports; ++i)
++        BsWrite(Regs, OHCI_RH_PORT_STATUS + i, OHCI_PORT_POWER |
++                OHCI_PORT_CHANGE_MASK);
++    BsDelayMs(10);
++    Pad->Ready = TRUE;
++    return TRUE;
++}
++
++BS_INIT
++static BOOLEAN
++BsControl(BS_PAD *Pad, UCHAR Address, UCHAR MaxPacket, BOOLEAN LowSpeed,
++          UCHAR RequestType, UCHAR Request, USHORT Value, USHORT Index,
++          USHORT Length)
++{
++    ULONG ControlPa = Pad->Physical + FIELD_OFFSET(BS_USB_DMA, Control);
++    ULONG DataPa = Pad->Physical + FIELD_OFFSET(BS_USB_DMA, Data);
++    ULONG Deadline;
++
++    if (!Pad->Ready || Pad->Regs == NULL || Pad->Dma == NULL ||
++        (LONG)(BsNowMs() - Pad->TransferDeadline) >= 0)
++        return FALSE;
++    RtlZeroMemory(Pad->Dma->Data, sizeof(Pad->Dma->Data));
++    if (!sb_ohci_prepare_control(&Pad->Dma->Control, ControlPa, DataPa,
++                                 Address, MaxPacket, RequestType, Request,
++                                 Value, Index, Length))
++        return FALSE;
++    if (LowSpeed)
++        Pad->Dma->Control.ed.flags |= 1u << 13;
++    KeMemoryBarrier();
++    BsWrite(Pad->Regs, OHCI_CONTROL_HEAD_ED,
++            ControlPa + FIELD_OFFSET(SbOhciControl, ed));
++    BsWrite(Pad->Regs, OHCI_COMMAND_STATUS, OHCI_COMMAND_CONTROL_FILLED);
++
++    Deadline = BsNowMs() + 100u;
++    if ((LONG)(Pad->TransferDeadline - Deadline) < 0)
++        Deadline = Pad->TransferDeadline;
++    for (;;)
++    {
++        KeMemoryBarrier();
++        if (sb_ohci_control_complete(&Pad->Dma->Control, Length))
++        {
++            BsWrite(Pad->Regs, OHCI_CONTROL_HEAD_ED, 0);
++            return TRUE;
++        }
++        if (Pad->Dma->Control.ed.head & 1u)
++        {
++            /* A halted ED has retired the TD chain. Detach it before the
++             * descriptor storage can be reused for another request. */
++            BsWrite(Pad->Regs, OHCI_CONTROL_HEAD_ED, 0);
++            return FALSE;
++        }
++        if ((LONG)(BsNowMs() - Deadline) >= 0)
++        {
++            Pad->Ready = FALSE;
++            if (!BsOhciStop(Pad->Regs))
++                Pad->QuiesceFailed = TRUE;
++            return FALSE;
++        }
++        KeStallExecutionProcessor(100);
++    }
++}
++
++BS_INIT
++static BOOLEAN
++BsGetDevice(BS_PAD *Pad, UCHAR Address, UCHAR MaxPacket, BOOLEAN LowSpeed)
++{
++    return BsControl(Pad, Address, MaxPacket, LowSpeed, 0x80,
++                     USB_REQ_GET_DESCRIPTOR,
++                     (USHORT)(USB_DEVICE_DESCRIPTOR << 8), 0, 8) &&
++           Pad->Dma->Data[0] >= 8 && Pad->Dma->Data[1] == USB_DEVICE_DESCRIPTOR &&
++           (Pad->Dma->Data[7] == 8 || Pad->Dma->Data[7] == 16 ||
++            Pad->Dma->Data[7] == 32 || Pad->Dma->Data[7] == 64);
++}
++
++BS_INIT
++static BOOLEAN
++BsSetAddressAndConfiguration(BS_PAD *Pad, UCHAR Address, UCHAR MaxPacket,
++                             BOOLEAN LowSpeed, UCHAR NewAddress)
++{
++    if (!BsControl(Pad, Address, MaxPacket, LowSpeed, 0x00,
++                   USB_REQ_SET_ADDRESS, NewAddress, 0, 0))
++        return FALSE;
++    BsDelayMs(2);
++    return BsControl(Pad, NewAddress, MaxPacket, LowSpeed, 0x00,
++                     USB_REQ_SET_CONFIGURATION, 1, 0, 0);
++}
++
++BS_INIT
++static BOOLEAN
++BsVerifyXid(BS_PAD *Pad)
++{
++    if (!BsControl(Pad, Pad->Address, Pad->MaxPacket, Pad->LowSpeed,
++                   0xc1, USB_REQ_GET_DESCRIPTOR, 0x4200, 0, 16))
++        return FALSE;
++    return Pad->Dma->Data[0] >= 8 && Pad->Dma->Data[1] == 0x42 &&
++           Pad->Dma->Data[4] == 1 &&
++           Pad->Dma->Data[6] >= SB_XID_REPORT_BYTES;
++}
++
++BS_INIT
++static BOOLEAN
++BsEnumerateHub(BS_PAD *Pad, UCHAR HubAddress, UCHAR HubPacket,
++               BOOLEAN HubLowSpeed, ULONG Depth, UCHAR *NextAddress)
++{
++    ULONG Attempt, Port, Status;
++    UCHAR ChildAddress, ChildClass, ChildPacket, HubPorts;
++    BOOLEAN AnyConnected, ChildLowSpeed;
++
++    if (Depth >= BS_MAX_HUB_DEPTH || *NextAddress > 127u ||
++        !BsControl(Pad, HubAddress, HubPacket, HubLowSpeed, 0xa0,
++                   USB_REQ_GET_DESCRIPTOR,
++                   (USHORT)(USB_HUB_DESCRIPTOR << 8), 0, 16) ||
++        Pad->Dma->Data[1] != USB_HUB_DESCRIPTOR ||
++        Pad->Dma->Data[2] == 0 || Pad->Dma->Data[2] > BS_MAX_HUB_PORTS)
++        return FALSE;
++    HubPorts = Pad->Dma->Data[2];
++    for (Port = 1; Port <= HubPorts; ++Port)
++    {
++        if (!BsControl(Pad, HubAddress, HubPacket, HubLowSpeed, 0x23,
++                       USB_REQ_SET_FEATURE, USB_HUB_PORT_POWER,
++                       (USHORT)Port, 0))
++            return FALSE;
++    }
++
++    /* xemu can expose the hub before its downstream devices. Bound the wait
++     * once per hub, then inspect every connected sibling instead of assuming
++     * the first child is the controller. */
++    AnyConnected = FALSE;
++    for (Attempt = 0; Attempt < 20 && !AnyConnected; ++Attempt)
++    {
++        BsDelayMs(25);
++        for (Port = 1; Port <= HubPorts; ++Port)
++        {
++            if (!BsControl(Pad, HubAddress, HubPacket, HubLowSpeed, 0xa3,
++                           USB_REQ_GET_STATUS, 0, (USHORT)Port, 4))
++                return FALSE;
++            Status = Pad->Dma->Data[0] |
++                     ((ULONG)Pad->Dma->Data[1] << 8);
++            if (Status & OHCI_PORT_CONNECTED)
++                AnyConnected = TRUE;
++        }
++    }
++    if (!AnyConnected)
++        return FALSE;
++
++    for (Port = 1; Port <= HubPorts; ++Port)
++    {
++        if (!BsControl(Pad, HubAddress, HubPacket, HubLowSpeed, 0xa3,
++                       USB_REQ_GET_STATUS, 0, (USHORT)Port, 4))
++            return FALSE;
++        Status = Pad->Dma->Data[0] | ((ULONG)Pad->Dma->Data[1] << 8);
++        if (!(Status & OHCI_PORT_CONNECTED))
++            continue;
++        if (!BsControl(Pad, HubAddress, HubPacket, HubLowSpeed, 0x23,
++                       USB_REQ_SET_FEATURE, USB_HUB_PORT_RESET,
++                       (USHORT)Port, 0))
++            return FALSE;
++        BsDelayMs(10);
++        if (!BsControl(Pad, HubAddress, HubPacket, HubLowSpeed, 0xa3,
++                       USB_REQ_GET_STATUS, 0, (USHORT)Port, 4))
++            return FALSE;
++        Status = Pad->Dma->Data[0] | ((ULONG)Pad->Dma->Data[1] << 8);
++        if ((Status & (OHCI_PORT_CONNECTED | OHCI_PORT_ENABLED)) !=
++            (OHCI_PORT_CONNECTED | OHCI_PORT_ENABLED))
++            continue;
++        ChildLowSpeed = (Status & OHCI_PORT_LOW_SPEED) != 0;
++        if (!BsGetDevice(Pad, 0, 8, ChildLowSpeed))
++        {
++            if (!Pad->Ready)
++                return FALSE;
++            continue;
++        }
++        ChildPacket = Pad->Dma->Data[7];
++        ChildClass = Pad->Dma->Data[4];
++        if (*NextAddress > 127u)
++            return FALSE;
++        ChildAddress = (*NextAddress)++;
++        if (!BsSetAddressAndConfiguration(Pad, 0, ChildPacket,
++                                          ChildLowSpeed, ChildAddress))
++        {
++            if (!Pad->Ready)
++                return FALSE;
++            continue;
++        }
++        if (ChildClass == USB_CLASS_HUB)
++        {
++            if (BsEnumerateHub(Pad, ChildAddress, ChildPacket,
++                               ChildLowSpeed, Depth + 1u, NextAddress))
++                return TRUE;
++            if (!Pad->Ready)
++                return FALSE;
++            continue;
++        }
++        Pad->Address = ChildAddress;
++        Pad->MaxPacket = ChildPacket;
++        Pad->LowSpeed = ChildLowSpeed;
++        if (BsVerifyXid(Pad))
++            return TRUE;
++        if (!Pad->Ready)
++            return FALSE;
++    }
++    return FALSE;
++}
++
++BS_INIT
++static BOOLEAN
++BsFindPadBehindHub(BS_PAD *Pad, UCHAR HubPacket, BOOLEAN HubLowSpeed)
++{
++    UCHAR NextAddress = BS_USB_ADDRESS_PAD;
++
++    if (!BsSetAddressAndConfiguration(Pad, 0, HubPacket, HubLowSpeed,
++                                      BS_USB_ADDRESS_HUB))
++        return FALSE;
++    return BsEnumerateHub(Pad, BS_USB_ADDRESS_HUB, HubPacket, HubLowSpeed,
++                          0, &NextAddress);
++}
++
++BS_INIT
++static BOOLEAN
++BsProbeRootPort(BS_PAD *Pad, ULONG Port)
++{
++    ULONG Status;
++    BOOLEAN LowSpeed;
++    UCHAR MaxPacket, DeviceClass;
++
++    Status = BsRead(Pad->Regs, OHCI_RH_PORT_STATUS + Port);
++    if (!(Status & OHCI_PORT_CONNECTED))
++        return FALSE;
++    BsWrite(Pad->Regs, OHCI_RH_PORT_STATUS + Port,
++            OHCI_PORT_POWER | OHCI_PORT_RESET | OHCI_PORT_CHANGE_MASK);
++    BsDelayMs(10);
++    Status = BsRead(Pad->Regs, OHCI_RH_PORT_STATUS + Port);
++    if ((Status & (OHCI_PORT_CONNECTED | OHCI_PORT_ENABLED)) !=
++        (OHCI_PORT_CONNECTED | OHCI_PORT_ENABLED))
++        return FALSE;
++    LowSpeed = (Status & OHCI_PORT_LOW_SPEED) != 0;
++    if (!BsGetDevice(Pad, 0, 8, LowSpeed))
++        return FALSE;
++    MaxPacket = Pad->Dma->Data[7];
++    DeviceClass = Pad->Dma->Data[4];
++    if (DeviceClass == USB_CLASS_HUB)
++        return BsFindPadBehindHub(Pad, MaxPacket, LowSpeed);
++    if (!BsSetAddressAndConfiguration(Pad, 0, MaxPacket, LowSpeed,
++                                      BS_USB_ADDRESS_PAD))
++        return FALSE;
++    Pad->Address = BS_USB_ADDRESS_PAD;
++    Pad->MaxPacket = MaxPacket;
++    Pad->LowSpeed = LowSpeed;
++    return BsVerifyXid(Pad);
++}
++
++BS_INIT
++static BOOLEAN BsPadClose(BS_PAD *Pad);
++
++BS_INIT
++static BOOLEAN
++BsPadOpen(BS_PAD *Pad, ULONG Deadline)
++{
++    volatile ULONG *Controllers[2] = {BS_USB0_MMIO, BS_USB1_MMIO};
++    PVOID VerifiedAlias;
++    ULONG Controller, Port, Ports;
++
++    RtlZeroMemory(Pad, sizeof(*Pad));
++    Pad->TransferDeadline = Deadline;
++    Pad->Allocation = NxMmAllocateContiguousMemoryEx(BS_DMA_BYTES, 0,
++        BS_DMA_HIGH, PAGE_SIZE, PAGE_READWRITE | PAGE_NOCACHE);
++    if (Pad->Allocation == NULL)
++        return FALSE;
++    if ((ULONG_PTR)Pad->Allocation < NXK_KSEG0_BASE ||
++        (ULONG_PTR)Pad->Allocation >= NXK_KSEG0_BASE + BS_DMA_HIGH + 1u)
++        goto fail;
++    Pad->Physical = (ULONG_PTR)Pad->Allocation - NXK_KSEG0_BASE;
++    VerifiedAlias = NxkTryGetVerifiedWbDirectAlias(
++        Pad->Physical >> PAGE_SHIFT);
++    if (VerifiedAlias != Pad->Allocation)
++        goto fail;
++    Pad->Dma = (BS_USB_DMA *)VerifiedAlias;
++    if ((Pad->Physical & (PAGE_SIZE - 1)) != 0 ||
++        Pad->Physical > 0x03fff000u)
++        goto fail;
++
++    for (Controller = 0; Controller < RTL_NUMBER_OF(Controllers); ++Controller)
++    {
++        if ((LONG)(BsNowMs() - Pad->TransferDeadline) >= 0)
++            goto fail;
++        if (!BsOhciStart(Pad, Controllers[Controller]))
++        {
++            if (!Pad->QuiesceFailed && !BsOhciStop(Pad->Regs))
++                Pad->QuiesceFailed = TRUE;
++            if (Pad->QuiesceFailed)
++                goto fail;
++            Pad->Regs = NULL;
++            continue;
++        }
++        if ((LONG)(BsNowMs() - Pad->TransferDeadline) >= 0)
++            goto fail;
++        Ports = BsRead(Pad->Regs, OHCI_RH_DESCRIPTOR_A) & 0xffu;
++        for (Port = 0; Port < Ports; ++Port)
++        {
++            if (BsProbeRootPort(Pad, Port))
++            {
++                Pad->Source = 1u + Controller * 16u + Port;
++                return TRUE;
++            }
++            /* An unsuccessful enumeration may leave address zero or one
++             * occupied. Resetting the controller restores a clean address
++             * space before examining another root port. */
++            if (Pad->QuiesceFailed)
++                goto fail;
++            if ((LONG)(BsNowMs() - Pad->TransferDeadline) >= 0)
++                goto fail;
++            Pad->Ready = FALSE;
++            if (!BsOhciStop(Pad->Regs))
++            {
++                Pad->QuiesceFailed = TRUE;
++                goto fail;
++            }
++            if (!BsOhciStart(Pad, Controllers[Controller]))
++            {
++                if (Pad->QuiesceFailed)
++                    goto fail;
++                break;
++            }
++        }
++        Pad->Ready = FALSE;
++        if (!BsOhciStop(Pad->Regs))
++        {
++            Pad->QuiesceFailed = TRUE;
++            goto fail;
++        }
++        Pad->Regs = NULL;
++    }
++fail:
++    (VOID)BsPadClose(Pad);
++    return FALSE;
++}
++
++BS_INIT
++static BOOLEAN
++BsPadClose(BS_PAD *Pad)
++{
++    if (Pad->Regs != NULL)
++    {
++        Pad->Ready = FALSE;
++        if (!BsOhciStop(Pad->Regs))
++        {
++            Pad->QuiesceFailed = TRUE;
++            return FALSE;
++        }
++        Pad->Regs = NULL;
++    }
++    if (Pad->QuiesceFailed)
++        return FALSE;
++    if (Pad->Allocation != NULL)
++    {
++        RtlSecureZeroMemory(Pad->Allocation, BS_DMA_BYTES);
++        NxMmFreeContiguousMemory(Pad->Allocation);
++    }
++    RtlZeroMemory(Pad, sizeof(*Pad));
++    return TRUE;
++}
++
++BS_INIT
++static SbInput
++BsPadRead(BS_PAD *Pad, ULONG Deadline)
++{
++    SbInput Input = {0};
++    uint32_t Buttons;
++
++    Pad->TransferDeadline = Deadline;
++    Input.source = Pad->Source;
++    if (Pad->Ready && Pad->Regs != NULL &&
++        BsControl(Pad, Pad->Address, Pad->MaxPacket, Pad->LowSpeed,
++                  0xa1, 1, 0x0100, 0, SB_XID_REPORT_BYTES) &&
++        sb_xid_decode_report(Pad->Dma->Data, SB_XID_REPORT_BYTES, &Buttons))
++    {
++        Input.buttons = Buttons;
++        Input.valid = true;
++    }
++    /* Timestamp the completed transfer. A report that started before its
++     * caller's deadline but completed at or after it is not observable. */
++    Input.ms = BsNowMs();
++    if ((LONG)(Input.ms - Deadline) >= 0)
++    {
++        Input.buttons = 0;
++        Input.valid = false;
++    }
++    return Input;
++}
++
++BS_INIT
++static BOOLEAN
++BsReadEeprom(UCHAR *User)
++{
++    ULONG i;
++    extern NTSTATUS HalpXboxSmBusReadByte(UCHAR, UCHAR, PUCHAR);
++
++    for (i = 0; i < 0x60; ++i)
++        if (!NT_SUCCESS(HalpXboxSmBusReadByte(EEPROM_SLAVE_ADDRESS,
++                                              EEPROM_USER_CHECKSUM + i,
++                                              User + i)))
++            return FALSE;
++    return TRUE;
++}
++
++BS_INIT
++static ULONG
++BsChecksum(const UCHAR *Data, ULONG Length)
++{
++    ULONGLONG Sum = 0;
++    ULONG i, Word;
++
++    for (i = 0; i < Length; i += sizeof(ULONG))
++    {
++        RtlCopyMemory(&Word, Data + i, sizeof(Word));
++        Sum += Word;
++    }
++    return ~(ULONG)((Sum >> 32) + (ULONG)Sum);
++}
++
++BS_INIT
++static BOOLEAN
++BsUserValid(const UCHAR *User)
++{
++    ULONG Stored;
++    RtlCopyMemory(&Stored, User, sizeof(Stored));
++    return Stored == BsChecksum(User + sizeof(ULONG), EEPROM_USER_BYTES);
++}
++
++BS_INIT
++static ULONG
++BsUserWord(const UCHAR *User, ULONG Offset)
++{
++    ULONG Word;
++    RtlCopyMemory(&Word, User + Offset - EEPROM_USER_CHECKSUM, sizeof(Word));
++    return Word;
++}
++
++BS_INIT
++static SbCommitResult
++BsCommitSettings(PVOID Context, const SbSettings *Original,
++                 const SbSettings *Edited, uint32_t Changed)
++{
++    BS_STORE *Store = Context;
++    UCHAR User[0x60];
++    NTSTATUS Status;
++
++    if (!Changed)
++        return SB_COMMIT_OK;
++    if (!Store->Attempted)
++    {
++        if (!BsReadEeprom(User) || !BsUserValid(User) ||
++            BsUserWord(User, EEPROM_LANGUAGE) != Original->language ||
++            BsUserWord(User, EEPROM_VIDEO) != Original->video ||
++            BsUserWord(User, EEPROM_AUDIO) != Original->audio)
++            return SB_COMMIT_REJECTED;
++    }
++    Store->Attempted = TRUE;
++
++    /* A recovery retry rewrites all three menu-owned words. This repairs a
++     * checksum/word split caused by an earlier partial SMBus transaction. */
++    Status = ExSaveNonVolatileSetting(7, NVS_DWORD,
++                                      (PVOID)&Edited->language, sizeof(ULONG));
++    if (NT_SUCCESS(Status))
++        Status = ExSaveNonVolatileSetting(8, NVS_DWORD,
++                                          (PVOID)&Edited->video, sizeof(ULONG));
++    if (NT_SUCCESS(Status))
++        Status = ExSaveNonVolatileSetting(9, NVS_DWORD,
++                                          (PVOID)&Edited->audio, sizeof(ULONG));
++    if (!NT_SUCCESS(Status) || !BsReadEeprom(User) || !BsUserValid(User) ||
++        BsUserWord(User, EEPROM_LANGUAGE) != Edited->language ||
++        BsUserWord(User, EEPROM_VIDEO) != Edited->video ||
++        BsUserWord(User, EEPROM_AUDIO) != Edited->audio)
++        return SB_COMMIT_UNCERTAIN;
++    return SB_COMMIT_OK;
++}
++
++BS_INIT
++static BOOLEAN
++BsLoadSettings(SbSettings *Settings)
++{
++    ULONG Type, Length;
++    return NT_SUCCESS(ExQueryNonVolatileSetting(7, &Type, &Settings->language,
++                                                sizeof(ULONG), &Length)) &&
++           Type == NVS_DWORD && Length == sizeof(ULONG) &&
++           NT_SUCCESS(ExQueryNonVolatileSetting(8, &Type, &Settings->video,
++                                                sizeof(ULONG), &Length)) &&
++           Type == NVS_DWORD && Length == sizeof(ULONG) &&
++           NT_SUCCESS(ExQueryNonVolatileSetting(9, &Type, &Settings->audio,
++                                                sizeof(ULONG), &Length)) &&
++           Type == NVS_DWORD && Length == sizeof(ULONG);
++}
++
++BS_INIT
++static VOID
++BsRenderPrompt(VOID)
++{
++    PVOID Logo;
++
++    /* Draw the resource directly. DisplayBootBitmap's palette-only fade path
++     * did not reliably blit this uncompressed 4-bit Xbox resource. */
++    InbvSolidColorFill(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1,
++                       BV_COLOR_BLACK);
++    Logo = InbvGetResourceAddress(IDB_LOGO_DEFAULT);
++    if (Logo != NULL)
++        InbvBitBlt(Logo, (SCREEN_WIDTH - 256) / 2, 78);
++    InbvEnableDisplayString(TRUE);
++    InbvSetTextColor(BV_COLOR_WHITE);
++    InbvSetScrollRegion(272, 352, SCREEN_WIDTH - 1, 383);
++    InbvDisplayString((PCHAR)BsBrand);
++    InbvSetScrollRegion(464, 448, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1);
++    InbvDisplayString((PCHAR)BsPrompt);
++}
++
++BS_INIT
++static VOID
++BsRenderMenu(const SbSetup *Setup)
++{
++    CHAR Value[48], Line[128];
++    ULONG Row;
++    PVOID Logo;
++
++    InbvSolidColorFill(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1,
++                       BV_COLOR_BLACK);
++    /* Keep the boot identity present while setup is open. The 256x256 image
++     * fits exactly in the lower-right quadrant and remains backed by the
++     * same discardable ROM resource as the splash. */
++    Logo = InbvGetResourceAddress(IDB_LOGO_DEFAULT);
++    if (Logo != NULL)
++        InbvBitBlt(Logo, SCREEN_WIDTH - 256, SCREEN_HEIGHT - 256);
++    InbvSetScrollRegion(32, 24, SCREEN_WIDTH - 33, SCREEN_HEIGHT - 25);
++    InbvSetTextColor(BV_COLOR_WHITE);
++    InbvDisplayString((PCHAR)BsMenuTitle);
++    for (Row = 0; Row < SB_ROW_COUNT; ++Row)
++    {
++        sb_setup_field_value(Setup, (SbSetupRow)Row, Value, sizeof(Value));
++        sprintf(Line, BsMenuLine,
++                Setup->row == (SbSetupRow)Row ? '>' : ' ',
++                sb_setup_field_label((SbSetupRow)Row), Value);
++        InbvDisplayString(Line);
++    }
++    InbvDisplayString((PCHAR)BsBlankLine);
++    if (Setup->state == SB_MENU_CONFIRM_SAVE)
++        InbvDisplayString((PCHAR)BsConfirmSave);
++    else if (Setup->state == SB_MENU_CONFIRM_DISCARD)
++        InbvDisplayString((PCHAR)BsConfirmDiscard);
++    else if (Setup->state == SB_MENU_RECOVERY)
++        InbvDisplayString((PCHAR)BsRecovery);
++}
++
++CODE_SEG("INIT")
++DECLSPEC_NOINLINE
++VOID
++NTAPI
++NxkBootSetupRun(VOID)
++{
++    BS_PAD Pad;
++    SbBootGate Gate;
++    SbGateResult GateResult = SB_GATE_WAIT;
++    SbSettings Initial;
++    SbSetup Setup;
++    BS_STORE StoreContext = {0};
++    SbSettingsStore Store = {&StoreContext, BsCommitSettings};
++    SbInput Input;
++    uint32_t PreviousButtons = 0xffffffffu;
++    SbMenuState PreviousState;
++    SbSetupRow PreviousRow;
++
++    if (!InbvBootDriverInstalled)
++        return;
++    BsRenderPrompt();
++    /* The full gate begins only after the requested screen is visible. */
++    sb_boot_gate_init(&Gate, BsNowMs());
++    (VOID)BsPadOpen(&Pad, Gate.start + SB_WINDOW_MS);
++    while (GateResult == SB_GATE_WAIT)
++    {
++        Input = BsPadRead(&Pad, Gate.start + SB_WINDOW_MS);
++        GateResult = sb_boot_gate_poll(&Gate, Input);
++        if (GateResult == SB_GATE_WAIT)
++            BsDelayMs(10);
++    }
++    if (GateResult != SB_GATE_ENTER || !BsLoadSettings(&Initial))
++    {
++        if (!BsPadClose(&Pad))
++            KeBugCheckEx(PHASE1_INITIALIZATION_FAILED,
++                         STATUS_DEVICE_NOT_READY, 9, 0, 0);
++        return;
++    }
++
++    sb_setup_open(&Setup, Initial, BS_SUPPORTED_FIELDS);
++    BsRenderMenu(&Setup);
++    PreviousState = Setup.state;
++    PreviousRow = Setup.row;
++    while (Setup.state != SB_MENU_CONTINUE && Setup.state != SB_MENU_REBOOT)
++    {
++        Input = BsPadRead(&Pad, BsNowMs() + 100u);
++        sb_setup_input(&Setup, Input, &Store);
++        if (Setup.state != PreviousState || Setup.row != PreviousRow ||
++            Input.buttons != PreviousButtons)
++        {
++            BsRenderMenu(&Setup);
++            PreviousState = Setup.state;
++            PreviousRow = Setup.row;
++            PreviousButtons = Input.buttons;
++        }
++        BsDelayMs(10);
++    }
++    if (!BsPadClose(&Pad))
++        KeBugCheckEx(PHASE1_INITIALIZATION_FAILED,
++                     STATUS_DEVICE_NOT_READY, 9, 0, 0);
++    if (Setup.state == SB_MENU_REBOOT)
++        HalReturnToFirmware(HalRebootRoutine);
++}
++
++/* EOF */
+-- 
+2.47.3
+

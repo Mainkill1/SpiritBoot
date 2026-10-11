@@ -1,0 +1,25 @@
+name: Boot setup contract (host only)
+on:
+  pull_request:
+    paths:
+      - 'src/boot/setup/**'
+      - 'src/boot/splash/**'
+      - 'patches/roswell/0089-boot-settings-menu.patch'
+      - 'sources/firmware-lock.json'
+      - 'tests/host/boot-setup/**'
+      - 'tools/boot_setup_demo.c'
+      - 'tools/build_boot_splash.py'
+      - 'tools/check_boot_setup_placement.py'
+      - 'tools/firmware.py'
+      - '.github/workflows/boot-setup.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test menu logic, failure paths and freestanding i386 footprint
+        run: python3 tests/host/boot-setup/check.py --output "$RUNNER_TEMP/boot-setup"
