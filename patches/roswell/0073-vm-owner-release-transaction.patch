@@ -1,0 +1,80 @@
+diff --git a/ntoskrnl/xb/mm/vm.c b/ntoskrnl/xb/mm/vm.c
+index aad5dbea..10cba261 100644
+--- a/ntoskrnl/xb/mm/vm.c
++++ b/ntoskrnl/xb/mm/vm.c
+@@ -162,11 +162,13 @@ static VOID
+ NxvFreePageAtPte(
+     IN PULONG Pte)
+ {
+-    PFN_NUMBER Pfn = (*Pte) >> PAGE_SHIFT;
++    PFN_NUMBER Pfn;
+     KIRQL OldIrql;
+ 
+-    *Pte = 0;
+     OldIrql = MiAcquirePfnLock();
++    /* Relocation can retarget this PTE until the PFN lock is held. */
++    Pfn = (*Pte) >> PAGE_SHIFT;
++    *Pte = 0;
+     NxkPageSupplySetOwner(Pfn, 0);
+     MmDereferencePage(Pfn);
+     MiReleasePfnLock(OldIrql);
+diff --git a/tests/host/gpu-instance/check-vm-teardown.py b/tests/host/gpu-instance/check-vm-teardown.py
+new file mode 100644
+index 00000000..3b97d91d
+--- /dev/null
++++ b/tests/host/gpu-instance/check-vm-teardown.py
+@@ -0,0 +1,54 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Inject legal relocation before VM teardown acquires the PFN lock."""
++from pathlib import Path
++import runpy
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++# Reuse the fixture's real claim/supply bodies and privileged backend only.
++saved_argv = sys.argv
++sys.argv = [str(Path(__file__).with_name("check.py")), str(out / "claim")]
++parts = runpy.run_path(sys.argv[0])
++sys.argv = saved_argv
++source = (out / "claim/gpu-instance.c").read_text()
++source = source.replace("static int lockDepth;", "static int lockDepth;\nstatic void (*beforePfnLock)(void);")
++source = source.replace("assert(!lockDepth);lockDepth=1;return 0;", "if(beforePfnLock) { void (*hook)(void)=beforePfnLock;beforePfnLock=NULL;hook(); } assert(!lockDepth);lockDepth=1;return 0;")
++source = source.replace("int main(int argc,char **argv)", "int claim_suite_main(int argc,char **argv)")
++vm = (root / "ntoskrnl/xb/mm/vm.c").read_text()
++source += "\nstatic void MmDereferencePage(PFN_NUMBER p) { NxkPageSupplyReturn(p); }\n"
++source += parts["function"](vm, "NxvFreePageAtPte")
++source += r'''
++static void concurrent_claim(void) {
++    require(claim_bytes(4096)==(PVOID)0x83ff0000,"injected claim succeeds");
++}
++int main(void) {
++    require(mmap((void*)0xc0000000,0x400000,PROT_READ|PROT_WRITE,
++            MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0)==(void*)0xc0000000,"fixture self-map");
++    reset();owned(TOP-1,0,0);
++    lockDepth=1;NxkPageSupplyReturn(0x30);lockDepth=0;
++    /* Models scheduling at APC level immediately before lock acquisition.
++     * The hook removes itself before the nested claim's lock acquisition. */
++    beforePfnLock=concurrent_claim;
++    NxvFreePageAtPte(&PTE(0));
++    require(!NxkPageSupplyIsFree(TOP-1),"VM teardown must not return GPU-owned old frame");
++    require(NxkNv2aInstanceBytes==4096,"GPU reservation remains published");
++    require(PTE(0)==0,"VM teardown clears the current relocated PTE");
++    require(NxkPageSupplyIsFree(0x30),"VM teardown returns relocated destination");
++    require(NxkPageSupplyGetOwner(TOP-1)==0,"GPU frame retains non-movable ownership");
++    require(MmAvailablePages==16&&lockDepth==0,"free count and lock restored");
++    claim_bytes(0);require(MmAvailablePages==17,"later GPU shrink releases its own frame once");
++    puts("gpu-instance: production VM teardown/relocation interleaving PASS");
++}
++'''
++c = out / "vm-teardown.c"
++c.write_text(source)
++for reserved in (0, 1):
++    exe = out / f"vm-teardown-{reserved}"
++    subprocess.run(["cc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
++                    "-Wno-unused-function", "-Wno-unused-variable", "-Wno-unused-but-set-variable",
++                    f"-DXBOX_RESERVE_UPPER_RAM={reserved}", str(c), "-o", str(exe)], check=True)
++    subprocess.run([str(exe)], check=True)
