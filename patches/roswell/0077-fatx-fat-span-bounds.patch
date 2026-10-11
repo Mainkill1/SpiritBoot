@@ -1,0 +1,138 @@
+From a896b092c076edb6a53d064c75d089ba48be2d64 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 18:42:52 -0700
+Subject: [PATCH] FATX: validate physical FAT entry spans
+
+---
+ drivers/filesystems/vfatfs/fat.c    | 37 +++++++++++++++++++++++++++--
+ tests/host/fatx/check-chain-walk.py | 26 ++++++++++++++++----
+ 2 files changed, 57 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/filesystems/vfatfs/fat.c b/drivers/filesystems/vfatfs/fat.c
+index b2e8e799..27423545 100644
+--- a/drivers/filesystems/vfatfs/fat.c
++++ b/drivers/filesystems/vfatfs/fat.c
+@@ -44,8 +44,41 @@ VfatIsValidDataCluster(
+     PDEVICE_EXTENSION DeviceExt,
+     ULONG Cluster)
+ {
+-    return Cluster >= 2 &&
+-           Cluster - 2 < DeviceExt->FatInfo.NumberOfClusters;
++    ULONGLONG EntryOffset;
++    ULONGLONG FatBytes;
++    ULONG EntryBytes;
++
++    if (Cluster < 2 ||
++        Cluster - 2 >= DeviceExt->FatInfo.NumberOfClusters)
++    {
++        return FALSE;
++    }
++
++    switch (DeviceExt->FatInfo.FatType)
++    {
++        case FAT12:
++            EntryOffset = ((ULONGLONG)Cluster * 3) / 2;
++            EntryBytes = sizeof(USHORT);
++            break;
++        case FAT16:
++        case FATX16:
++            EntryOffset = (ULONGLONG)Cluster * sizeof(USHORT);
++            EntryBytes = sizeof(USHORT);
++            break;
++        case FAT32:
++        case FATX32:
++            EntryOffset = (ULONGLONG)Cluster * sizeof(ULONG);
++            EntryBytes = sizeof(ULONG);
++            break;
++        default:
++            return FALSE;
++    }
++
++    FatBytes = (ULONGLONG)DeviceExt->FatInfo.FATSectors *
++               DeviceExt->FatInfo.BytesPerSector;
++    return EntryOffset <= MAXULONG &&
++           EntryBytes <= FatBytes &&
++           EntryOffset <= FatBytes - EntryBytes;
+ }
+ 
+ /*
+diff --git a/tests/host/fatx/check-chain-walk.py b/tests/host/fatx/check-chain-walk.py
+index 366e459c..8e8d224d 100644
+--- a/tests/host/fatx/check-chain-walk.py
++++ b/tests/host/fatx/check-chain-walk.py
+@@ -32,6 +32,7 @@ shim = r'''
+ #include <string.h>
+ #include <setjmp.h>
+ typedef uint32_t ULONG, *PULONG;
++typedef uint64_t ULONGLONG;
+ typedef uint16_t USHORT, *PUSHORT;
+ typedef int32_t NTSTATUS;
+ typedef int BOOLEAN;
+@@ -40,19 +41,21 @@ typedef struct { int64_t QuadPart; } LARGE_INTEGER;
+ typedef struct _DEVICE_EXTENSION DEVICE_EXTENSION, *PDEVICE_EXTENSION;
+ struct _DEVICE_EXTENSION {
+     struct { ULONG FatType, BytesPerCluster, SectorsPerCluster, rootStart,
+-                   NumberOfClusters;
++                   NumberOfClusters, FATSectors, BytesPerSector;
+     } FatInfo;
+     PVOID FATFileObject;
+     int FatResource;
+     NTSTATUS (*GetNextCluster)(PDEVICE_EXTENSION, ULONG, PULONG);
+     NTSTATUS (*FindAndMarkAvailableCluster)(PDEVICE_EXTENSION, PULONG);
+ };
++#define FAT12 1
+ #define FAT16 2
+ #define FAT32 3
+ #define FATX16 4
+ #define FATX32 5
+ #define TRUE 1
+ #define FALSE 0
++#define MAXULONG UINT32_MAX
+ #define STATUS_SUCCESS 0
+ #define STATUS_UNSUCCESSFUL ((NTSTATUS)0xc0000001)
+ #define STATUS_FILE_CORRUPT_ERROR ((NTSTATUS)0xc0000102)
+@@ -125,6 +128,7 @@ static DEVICE_EXTENSION setup(ULONG type, ULONG chunk) {
+     d.FatInfo.FatType = type; d.FatInfo.BytesPerCluster = 4096;
+     d.FatInfo.SectorsPerCluster = 8; d.FatInfo.rootStart = 24;
+     d.FatInfo.NumberOfClusters = 16000;
++    d.FatInfo.FATSectors = 2048; d.FatInfo.BytesPerSector = 512;
+     d.GetNextCluster = (type == FAT16 || type == FATX16) ?
+                       FAT16GetNextCluster : FAT32GetNextCluster;
+     d.FindAndMarkAvailableCluster = find_cluster;
+@@ -194,6 +198,19 @@ int main(void) {
+               "out-of-range current cluster is rejected before mapping");
+         balanced();
+ 
++        d = setup(type, 4096); d.FatInfo.FATSectors = 1; next = 0x1234;
++        s = OffsetToCluster(&d, 400, 4096, &next, FALSE);
++        check(s == STATUS_FILE_CORRUPT_ERROR && next == 0x1234 && maps == 0,
++              "cluster outside physical FAT span is rejected before mapping");
++        balanced();
++
++        d = setup(type, 4096); d.FatInfo.FATSectors = 1;
++        put(type, 2, 400); next = 0x1234;
++        s = OffsetToCluster(&d, 2, 4096, &next, FALSE);
++        check(s == STATUS_FILE_CORRUPT_ERROR && next == 0x1234,
++              "next cluster outside physical FAT span is corruption");
++        balanced();
++
+         d = setup(type, 4096);
+         put(type, 2, d.FatInfo.NumberOfClusters + 2); next = 0x1234;
+         s = OffsetToCluster(&d, 2, 4096, &next, FALSE);
+@@ -225,9 +242,10 @@ int main(void) {
+     check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == 0 && next == 3,
+           "DOS FAT32 masks high nibble");
+     balanced();
+-    d = setup(FATX32, 4096); d.FatInfo.NumberOfClusters = UINT32_MAX;
+-    put(FATX32, 2, 0xf0000003u);
+-    check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == 0 && next == 0xf0000003u,
++    d = setup(FATX32, 4096); d.FatInfo.NumberOfClusters = 0x10000010u;
++    d.FatInfo.FATSectors = 2097153;
++    put(FATX32, 2, 0x10000003u);
++    check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == 0 && next == 0x10000003u,
+           "FATX32 retains full-width entry");
+     balanced();
+     d = setup(FATX16, 4096); put(FATX16, 2, 3);
+-- 
+2.47.3
+
