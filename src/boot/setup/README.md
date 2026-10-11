@@ -11,11 +11,12 @@ i386 object footprint and frame sizes, not an entire firmware RAM footprint.
 
 ## Proposed startup and controls
 
-Hold **Start for 600 ms** within a **2-second** bounded boot-input window.
+Press **Start** within a fixed **3-second** bounded boot-input window.
 Release all buttons before navigating. D-pad selects/edits, A activates, X
 requests save, B requests discard. Save and discard of changed values require
 confirmation. A held key cannot serve as both selection and confirmation.
-Absent input times out; disconnection/generation change cannot combine holds.
+Absent input times out; disconnection or a device-generation change disarms menu
+controls until a fresh neutral report arrives.
 
 The initial fields are language, screen shape, 480p/720p/1080i permissions,
 PAL60 preference, audio mode, AC3 and DTS. The platform supplies supported fields;
@@ -36,7 +37,7 @@ python3 tests/host/boot-setup/check.py --output /tmp/spiritboot-setup
 /tmp/spiritboot-setup/boot-setup-demo
 ```
 
-The demo maps `h` to a synthetic Start hold; `w/s` to rows, `a/d` to edits, `e`
+The demo maps `h` to a synthetic Start press; `w/s` to rows, `a/d` to edits, `e`
 to A, `x` to Save, and `b` to Discard. Press Enter after each command. It uses
 in-memory settings and an 8 KiB host arena; it never accesses Xbox hardware or
 writes a real EEPROM. Try `h`, `e`, `x`, `e` to stage a language change and save,

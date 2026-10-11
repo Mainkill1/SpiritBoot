@@ -15,7 +15,8 @@ explicit second stage; do not enable an unqualified stub in shipped firmware.
 
 ## Global constraints
 
-Start held 600 ms; 2,000 ms gate window; maximum valid sample gap 100 ms.
+One Start press; fixed 3,000 ms gate window. A press at or after the deadline
+does not extend boot.
 No core heap, mutable globals, controller thread or runtime menu callbacks.
 Native transient arena budget 4 MiB; whole-kernel settled goal remains 512 KiB.
 Do not write EEPROM on browse/cancel or treat partial persistence as success.
@@ -23,7 +24,7 @@ Do not modify shipped firmware until actual native integration is qualified.
 
 ## Review focus
 
-Unplug/replug cannot combine hold durations or confirm a save.
+Unplug/replug cannot carry an entry press into menu confirmation.
 Wrapping clocks cannot strand the boot or prematurely accept a backward timestamp.
 Unknown settings/flags survive opening, editing other fields, and cancelling.
 Uncertain writes cannot take the ordinary continue path.
@@ -36,8 +37,8 @@ Files: `src/boot/setup/boot_setup.h`, `src/boot/setup/boot_setup.c`,
 Interfaces: `sb_boot_gate_init/poll`, `sb_setup_open/input`,
 `sb_setup_field_label/value`, staged `SbSettings`, `SbSettingsStore`.
 
-- [x] Write failing gate tests (held boot key, short press, disconnect, source change,
-  gap, timeout, late press, uint32 wrap/backward, sticky outcome).
+- [x] Write failing gate tests (held-at-boot, one press, invalid report, timeout,
+  late press, uint32 wrap/backward and sticky outcome).
 - [x] Implement gate and verify tests.
 - [x] Write menu tests (neutral entry, edges, confirmation, supported fields, unknown
   bits, unchanged save, changed-word mask, rejection and uncertain commit).
@@ -51,7 +52,7 @@ Interface: `sb_boot_arena_retire(SbBootArena *, const SbArenaOps *)`.
 - [x] Write failing lifecycle tests (stop-before-scrub, scrub-before-release,
   failed stop, failed release/retry, repeated release, invalid/overlapping spans).
 - [x] Implement checked retirement with non-elidable clearing.
-- [x] Add host text menu with simulated Start-hold input and memory-only settings;
+- [x] Add host text menu with simulated Start input and memory-only settings;
   label it a demonstration, not an Xbox boot test.
 
 ## Task 3: reproducible host gate and handoff

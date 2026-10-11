@@ -64,15 +64,12 @@ int main(void)
     SbMenuState action;
     SbBootArena arena;
     SbSetup *setup;
-    puts("HOST DEMO: h simulates holding controller Start for 600 ms at boot.");
+    puts("HOST DEMO: h simulates pressing controller Start during the 3 second prompt.");
     puts("Any other input simulates no-button boot. No real controller is accessed.");
     sb_boot_gate_init(&gate,0);
     if (!fgets(line,sizeof(line),stdin) || line[0]!='h') {
         result=sb_boot_gate_poll(&gate,(SbInput){SB_WINDOW_MS,1,0,false});
-    } else {
-        for (unsigned ms=0;ms<=SB_HOLD_MS;ms+=50)
-            result=sb_boot_gate_poll(&gate,(SbInput){ms,1,SB_START,true});
-    }
+    } else result=sb_boot_gate_poll(&gate,(SbInput){1,1,SB_START,true});
     if (result!=SB_GATE_ENTER) {
         puts("Normal boot: setup arena never allocated."); return 0;
     }

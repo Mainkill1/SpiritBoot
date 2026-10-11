@@ -5,9 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define SB_HOLD_MS 600u
-#define SB_WINDOW_MS 2000u
-#define SB_SAMPLE_GAP_MS 100u
+#define SB_WINDOW_MS 3000u
 #define SB_PAGE_SIZE 4096u
 
 /* Normalized inputs, NOT Xbox USB packet bits. Source includes device generation. */
@@ -16,9 +14,8 @@ enum { SB_START=1u, SB_UP=2u, SB_DOWN=4u, SB_LEFT=8u, SB_RIGHT=16u,
 typedef struct { uint32_t ms, source, buttons; bool valid; } SbInput;
 typedef enum { SB_GATE_WAIT, SB_GATE_ENTER, SB_GATE_BOOT } SbGateResult;
 typedef struct {
-    uint32_t start, held_at, previous_ms, source;
+    uint32_t start;
     SbGateResult result;
-    bool tracking, sampled;
 } SbBootGate;
 void sb_boot_gate_init(SbBootGate *gate, uint32_t now);
 SbGateResult sb_boot_gate_poll(SbBootGate *gate, SbInput input);

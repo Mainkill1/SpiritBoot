@@ -8,67 +8,44 @@ static unsigned tests;
 #define RUN(f) do { f(); printf("ok %u - %s\n", ++tests, #f); } while (0)
 static SbInput input(uint32_t ms, uint32_t source, uint32_t keys, bool valid)
 { return (SbInput){ms,source,keys,valid}; }
-static SbGateResult hold(SbBootGate *g, uint32_t start, unsigned duration, uint32_t source)
-{
-    SbGateResult r=SB_GATE_WAIT;
-    for (unsigned t=0; t<=duration; t+=50)
-        r=sb_boot_gate_poll(g,input(start+t,source,SB_START,true));
-    return r;
-}
-static void held_at_boot(void) {
+static void held_at_boot_enters_immediately(void) {
     SbBootGate g; sb_boot_gate_init(&g,100);
-    assert(hold(&g,100,550,3)==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(700,3,SB_START,true))==SB_GATE_ENTER);
+    assert(sb_boot_gate_poll(&g,input(100,3,SB_START,true))==SB_GATE_ENTER);
     assert(sb_boot_gate_poll(&g,input(9999,0,0,false))==SB_GATE_ENTER);
 }
-static void short_presses_do_not_accumulate(void) {
+static void one_start_press_enters(void) {
     SbBootGate g; sb_boot_gate_init(&g,0);
-    assert(hold(&g,0,400,1)==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(450,1,0,true))==SB_GATE_WAIT);
-    assert(hold(&g,500,550,1)==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(1100,1,SB_START,true))==SB_GATE_ENTER);
+    assert(sb_boot_gate_poll(&g,input(1450,1,0,true))==SB_GATE_WAIT);
+    assert(sb_boot_gate_poll(&g,input(1451,1,SB_START,true))==SB_GATE_ENTER);
 }
-static void disconnected_input_restarts_hold(void) {
-    SbBootGate g; sb_boot_gate_init(&g,0); hold(&g,0,500,1);
-    sb_boot_gate_poll(&g,input(550,1,SB_START,false));
-    assert(hold(&g,600,550,1)==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(1200,1,SB_START,true))==SB_GATE_ENTER);
+static void invalid_start_is_ignored(void) {
+    SbBootGate g; sb_boot_gate_init(&g,0);
+    assert(sb_boot_gate_poll(&g,input(500,1,SB_START,false))==SB_GATE_WAIT);
+    assert(sb_boot_gate_poll(&g,input(501,1,SB_START,true))==SB_GATE_ENTER);
 }
-static void different_controllers_cannot_share_hold(void) {
-    SbBootGate g; sb_boot_gate_init(&g,0); hold(&g,0,500,1);
-    assert(hold(&g,550,550,2)==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(1150,2,SB_START,true))==SB_GATE_ENTER);
-}
-static void stale_report_gap_restarts_hold(void) {
-    SbBootGate g; sb_boot_gate_init(&g,0); hold(&g,0,500,1);
-    assert(hold(&g,601,550,1)==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(1201,1,SB_START,true))==SB_GATE_ENTER);
+static void any_connected_controller_can_enter(void) {
+    SbBootGate g; sb_boot_gate_init(&g,0);
+    assert(sb_boot_gate_poll(&g,input(100,7,SB_START,true))==SB_GATE_ENTER);
 }
 static void missing_input_has_bounded_timeout(void) {
     SbBootGate g; sb_boot_gate_init(&g,0);
-    assert(sb_boot_gate_poll(&g,input(1999,1,0,false))==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(2000,1,SB_START,true))==SB_GATE_BOOT);
-    assert(hold(&g,0,650,1)==SB_GATE_BOOT);
+    assert(sb_boot_gate_poll(&g,input(2999,1,0,false))==SB_GATE_WAIT);
+    assert(sb_boot_gate_poll(&g,input(3000,1,SB_START,true))==SB_GATE_BOOT);
+    assert(sb_boot_gate_poll(&g,input(9999,1,SB_START,true))==SB_GATE_BOOT);
 }
-static void late_hold_cannot_extend_boot_window(void) {
+static void late_press_does_not_extend_boot_window(void) {
     SbBootGate g; sb_boot_gate_init(&g,0);
-    assert(hold(&g,1500,450,1)==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(2000,1,SB_START,true))==SB_GATE_BOOT);
+    assert(sb_boot_gate_poll(&g,input(2999,1,0,true))==SB_GATE_WAIT);
+    assert(sb_boot_gate_poll(&g,input(3000,1,SB_START,true))==SB_GATE_BOOT);
 }
 static void gate_clock_wrap_is_supported(void) {
     SbBootGate g; uint32_t start=UINT32_MAX-300u;
     sb_boot_gate_init(&g,start);
-    assert(hold(&g,start,600,1)==SB_GATE_ENTER);
+    assert(sb_boot_gate_poll(&g,input(99,1,SB_START,true))==SB_GATE_ENTER);
 }
 static void backward_clock_does_not_enter_menu(void) {
-    SbBootGate g; sb_boot_gate_init(&g,0); hold(&g,0,400,1);
-    assert(sb_boot_gate_poll(&g,input(350,1,SB_START,true))==SB_GATE_BOOT);
-}
-static void exact_sample_gap_is_allowed(void) {
-    SbBootGate g; sb_boot_gate_init(&g,0);
-    for (unsigned t=0;t<600;t+=100)
-        assert(sb_boot_gate_poll(&g,input(t,1,SB_START,true))==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(600,1,SB_START,true))==SB_GATE_ENTER);
+    SbBootGate g; sb_boot_gate_init(&g,500);
+    assert(sb_boot_gate_poll(&g,input(499,1,SB_START,true))==SB_GATE_BOOT);
 }
 
 typedef struct {
@@ -288,11 +265,10 @@ static void descriptor_and_callback_context_cannot_be_retired(void) {
 }
 int main(void) {
     puts("TAP version 13");
-    RUN(held_at_boot); RUN(short_presses_do_not_accumulate);
-    RUN(disconnected_input_restarts_hold); RUN(different_controllers_cannot_share_hold);
-    RUN(stale_report_gap_restarts_hold); RUN(missing_input_has_bounded_timeout);
-    RUN(late_hold_cannot_extend_boot_window); RUN(gate_clock_wrap_is_supported);
-    RUN(backward_clock_does_not_enter_menu); RUN(exact_sample_gap_is_allowed);
+    RUN(held_at_boot_enters_immediately); RUN(one_start_press_enters);
+    RUN(invalid_start_is_ignored); RUN(any_connected_controller_can_enter);
+    RUN(missing_input_has_bounded_timeout); RUN(late_press_does_not_extend_boot_window);
+    RUN(gate_clock_wrap_is_supported); RUN(backward_clock_does_not_enter_menu);
     RUN(menu_starts_without_mutation); RUN(entry_button_must_be_released);
     RUN(reconnect_requires_neutral_report); RUN(changing_device_without_disconnect_requires_release);
     RUN(language_wrap_and_unknown_value); RUN(video_edit_preserves_unknown_bits);

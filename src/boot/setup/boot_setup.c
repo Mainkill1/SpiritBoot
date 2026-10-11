@@ -11,24 +11,14 @@ void sb_boot_gate_init(SbBootGate *g, uint32_t now)
 
 SbGateResult sb_boot_gate_poll(SbBootGate *g, SbInput in)
 {
+    uint32_t elapsed;
+
     if (g->result != SB_GATE_WAIT) return g->result;
-    if (in.ms - g->start >= SB_WINDOW_MS ||
-        (g->sampled && in.ms - g->previous_ms > UINT32_MAX / 2u))
+    elapsed = in.ms - g->start;
+    if (elapsed >= SB_WINDOW_MS || elapsed > UINT32_MAX / 2u)
         return g->result = SB_GATE_BOOT;
-    if (!in.valid || !(in.buttons & SB_START)) {
-        g->tracking = false;
-    } else {
-        if (!g->tracking || in.source != g->source ||
-            (g->sampled && in.ms - g->previous_ms > SB_SAMPLE_GAP_MS)) {
-            g->held_at = in.ms;
-            g->source = in.source;
-            g->tracking = true;
-        }
-        if (in.ms - g->held_at >= SB_HOLD_MS)
-            g->result = SB_GATE_ENTER;
-    }
-    g->previous_ms = in.ms;
-    g->sampled = true;
+    if (in.valid && (in.buttons & SB_START))
+        g->result = SB_GATE_ENTER;
     return g->result;
 }
 

@@ -20,14 +20,14 @@ source snapshot or silently enable this standalone component in release firmware
 
 ## Chosen behavior
 
-Hold controller **Start for 600 ms** during a **2,000 ms** boot-input window.
-Poll fresh, valid reports at intervals no longer than **100 ms**. A release,
-disconnect, device-generation change or longer sample gap restarts the hold.
-Time arithmetic tolerates uint32 millisecond wrap, not a backward clock jump.
+Press controller **Start** during a fixed **3,000 ms** boot-input window.
+One fresh valid report enters setup immediately. Invalid reports are ignored and
+input at or after the deadline cannot extend boot. Time arithmetic tolerates
+uint32 millisecond wrap, not a backward clock jump.
 The adapter uses a finite enumeration deadline; no controller cannot stall boot.
 These are initial design defaults, not claimed existing Xbox firmware settings.
 
-A held-at-power-on button is valid; an activation sample is consumed. The menu
+A held-at-power-on button is valid; the activation sample is consumed. The menu
 requires a fresh neutral report before accepting navigation. D-pad selects or
 edits; A activates; X requests save; B requests discard/continue. Confirmation
 requires a second press, not a held button carried over from the prior screen.
