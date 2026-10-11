@@ -94,7 +94,7 @@ replace or surround that function while reusing the same input, state machine,
 and persistence interfaces. Animation code and assets remain boot-only and must
 fit the measured ROM budget or use a separately reviewed overlay. The current
 static image is a 32,886-byte 4-bit indexed bitmap. It resides in the
-discardable resource/INIT span. The 64 MiB release image retains 36,020 bytes in
+discardable resource/INIT span. The 64 MiB release image retains 36,036 bytes in
 the fixed kernel slot after the complete feature;
 enlarging the flash format is a separate compatibility decision.
 
