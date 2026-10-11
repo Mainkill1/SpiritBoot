@@ -1,0 +1,395 @@
+From 2f826b214642e4d2bbb7f2951e7c4858bb328f5b Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 18:26:00 -0700
+Subject: [PATCH] FATX: batch contiguous-run metadata lookups
+
+---
+ drivers/filesystems/vfatfs/fat.c    | 139 ++++++++++++++++++++++++++++
+ drivers/filesystems/vfatfs/rw.c     |  94 ++++++++++++++-----
+ drivers/filesystems/vfatfs/vfat.h   |   8 ++
+ tests/host/fatx/check-chain-walk.py |  50 ++++++++++
+ 4 files changed, 267 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/filesystems/vfatfs/fat.c b/drivers/filesystems/vfatfs/fat.c
+index 27423545..de041f6c 100644
+--- a/drivers/filesystems/vfatfs/fat.c
++++ b/drivers/filesystems/vfatfs/fat.c
+@@ -992,6 +992,145 @@ WalkFatChain(
+     return STATUS_SUCCESS;
+ }
+ 
++/*
++ * Find a physically contiguous file extent while retaining each FAT metadata
++ * lease for a bounded batch. The mapping is dropped before the caller submits
++ * data I/O.
++ */
++NTSTATUS
++GetContiguousClusterRun(
++    PDEVICE_EXTENSION DeviceExt,
++    ULONG CurrentCluster,
++    ULONG MaximumClusters,
++    PULONG ClusterCount,
++    PULONG NextCluster)
++{
++    ULONG EntrySize, EntryMask, ChunkSize;
++    ULONG Total = 0;
++    NTSTATUS Status = STATUS_SUCCESS;
++    BOOLEAN Stopped = FALSE;
++
++    if (MaximumClusters == 0)
++        return STATUS_INVALID_PARAMETER;
++
++    if ((DeviceExt->FatInfo.FatType == FAT16 ||
++         DeviceExt->FatInfo.FatType == FATX16) &&
++        DeviceExt->GetNextCluster == FAT16GetNextCluster)
++    {
++        EntrySize = sizeof(USHORT);
++        EntryMask = 0xffff;
++    }
++    else if ((DeviceExt->FatInfo.FatType == FAT32 ||
++              DeviceExt->FatInfo.FatType == FATX32) &&
++             DeviceExt->GetNextCluster == FAT32GetNextCluster)
++    {
++        EntrySize = sizeof(ULONG);
++        EntryMask = FAT32EntryMask(DeviceExt);
++    }
++    else
++    {
++        while (Total < MaximumClusters)
++        {
++            ULONG ThisCluster = CurrentCluster;
++
++            Status = GetNextCluster(DeviceExt, ThisCluster, &CurrentCluster);
++            if (!NT_SUCCESS(Status))
++                return Status;
++            ++Total;
++            if (CurrentCluster == 0xffffffff ||
++                CurrentCluster != ThisCluster + 1)
++                break;
++        }
++        *ClusterCount = Total;
++        *NextCluster = CurrentCluster;
++        return STATUS_SUCCESS;
++    }
++
++    ChunkSize = CACHEPAGESIZE(DeviceExt);
++    while (Total < MaximumClusters && !Stopped)
++    {
++        PVOID Context = NULL, BaseAddress = NULL;
++        ULONG MappedOffset = 0;
++        ULONG Remaining = MaximumClusters - Total;
++        ULONG BatchClusters = Remaining < 256 ? Remaining : 256;
++        ULONG i;
++
++        ExAcquireResourceSharedLite(&DeviceExt->FatResource, TRUE);
++        _SEH2_TRY
++        {
++            for (i = 0; i < BatchClusters; ++i)
++            {
++                ULONG ThisCluster = CurrentCluster;
++                ULONG FATOffset, ChunkOffset;
++                LARGE_INTEGER Offset;
++
++                if (!VfatIsValidDataCluster(DeviceExt, ThisCluster))
++                {
++                    Status = STATUS_FILE_CORRUPT_ERROR;
++                    break;
++                }
++
++                FATOffset = ThisCluster * EntrySize;
++                ChunkOffset = ROUND_DOWN(FATOffset, ChunkSize);
++                if (Context == NULL || MappedOffset != ChunkOffset)
++                {
++                    if (Context != NULL)
++                    {
++                        CcUnpinData(Context);
++                        Context = NULL;
++                    }
++                    Offset.QuadPart = ChunkOffset;
++                    if (!CcMapData(DeviceExt->FATFileObject, &Offset, ChunkSize,
++                                   MAP_WAIT, &Context, &BaseAddress))
++                    {
++                        Status = STATUS_UNSUCCESSFUL;
++                        break;
++                    }
++                    MappedOffset = ChunkOffset;
++                }
++
++                if (EntrySize == sizeof(USHORT))
++                    CurrentCluster = *(PUSHORT)((char *)BaseAddress +
++                                               FATOffset % ChunkSize);
++                else
++                    CurrentCluster = *(PULONG)((char *)BaseAddress +
++                                              FATOffset % ChunkSize);
++                CurrentCluster &= EntryMask;
++                if (CurrentCluster >= EntryMask - 7)
++                    CurrentCluster = 0xffffffff;
++                if (CurrentCluster != 0xffffffff &&
++                    !VfatIsValidDataCluster(DeviceExt, CurrentCluster))
++                {
++                    Status = STATUS_FILE_CORRUPT_ERROR;
++                    break;
++                }
++
++                ++Total;
++                if (CurrentCluster == 0xffffffff ||
++                    CurrentCluster != ThisCluster + 1)
++                {
++                    Stopped = TRUE;
++                    break;
++                }
++            }
++        }
++        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
++        {
++            Status = _SEH2_GetExceptionCode();
++        }
++        _SEH2_END;
++        if (Context != NULL)
++            CcUnpinData(Context);
++        ExReleaseResourceLite(&DeviceExt->FatResource);
++        if (!NT_SUCCESS(Status))
++            return Status;
++    }
++
++    *ClusterCount = Total;
++    *NextCluster = CurrentCluster;
++    return STATUS_SUCCESS;
++}
++
+ /*
+  * FUNCTION: Retrieve the next cluster depending on the FAT type
+  */
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index 11d40a96..f8a3d8fa 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -280,18 +280,19 @@ VfatReadFileData(
+         BytesDone = 0;
+         ClusterCount = 0;
+ 
+-        do
++        if (FirstCluster == 1)
+         {
+-            ClusterCount++;
+-            if (First)
++            do
+             {
+-                BytesDone =  min (Length, BytesPerCluster - (ReadOffset.u.LowPart % BytesPerCluster));
+-                StartOffset.QuadPart += ReadOffset.u.LowPart % BytesPerCluster;
+-                First = FALSE;
+-            }
+-            else
+-            {
+-                if (Length - BytesDone > BytesPerCluster)
++                ClusterCount++;
++                if (First)
++                {
++                    BytesDone = min(Length, BytesPerCluster -
++                                             (ReadOffset.u.LowPart % BytesPerCluster));
++                    StartOffset.QuadPart += ReadOffset.u.LowPart % BytesPerCluster;
++                    First = FALSE;
++                }
++                else if (Length - BytesDone > BytesPerCluster)
+                 {
+                     BytesDone += BytesPerCluster;
+                 }
+@@ -299,10 +300,32 @@ VfatReadFileData(
+                 {
+                     BytesDone = Length;
+                 }
++                Status = NextCluster(DeviceExt, FirstCluster, &CurrentCluster, FALSE);
++            }
++            while (StartCluster + ClusterCount == CurrentCluster &&
++                   NT_SUCCESS(Status) && Length > BytesDone);
++        }
++        else
++        {
++            ULONG ClusterOffset = First ?
++                ReadOffset.u.LowPart % BytesPerCluster : 0;
++            ULONG MaximumClusters = (ULONG)
++                (((ULONGLONG)ClusterOffset + Length + BytesPerCluster - 1) /
++                 BytesPerCluster);
++            ULONGLONG RunBytes;
++
++            Status = GetContiguousClusterRun(DeviceExt, CurrentCluster,
++                                             MaximumClusters, &ClusterCount,
++                                             &CurrentCluster);
++            if (!NT_SUCCESS(Status))
++            {
++                break;
+             }
+-            Status = NextCluster(DeviceExt, FirstCluster, &CurrentCluster, FALSE);
++            RunBytes = (ULONGLONG)ClusterCount * BytesPerCluster - ClusterOffset;
++            BytesDone = RunBytes < Length ? (ULONG)RunBytes : Length;
++            StartOffset.QuadPart += ClusterOffset;
++            First = FALSE;
+         }
+-        while (StartCluster + ClusterCount == CurrentCluster && NT_SUCCESS(Status) && Length > BytesDone);
+         DPRINT("start %08x, next %08x, count %u\n",
+                StartCluster, CurrentCluster, ClusterCount);
+ 
+@@ -495,18 +518,19 @@ VfatWriteFileData(
+         BytesDone = 0;
+         ClusterCount = 0;
+ 
+-        do
++        if (FirstCluster == 1)
+         {
+-            ClusterCount++;
+-            if (First)
++            do
+             {
+-                BytesDone =  min (Length, BytesPerCluster - (WriteOffset.u.LowPart % BytesPerCluster));
+-                StartOffset.QuadPart += WriteOffset.u.LowPart % BytesPerCluster;
+-                First = FALSE;
+-            }
+-            else
+-            {
+-                if (Length - BytesDone > BytesPerCluster)
++                ClusterCount++;
++                if (First)
++                {
++                    BytesDone = min(Length, BytesPerCluster -
++                                             (WriteOffset.u.LowPart % BytesPerCluster));
++                    StartOffset.QuadPart += WriteOffset.u.LowPart % BytesPerCluster;
++                    First = FALSE;
++                }
++                else if (Length - BytesDone > BytesPerCluster)
+                 {
+                     BytesDone += BytesPerCluster;
+                 }
+@@ -514,10 +538,32 @@ VfatWriteFileData(
+                 {
+                     BytesDone = Length;
+                 }
++                Status = NextCluster(DeviceExt, FirstCluster, &CurrentCluster, FALSE);
++            }
++            while (StartCluster + ClusterCount == CurrentCluster &&
++                   NT_SUCCESS(Status) && Length > BytesDone);
++        }
++        else
++        {
++            ULONG ClusterOffset = First ?
++                WriteOffset.u.LowPart % BytesPerCluster : 0;
++            ULONG MaximumClusters = (ULONG)
++                (((ULONGLONG)ClusterOffset + Length + BytesPerCluster - 1) /
++                 BytesPerCluster);
++            ULONGLONG RunBytes;
++
++            Status = GetContiguousClusterRun(DeviceExt, CurrentCluster,
++                                             MaximumClusters, &ClusterCount,
++                                             &CurrentCluster);
++            if (!NT_SUCCESS(Status))
++            {
++                break;
+             }
+-            Status = NextCluster(DeviceExt, FirstCluster, &CurrentCluster, FALSE);
++            RunBytes = (ULONGLONG)ClusterCount * BytesPerCluster - ClusterOffset;
++            BytesDone = RunBytes < Length ? (ULONG)RunBytes : Length;
++            StartOffset.QuadPart += ClusterOffset;
++            First = FALSE;
+         }
+-        while (StartCluster + ClusterCount == CurrentCluster && NT_SUCCESS(Status) && Length > BytesDone);
+         DPRINT("start %08x, next %08x, count %u\n",
+                StartCluster, CurrentCluster, ClusterCount);
+ 
+diff --git a/drivers/filesystems/vfatfs/vfat.h b/drivers/filesystems/vfatfs/vfat.h
+index 07964e98..bcad0713 100644
+--- a/drivers/filesystems/vfatfs/vfat.h
++++ b/drivers/filesystems/vfatfs/vfat.h
+@@ -937,6 +937,14 @@ WalkFatChain(
+     ULONG Links,
+     PULONG Cluster);
+ 
++NTSTATUS
++GetContiguousClusterRun(
++    PDEVICE_EXTENSION DeviceExt,
++    ULONG CurrentCluster,
++    ULONG MaximumClusters,
++    PULONG ClusterCount,
++    PULONG NextCluster);
++
+ NTSTATUS
+ GetNextClusterExtend(
+     PDEVICE_EXTENSION DeviceExt,
+diff --git a/tests/host/fatx/check-chain-walk.py b/tests/host/fatx/check-chain-walk.py
+index 8e8d224d..9ad26d3c 100644
+--- a/tests/host/fatx/check-chain-walk.py
++++ b/tests/host/fatx/check-chain-walk.py
+@@ -22,8 +22,15 @@ names = ["FAT32EntryMask", "VfatIsValidDataCluster",
+ if "WalkFatChain(" in fat:
+     names.append("WalkFatChain")
+ names.append("GetNextClusterExtend")
++names.append("GetContiguousClusterRun")
+ body = "\n".join(extract.function(fat, name) for name in names)
+ body += extract.function(rw, "OffsetToCluster")
++read_body = extract.function(rw, "VfatReadFileData")
++write_body = extract.function(rw, "VfatWriteFileData")
++assert "GetContiguousClusterRun" in read_body
++assert "GetContiguousClusterRun" in write_body
++assert read_body.count("Status = NextCluster") == 1
++assert write_body.count("Status = NextCluster") == 1
+ shim = r'''
+ #include <stdint.h>
+ #include <stddef.h>
+@@ -58,6 +65,7 @@ struct _DEVICE_EXTENSION {
+ #define MAXULONG UINT32_MAX
+ #define STATUS_SUCCESS 0
+ #define STATUS_UNSUCCESSFUL ((NTSTATUS)0xc0000001)
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000d)
+ #define STATUS_FILE_CORRUPT_ERROR ((NTSTATUS)0xc0000102)
+ #define VFAT_BREAK_ON_CORRUPTION 1
+ #define MAP_WAIT 1
+@@ -267,6 +275,48 @@ int main(void) {
+           "root sentinel route unchanged");
+     check(OffsetToCluster(&d, 2, 0, &next, FALSE) == 0 && next == 2 && !maps,
+           "zero-link seek requires no mapping");
++
++    {
++        ULONG count = 0;
++        d = setup(FATX32, 4096);
++        for (ULONG c = 2; c < 702; ++c) put(FATX32, c, c + 1);
++        check(GetContiguousClusterRun(&d, 2, 700, &count, &next) ==
++              STATUS_SUCCESS && count == 700 && next == 702,
++              "700-cluster contiguous run preserves extent");
++        check(acquisitions == 3 && maps <= 3,
++              "700-cluster run uses three bounded metadata leases");
++        balanced();
++
++        d = setup(FATX32, 4096);
++        put(FATX32, 2, 3); put(FATX32, 3, 10); count = next = 0;
++        check(GetContiguousClusterRun(&d, 2, 8, &count, &next) ==
++              STATUS_SUCCESS && count == 2 && next == 10,
++              "fragmented run stops at first noncontiguous cluster");
++        check(acquisitions == 1 && maps == 1,
++              "short contiguous run uses one mapping transaction");
++        balanced();
++
++        d = setup(FATX16, 4096);
++        put(FATX16, 2, 3); put(FATX16, 3, 0xffff); count = next = 0;
++        check(GetContiguousClusterRun(&d, 2, 8, &count, &next) ==
++              STATUS_SUCCESS && count == 2 && next == 0xffffffff,
++              "terminal run reports included clusters and EOF");
++        balanced();
++
++        d = setup(FATX32, 4096); count = 77; next = 88;
++        check(GetContiguousClusterRun(&d, 2, 4, &count, &next) ==
++              STATUS_FILE_CORRUPT_ERROR && count == 77 && next == 88,
++              "corrupt run preserves caller outputs");
++        balanced();
++
++        d = setup(FATX32, 4096); put(FATX32, 2, 3);
++        fault_map = 1; count = 77; next = 88;
++        check(GetContiguousClusterRun(&d, 2, 4, &count, &next) ==
++              STATUS_UNSUCCESSFUL && count == 77 && next == 88,
++              "mapping failure preserves run outputs");
++        check(!pins && !held && acquisitions == releases,
++              "mapping failure releases run ownership");
++    }
+     printf("FAT chain production paths: %d checks, %d failures\n", checks, failures);
+     return failures != 0;
+ }
+-- 
+2.47.3
+
