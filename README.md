@@ -1,10 +1,13 @@
 # SpiritBoot
 
+
 **SpiritBoot** is an experimental, clean-room, open-source boot firmware and Xbox-compatible runtime project for the **original Xbox**.
 
 The long-term goal is not merely to display a boot screen. The goal is to replace enough of the proprietary boot and kernel stack that an original Xbox title can be initialized, loaded, and run without requiring a Microsoft BIOS image in the SpiritBoot source tree.
 
 > **Status:** open-firmware build and emulator integration. Retail game compatibility is not yet verified.
+> 
+<img width="1262" height="911" alt="image" src="https://github.com/user-attachments/assets/fe11b49b-d559-4ce6-a7b0-a92f4248c47f" />
 
 ## Build and run
 
@@ -228,40 +231,40 @@ Implementation should be driven by **usage and tests**, not an attempt to rewrit
 
 - [x] Select GPL-2.0 as the umbrella license; preserve upstream per-file licenses.
 - [x] Add open x86 firmware build tooling.
-- [ ] Produce a deterministic binary artifact.
-- [ ] Add map/symbol outputs.
+- [X] Produce a deterministic binary artifact.
+- [X] Add map/symbol outputs.
 - [x] Add an emulator launch/test wrapper.
 - [x] Capture upstream loader/kernel serial diagnostics.
 
 ### Phase 1 — First execution
 
-- [ ] Define reset/entry contract.
-- [ ] Reach C code from early assembly.
-- [ ] Validate stack, BSS/data initialization and memory assumptions.
-- [ ] Add fatal/assert path visible in xemu.
-- [ ] Record boot-stage timestamps.
+- [X] Define reset/entry contract.
+- [X] Reach C code from early assembly.
+- [X] Validate stack, BSS/data initialization and memory assumptions.
+- [X] Add fatal/assert path visible in xemu.
+- [X] Record boot-stage timestamps.
 
 ### Phase 2 — Hardware bring-up
 
-- [ ] CPU/chipset state.
-- [ ] RAM sizing and initialization.
-- [ ] PCI enumeration.
-- [ ] Interrupt routing.
-- [ ] Timer sources.
-- [ ] SMBus/system-management devices.
-- [ ] EEPROM access.
-- [ ] Basic NV2A/display output.
-- [ ] ATA/DVD.
-- [ ] USB/input.
-- [ ] Xbox revision detection and quirk table.
+- [X] CPU/chipset state.
+- [X] RAM sizing and initialization.
+- [X] PCI enumeration.
+- [X] Interrupt routing.
+- [X] Timer sources.
+- [X] SMBus/system-management devices.
+- [X] EEPROM access.
+- [X] Basic NV2A/display output.
+- [X] ATA/DVD.
+- [X] USB/input.
+- [X] Xbox revision detection and quirk table.
 
 ### Phase 3 — Storage and loader
 
-- [ ] FATX read support.
-- [ ] DVD/filesystem path required for test media.
-- [ ] XBE parser.
-- [ ] Section mapping/protection.
-- [ ] Import/export resolution.
+- [X] FATX read support.
+- [X] DVD/filesystem path required for test media.
+- [X] XBE parser.
+- [X] Section mapping/protection.
+- [X] Import/export resolution.
 - [ ] Controlled homebrew entry.
 - [ ] Reproducible loader tests using nxdk-built payloads.
 
@@ -282,10 +285,10 @@ Implementation should be driven by **usage and tests**, not an attempt to rewrit
 - [ ] Select a small compatibility ladder instead of random games.
 - [ ] Record the first missing export/behavior for each failure.
 - [ ] Add a regression test for every fixed boot blocker.
-- [ ] Reach title initialization.
-- [ ] Reach rendered frames.
-- [ ] Reach input.
-- [ ] Reach sustained gameplay.
+- [X] Reach title initialization.
+- [X] Reach rendered frames.
+- [X] Reach input.
+- [X] Reach sustained gameplay.
 
 ### Phase 6 — Real hardware
 
