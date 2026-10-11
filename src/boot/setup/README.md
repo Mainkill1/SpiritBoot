@@ -1,17 +1,20 @@
-# Boot setup menu draft
+# Boot setup menu
 
-**Status: host-tested core and integration design, not enabled in the BIOS.**
-There is no shipped button-entry path yet. No native controller/GPU/EEPROM test
-or post-title physical-memory result is claimed by this directory.
+**Status: native implementation and exact-ROM qualification complete.** The
+ordered firmware patch enables the setup prompt before the boot display is
+retired. A controller can enter the menu, edit settings, verify an EEPROM save,
+reboot, and observe the saved values. With no input, boot continues after the
+fixed three-second guest-time window.
 
-The menu engine and gate are freestanding C11 with no heap calls or mutable
-globals. `boot_arena.c` is the separate coordinator primitive that must remain
-outside the menu's code/data/stack when retiring it. The test build reports its
-i386 object footprint and frame sizes, not an entire firmware RAM footprint.
+The menu engine, gate, and OHCI descriptor helpers are freestanding C11 with no
+heap calls or mutable globals. The native adapter lives in the kernel's
+discardable INIT section. It owns one 4 KiB low-memory DMA page, stops the OHCI
+controller, scrubs and frees that page, and returns before INIT is discarded.
+There is no resident menu worker, callback, allocation, or title-time polling.
 
 ## Proposed startup and controls
 
-Press **Start** within a fixed **3-second** bounded boot-input window.
+Hold **X** during the fixed **3-second** bounded splash/input window.
 Release all buttons before navigating. D-pad selects/edits, A activates, X
 requests save, B requests discard. Save and discard of changed values require
 confirmation. A held key cannot serve as both selection and confirmation.
@@ -37,7 +40,7 @@ python3 tests/host/boot-setup/check.py --output /tmp/spiritboot-setup
 /tmp/spiritboot-setup/boot-setup-demo
 ```
 
-The demo maps `h` to a synthetic Start press; `w/s` to rows, `a/d` to edits, `e`
+The demo maps `h` to a synthetic held X input; `w/s` to rows, `a/d` to edits, `e`
 to A, `x` to Save, and `b` to Discard. Press Enter after each command. It uses
 in-memory settings and an 8 KiB host arena; it never accesses Xbox hardware or
 writes a real EEPROM. Try `h`, `e`, `x`, `e` to stage a language change and save,
@@ -49,23 +52,44 @@ globals. It additionally checks the demo's skip/save/discard routes. Requirement
 Python 3.10+, a C compiler supporting i386 object output, GNU nm and size. No
 32-bit runtime libraries or third-party Python packages are required.
 
-## Native integration still required before merge
+## Native implementation
 
-Implement a real bounded controller adapter and minimal video renderer; independently
-link/package the ROM overlay; install the coordinator at the verified boot phase;
-provide serialized, verified persistence; drain callbacks/DMA and transfer display
-ownership; retire all allocations and code/stack/PT pages; build and test actual
-64/128 MiB firmware. The default native transient arena design budget is 4 MiB;
-no menu allocations or callbacks may remain at title entry. Shared runtime EEPROM,
-AV and device APIs are not disposable UI code.
+`patches/roswell/0089-boot-settings-menu.patch` adds a bounded, boot-only owner
+for xemu's Xbox OHCI/XID topology. It walks nested hubs to a maximum depth of
+four, accepts one original-Xbox 20-byte input report, and treats missing or
+unsupported input as an ordinary bounded boot. The DMA allocation is constrained
+to the verified low direct-map range; the adapter does not start the resident USB
+stack or leave an input device behind for the title.
 
-Only owned allocator-backed memory may be scrubbed. The executor, stack, arena
-descriptor, release callback and its whole context must live outside the arena.
-The portable function checks basic ranges and overlap, not page mapping, hardware
-quiescence or ownership. The native coordinator supplies those proofs. A failure
-in quiesce or allocator release blocks handoff; clearing bytes is not reclamation.
-The release callback must be all-or-nothing: on false the caller still owns every
-page, allowing a release-only retry without a double free.
+The renderer is deliberately isolated in `BsRenderMenu`. It uses the existing
+boot-display text primitives and does not own a second framebuffer. A future
+semi-animated boot presentation can replace or surround this function without
+changing controller enumeration, menu state, or EEPROM transactions. Keep future
+art, animation state, and rendering helpers in INIT (or a separately admitted ROM
+overlay), and preserve the same teardown boundary before title launch.
+The static fox remains visible in the menu's lower-right quadrant using the
+same discardable bitmap resource; opening setup does not allocate or decode a
+second copy.
+
+Saving writes only setting words 7, 8, and 9 through the shared kernel API, then
+rereads the complete EEPROM user section and verifies its checksum and values.
+Any incomplete result stays in recovery rather than launching a title. Discard
+and unchanged-save paths perform no EEPROM writes.
+
+The locked 64 and 128 MiB release builds pass the resident-to-INIT reference
+audit. Relative to the matched 64 MiB main build, the complete menu and static
+splash add 37,888 linked kernel bytes and 7,364 compressed ROM bytes. Most of
+the linked delta is the discardable 32 KiB image resource. The resulting 256 KiB
+image retains 36,020 bytes in its kernel slot for later work.
+
+The exact 64 MiB splash build is
+`sha256:87ffbe705380eb8396dc9472901d259ce977342e2baf550bd6a4a62e060ab26b`.
+The matching 128 MiB build is
+`sha256:b56fb39d99c48cfd5334c8eb9bc19273f99580110d5ea4e650212e44b7bbc29b`.
+The exact final 64 MiB ROM passed both native Steam Deck routes: held X entered
+setup, the lower-right fox remained visible, English changed to Japanese, the
+EEPROM save was verified, and Japanese survived reboot; a separate no-input run
+displayed the fox, brand, and prompt before reaching the Conker title normally.
 
 See [design](../../../docs/superpowers/specs/2026-10-10-boot-setup-design.md) and
 [implementation plan](../../../docs/superpowers/plans/2026-10-10-boot-setup.md).

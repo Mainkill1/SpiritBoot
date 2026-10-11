@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "src/boot/setup"
 CC = shlex.split(os.environ.get("CC", "cc"))
 COMMON = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-I" + str(SOURCE)]
-SOURCES = [str(SOURCE / name) for name in ("boot_setup.c", "boot_arena.c")]
+SOURCES = [str(SOURCE / name) for name in
+           ("boot_setup.c", "boot_arena.c", "boot_xid.c")]
 TEST = str(Path(__file__).with_name("test_boot_setup.c"))
 
 

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "boot_setup.h"
+#include "boot_xid.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -8,44 +9,105 @@ static unsigned tests;
 #define RUN(f) do { f(); printf("ok %u - %s\n", ++tests, #f); } while (0)
 static SbInput input(uint32_t ms, uint32_t source, uint32_t keys, bool valid)
 { return (SbInput){ms,source,keys,valid}; }
+
+static void ohci_control_builds_setup_data_and_status(void) {
+    SbOhciControl c;
+    uint32_t pa=0x00102000u, data=0x00102100u;
+    assert(sb_ohci_prepare_control(&c,pa,data,5,64,0xa1,1,0x0100,0,20));
+    assert(c.ed.flags==(5u|(64u<<16)));
+    assert(c.ed.head==pa+offsetof(SbOhciControl,td[0]));
+    assert(c.ed.tail==pa+offsetof(SbOhciControl,td[3]));
+    assert(c.setup[0]==0xa1 && c.setup[1]==1);
+    assert(c.setup[2]==0 && c.setup[3]==1 && c.setup[6]==20 && c.setup[7]==0);
+    assert(c.td[0].cbp==pa+offsetof(SbOhciControl,setup));
+    assert(c.td[1].cbp==data && c.td[1].be==data+19);
+    assert(((c.td[1].flags>>19)&3u)==2u);
+    assert(((c.td[2].flags>>19)&3u)==1u);
+}
+static void ohci_control_rejects_unsafe_layouts(void) {
+    SbOhciControl c;
+    assert(!sb_ohci_prepare_control(&c,0x1003,0x2000,0,8,0,0,0,0,0));
+    assert(!sb_ohci_prepare_control(&c,0x1000,0x2000,128,8,0,0,0,0,0));
+    assert(!sb_ohci_prepare_control(&c,0x1000,0x2000,0,12,0,0,0,0,0));
+    assert(!sb_ohci_prepare_control(&c,0x1000,0,0,8,0x80,6,0x100,0,8));
+}
+static void ohci_completion_requires_retired_clean_chain(void) {
+    SbOhciControl c;
+    uint32_t tail;
+    assert(sb_ohci_prepare_control(&c,0x1000,0x2000,1,8,0x80,6,0x100,0,8));
+    assert(!sb_ohci_control_complete(&c,8));
+    tail=c.ed.tail;
+    c.ed.head=tail;
+    c.td[0].flags&=0x0fffffffu;
+    c.td[1].flags&=0x0fffffffu;
+    c.td[2].flags&=0x0fffffffu;
+    assert(sb_ohci_control_complete(&c,8));
+    c.ed.head=tail|1u;
+    assert(!sb_ohci_control_complete(&c,8));
+}
+static void ohci_zero_length_checks_status_td(void) {
+    SbOhciControl c;
+    uint32_t tail;
+    assert(sb_ohci_prepare_control(&c,0x1000,0,1,8,0x00,5,2,0,0));
+    tail=c.ed.tail;
+    c.ed.head=tail;
+    c.td[0].flags&=0x0fffffffu;
+    c.td[2].flags&=0x0fffffffu;
+    assert(sb_ohci_control_complete(&c,0));
+    c.td[2].flags|=4u<<28;
+    assert(!sb_ohci_control_complete(&c,0));
+}
+static void xid_report_decodes_menu_controls(void) {
+    uint8_t report[20]={0}; uint32_t buttons=0;
+    report[1]=20; report[2]=0x15; report[4]=0xff; report[6]=1;
+    assert(sb_xid_decode_report(report,sizeof(report),&buttons));
+    assert(buttons==(SB_START|SB_UP|SB_LEFT|SB_A|SB_X));
+    report[1]=19;
+    assert(!sb_xid_decode_report(report,sizeof(report),&buttons));
+    assert(!sb_xid_decode_report(report,19,&buttons));
+}
 static void held_at_boot_enters_immediately(void) {
     SbBootGate g; sb_boot_gate_init(&g,100);
-    assert(sb_boot_gate_poll(&g,input(100,3,SB_START,true))==SB_GATE_ENTER);
+    assert(sb_boot_gate_poll(&g,input(100,3,SB_X,true))==SB_GATE_ENTER);
     assert(sb_boot_gate_poll(&g,input(9999,0,0,false))==SB_GATE_ENTER);
 }
-static void one_start_press_enters(void) {
+static void start_does_not_enter_setup(void) {
+    SbBootGate g; sb_boot_gate_init(&g,0);
+    assert(sb_boot_gate_poll(&g,input(100,1,SB_START,true))==SB_GATE_WAIT);
+}
+static void one_x_press_enters(void) {
     SbBootGate g; sb_boot_gate_init(&g,0);
     assert(sb_boot_gate_poll(&g,input(1450,1,0,true))==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(1451,1,SB_START,true))==SB_GATE_ENTER);
+    assert(sb_boot_gate_poll(&g,input(1451,1,SB_X,true))==SB_GATE_ENTER);
 }
-static void invalid_start_is_ignored(void) {
+static void invalid_x_is_ignored(void) {
     SbBootGate g; sb_boot_gate_init(&g,0);
-    assert(sb_boot_gate_poll(&g,input(500,1,SB_START,false))==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(501,1,SB_START,true))==SB_GATE_ENTER);
+    assert(sb_boot_gate_poll(&g,input(500,1,SB_X,false))==SB_GATE_WAIT);
+    assert(sb_boot_gate_poll(&g,input(501,1,SB_X,true))==SB_GATE_ENTER);
 }
 static void any_connected_controller_can_enter(void) {
     SbBootGate g; sb_boot_gate_init(&g,0);
-    assert(sb_boot_gate_poll(&g,input(100,7,SB_START,true))==SB_GATE_ENTER);
+    assert(sb_boot_gate_poll(&g,input(100,7,SB_X,true))==SB_GATE_ENTER);
 }
 static void missing_input_has_bounded_timeout(void) {
     SbBootGate g; sb_boot_gate_init(&g,0);
     assert(sb_boot_gate_poll(&g,input(2999,1,0,false))==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(3000,1,SB_START,true))==SB_GATE_BOOT);
-    assert(sb_boot_gate_poll(&g,input(9999,1,SB_START,true))==SB_GATE_BOOT);
+    assert(sb_boot_gate_poll(&g,input(3000,1,SB_X,true))==SB_GATE_BOOT);
+    assert(sb_boot_gate_poll(&g,input(9999,1,SB_X,true))==SB_GATE_BOOT);
 }
 static void late_press_does_not_extend_boot_window(void) {
     SbBootGate g; sb_boot_gate_init(&g,0);
     assert(sb_boot_gate_poll(&g,input(2999,1,0,true))==SB_GATE_WAIT);
-    assert(sb_boot_gate_poll(&g,input(3000,1,SB_START,true))==SB_GATE_BOOT);
+    assert(sb_boot_gate_poll(&g,input(3000,1,SB_X,true))==SB_GATE_BOOT);
 }
 static void gate_clock_wrap_is_supported(void) {
     SbBootGate g; uint32_t start=UINT32_MAX-300u;
     sb_boot_gate_init(&g,start);
-    assert(sb_boot_gate_poll(&g,input(99,1,SB_START,true))==SB_GATE_ENTER);
+    assert(sb_boot_gate_poll(&g,input(99,1,SB_X,true))==SB_GATE_ENTER);
 }
 static void backward_clock_does_not_enter_menu(void) {
     SbBootGate g; sb_boot_gate_init(&g,500);
-    assert(sb_boot_gate_poll(&g,input(499,1,SB_START,true))==SB_GATE_BOOT);
+    assert(sb_boot_gate_poll(&g,input(499,1,SB_X,true))==SB_GATE_BOOT);
 }
 
 typedef struct {
@@ -98,6 +160,14 @@ static void changing_device_without_disconnect_requires_release(void) {
     SbSetup s; sb_setup_open(&s,initial(),SB_ALL_FIELDS);
     press(&s,SB_A,NULL); sample(&s,SB_A,2,true,NULL);
     assert(s.edited.language==2);
+}
+static void held_entry_x_cannot_save_menu(void) {
+    Store f={0}; SbSettingsStore io={&f,commit}; SbSetup s;
+    sb_setup_open(&s,initial(),SB_ALL_FIELDS);
+    sample(&s,SB_X,1,true,&io); sample(&s,SB_X,1,true,&io);
+    assert(s.state==SB_MENU_EDIT && f.calls==0);
+    sample(&s,0,1,true,&io);
+    assert(s.state==SB_MENU_EDIT && f.calls==0);
 }
 static void language_wrap_and_unknown_value(void) {
     SbSetup s; sb_setup_open(&s,initial(),SB_ALL_FIELDS);
@@ -265,11 +335,17 @@ static void descriptor_and_callback_context_cannot_be_retired(void) {
 }
 int main(void) {
     puts("TAP version 13");
-    RUN(held_at_boot_enters_immediately); RUN(one_start_press_enters);
-    RUN(invalid_start_is_ignored); RUN(any_connected_controller_can_enter);
+    RUN(ohci_control_builds_setup_data_and_status);
+    RUN(ohci_control_rejects_unsafe_layouts);
+    RUN(ohci_completion_requires_retired_clean_chain);
+    RUN(ohci_zero_length_checks_status_td);
+    RUN(xid_report_decodes_menu_controls);
+    RUN(held_at_boot_enters_immediately); RUN(start_does_not_enter_setup); RUN(one_x_press_enters);
+    RUN(invalid_x_is_ignored); RUN(any_connected_controller_can_enter);
     RUN(missing_input_has_bounded_timeout); RUN(late_press_does_not_extend_boot_window);
     RUN(gate_clock_wrap_is_supported); RUN(backward_clock_does_not_enter_menu);
     RUN(menu_starts_without_mutation); RUN(entry_button_must_be_released);
+    RUN(held_entry_x_cannot_save_menu);
     RUN(reconnect_requires_neutral_report); RUN(changing_device_without_disconnect_requires_release);
     RUN(language_wrap_and_unknown_value); RUN(video_edit_preserves_unknown_bits);
     RUN(aspect_modes_are_mutually_exclusive); RUN(audio_edit_preserves_unknown_bits);

@@ -6,8 +6,8 @@
 menu-owned RAM or background work after exit.
 
 **Architecture:** Separate a bounded input gate, disposable menu engine and
-coordinator-owned arena retirement. Native adapters and ROM linking remain an
-explicit second stage; do not enable an unqualified stub in shipped firmware.
+boot-only native adapter. The implementation uses the existing boot display and
+places all private code in INIT, which is discarded before title launch.
 
 **Tech Stack:** Freestanding C11, host C tests, Python standard-library test runner.
 
@@ -15,7 +15,7 @@ explicit second stage; do not enable an unqualified stub in shipped firmware.
 
 ## Global constraints
 
-One Start press; fixed 3,000 ms gate window. A press at or after the deadline
+Held X enters setup during the fixed 3,000 ms gate window. A report at or after the deadline
 does not extend boot.
 No core heap, mutable globals, controller thread or runtime menu callbacks.
 Native transient arena budget 4 MiB; whole-kernel settled goal remains 512 KiB.
@@ -52,7 +52,7 @@ Interface: `sb_boot_arena_retire(SbBootArena *, const SbArenaOps *)`.
 - [x] Write failing lifecycle tests (stop-before-scrub, scrub-before-release,
   failed stop, failed release/retry, repeated release, invalid/overlapping spans).
 - [x] Implement checked retirement with non-elidable clearing.
-- [x] Add host text menu with simulated Start input and memory-only settings;
+- [x] Add host text menu with simulated held-X input and memory-only settings;
   label it a demonstration, not an Xbox boot test.
 
 ## Task 3: reproducible host gate and handoff
@@ -63,19 +63,24 @@ Files: `tests/host/boot-setup/check.py`, `.github/workflows/boot-setup.yml`,
 - [x] Compile/run host tests with warnings-as-errors, ASan/UBSan and optimized code.
 - [x] Compile i386 freestanding objects; check undefined symbols and writable
   globals; report code and stack sizes without calling them a runtime census.
-- [ ] Verify demo, diff, and exact published file hashes; create draft PR.
+- [x] Verify demo, diff, and exact published file hashes; create draft PR.
 
-## Task 4: native boot input, overlay and settings backend (merge blockers)
+## Task 4: native boot input and settings backend
 
-- [ ] Reconstruct current Roswell using the lock; implement temporary USB/XID input
+- [x] Reconstruct current Roswell using the lock; implement temporary USB/XID input
   with bounded enumeration, stable device generation and real stop/DMA proof.
-- [ ] Link and pack the overlay/assets separately; implement a bounded minimal NV2A
-  renderer with owned framebuffer and complete scanout handoff.
-- [ ] Add the coordinator at the verified boot phase, not in freed INIT code;
+- [x] Reuse the existing boot display without a second framebuffer; keep the
+  presentation behind one replaceable render function for later animation work.
+- [x] Add the coordinator at the verified boot phase, before INIT and boot display
+  retirement;
   integrate via a new ordered, hashed Roswell patch.
-- [ ] Implement serialized, verified EEPROM transaction and recovery behavior;
+- [x] Implement serialized, verified EEPROM transaction and recovery behavior;
   publish no fake success from existing cached readback.
-- [ ] Return/scrub overlay, input, framebuffer, stack and page-table allocations;
-  prove allocator ownership and warm-persistence preservation at both capacities.
-- [ ] Run the spec's release/checked/native/game gates; record results before
-  changing the draft status. Broader settings categories get independent changes.
+- [x] Stop OHCI, clear controller ownership, scrub and return the only temporary
+  4 KiB DMA page before title launch; discard all private code with INIT.
+- [x] Build locked release firmware at 64 and 128 MiB; pass the post-link INIT
+  audit, native edit/save/readback/reboot/persistence, and no-input title handoff.
+
+Broader settings categories and a semi-animated boot presentation remain
+independent follow-ups. They must preserve this input, persistence, and teardown
+contract.

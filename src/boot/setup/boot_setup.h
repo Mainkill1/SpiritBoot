@@ -5,6 +5,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if defined(SARCH_XBOX) && defined(__GNUC__)
+#define SB_INIT_CODE __attribute__((section("INIT"), noinline))
+#define SB_INIT_DATA __attribute__((section("INITDATA")))
+#else
+#define SB_INIT_CODE
+#define SB_INIT_DATA
+#endif
+
 #define SB_WINDOW_MS 3000u
 #define SB_PAGE_SIZE 4096u
 
@@ -17,8 +25,8 @@ typedef struct {
     uint32_t start;
     SbGateResult result;
 } SbBootGate;
-void sb_boot_gate_init(SbBootGate *gate, uint32_t now);
-SbGateResult sb_boot_gate_poll(SbBootGate *gate, SbInput input);
+SB_INIT_CODE void sb_boot_gate_init(SbBootGate *gate, uint32_t now);
+SB_INIT_CODE SbGateResult sb_boot_gate_poll(SbBootGate *gate, SbInput input);
 
 /* Only standardized setting indices 7/8/9; no factory or key material. */
 typedef struct { uint32_t language, video, audio; } SbSettings;
@@ -48,11 +56,12 @@ typedef struct {
     SbCommitResult last_save;
     bool armed, source_seen;
 } SbSetup;
-void sb_setup_open(SbSetup *setup, SbSettings initial, uint32_t supported);
-void sb_setup_input(SbSetup *setup, SbInput input, const SbSettingsStore *store);
-uint32_t sb_setup_changed(const SbSetup *setup);
-const char *sb_setup_field_label(SbSetupRow row);
-void sb_setup_field_value(const SbSetup *setup, SbSetupRow row, char *out, size_t size);
+SB_INIT_CODE void sb_setup_open(SbSetup *setup, SbSettings initial, uint32_t supported);
+SB_INIT_CODE void sb_setup_input(SbSetup *setup, SbInput input, const SbSettingsStore *store);
+SB_INIT_CODE uint32_t sb_setup_changed(const SbSetup *setup);
+SB_INIT_CODE const char *sb_setup_field_label(SbSetupRow row);
+SB_INIT_CODE void sb_setup_field_value(const SbSetup *setup, SbSetupRow row,
+                                       char *out, size_t size);
 
 /* This descriptor, retirement code/stack, ops and release context must be
  * OUTSIDE the arena. Return from menu code before invoking the coordinator.

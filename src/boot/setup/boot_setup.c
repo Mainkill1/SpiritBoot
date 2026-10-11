@@ -17,7 +17,7 @@ SbGateResult sb_boot_gate_poll(SbBootGate *g, SbInput in)
     elapsed = in.ms - g->start;
     if (elapsed >= SB_WINDOW_MS || elapsed > UINT32_MAX / 2u)
         return g->result = SB_GATE_BOOT;
-    if (in.valid && (in.buttons & SB_START))
+    if (in.valid && (in.buttons & SB_X))
         g->result = SB_GATE_ENTER;
     return g->result;
 }
@@ -25,16 +25,53 @@ SbGateResult sb_boot_gate_poll(SbBootGate *g, SbInput in)
 /* Public Xbox setting encodings. Unknown/unedited bits must survive. */
 #define WIDE 0x00010000u
 #define LETTERBOX 0x00100000u
-static const char *const labels[SB_ROW_COUNT] = {
-    "Language", "Screen shape", "Allow 480p", "Allow 720p", "Allow 1080i",
-    "PAL60 preference", "Audio mode", "Dolby Digital (AC3)", "DTS",
-    "Save and reboot", "Discard and continue"
+#define TEXT(name, value) static const char name[] SB_INIT_DATA = value
+TEXT(label_language, "Language");
+TEXT(label_shape, "Screen shape");
+TEXT(label_480p, "Allow 480p");
+TEXT(label_720p, "Allow 720p");
+TEXT(label_1080i, "Allow 1080i");
+TEXT(label_pal60, "PAL60 preference");
+TEXT(label_audio, "Audio mode");
+TEXT(label_ac3, "Dolby Digital (AC3)");
+TEXT(label_dts, "DTS");
+TEXT(label_save, "Save and reboot");
+TEXT(label_continue, "Discard and continue");
+TEXT(text_unknown_preserved, "Unknown (preserved)");
+TEXT(text_unknown, "Unknown");
+TEXT(text_unavailable, "Unavailable");
+TEXT(text_english, "English");
+TEXT(text_japanese, "Japanese");
+TEXT(text_german, "German");
+TEXT(text_french, "French");
+TEXT(text_spanish, "Spanish");
+TEXT(text_italian, "Italian");
+TEXT(text_korean, "Korean");
+TEXT(text_chinese, "Chinese");
+TEXT(text_portuguese, "Portuguese");
+TEXT(text_normal, "Normal (4:3)");
+TEXT(text_widescreen, "Widescreen");
+TEXT(text_letterbox, "Letterbox");
+TEXT(text_stereo, "Stereo");
+TEXT(text_mono, "Mono");
+TEXT(text_surround, "Surround");
+TEXT(text_on, "On");
+TEXT(text_off, "Off");
+TEXT(text_review, "Review changes");
+TEXT(text_no_changes, "No changes");
+TEXT(text_no_writes, "No EEPROM writes");
+#undef TEXT
+
+static const char *const labels[SB_ROW_COUNT] SB_INIT_DATA = {
+    label_language, label_shape, label_480p, label_720p, label_1080i,
+    label_pal60, label_audio, label_ac3, label_dts, label_save, label_continue
 };
-static const char *const languages[] = {
-    "Unknown (preserved)", "English", "Japanese", "German", "French", "Spanish",
-    "Italian", "Korean", "Chinese", "Portuguese"
+static const char *const languages[] SB_INIT_DATA = {
+    text_unknown_preserved, text_english, text_japanese, text_german,
+    text_french, text_spanish, text_italian, text_korean, text_chinese,
+    text_portuguese
 };
-static const uint32_t masks[SB_FIELD_COUNT] = {
+static const uint32_t masks[SB_FIELD_COUNT] SB_INIT_DATA = {
     0, WIDE|LETTERBOX, 0x00080000u, 0x00020000u, 0x00040000u,
     0x00400000u, 3u, 0x00010000u, 0x00020000u
 };
@@ -54,7 +91,8 @@ uint32_t sb_setup_changed(const SbSetup *s)
            (s->original.audio != s->edited.audio ? SB_AUDIO_WORD : 0u);
 }
 
-static uint32_t next_value(uint32_t now, const uint32_t *values, unsigned n, int direction)
+SB_INIT_CODE static uint32_t
+next_value(uint32_t now, const uint32_t *values, unsigned n, int direction)
 {
     for (unsigned i=0; i<n; ++i)
         if (values[i] == now)
@@ -62,11 +100,11 @@ static uint32_t next_value(uint32_t now, const uint32_t *values, unsigned n, int
     return values[direction > 0 ? 0u : n-1u];
 }
 
-static void edit(SbSetup *s, int direction)
+SB_INIT_CODE static void edit(SbSetup *s, int direction)
 {
-    static const uint32_t lang[] = {1,2,3,4,5,6,7,8,9};
-    static const uint32_t aspect[] = {0,WIDE,LETTERBOX};
-    static const uint32_t audio[] = {0,1,2};
+    static const uint32_t lang[] SB_INIT_DATA = {1,2,3,4,5,6,7,8,9};
+    static const uint32_t aspect[] SB_INIT_DATA = {0,WIDE,LETTERBOX};
+    static const uint32_t audio[] SB_INIT_DATA = {0,1,2};
     uint32_t *word, value, mask;
     if ((unsigned)s->row >= SB_FIELD_COUNT || !(s->supported & (1u << s->row))) return;
     if (s->row == SB_LANGUAGE) {
@@ -82,12 +120,12 @@ static void edit(SbSetup *s, int direction)
     *word = (*word & ~mask) | value;
 }
 
-static void request_save(SbSetup *s)
+SB_INIT_CODE static void request_save(SbSetup *s)
 {
     s->state = sb_setup_changed(s) ? SB_MENU_CONFIRM_SAVE : SB_MENU_CONTINUE;
 }
 
-static void save(SbSetup *s, const SbSettingsStore *store)
+SB_INIT_CODE static void save(SbSetup *s, const SbSettingsStore *store)
 {
     bool already_uncertain = s->state == SB_MENU_RECOVERY;
     s->last_save = store && store->commit ?
@@ -148,10 +186,10 @@ void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
 
 const char *sb_setup_field_label(SbSetupRow row)
 {
-    return (unsigned)row < SB_ROW_COUNT ? labels[row] : "Unknown";
+    return (unsigned)row < SB_ROW_COUNT ? labels[row] : text_unknown;
 }
 
-static void text_copy(char *to, size_t capacity, const char *from)
+SB_INIT_CODE static void text_copy(char *to, size_t capacity, const char *from)
 {
     size_t i=0;
     if (!to || !capacity) return;
@@ -161,23 +199,24 @@ static void text_copy(char *to, size_t capacity, const char *from)
 
 void sb_setup_field_value(const SbSetup *s, SbSetupRow row, char *out, size_t size)
 {
-    const char *text="Unknown";
+    const char *text=text_unknown;
     uint32_t value;
     if ((unsigned)row < SB_FIELD_COUNT) {
-        if (!(s->supported & (1u << row))) text="Unavailable";
+        if (!(s->supported & (1u << row))) text=text_unavailable;
         else if (row == SB_LANGUAGE)
             text=languages[s->edited.language <= 9u ? s->edited.language : 0u];
         else {
             value = (row < SB_AUDIO_MODE ? s->edited.video : s->edited.audio) & masks[row];
             if (row == SB_ASPECT)
-                text=value==0 ? "Normal (4:3)" : value==WIDE ? "Widescreen" :
-                     value==LETTERBOX ? "Letterbox" : "Unknown (preserved)";
+                text=value==0 ? text_normal : value==WIDE ? text_widescreen :
+                     value==LETTERBOX ? text_letterbox : text_unknown_preserved;
             else if (row == SB_AUDIO_MODE)
-                text=value==0 ? "Stereo" : value==1 ? "Mono" :
-                     value==2 ? "Surround" : "Unknown (preserved)";
-            else text=value ? "On" : "Off";
+                text=value==0 ? text_stereo : value==1 ? text_mono :
+                     value==2 ? text_surround : text_unknown_preserved;
+            else text=value ? text_on : text_off;
         }
-    } else if (row == SB_SAVE) text=sb_setup_changed(s) ? "Review changes" : "No changes";
-    else if (row == SB_CONTINUE) text="No EEPROM writes";
+    } else if (row == SB_SAVE)
+        text=sb_setup_changed(s) ? text_review : text_no_changes;
+    else if (row == SB_CONTINUE) text=text_no_writes;
     text_copy(out,size,text);
 }

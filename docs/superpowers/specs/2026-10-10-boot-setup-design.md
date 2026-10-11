@@ -1,4 +1,4 @@
-# ROM-backed boot setup: draft design
+# Boot setup menu design and implementation record
 
 ## Intent and status
 
@@ -8,19 +8,19 @@ stacks and loaded code must not remain resident when a title starts. The wider
 firmware goal remains 512 KiB settled overhead; this feature must not claim that
 its own low state size achieves that whole-system goal.
 
-This draft provides a freestanding, host-tested gate/menu core, staged settings,
-a separate arena-retirement primitive and a runnable host demonstration. It does
-**not** yet connect a physical controller or render on NV2A, pack a setup module
-into flash, or change the shipped firmware path. Those are explicit native
-integration gates, not successful tests implied by the host implementation.
+The implementation provides a freestanding gate/menu core, staged settings,
+host tests, a temporary native OHCI/XID owner, boot-display rendering and verified
+EEPROM persistence. It is integrated by ordered patch 0089 and built at both
+64 and 128 MiB. Exact-ROM Steam Deck qualification covers save/readback/reboot,
+persisted display, and the no-input title handoff.
 
-Reviewed product base: `e34b1e5f365cd80bbff2af9504c8641ac07546b2`. Production kernel
+Reviewed product base: `375a2c16d1e5ae230bfa46bd4805be301094cd1f`. Production kernel
 changes use the ordered Roswell patches and firmware lock. Do not edit the old
 source snapshot or silently enable this standalone component in release firmware.
 
 ## Chosen behavior
 
-Press controller **Start** during a fixed **3,000 ms** boot-input window.
+Hold controller **X** during a fixed **3,000 ms** splash/input window.
 One fresh valid report enters setup immediately. Invalid reports are ignored and
 input at or after the deadline cannot extend boot. Time arithmetic tolerates
 uint32 millisecond wrap, not a backward clock jump.
@@ -76,12 +76,33 @@ not. Emulator renderer/acceleration options belong to a negotiated xemu interfac
 
 ## Placement and memory ownership
 
-Recommended: compressed, independently linked setup overlay in flash, loaded only
-on request into a temporary allocator-owned arena. Use a tiny bitmap/text renderer
-rather than a permanent general GUI. Alternative: INIT placement, simpler to link
-but always materialized and tied to the initialization discard boundary. Direct
-flash execution reduces code-copy RAM but needs a proven mapping and suitable
-linking. Do not build a general demand-pager for this feature.
+The first native version chooses INIT placement and the existing boot-display
+primitives. It does not allocate a second framebuffer or load a general GUI.
+Private menu, input, and rendering code is discarded at the established INIT
+boundary. The splash is displayed immediately after boot-video initialization
+and remains unchanged throughout the gate, with `Spirit Boot` below the image
+and `Hold X to enter setup` in the bottom-right corner. The controller adapter
+owns one temporary 4 KiB DMA page, constrained to the verified low direct-map
+range, and releases it after resetting OHCI.
+
+When setup opens, the same bitmap is redrawn in the lower-right quadrant while
+the settings remain above and to its left. It is referenced directly from the
+discardable resource section; the menu does not decode or retain another copy.
+
+Presentation is isolated in `BsRenderMenu`. A future semi-animated boot may
+replace or surround that function while reusing the same input, state machine,
+and persistence interfaces. Animation code and assets remain boot-only and must
+fit the measured ROM budget or use a separately reviewed overlay. The current
+static image is a 32,886-byte 4-bit indexed bitmap. It resides in the
+discardable resource/INIT span. The 64 MiB release image retains 36,020 bytes in
+the fixed kernel slot after the complete feature;
+enlarging the flash format is a separate compatibility decision.
+
+A later renderer experiment may compare a vertex-colored triangle mesh and a
+small shading texture against DXT5 at the actual displayed size. DXT5 texture
+data is 16 KiB at 128x128 or 64 KiB at 256x256. Selection must use measured ROM,
+temporary RAM, setup cost and visual quality; the original Xbox shader pipeline
+cannot directly use a modern procedural GLSL shader.
 
 Keep shared runtime exports (EEPROM query/save, SMBus, AV etc.) resident. Move only
 menu-private editor/parser/assets and boot-only adapters into the overlay. Menus
@@ -129,20 +150,31 @@ RAM or guessed fixed addresses, including warm-persisted title pages.
   supply after restoration, or extend its bounded staging proof before earlier use.
 - Roswell `ntoskrnl/xb/eeprom.c`: existing cached query/save is shared runtime ABI;
   add a verified writer boundary, not raw UI writes behind the shadow.
-- No pre-title controller path was established in this review. Games reading pads
-  and nxdk's SDL support do not establish a callable kernel XInput API. Implement
-  a bounded temporary USB/XID adapter with a real stop/fence/reset handoff.
+- Patch 0089 supplies its own bounded pre-title USB/OHCI/XID owner. It does not
+  depend on a callable kernel XInput API and must complete its stop/reset/fence
+  handoff before the resident USB stack or title can take ownership.
 
-## Native completion gates (all still required)
+## Qualification record
 
-Build release/checked at 64/128 MiB; prove flash capacity without changing the ROM
-size silently; audit linked references/sections; real controller entry/navigation;
-no-button and disconnected-device timeouts; changed/unchanged/cancel persistence;
-fault injection at each writer/teardown stage; screen output and scanout handoff;
-actual allocator ledger and reallocation of retired pages; repeated entry across
-reset; warm-persistence sentinels; unchanged Conker/PGR2 launch routes. Compare
-post-exit firmware overhead with a matched menu-disabled control, not just public
-free-count fields. Account separately for cache warming and title allocations.
+The portable suite runs 39 sanitizer and optimized cases covering controller
+descriptors, gate timing, reconnect discipline, settings edits, commit outcomes,
+and retirement ordering. Locked 64 and 128 MiB release builds pass the post-link
+resident-to-INIT reference audit. The complete 64 MiB feature build adds 37,888
+linked kernel bytes and 7,364 compressed bytes relative to matched main. Most of
+the linked delta is the discardable static image.
+
+On the Steam Deck, the exact final 64 MiB ROM entered through held X on an
+OS-visible Xbox controller, retained the fox in the lower-right menu, changed
+English to Japanese, displayed the save confirmation, verified the EEPROM
+transaction, rebooted, and displayed Japanese after re-entry. A separate
+neutral-input run displayed the centered fox, `Spirit Boot`, and bottom-right
+prompt, then timed out and reached the Conker title automatically. The first
+historical timeout attempt was clipped by its job deadline and remains recorded
+as a test-harness failure; the corrected final 75-second job completed.
+
+Physical Xbox USB topology, injected SMBus failures, and a future animated
+presentation remain follow-up qualification. They do not change the bounded xemu
+menu contract proven here.
 
 ## Sources
 
