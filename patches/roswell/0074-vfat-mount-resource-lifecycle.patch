@@ -1,0 +1,273 @@
+From 30fa04e9cd1384474a9a9e65a8dd60b64a7c82eb Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 18:15:50 -0700
+Subject: [PATCH] VFAT: balance mount resource lifecycle
+
+---
+ drivers/filesystems/vfatfs/fsctl.c       |  19 +++-
+ drivers/filesystems/vfatfs/misc.c        |  32 +++++-
+ drivers/filesystems/vfatfs/vfat.h        |   8 ++
+ tests/host/fatx/check-mount-resources.py | 131 +++++++++++++++++++++++
+ 4 files changed, 184 insertions(+), 6 deletions(-)
+ create mode 100644 tests/host/fatx/check-mount-resources.py
+
+diff --git a/drivers/filesystems/vfatfs/fsctl.c b/drivers/filesystems/vfatfs/fsctl.c
+index aac66309..a9ebbc7b 100644
+--- a/drivers/filesystems/vfatfs/fsctl.c
++++ b/drivers/filesystems/vfatfs/fsctl.c
+@@ -539,6 +539,7 @@ VfatMount(
+     ULONG HashTableSize;
+     ULONG i;
+     FATINFO FatInfo;
++    BOOLEAN ResourcesInitialized = FALSE;
+ #ifndef SARCH_XBOX
+     BOOLEAN Dirty;
+ #endif
+@@ -711,8 +712,13 @@ VfatMount(
+ 
+     DPRINT("FsDeviceObject %p\n", DeviceObject);
+ 
+-    /* Initialize this resource early ... it's used in VfatCleanup */
+-    ExInitializeResourceLite(&DeviceExt->DirResource);
++    /* Initialize both resources before any path can acquire either one. */
++    Status = VfatInitializeMountResources(DeviceExt);
++    if (!NT_SUCCESS(Status))
++    {
++        goto ByeBye;
++    }
++    ResourcesInitialized = TRUE;
+ 
+     DeviceExt->IoVPB = DeviceObject->Vpb;
+     DeviceExt->SpareVPB = ExAllocatePoolWithTag(NonPagedPool, sizeof(VPB), TAG_VPB);
+@@ -775,8 +781,11 @@ VfatMount(
+     _SEH2_END;
+ 
+     DeviceExt->LastAvailableCluster = 2;
+-    CountAvailableClusters(DeviceExt, NULL);
+-    ExInitializeResourceLite(&DeviceExt->FatResource);
++    Status = CountAvailableClusters(DeviceExt, NULL);
++    if (!NT_SUCCESS(Status))
++    {
++        goto ByeBye;
++    }
+ 
+     InitializeListHead(&DeviceExt->FcbListHead);
+ 
+@@ -869,6 +878,8 @@ ByeBye:
+             ExFreePoolWithTag(DeviceExt->SpareVPB, TAG_VPB);
+         if (DeviceExt && DeviceExt->Statistics)
+             ExFreePoolWithTag(DeviceExt->Statistics, TAG_STATS);
++        if (ResourcesInitialized)
++            VfatDeleteMountResources(DeviceExt);
+         if (DeviceObject)
+             IoDeleteDevice(DeviceObject);
+     }
+diff --git a/drivers/filesystems/vfatfs/misc.c b/drivers/filesystems/vfatfs/misc.c
+index a01e098e..0aaf2962 100644
+--- a/drivers/filesystems/vfatfs/misc.c
++++ b/drivers/filesystems/vfatfs/misc.c
+@@ -503,6 +503,35 @@ VfatLockUserBuffer(
+     return STATUS_SUCCESS;
+ }
+ 
++NTSTATUS
++VfatInitializeMountResources(
++    IN PDEVICE_EXTENSION DeviceExt)
++{
++    NTSTATUS Status;
++
++    Status = ExInitializeResourceLite(&DeviceExt->DirResource);
++    if (!NT_SUCCESS(Status))
++    {
++        return Status;
++    }
++
++    Status = ExInitializeResourceLite(&DeviceExt->FatResource);
++    if (!NT_SUCCESS(Status))
++    {
++        ExDeleteResourceLite(&DeviceExt->DirResource);
++    }
++
++    return Status;
++}
++
++VOID
++VfatDeleteMountResources(
++    IN PDEVICE_EXTENSION DeviceExt)
++{
++    ExDeleteResourceLite(&DeviceExt->FatResource);
++    ExDeleteResourceLite(&DeviceExt->DirResource);
++}
++
+ BOOLEAN
+ VfatCheckForDismount(
+     IN PDEVICE_EXTENSION DeviceExt,
+@@ -672,8 +701,7 @@ VfatCheckForDismount(
+ 
+         /* Release resources */
+         ExFreePoolWithTag(DeviceExt->Statistics, TAG_STATS);
+-        ExDeleteResourceLite(&DeviceExt->DirResource);
+-        ExDeleteResourceLite(&DeviceExt->FatResource);
++        VfatDeleteMountResources(DeviceExt);
+ 
+         /* Dismount our device if possible */
+         ObDereferenceObject(DeviceExt->StorageDevice);
+diff --git a/drivers/filesystems/vfatfs/vfat.h b/drivers/filesystems/vfatfs/vfat.h
+index ca95e38a..2374deb5 100644
+--- a/drivers/filesystems/vfatfs/vfat.h
++++ b/drivers/filesystems/vfatfs/vfat.h
+@@ -1197,6 +1197,14 @@ VfatLockUserBuffer(
+     IN ULONG Length,
+     IN LOCK_OPERATION Operation);
+ 
++NTSTATUS
++VfatInitializeMountResources(
++    IN PDEVICE_EXTENSION DeviceExt);
++
++VOID
++VfatDeleteMountResources(
++    IN PDEVICE_EXTENSION DeviceExt);
++
+ BOOLEAN
+ VfatCheckForDismount(
+     IN PDEVICE_EXTENSION DeviceExt,
+diff --git a/tests/host/fatx/check-mount-resources.py b/tests/host/fatx/check-mount-resources.py
+new file mode 100644
+index 00000000..00acdaa9
+--- /dev/null
++++ b/tests/host/fatx/check-mount-resources.py
+@@ -0,0 +1,131 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production VFAT mount-resource lifecycle helpers."""
++
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++
++misc = (root / "drivers/filesystems/vfatfs/misc.c").read_text()
++fsctl = (root / "drivers/filesystems/vfatfs/fsctl.c").read_text()
++initialize = extract.function(misc, "VfatInitializeMountResources")
++destroy = extract.function(misc, "VfatDeleteMountResources")
++mount = extract.function(fsctl, "VfatMount")
++
++init_call = mount.index("VfatInitializeMountResources(DeviceExt)")
++count_call = mount.index("CountAvailableClusters(DeviceExt, NULL)")
++cleanup_call = mount.index("VfatDeleteMountResources(DeviceExt)")
++assert init_call < count_call < cleanup_call
++assert "ResourcesInitialized = TRUE" in mount
++assert "if (ResourcesInitialized)" in mount
++
++shim = r'''
++#include <stdint.h>
++#include <stdio.h>
++
++#define IN
++typedef int32_t NTSTATUS;
++typedef void VOID;
++typedef struct {
++    int DirResource;
++    int FatResource;
++} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
++
++#define STATUS_SUCCESS 0
++#define STATUS_UNSUCCESSFUL ((NTSTATUS)0xc0000001)
++#define NT_SUCCESS(s) ((s) >= 0)
++
++static int init_call_count;
++static int delete_call_count;
++static int fail_init_call;
++static int init_order[2];
++static int delete_order[2];
++
++static NTSTATUS ExInitializeResourceLite(int *resource)
++{
++    int call = ++init_call_count;
++    init_order[call - 1] = *resource;
++    if (call == fail_init_call)
++        return STATUS_UNSUCCESSFUL;
++    return STATUS_SUCCESS;
++}
++
++static NTSTATUS ExDeleteResourceLite(int *resource)
++{
++    delete_order[delete_call_count++] = *resource;
++    return STATUS_SUCCESS;
++}
++
++static void reset(void)
++{
++    init_call_count = delete_call_count = fail_init_call = 0;
++    init_order[0] = init_order[1] = 0;
++    delete_order[0] = delete_order[1] = 0;
++}
++'''
++
++cases = r'''
++static int checks;
++static int failures;
++
++static void check(int condition, const char *label)
++{
++    ++checks;
++    if (!condition) {
++        ++failures;
++        fprintf(stderr, "FAIL: %s\n", label);
++    }
++}
++
++int main(void)
++{
++    DEVICE_EXTENSION d = { .DirResource = 1, .FatResource = 2 };
++    NTSTATUS status;
++
++    reset();
++    status = VfatInitializeMountResources(&d);
++    check(status == STATUS_SUCCESS && init_call_count == 2 &&
++          init_order[0] == 1 && init_order[1] == 2 && delete_call_count == 0,
++          "successful initialization is directory then FAT");
++    VfatDeleteMountResources(&d);
++    check(delete_call_count == 2 && delete_order[0] == 2 && delete_order[1] == 1,
++          "successful deletion is FAT then directory");
++
++    reset();
++    fail_init_call = 1;
++    status = VfatInitializeMountResources(&d);
++    check(status == STATUS_UNSUCCESSFUL && init_call_count == 1 &&
++          delete_call_count == 0,
++          "first initialization failure owns no resource");
++
++    reset();
++    fail_init_call = 2;
++    status = VfatInitializeMountResources(&d);
++    check(status == STATUS_UNSUCCESSFUL && init_call_count == 2 &&
++          delete_call_count == 1 && delete_order[0] == 1,
++          "second initialization failure deletes directory resource");
++
++    printf("VFAT mount resource lifecycle: %d checks, %d failures\n",
++           checks, failures);
++    return failures != 0;
++}
++'''
++
++source = out / "mount-resources.c"
++source.write_text(shim + initialize + destroy + cases)
++subprocess.run([
++    "cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
++    str(source), "-o", str(out / "mount-resources")
++], check=True)
++subprocess.run([str(out / "mount-resources")], check=True)
+-- 
+2.47.3
+
