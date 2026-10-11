@@ -1,0 +1,444 @@
+diff --git a/ntoskrnl/xb/mm/contig.c b/ntoskrnl/xb/mm/contig.c
+index d7351e52..ab75bd1b 100644
+--- a/ntoskrnl/xb/mm/contig.c
++++ b/ntoskrnl/xb/mm/contig.c
+@@ -819,11 +819,12 @@ BOOLEAN NxkMmAdoptRestored(PVOID Alias, SIZE_T Size)
+  *
+  *  1. The region's PA is fixed by NV2A hardware (the GPU's internal MMU
+  *     finds RAMHT/RAMFC/graphics-context records at the top of the title-
+- *     visible address space) -- the title can't relocate it, so we pre-
+- *     exclude it from the contiguous-memory heap at boot.
+- *  2. It can only shrink the GPU-reserved sub-region, not grow it.  The
+- *     unused bytes (NV2A_INSTANCE_BYTES - claim) go back to the title's
+- *     heap so the title can use them for normal contiguous allocations.
++ *     visible address space) -- the title can't relocate the window.
++ *  2. Growth removes the newly claimed span from the page supply,
++ *     relocating movable owners first.  Shrink returns only pages
++ *     acquired by a successful claim.  Failed growth returns NULL and
++ *     preserves the previous claim rather than exposing another owner
++ *     to GPU writes.  This exhaustion policy is not a retail trace claim.
+  *  3. The return value is the title's new heap ceiling -- top of memory
+  *     minus the hardware-fixed padding gap (PA 0x03FF0000-0x04000000 on
+  *     a 64 MB Xbox).  Subsequent contig allocs must not extend above it.
+@@ -853,6 +854,10 @@ NxMmClaimGpuInstanceMemory(
+     OUT SIZE_T *NumberOfPaddingBytes)
+ {
+     SIZE_T Claim;
++    PVOID Result = (PVOID)(NXK_KSEG0_BASE | NXK_NV2A_HEAP_CEILING);
++#ifdef NXK_MM_PHYS
++    KIRQL OldIrql = MiAcquirePfnLock();
++#endif
+ 
+     if (NumberOfBytes == MAXULONG_PTR)
+     {
+@@ -861,9 +866,13 @@ NxMmClaimGpuInstanceMemory(
+     }
+     else
+     {
+-        Claim = (NumberOfBytes + (PAGE_SIZE - 1)) & ~((SIZE_T)PAGE_SIZE - 1);
+-        if (Claim > NXK_NV2A_INSTANCE_BYTES)
++        /* Clamp before rounding: an oversized request must not wrap to
++         * zero and release an existing reservation. */
++        if (NumberOfBytes >= NXK_NV2A_INSTANCE_BYTES)
+             Claim = NXK_NV2A_INSTANCE_BYTES;
++        else
++            Claim = (NumberOfBytes + (PAGE_SIZE - 1)) &
++                    ~((SIZE_T)PAGE_SIZE - 1);
+ 
+ #ifdef NXK_MM_PHYS
+         {
+@@ -873,37 +882,39 @@ NxMmClaimGpuInstanceMemory(
+             PFN_NUMBER Top = NXK_NV2A_HEAP_CEILING >> PAGE_SHIFT;
+             PFN_NUMBER NewLow = Top - (Claim >> PAGE_SHIFT);
+             PFN_NUMBER OldLow = Top - (NxkNv2aInstanceBytes >> PAGE_SHIFT);
+-            KIRQL OldIrql = MiAcquirePfnLock();
+-
+-            while (NewLow < OldLow)
++            if (NewLow < OldLow)
+             {
+-                OldLow--;
+-                if (!NxkPageSupplyTakeSpecific(OldLow) &&
+-                    NxkPageSupplyTakeRunRelocate(1, OldLow, OldLow, 1) == 0)
++                /* Preflight the entire growth span before moving any
++                 * owner.  Per-page claims can fail after earlier pages
++                 * have already been acquired or relocated. */
++                if (NxkPageSupplyTakeRunRelocate(OldLow - NewLow,
++                                               NewLow, OldLow - 1, 1) == 0)
+                 {
+-                    XbDbg("MmClaimGpuInstanceMemory: PFN %05lx not "
+-                          "reclaimable\n", (ULONG)OldLow);
++                    Result = NULL;
++                    Claim = NxkNv2aInstanceBytes;
+                 }
+             }
+-            while (NewLow > OldLow)
++            else while (NewLow > OldLow)
+             {
+                 NxkPageSupplyReturn(OldLow);
+                 OldLow++;
+             }
+-            MiReleasePfnLock(OldIrql);
+         }
+ #endif
+         NxkNv2aInstanceBytes = Claim;
+     }
++#ifdef NXK_MM_PHYS
++    MiReleasePfnLock(OldIrql);
++#endif
+ 
+     if (NumberOfPaddingBytes != NULL)
+         *NumberOfPaddingBytes = NXK_NV2A_PADDING_BYTES;
+ 
+     XbDbg("MmClaimGpuInstanceMemory(req=0x%lx) claim=0x%lx pad=0x%lx -> 0x%08lx\n",
+           (ULONG)NumberOfBytes, (ULONG)Claim, (ULONG)NXK_NV2A_PADDING_BYTES,
+-          (ULONG)(NXK_KSEG0_BASE | NXK_NV2A_HEAP_CEILING));
++          (ULONG)(ULONG_PTR)Result);
+ 
+-    return (PVOID)(NXK_KSEG0_BASE | NXK_NV2A_HEAP_CEILING);
++    return Result;
+ }
+ 
+ /* EOF */
+diff --git a/tests/host/gpu-instance/check.py b/tests/host/gpu-instance/check.py
+new file mode 100644
+index 00000000..f5aec53d
+--- /dev/null
++++ b/tests/host/gpu-instance/check.py
+@@ -0,0 +1,198 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the actual GPU claim and page-supply bodies against owned PFNs."""
++from pathlib import Path
++import re
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++
++
++def function(text, name):
++    hit = re.search(r"(?m)^" + name + r"\s*\([^;]*?\)\s*\{", text)
++    assert hit, name
++    start = text.rfind("\n\n", 0, hit.start()) + 2
++    brace = text.index("{", hit.start())
++    depth, end = 1, brace + 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[start:end] + "\n"
++
++
++supply = (root / "ntoskrnl/xb/mm/pagesupply.c").read_text()
++contig = (root / "ntoskrnl/xb/mm/contig.c").read_text()
++core = supply[supply.index("#define NXP_FREE"):
++              supply.index("VOID\nNTAPI\nNxkPageSupplyReturn")]
++core += "".join(function(supply, name) for name in (
++    "NxkPageSupplyReturn", "NxkPageSupplySetOwner",
++    "NxkPageSupplyGetOwner", "NxkPageSupplyIsFree",
++    "NxkPageSupplyTakeSpecific", "NxkPageSupplyTakeRun",
++    "NxkPageSupplyTakeAnyOutside"))
++if re.search(r"(?m)^NxpRelocationCapacity\s*\(", supply):
++    core += function(supply, "NxpRelocationCapacity")
++
++shim = r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <assert.h>
++#include <sys/mman.h>
++typedef uint32_t ULONG, *PULONG, PFN_NUMBER, PFN_COUNT, SIZE_T;
++typedef uint16_t USHORT, *PUSHORT;
++typedef uint8_t UCHAR, BOOLEAN, KIRQL;
++typedef uintptr_t ULONG_PTR;
++typedef void VOID, *PVOID;
++#define NTAPI
++#define IN
++#define OUT
++#define TRUE 1
++#define FALSE 0
++#define PAGE_SIZE 4096u
++#define PAGE_SHIFT 12
++#define NXK_KSEG0_BASE 0x80000000u
++#define NXK_KSEG0_RAM_SIZE 0x04000000u
++#define NXK_HIGH_ZONE_BASE 0x03400000u
++#define NXK_HIGH_ZONE_LIMIT 0x03c00000u
++#define NXK_NV2A_HEAP_CEILING 0x03ff0000u
++#define NXK_NV2A_INSTANCE_BYTES 0x10000u
++#define NXK_NV2A_PADDING_BYTES 0x10000u
++#define MAXULONG_PTR UINT32_MAX
++#define NXK_MM_PHYS 1
++#define ASSERT assert
++#define MI_ASSERT_PFN_LOCK_HELD() assert(lockDepth==1)
++#define UNREFERENCED_PARAMETER(x) ((void)(x))
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define XbDbg(...) ((void)0)
++static int lockDepth;
++static PFN_NUMBER MmAvailablePages;
++static BOOLEAN NxkMmRetailShapedMap(void) { return TRUE; }
++static BOOLEAN NxkMmPersistentPage(PFN_NUMBER p) { (void)p; return FALSE; }
++static PVOID NxkTryGetVerifiedWbDirectAlias(PFN_NUMBER p) { (void)p; return NULL; }
++static void KeZeroPages(PVOID p, SIZE_T n) { memset(p,0,n); }
++static void MiZeroPhysicalPage(PFN_NUMBER p) { assert(p>0); }
++static KIRQL MiAcquirePfnLock(void) { assert(!lockDepth);lockDepth=1;return 0; }
++static void MiReleasePfnLock(KIRQL i) { (void)i;assert(lockDepth==1);lockDepth=0; }
++static void KeInvalidateTlbEntry(PVOID p) { (void)p; }
++'''
++relocation = r'''
++static PVOID NxpRelocationPtes=(PVOID)1;
++static UCHAR frames[0x8000][PAGE_SIZE];
++#define HIGH_LEVEL 31
++#define DPRINT1(...) ((void)0)
++static void KeRaiseIrql(KIRQL level,KIRQL *old) { (void)level;*old=0; }
++static void KeLowerIrql(KIRQL old) { (void)old; }
++static void NxpMapRelocationPages(PFN_NUMBER s,PFN_NUMBER d) { (void)s;(void)d; }
++static void NxpUnmapRelocationPages(void) {}
++/* Only privileged copy/PTE/TLB instructions are replaced. Production
++ * preflight, selection, counters, ownership and claim code run unchanged. */
++#define __asm__
++#define __volatile__(...) do { memcpy(frames[Dest],frames[Page],PAGE_SIZE); *Pte=NewEntry; } while(0)
++'''
++claim = "static SIZE_T NxkNv2aInstanceBytes;\n" + function(contig, "NxMmClaimGpuInstanceMemory")
++main = r'''
++#define TOP 0x3ff0u
++#define PTE(n) (((PULONG)0xc0000000)[0x20+(n)])
++static void require(int ok,const char *m) {
++    if(!ok) {fprintf(stderr,"FAIL: %s\n",m);exit(1);}
++}
++static void reset(void) {
++    static ULONG storage[0xc000];
++    memset(storage,0,sizeof(storage));memset((void*)0xc0000000,0,0x400000);
++    MmAvailablePages=0;NxpFreeHeadKernel=NxpFreeHeadTitle=0;NxpGenericAvail=0;
++    lockDepth=1;NxkPageSupplyInitialize(0x7fff,storage);
++    for(PFN_NUMBER p=TOP-16;p<TOP;p++) NxkPageSupplyReturn(p);
++    lockDepth=0;NxkNv2aInstanceBytes=0;
++}
++static void owned(PFN_NUMBER p,unsigned n,int pinned) {
++    lockDepth=1;require(NxkPageSupplyTakeSpecific(p),"owner acquires free frame");
++    PTE(n)=(p<<12)|3;NxkPageSupplySetOwner(p,(ULONG_PTR)&PTE(n));
++    NxpPins[p]=pinned?1:0;memset(frames[p],0x5a+n,PAGE_SIZE);lockDepth=0;
++}
++static PVOID claim_bytes(SIZE_T n) {
++    SIZE_T padding=0;PVOID p=NxMmClaimGpuInstanceMemory(n,&padding);
++    require(padding==65536,"padding contract remains fixed");
++    require(lockDepth==0,"all API exits release PFN lock");return p;
++}
++static void normal(void) {
++    require(claim_bytes(1)==(PVOID)0x83ff0000,"successful claim fixed base");
++    require(NxkNv2aInstanceBytes==4096&&MmAvailablePages==15,"one-byte claim rounds to one page");
++    require(claim_bytes(UINT32_MAX)==(PVOID)0x83ff0000&&MmAvailablePages==15,"query is read-only");
++    require(claim_bytes(4096)!=NULL&&MmAvailablePages==15,"unchanged claim has no page effect");
++    require(claim_bytes(8193)!=NULL&&NxkNv2aInstanceBytes==12288&&MmAvailablePages==13,"growth acquires every page");
++    require(claim_bytes(4097)!=NULL&&NxkNv2aInstanceBytes==8192&&MmAvailablePages==14,"shrink returns only removed tail page");
++    require(claim_bytes(0)!=NULL&&MmAvailablePages==16,"zero releases complete owned span");
++}
++static void failed(unsigned distance,int existing) {
++    PFN_NUMBER bad=TOP-distance;
++    if(existing) require(claim_bytes(4096)!=NULL,"existing claim succeeds");
++    owned(bad,0,1);PFN_NUMBER before=MmAvailablePages;
++    require(claim_bytes(4*4096)==NULL,"failed acquisition must not report success");
++    require(NxkNv2aInstanceBytes==(existing?4096u:0u)&&MmAvailablePages==before,"failure preserves previous claim/free count");
++    require(PTE(0)==((bad<<12)|3)&&NxpPins[bad]==1,"failure preserves pinned owner");
++    claim_bytes(UINT32_MAX);claim_bytes(0);
++    require(NxpLinks[bad]==((ULONG_PTR)&PTE(0)-0xc0000000u)/4&&NxpPins[bad]==1,"later shrink cannot release failed owner's page");
++}
++static void release_after_failed(void) {
++    owned(TOP-2,0,1);claim_bytes(3*4096);claim_bytes(0);
++    require(NxpLinks[TOP-2]==((ULONG_PTR)&PTE(0)-0xc0000000u)/4&&NxpPins[TOP-2]==1,"shrink must preserve unreclaimed owner's metadata");
++}
++static void capacity(void) {
++    owned(TOP-1,0,0);ULONG old=PTE(0);PFN_NUMBER before=MmAvailablePages;
++    require(claim_bytes(65536)==NULL,"full window fails without an outside relocation frame");
++    require(PTE(0)==old&&MmAvailablePages==before&&NxkNv2aInstanceBytes==0,"capacity failure has no partial relocation/claim");
++}
++static void relocated(void) {
++    owned(TOP-1,0,0);owned(TOP-2,1,0);
++    lockDepth=1;NxkPageSupplyReturn(0x30);NxkPageSupplyReturn(0x31);lockDepth=0;
++    require(claim_bytes(3*4096)!=NULL,"complete span relocates live unpinned pages");
++    require((PTE(0)>>12)<TOP-16&&(PTE(1)>>12)<TOP-16,"relocation destinations lie outside instance window");
++    require((PTE(0)>>12)!=(PTE(1)>>12),"owners receive distinct frames");
++    require(memcmp(frames[TOP-1],frames[PTE(0)>>12],PAGE_SIZE)==0&&memcmp(frames[TOP-2],frames[PTE(1)>>12],PAGE_SIZE)==0,"relocated bytes remain exact");
++    require(MmAvailablePages==13,"claim accounts for every acquired page");
++    claim_bytes(0);require(MmAvailablePages==16,"shrink retains relocated live owners");
++}
++static void large(void) {
++    require(claim_bytes(UINT32_MAX-1)!=NULL,"large non-query request keeps existing capped contract");
++    require(NxkNv2aInstanceBytes==65536&&MmAvailablePages==0,"rounding cannot wrap large claim to zero");
++    claim_bytes(0);require(MmAvailablePages==16,"large claim releases exactly sixteen pages");
++}
++int main(int argc,char **argv) {
++    require(argc==2,"scenario argument");
++    require(mmap((void*)0xc0000000,0x400000,PROT_READ|PROT_WRITE,
++            MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0)==(void*)0xc0000000,"fixture self-map");
++    reset();
++    if(!strcmp(argv[1],"normal")) normal();
++    else if(!strcmp(argv[1],"blocked-first")) failed(1,0);
++    else if(!strcmp(argv[1],"partial-growth")) failed(2,0);
++    else if(!strcmp(argv[1],"existing-claim")) failed(3,1);
++    else if(!strcmp(argv[1],"shrink-failed-owner")) release_after_failed();
++    else if(!strcmp(argv[1],"capacity")) capacity();
++    else if(!strcmp(argv[1],"relocation")) relocated();
++    else if(!strcmp(argv[1],"large-request")) large();
++    else require(0,"unknown scenario");
++    printf("gpu-instance %s PASS\n",argv[1]);return 0;
++}
++'''
++source = out / "gpu-instance.c"
++source.write_text(shim + core + relocation
++                  + function(supply, "NxkPageSupplyTakeRunRelocate") + claim + main)
++failed_cases = []
++for reserved in (0, 1):
++    exe = out / f"gpu-instance-{reserved}"
++    subprocess.run(["cc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
++                    "-Wno-unused-function", "-Wno-unused-variable",
++                    "-Wno-unused-but-set-variable", f"-DXBOX_RESERVE_UPPER_RAM={reserved}",
++                    str(source), "-o", str(exe)], check=True)
++    for case in ("normal", "blocked-first", "partial-growth", "existing-claim",
++                 "shrink-failed-owner", "capacity", "relocation", "large-request"):
++        if subprocess.run([str(exe), case]).returncode:
++            failed_cases.append((reserved, case))
++if failed_cases:
++    raise SystemExit(f"gpu-instance failures: {failed_cases}")
++print("gpu-instance: all 16 production claim/page-supply scenarios PASS")
+diff --git a/tests/xbe/gpu-instance/Makefile b/tests/xbe/gpu-instance/Makefile
+new file mode 100644
+index 00000000..2f3bd5c5
+--- /dev/null
++++ b/tests/xbe/gpu-instance/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = GPU-INSTANCE-OWNERSHIP
++GEN_XISO = gpu-instance.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/gpu-instance/main.c b/tests/xbe/gpu-instance/main.c
+new file mode 100644
+index 00000000..b1f7b282
+--- /dev/null
++++ b/tests/xbe/gpu-instance/main.c
+@@ -0,0 +1,121 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Finite public-ABI ownership test. No display initialization or GPU writes:
++ * the guest temporarily owns instance pages, then shuts down via the SMC.
++ */
++#include <xboxkrnl/xboxkrnl.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <string.h>
++#include "../api-regression/tap.h"
++
++static unsigned number, failures;
++static void check(bool ok, const char *name)
++{
++    ++number;
++    if (ok) tap_ok(number, name);
++    else { tap_not_ok(number, name); ++failures; }
++}
++static ULONG available(void)
++{
++    MM_STATISTICS s = {0};
++    s.Length = sizeof(s);
++    if (MmQueryStatistics(&s) != 0) return UINT32_MAX;
++    return s.AvailablePages;
++}
++static PVOID pin(ULONG pa)
++{
++    return MmAllocateContiguousMemoryEx(4096, pa, pa + 4095, 4096,
++                                        PAGE_READWRITE);
++}
++static bool bytes(const void *p, unsigned char want)
++{
++    const unsigned char *b = p;
++    for (unsigned i = 0; i < 4096; ++i) if (b[i] != want) return false;
++    return true;
++}
++int main(void)
++{
++    SIZE_T padding = 0;
++    ULONG before, free_before_probe, free_after_probe;
++    PVOID idle[4] = {0};
++    PVOID held = NULL, duplicate = NULL, base;
++    tap_puts("== gpu-instance BEGIN schema=1 ==\n");
++    tap_version(14);
++    tap_plan(24);
++    /* Only this standalone guest uses the GPU window; no live title state
++     * is modified, and failure evidence is confined to the disposable VM. */
++    base = MmClaimGpuInstanceMemory(0, &padding);
++    check(base == (PVOID)0x83ff0000, "zero claim returns fixed base");
++    check(padding == 65536, "topology padding remains 64 KiB");
++    held = pin(0x03fed000);
++    check(held == (PVOID)0x83fed000, "exact owner acquired in future growth span");
++    if (held == NULL) goto done;
++    memset(held, 0xa5, 4096);
++    before = available();
++    check(before != UINT32_MAX, "public available-page query succeeds");
++    base = MmClaimGpuInstanceMemory(16384, &padding);
++    check(base == NULL, "unreclaimable owner rejects growth");
++    check(available() == before, "failed growth preserves free count");
++    check(bytes(held, 0xa5), "failed growth preserves owner bytes");
++    check(MmClaimGpuInstanceMemory(UINT32_MAX, NULL) == (PVOID)0x83ff0000,
++          "query sentinel remains read-only fixed-base operation");
++    check(MmClaimGpuInstanceMemory(0, NULL) == (PVOID)0x83ff0000,
++          "shrink after failure succeeds");
++    duplicate = pin(0x03fed000);
++    check(duplicate == NULL, "shrink cannot make another owner's frame free");
++    if (duplicate != NULL) {
++        /* Do not double-free an alias obtained from a broken reservation. */
++        held = NULL;
++        goto done;
++    }
++    check(bytes(held, 0xa5), "owner canary survives later shrink");
++    /* The failed allocation probe may reclaim unrelated empty slabs. */
++    before = available();
++    MmFreeContiguousMemory(held); held = NULL;
++    check(available() == before + 1, "ordinary owner release returns its one page");
++    /* Force unrelated slab reclamation so stale global-count baselines
++     * cannot accidentally pass depending on background allocation history. */
++    for (unsigned i = 0; i < 4; ++i) idle[i] = ExAllocatePool(2040);
++    check(idle[0] && idle[1] && idle[2] && idle[3],
++          "slab interference fixture acquires four small objects");
++    if (!idle[0] || !idle[1] || !idle[2] || !idle[3]) goto done;
++    before = available();
++    check(MmClaimGpuInstanceMemory(16384, NULL) == (PVOID)0x83ff0000,
++          "growth succeeds after owner release");
++    check(available() + 4 == before, "successful growth owns all four pages");
++    for (unsigned i = 0; i < 4; ++i) { ExFreePool(idle[i]); idle[i] = NULL; }
++    free_before_probe = available();
++    duplicate = pin(0x03fed000);
++    free_after_probe = available();
++    check(free_after_probe > free_before_probe,
++          "failed exact allocation reclaims unrelated empty slab backing");
++    tap_comment("probe available before=%u after=%u",
++                free_before_probe, free_after_probe);
++    check(duplicate == NULL, "active reservation excludes exact allocations");
++    if (duplicate != NULL) goto done;
++    /* Four pages are still GPU-owned; start the next transition after
++     * the allocator probe, whose pool reclamation is an intended side effect. */
++    before = free_after_probe + 4;
++    check(MmClaimGpuInstanceMemory(1, NULL) == (PVOID)0x83ff0000,
++          "one-byte claim rounds to one page");
++    check(available() + 1 == before, "shrink returns exactly three pages");
++    held = pin(0x03fed000);
++    check(held != NULL, "removed claim page is reusable");
++    if (held != NULL) { MmFreeContiguousMemory(held); held = NULL; }
++    check(MmClaimGpuInstanceMemory(UINT32_MAX - 1, NULL) == (PVOID)0x83ff0000,
++          "large non-query request retains capped success contract");
++    check(available() + 16 == before, "large request cannot wrap to zero");
++    check(MmClaimGpuInstanceMemory(0, NULL) == (PVOID)0x83ff0000,
++          "final zero releases complete reservation");
++    check(available() == before, "final available-page count restored");
++done:
++    for (unsigned i = 0; i < 4; ++i) if (idle[i]) ExFreePool(idle[i]);
++    if (held != NULL) MmFreeContiguousMemory(held);
++    tap_comment("completed=%u expected=24 failed=%u", number, failures);
++    tap_puts(number == 24 && failures == 0
++             ? "== gpu-instance END schema=1 status=PASS ==\n"
++             : "== gpu-instance END schema=1 status=FAIL ==\n");
++    tap_drain();
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    for (;;) __asm__ volatile("hlt");
++}
