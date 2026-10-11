@@ -1,0 +1,451 @@
+From bc2d60faed41db74e00779e103f45ecfe677cf30 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 19:57:18 -0700
+Subject: [PATCH] vfatfs: allocate uppercase names only for wildcards
+
+---
+ drivers/filesystems/vfatfs/create.c      |  27 +-
+ tests/host/fatx/check-findfile-upcase.py | 371 +++++++++++++++++++++++
+ 2 files changed, 389 insertions(+), 9 deletions(-)
+ create mode 100644 tests/host/fatx/check-findfile-upcase.py
+
+diff --git a/drivers/filesystems/vfatfs/create.c b/drivers/filesystems/vfatfs/create.c
+index 35d10fe..58fc66d 100644
+--- a/drivers/filesystems/vfatfs/create.c
++++ b/drivers/filesystems/vfatfs/create.c
+@@ -98,7 +98,7 @@ FindFile(
+     PVFATFCB rcFcb;
+     BOOLEAN Found;
+     UNICODE_STRING PathNameU;
+-    UNICODE_STRING FileToFindUpcase;
++    UNICODE_STRING FileToFindUpcase = { 0 };
+     BOOLEAN WildCard;
+     BOOLEAN IsFatX = vfatVolumeIsFatX(DeviceExt);
+ 
+@@ -166,13 +166,16 @@ FindFile(
+         }
+     }
+ 
+-    /* FsRtlIsNameInExpression need the searched string to be upcase,
+-    * even if IgnoreCase is specified */
+-    Status = RtlUpcaseUnicodeString(&FileToFindUpcase, FileToFindU, TRUE);
+-    if (!NT_SUCCESS(Status))
++    if (WildCard)
+     {
+-        ExFreePoolWithTag(PathNameBuffer, TAG_NAME);
+-        return Status;
++        /* FsRtlIsNameInExpression needs the searched string to be upcase,
++         * even if IgnoreCase is specified. */
++        Status = RtlUpcaseUnicodeString(&FileToFindUpcase, FileToFindU, TRUE);
++        if (!NT_SUCCESS(Status))
++        {
++            ExFreePoolWithTag(PathNameBuffer, TAG_NAME);
++            return Status;
++        }
+     }
+ 
+     while (TRUE)
+@@ -238,7 +241,10 @@ FindFile(
+             {
+                 CcUnpinData(Context);
+             }
+-            RtlFreeUnicodeString(&FileToFindUpcase);
++            if (FileToFindUpcase.Buffer)
++            {
++                RtlFreeUnicodeString(&FileToFindUpcase);
++            }
+             ExFreePoolWithTag(PathNameBuffer, TAG_NAME);
+             return STATUS_SUCCESS;
+         }
+@@ -250,7 +256,10 @@ FindFile(
+         CcUnpinData(Context);
+     }
+ 
+-    RtlFreeUnicodeString(&FileToFindUpcase);
++    if (FileToFindUpcase.Buffer)
++    {
++        RtlFreeUnicodeString(&FileToFindUpcase);
++    }
+     ExFreePoolWithTag(PathNameBuffer, TAG_NAME);
+     return Status;
+ }
+diff --git a/tests/host/fatx/check-findfile-upcase.py b/tests/host/fatx/check-findfile-upcase.py
+new file mode 100644
+index 0000000..730dcfd
+--- /dev/null
++++ b/tests/host/fatx/check-findfile-upcase.py
+@@ -0,0 +1,371 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production FindFile uppercase allocation boundary."""
++
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++body = extract.function(
++    (root / "drivers/filesystems/vfatfs/create.c").read_text(), "FindFile")
++
++shim = r'''
++#include <assert.h>
++#include <ctype.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#define SARCH_XBOX 1
++typedef int32_t NTSTATUS;
++typedef uint8_t BOOLEAN;
++typedef uint16_t USHORT;
++typedef uint16_t WCHAR;
++typedef WCHAR *PWCHAR;
++typedef uint32_t ULONG;
++typedef void *PVOID;
++typedef struct {
++    USHORT Length, MaximumLength;
++    WCHAR *Buffer;
++} UNICODE_STRING, *PUNICODE_STRING;
++typedef struct { int volume; } DIR_ENTRY;
++typedef struct _VFATFCB {
++    UNICODE_STRING PathNameU, LongNameU, ShortNameU;
++    DIR_ENTRY entry;
++    ULONG startIndex, dirIndex;
++    BOOLEAN root;
++} VFATFCB, *PVFATFCB;
++typedef struct { int fatx; } DEVICE_EXTENSION, *PDEVICE_EXTENSION;
++typedef struct {
++    ULONG DirIndex, StartIndex;
++    UNICODE_STRING LongNameU, ShortNameU;
++    DIR_ENTRY DirEntry;
++} VFAT_DIRENTRY_CONTEXT, *PVFAT_DIRENTRY_CONTEXT;
++
++#define TRUE 1
++#define FALSE 0
++#define STATUS_SUCCESS ((NTSTATUS)0)
++#define STATUS_UNSUCCESSFUL ((NTSTATUS)0xc0000001)
++#define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xc000009a)
++#define STATUS_NO_MORE_ENTRIES ((NTSTATUS)0x8000001a)
++#define NT_SUCCESS(status) ((NTSTATUS)(status) >= 0)
++#define LONGNAME_MAX_LENGTH 260
++#define NonPagedPool 0
++#define TAG_NAME 0
++#define ENTRY_VOLUME(fatx, entry) ((void)(fatx), (entry)->volume)
++#define ASSERT assert
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define VFAT_BREAK_ON_CORRUPTION 1
++static struct { unsigned Flags; } global_data;
++#define VfatGlobalData (&global_data)
++
++typedef struct {
++    const char *long_name;
++    const char *short_name;
++    BOOLEAN alias;
++    BOOLEAN volume;
++} TEST_ENTRY;
++static const TEST_ENTRY *entries;
++static unsigned entry_count, cursor;
++static unsigned path_allocs, path_frees, upcase_allocs, upcase_frees;
++static unsigned exact_calls, expression_calls, unpins, releases;
++static unsigned upcase_bytes;
++static BOOLEAN fail_upcase;
++static PVFATFCB table_hit;
++static int context_cookie;
++
++static USHORT ascii_to_unicode(const char *source, WCHAR *dest,
++                               USHORT capacity)
++{
++    USHORT length = 0;
++    while (*source) {
++        assert(length < capacity);
++        dest[length++] = (unsigned char)*source++;
++    }
++    return (USHORT)(length * sizeof(WCHAR));
++}
++
++static void *ExAllocatePoolWithTag(int pool, size_t bytes, unsigned tag)
++{
++    (void)pool;
++    (void)tag;
++    ++path_allocs;
++    return calloc(1, bytes);
++}
++
++static void ExFreePoolWithTag(void *allocation, unsigned tag)
++{
++    (void)tag;
++    ++path_frees;
++    free(allocation);
++}
++
++static BOOLEAN vfatVolumeIsFatX(PDEVICE_EXTENSION device)
++{
++    return device->fatx;
++}
++
++static BOOLEAN vfatFCBIsRoot(PVFATFCB fcb)
++{
++    return fcb->root;
++}
++
++static void RtlCopyUnicodeString(PUNICODE_STRING output,
++                                 const UNICODE_STRING *input)
++{
++    assert(input->Length <= output->MaximumLength);
++    memcpy(output->Buffer, input->Buffer, input->Length);
++    output->Length = input->Length;
++}
++
++static void RtlAppendUnicodeStringToString(PUNICODE_STRING output,
++                                           const UNICODE_STRING *input)
++{
++    assert(output->Length + input->Length <= output->MaximumLength);
++    memcpy((char *)output->Buffer + output->Length,
++           input->Buffer, input->Length);
++    output->Length += input->Length;
++}
++
++#define RtlCopyMemory memcpy
++
++static BOOLEAN FsRtlDoesNameContainWildCards(const UNICODE_STRING *name)
++{
++    for (unsigned i = 0; i < name->Length / sizeof(WCHAR); ++i)
++        if (name->Buffer[i] == '*' || name->Buffer[i] == '?')
++            return TRUE;
++    return FALSE;
++}
++
++static NTSTATUS RtlUpcaseUnicodeString(PUNICODE_STRING output,
++                                       const UNICODE_STRING *input,
++                                       BOOLEAN allocate)
++{
++    assert(allocate);
++    ++upcase_allocs;
++    upcase_bytes += input->Length + sizeof(WCHAR);
++    if (fail_upcase)
++        return STATUS_INSUFFICIENT_RESOURCES;
++    output->Buffer = calloc(1, input->Length + sizeof(WCHAR));
++    if (!output->Buffer)
++        return STATUS_INSUFFICIENT_RESOURCES;
++    output->Length = input->Length;
++    output->MaximumLength = input->Length + sizeof(WCHAR);
++    for (unsigned i = 0; i < input->Length / sizeof(WCHAR); ++i)
++        output->Buffer[i] = (WCHAR)toupper((unsigned char)input->Buffer[i]);
++    return STATUS_SUCCESS;
++}
++
++static void RtlFreeUnicodeString(PUNICODE_STRING string)
++{
++    ++upcase_frees;
++    free(string->Buffer);
++    string->Buffer = NULL;
++}
++
++static BOOLEAN equal_folded(const UNICODE_STRING *left,
++                            const UNICODE_STRING *right)
++{
++    if (left->Length != right->Length)
++        return FALSE;
++    for (unsigned i = 0; i < left->Length / sizeof(WCHAR); ++i)
++        if (toupper((unsigned char)left->Buffer[i]) !=
++            toupper((unsigned char)right->Buffer[i]))
++            return FALSE;
++    return TRUE;
++}
++
++static BOOLEAN FsRtlAreNamesEqual(const UNICODE_STRING *left,
++                                  const UNICODE_STRING *right,
++                                  BOOLEAN ignore_case, void *table)
++{
++    (void)table;
++    assert(ignore_case);
++    ++exact_calls;
++    return equal_folded(left, right);
++}
++
++static BOOLEAN FsRtlIsNameInExpression(const UNICODE_STRING *expression,
++                                       const UNICODE_STRING *name,
++                                       BOOLEAN ignore_case, void *table)
++{
++    unsigned ei = 0, ni = 0;
++    (void)table;
++    assert(ignore_case);
++    ++expression_calls;
++    while (ei < expression->Length / sizeof(WCHAR)) {
++        WCHAR ec = expression->Buffer[ei++];
++        if (ec == '*')
++            return TRUE;
++        if (ni == name->Length / sizeof(WCHAR))
++            return FALSE;
++        if (ec != '?' && ec != toupper((unsigned char)name->Buffer[ni]))
++            return FALSE;
++        ++ni;
++    }
++    return ni == name->Length / sizeof(WCHAR);
++}
++
++static PVFATFCB vfatGrabFCBFromTable(PDEVICE_EXTENSION device,
++                                     const UNICODE_STRING *path)
++{
++    (void)device;
++    (void)path;
++    return table_hit;
++}
++
++static void vfatReleaseFCB(PDEVICE_EXTENSION device, PVFATFCB fcb)
++{
++    (void)device;
++    (void)fcb;
++    ++releases;
++}
++
++static NTSTATUS VfatGetNextDirEntry(
++    PDEVICE_EXTENSION device, PVOID *context, PVOID *page, PVFATFCB parent,
++    PVFAT_DIRENTRY_CONTEXT output, BOOLEAN first)
++{
++    const TEST_ENTRY *entry;
++    WCHAR *long_buffer = output->LongNameU.Buffer;
++    USHORT long_maximum = output->LongNameU.MaximumLength;
++    WCHAR *short_buffer = output->ShortNameU.Buffer;
++    USHORT short_maximum = output->ShortNameU.MaximumLength;
++    (void)device;
++    (void)page;
++    (void)parent;
++    (void)first;
++    if (cursor == entry_count)
++        return STATUS_NO_MORE_ENTRIES;
++    entry = &entries[cursor++];
++    *context = &context_cookie;
++    output->DirEntry.volume = entry->volume;
++    output->LongNameU.Buffer = long_buffer;
++    output->LongNameU.MaximumLength = long_maximum;
++    output->LongNameU.Length = ascii_to_unicode(
++        entry->long_name, long_buffer, long_maximum / sizeof(WCHAR));
++    if (entry->alias) {
++        output->ShortNameU = output->LongNameU;
++    } else {
++        output->ShortNameU.Buffer = short_buffer;
++        output->ShortNameU.MaximumLength = short_maximum;
++        output->ShortNameU.Length = ascii_to_unicode(
++            entry->short_name, short_buffer, short_maximum / sizeof(WCHAR));
++    }
++    return STATUS_SUCCESS;
++}
++
++static void CcUnpinData(PVOID context)
++{
++    assert(context == &context_cookie);
++    ++unpins;
++}
++'''
++
++cases = r'''
++static UNICODE_STRING make_name(const char *name, WCHAR *buffer,
++                                USHORT capacity)
++{
++    UNICODE_STRING result = {
++        .Length = ascii_to_unicode(name, buffer, capacity),
++        .MaximumLength = (USHORT)(capacity * sizeof(WCHAR)),
++        .Buffer = buffer,
++    };
++    return result;
++}
++
++static void reset(const TEST_ENTRY *next_entries, unsigned count)
++{
++    entries = next_entries;
++    entry_count = count;
++    cursor = 0;
++    path_allocs = path_frees = upcase_allocs = upcase_frees = 0;
++    exact_calls = expression_calls = unpins = releases = upcase_bytes = 0;
++    fail_upcase = FALSE;
++    table_hit = NULL;
++}
++
++static NTSTATUS find(const char *pattern, PVFAT_DIRENTRY_CONTEXT output)
++{
++    DEVICE_EXTENSION device = {.fatx = TRUE};
++    WCHAR parent_buffer[2] = {'R', 0};
++    WCHAR name_buffer[64];
++    VFATFCB parent = {.root = TRUE};
++    parent.PathNameU = make_name("", parent_buffer, 2);
++    UNICODE_STRING name = make_name(pattern, name_buffer, 64);
++    output->DirIndex = 0;
++    return FindFile(&device, &parent, &name, output, TRUE);
++}
++
++int main(void)
++{
++    WCHAR long_buffer[64], short_buffer[64];
++    VFAT_DIRENTRY_CONTEXT output = {
++        .LongNameU = {.Buffer = long_buffer, .MaximumLength = sizeof(long_buffer)},
++        .ShortNameU = {.Buffer = short_buffer, .MaximumLength = sizeof(short_buffer)},
++    };
++    const TEST_ENTRY target[] = {{"TaRgEt", "TARGET", FALSE, FALSE}};
++    const TEST_ENTRY empty_then_target[] = {
++        {"", "", TRUE, FALSE}, {"target", "target", TRUE, FALSE},
++    };
++
++    reset(target, 1);
++    assert(find("target", &output) == STATUS_SUCCESS);
++    assert(upcase_allocs == 0 && upcase_frees == 0 && upcase_bytes == 0);
++    assert(exact_calls == 1 && expression_calls == 0);
++    assert(path_allocs == 1 && path_frees == 1 && unpins == 1);
++
++    reset(target, 1);
++    fail_upcase = TRUE;
++    assert(find("TARGET", &output) == STATUS_SUCCESS);
++    assert(upcase_allocs == 0 && upcase_frees == 0);
++
++    reset(target, 1);
++    assert(find("Ta?gEt", &output) == STATUS_SUCCESS);
++    assert(upcase_allocs == 1 && upcase_frees == 1 && upcase_bytes == 14);
++    assert(exact_calls == 0 && expression_calls == 1);
++    assert(path_allocs == 1 && path_frees == 1 && unpins == 1);
++
++    reset(target, 1);
++    fail_upcase = TRUE;
++    assert(find("*", &output) == STATUS_INSUFFICIENT_RESOURCES);
++    assert(upcase_allocs == 1 && upcase_frees == 0);
++    assert(path_allocs == 1 && path_frees == 1 && cursor == 0);
++
++    reset(empty_then_target, 2);
++    assert(find("target", &output) == STATUS_SUCCESS);
++    assert(upcase_allocs == 0 && exact_calls == 1 && unpins == 1);
++
++    reset(NULL, 0);
++    assert(find("absent", &output) == STATUS_NO_MORE_ENTRIES);
++    assert(upcase_allocs == 0 && path_allocs == 1 && path_frees == 1);
++
++    reset(target, 1);
++    for (unsigned i = 0; i < 100; ++i) {
++        cursor = 0;
++        assert(find("target", &output) == STATUS_SUCCESS);
++    }
++    assert(upcase_allocs == 0 && upcase_frees == 0 && exact_calls == 100);
++    assert(path_allocs == 100 && path_frees == 100 && unpins == 100);
++
++    puts("PASS: production FindFile allocates uppercase names only for wildcards");
++}
++'''
++
++c = out / "findfile-upcase.c"
++c.write_text(shim + body + cases)
++subprocess.run([
++    "cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
++    "-fsanitize=undefined", str(c), "-o", str(out / "findfile-upcase")
++], check=True)
++subprocess.run([str(out / "findfile-upcase")], check=True)
+-- 
+2.47.3
+
