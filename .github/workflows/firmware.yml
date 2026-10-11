@@ -54,7 +54,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 0416d4577cad337c747a80239111879a4c4a087a
+            test "$actual_tree" = c724ca60e168c6aad2f0c7026505c72bb66166ab
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -97,6 +97,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/performance-counter/check.py" "$output/performance-counter" >"$output/performance-counter.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/io-apc-order/check.py" "$output/io-apc-order" >"$output/io-apc-order.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/critical-section/check.py" "$output/critical-section" >"$output/critical-section.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/workqueue/check-fixed-worker-queue.py" "$output/fixed-worker-queue" >"$output/fixed-worker-queue.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs/check.py" "$output/xdvdfs-create" >"$output/xdvdfs-create.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs-directory/check.py" "$output/xdvdfs-directory" >"$output/xdvdfs-directory.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs-masks/check.py" "$output/xdvdfs-masks" >"$output/xdvdfs-masks.log" 2>&1
@@ -127,7 +128,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '0416d4577cad337c747a80239111879a4c4a087a', result
+          assert result['source_tree'] == 'c724ca60e168c6aad2f0c7026505c72bb66166ab', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
