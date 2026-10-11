@@ -1,4 +1,4 @@
-From dcce3a384ba47569c860841e8d78591807f18300 Mon Sep 17 00:00:00 2001
+From bfb0c2607744032dc5a893eea98fa403646562d2 Mon Sep 17 00:00:00 2001
 From: Codex <codex@localhost>
 Date: Sun, 11 Oct 2026 01:34:41 -0700
 Subject: [PATCH] xbox: add pre-title settings menu
@@ -13,8 +13,8 @@ Subject: [PATCH] xbox: add pre-title settings menu
  ntoskrnl/xb/boot_setup.h                      |  80 ++
  ntoskrnl/xb/boot_xid.c                        | 106 +++
  ntoskrnl/xb/boot_xid.h                        |  58 ++
- ntoskrnl/xb/bootsetup_native.c                | 844 ++++++++++++++++++
- 10 files changed, 1331 insertions(+), 3 deletions(-)
+ ntoskrnl/xb/bootsetup_native.c                | 847 ++++++++++++++++++
+ 10 files changed, 1334 insertions(+), 3 deletions(-)
  create mode 100644 ntoskrnl/inbv/resources/spiritboot.bmp
  create mode 100644 ntoskrnl/xb/boot_setup.c
  create mode 100644 ntoskrnl/xb/boot_setup.h
@@ -708,10 +708,10 @@ index 00000000..054f911c
 +#endif
 diff --git a/ntoskrnl/xb/bootsetup_native.c b/ntoskrnl/xb/bootsetup_native.c
 new file mode 100644
-index 00000000..77dfc304
+index 00000000..f3003729
 --- /dev/null
 +++ b/ntoskrnl/xb/bootsetup_native.c
-@@ -0,0 +1,844 @@
+@@ -0,0 +1,847 @@
 +/*
 + * PROJECT:     nxkrnl -- a free kernel for the original Xbox
 + * LICENSE:     GPL-2.0-or-later (https://spdx.org/licenses/GPL-2.0-or-later)
@@ -823,8 +823,7 @@ index 00000000..77dfc304
 +    BOOLEAN LowSpeed;
 +    BOOLEAN Ready;
 +    BOOLEAN QuiesceFailed;
-+    BOOLEAN Discovering;
-+    ULONG DiscoveryDeadline;
++    ULONG TransferDeadline;
 +    ULONG Source;
 +} BS_PAD;
 +
@@ -964,8 +963,7 @@ index 00000000..77dfc304
 +    ULONG Deadline;
 +
 +    if (!Pad->Ready || Pad->Regs == NULL || Pad->Dma == NULL ||
-+        (Pad->Discovering &&
-+         (LONG)(BsNowMs() - Pad->DiscoveryDeadline) >= 0))
++        (LONG)(BsNowMs() - Pad->TransferDeadline) >= 0)
 +        return FALSE;
 +    RtlZeroMemory(Pad->Dma->Data, sizeof(Pad->Dma->Data));
 +    if (!sb_ohci_prepare_control(&Pad->Dma->Control, ControlPa, DataPa,
@@ -980,9 +978,8 @@ index 00000000..77dfc304
 +    BsWrite(Pad->Regs, OHCI_COMMAND_STATUS, OHCI_COMMAND_CONTROL_FILLED);
 +
 +    Deadline = BsNowMs() + 100u;
-+    if (Pad->Discovering &&
-+        (LONG)(Pad->DiscoveryDeadline - Deadline) < 0)
-+        Deadline = Pad->DiscoveryDeadline;
++    if ((LONG)(Pad->TransferDeadline - Deadline) < 0)
++        Deadline = Pad->TransferDeadline;
 +    for (;;)
 +    {
 +        KeMemoryBarrier();
@@ -1210,8 +1207,7 @@ index 00000000..77dfc304
 +    ULONG Controller, Port, Ports;
 +
 +    RtlZeroMemory(Pad, sizeof(*Pad));
-+    Pad->Discovering = TRUE;
-+    Pad->DiscoveryDeadline = Deadline;
++    Pad->TransferDeadline = Deadline;
 +    Pad->Allocation = NxMmAllocateContiguousMemoryEx(BS_DMA_BYTES, 0,
 +        BS_DMA_HIGH, PAGE_SIZE, PAGE_READWRITE | PAGE_NOCACHE);
 +    if (Pad->Allocation == NULL)
@@ -1231,7 +1227,7 @@ index 00000000..77dfc304
 +
 +    for (Controller = 0; Controller < RTL_NUMBER_OF(Controllers); ++Controller)
 +    {
-+        if ((LONG)(BsNowMs() - Pad->DiscoveryDeadline) >= 0)
++        if ((LONG)(BsNowMs() - Pad->TransferDeadline) >= 0)
 +            goto fail;
 +        if (!BsOhciStart(Pad, Controllers[Controller]))
 +        {
@@ -1242,14 +1238,13 @@ index 00000000..77dfc304
 +            Pad->Regs = NULL;
 +            continue;
 +        }
-+        if ((LONG)(BsNowMs() - Pad->DiscoveryDeadline) >= 0)
++        if ((LONG)(BsNowMs() - Pad->TransferDeadline) >= 0)
 +            goto fail;
 +        Ports = BsRead(Pad->Regs, OHCI_RH_DESCRIPTOR_A) & 0xffu;
 +        for (Port = 0; Port < Ports; ++Port)
 +        {
 +            if (BsProbeRootPort(Pad, Port))
 +            {
-+                Pad->Discovering = FALSE;
 +                Pad->Source = 1u + Controller * 16u + Port;
 +                return TRUE;
 +            }
@@ -1258,7 +1253,7 @@ index 00000000..77dfc304
 +             * space before examining another root port. */
 +            if (Pad->QuiesceFailed)
 +                goto fail;
-+            if ((LONG)(BsNowMs() - Pad->DiscoveryDeadline) >= 0)
++            if ((LONG)(BsNowMs() - Pad->TransferDeadline) >= 0)
 +                goto fail;
 +            Pad->Ready = FALSE;
 +            if (!BsOhciStop(Pad->Regs))
@@ -1313,12 +1308,12 @@ index 00000000..77dfc304
 +
 +BS_INIT
 +static SbInput
-+BsPadRead(BS_PAD *Pad)
++BsPadRead(BS_PAD *Pad, ULONG Deadline)
 +{
 +    SbInput Input = {0};
 +    uint32_t Buttons;
 +
-+    Input.ms = BsNowMs();
++    Pad->TransferDeadline = Deadline;
 +    Input.source = Pad->Source;
 +    if (Pad->Ready && Pad->Regs != NULL &&
 +        BsControl(Pad, Pad->Address, Pad->MaxPacket, Pad->LowSpeed,
@@ -1327,6 +1322,14 @@ index 00000000..77dfc304
 +    {
 +        Input.buttons = Buttons;
 +        Input.valid = true;
++    }
++    /* Timestamp the completed transfer. A report that started before its
++     * caller's deadline but completed at or after it is not observable. */
++    Input.ms = BsNowMs();
++    if ((LONG)(Input.ms - Deadline) >= 0)
++    {
++        Input.buttons = 0;
++        Input.valid = false;
 +    }
 +    return Input;
 +}
@@ -1517,7 +1520,7 @@ index 00000000..77dfc304
 +    (VOID)BsPadOpen(&Pad, Gate.start + SB_WINDOW_MS);
 +    while (GateResult == SB_GATE_WAIT)
 +    {
-+        Input = BsPadRead(&Pad);
++        Input = BsPadRead(&Pad, Gate.start + SB_WINDOW_MS);
 +        GateResult = sb_boot_gate_poll(&Gate, Input);
 +        if (GateResult == SB_GATE_WAIT)
 +            BsDelayMs(10);
@@ -1536,7 +1539,7 @@ index 00000000..77dfc304
 +    PreviousRow = Setup.row;
 +    while (Setup.state != SB_MENU_CONTINUE && Setup.state != SB_MENU_REBOOT)
 +    {
-+        Input = BsPadRead(&Pad);
++        Input = BsPadRead(&Pad, BsNowMs() + 100u);
 +        sb_setup_input(&Setup, Input, &Store);
 +        if (Setup.state != PreviousState || Setup.row != PreviousRow ||
 +            Input.buttons != PreviousButtons)

@@ -78,14 +78,14 @@ and unchanged-save paths perform no EEPROM writes.
 
 The locked 64 and 128 MiB release builds pass the resident-to-INIT reference
 audit. Relative to the matched 64 MiB main build, the complete menu and static
-splash add 37,888 linked kernel bytes and 7,364 compressed ROM bytes. Most of
+splash add 37,888 linked kernel bytes and 7,348 compressed ROM bytes. Most of
 the linked delta is the discardable 32 KiB image resource. The resulting 256 KiB
-image retains 36,020 bytes in its kernel slot for later work.
+image retains 36,036 bytes in its kernel slot for later work.
 
 The exact 64 MiB splash build is
-`sha256:87ffbe705380eb8396dc9472901d259ce977342e2baf550bd6a4a62e060ab26b`.
+`sha256:69c1f8982b79aec46fc2089cbdee970d09cf39ea423b1d61bb06c73c5777552f`.
 The matching 128 MiB build is
-`sha256:b56fb39d99c48cfd5334c8eb9bc19273f99580110d5ea4e650212e44b7bbc29b`.
+`sha256:da17c1b6d8bdea0c1bb553d4750bf9e441709099a20c2ebf1ad51ebf7f4312cf`.
 The exact final 64 MiB ROM passed both native Steam Deck routes: held X entered
 setup, the lower-right fox remained visible, English changed to Japanese, the
 EEPROM save was verified, and Japanese survived reboot; a separate no-input run

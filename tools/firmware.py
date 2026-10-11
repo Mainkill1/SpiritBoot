@@ -189,7 +189,8 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
             boot_setup = actual_source / "ntoskrnl/xb/bootsetup_native.c"
             if boot_setup.exists():
                 run([sys.executable, str(ROOT / "tools/check_boot_setup_placement.py"),
-                     str(build / "ntoskrnl/xboxkrnl.unstripped.exe")])
+                     str(build / "ntoskrnl/xboxkrnl.unstripped.exe"),
+                     "--final-kernel", str(build / "ntoskrnl/xboxkrnl.exe")])
         image = build / "flash.bin"
         if image.stat().st_size != FLASH_SIZES[variant]:
             raise ValueError(f"invalid flash size: expected {FLASH_SIZES[variant]} bytes")

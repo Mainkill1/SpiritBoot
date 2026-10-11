@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 
 
@@ -17,9 +18,33 @@ def output(command: list[str]) -> str:
     return subprocess.check_output(command, text=True, stderr=subprocess.STDOUT)
 
 
+def section_characteristics(image: Path, wanted: bytes) -> int:
+    data = image.read_bytes()
+    if len(data) < 0x40 or data[:2] != b"MZ":
+        raise SystemExit(f"{image}: not a PE image")
+    pe = struct.unpack_from("<I", data, 0x3c)[0]
+    if pe + 24 > len(data) or data[pe:pe + 4] != b"PE\0\0":
+        raise SystemExit(f"{image}: invalid PE header")
+    count = struct.unpack_from("<H", data, pe + 6)[0]
+    optional_size = struct.unpack_from("<H", data, pe + 20)[0]
+    sections = pe + 24 + optional_size
+    if sections + count * 40 > len(data):
+        raise SystemExit(f"{image}: truncated PE section table")
+    for index in range(count):
+        header = sections + index * 40
+        name = data[header:header + 8].rstrip(b"\0")
+        if name == wanted:
+            return struct.unpack_from("<I", data, header + 36)[0]
+    raise SystemExit(f"{image}: missing {wanted.decode()} section")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("kernel", type=Path)
+    parser.add_argument(
+        "--final-kernel", type=Path, required=True,
+        help="stripped kernel packed into the ROM; .rsrc must be discardable",
+    )
     parser.add_argument("--objdump")
     parser.add_argument("--nm")
     args = parser.parse_args()
@@ -63,9 +88,17 @@ def main() -> None:
         details = "\n".join(f"  0x{address:08x} {name}"
                             for address, name in escaped)
         raise SystemExit("boot-menu symbols escaped INIT:\n" + details)
+
+    resource_flags = section_characteristics(args.final_kernel, b".rsrc")
+    if not resource_flags & 0x02000000:
+        raise SystemExit(
+            f"{args.final_kernel}: .rsrc is resident "
+            f"(flags 0x{resource_flags:08x})"
+        )
     print(
         f"boot-menu placement: {len(found)} symbols in "
-        f"INIT 0x{init[0]:08x}-0x{init[1]:08x}"
+        f"INIT 0x{init[0]:08x}-0x{init[1]:08x}; "
+        f"final .rsrc flags 0x{resource_flags:08x}"
     )
 
 
