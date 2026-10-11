@@ -1,0 +1,787 @@
+From 3b724e7b77aa27306d4999373c9fcec30633e316 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 20:55:56 -0700
+Subject: [PATCH] cache: retain dirty maps across flush failures
+
+---
+ ntoskrnl/xb/mm/cache.c                   | 128 +++++++++---
+ tests/host/cache/check-flush-lifetime.py | 251 +++++++++++++++++++++++
+ tests/host/cache/check-map-lifetime.py   | 218 ++++++++++++++++++++
+ tests/host/cache/check-pin-arguments.py  |   1 +
+ tests/host/cache/check-pin-reuse.py      |   1 +
+ tests/host/metadata/check.py             |   1 +
+ 6 files changed, 577 insertions(+), 23 deletions(-)
+ create mode 100644 tests/host/cache/check-flush-lifetime.py
+ create mode 100644 tests/host/cache/check-map-lifetime.py
+
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index 904b41a7..6f571358 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -99,6 +99,8 @@ typedef struct _NXC_MAP
+     PCACHE_MANAGER_CALLBACKS Callbacks;
+     PVOID LazyWriteContext;
+     BOOLEAN PinAccess;
++    BOOLEAN UninitializePending;
++    PCACHE_UNINITIALIZE_EVENT UninitializeCompleteEvent;
+     LIST_ENTRY MapLinks;            /* in NxcMapList */
+     LIST_ENTRY PrivateList;         /* PRIVATE_CACHE_MAPs */
+     PRIVATE_CACHE_MAP EmbeddedPrivateMap;
+@@ -279,6 +281,9 @@ NxcFlushBlock(
+         NxcWbDepth--;
+     }
+ 
++    if (NT_SUCCESS(Status) && Got != WriteLen)
++        Status = STATUS_DEVICE_DATA_ERROR;
++
+     if (NT_SUCCESS(Status))
+     {
+         Block->Dirty = FALSE;
+@@ -604,7 +609,7 @@ CcInitializeCacheMap(
+ }
+ 
+ /* Flush + drop every block of a map.  Mutex held; IO drops it. */
+-static VOID
++static NTSTATUS
+ NxcFlushMap(
+     IN NXC_MAP *Map,
+     IN LONGLONG Start,
+@@ -638,8 +643,12 @@ restart:
+             Block->Busy = TRUE;
+             BlockStatus = NxcFlushBlock(Block, &Written);   /* unlocks */
+             Block->RefCount--;
+-            if (!NT_SUCCESS(BlockStatus)) Status = BlockStatus;
+             Total += Written;
++            if (!NT_SUCCESS(BlockStatus))
++            {
++                Status = BlockStatus;
++                break;
++            }
+             goto restart;       /* table may have changed while unlocked */
+         }
+ 
+@@ -657,6 +666,56 @@ restart:
+         IoStatus->Status = Status;
+         IoStatus->Information = Total;
+     }
++    return Status;
++}
++
++/* Complete the last-close teardown only after every dirty byte has reached
++ * the backing file and no BCB or in-flight IO still owns a block.  The map's
++ * file-object reference keeps both the section pointers and the paging target
++ * alive while teardown is deferred.  Called with NxcMutex held and returns
++ * with it held, including when object dereference temporarily drops it. */
++static BOOLEAN
++NxcTryFinalizeMapLocked(
++    IN NXC_MAP *Map)
++{
++    PFILE_OBJECT FileObject;
++    PCACHE_UNINITIALIZE_EVENT CompleteEvent;
++
++    if (!Map->UninitializePending || Map->OpenCount != 0 ||
++        !IsListEmpty(&Map->PrivateList))
++        return FALSE;
++
++    for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
++    {
++        NXC_BLOCK *Block = &NxcBlocks[i];
++        if (Block->Map != Map || Block->Data == NULL) continue;
++        if (Block->RefCount != 0 || Block->Busy || Block->Dirty)
++            return FALSE;
++    }
++
++    for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
++    {
++        NXC_BLOCK *Block = &NxcBlocks[i];
++        if (Block->Map != Map || Block->Data == NULL) continue;
++        RemoveEntryList(&Block->LruLink);
++        Block->Map = NULL;
++        Block->Valid = FALSE;
++        Block->Dirty = FALSE;
++    }
++
++    FileObject = Map->FileObject;
++    CompleteEvent = Map->UninitializeCompleteEvent;
++    RemoveEntryList(&Map->MapLinks);
++    if (FileObject->SectionObjectPointer->SharedCacheMap == Map)
++        FileObject->SectionObjectPointer->SharedCacheMap = NULL;
++    ExFreePoolWithTag(Map, NXC_TAG);
++
++    ExReleaseFastMutex(&NxcMutex);
++    if (CompleteEvent != NULL)
++        KeSetEvent(&CompleteEvent->Event, IO_NO_INCREMENT, FALSE);
++    ObDereferenceObject(FileObject);
++    ExAcquireFastMutex(&NxcMutex);
++    return TRUE;
+ }
+ 
+ BOOLEAN
+@@ -668,6 +727,9 @@ CcUninitializeCacheMap(
+ {
+     NXC_MAP *Map;
+     PPRIVATE_CACHE_MAP PrivateMap;
++    NTSTATUS FlushStatus = STATUS_SUCCESS;
++    BOOLEAN CompleteNow = TRUE;
++    BOOLEAN Result = TRUE;
+ 
+     ExAcquireFastMutex(&NxcMutex);
+ 
+@@ -698,27 +760,33 @@ CcUninitializeCacheMap(
+             Map->OpenCount--;
+             if (Map->OpenCount == 0)
+             {
+-                PFILE_OBJECT MapFileObject = Map->FileObject;
+-
+-                /* Last handle: write everything back, then drop the map. */
+-                NxcFlushMap(Map, 0, MAXLONGLONG, FALSE, NULL);
+-                NxcFlushMap(Map, 0, MAXLONGLONG, TRUE, NULL);
+-                RemoveEntryList(&Map->MapLinks);
+-                MapFileObject->SectionObjectPointer->SharedCacheMap = NULL;
+-                ExFreePoolWithTag(Map, NXC_TAG);
+-
+-                ExReleaseFastMutex(&NxcMutex);
+-                ObDereferenceObject(MapFileObject);
+-                ExAcquireFastMutex(&NxcMutex);
++                /* A final close may race a live BCB, and paging IO may fail.
++                 * Retain the map and its file-object reference until a later
++                 * unpin or successful explicit/global flush makes teardown
++                 * safe.  Dirty data is never discarded on a failed close. */
++                Map->UninitializePending = TRUE;
++                ASSERT(Map->UninitializeCompleteEvent == NULL ||
++                       UninitializeCompleteEvent == NULL ||
++                       Map->UninitializeCompleteEvent ==
++                           UninitializeCompleteEvent);
++                if (Map->UninitializeCompleteEvent == NULL)
++                    Map->UninitializeCompleteEvent =
++                        UninitializeCompleteEvent;
++                CompleteNow = FALSE;
++                FlushStatus = NxcFlushMap(Map, 0, MAXLONGLONG, FALSE, NULL);
++                if (NT_SUCCESS(FlushStatus))
++                    NxcTryFinalizeMapLocked(Map);
++                else
++                    Result = FALSE;
+             }
+         }
+     }
+ 
+     ExReleaseFastMutex(&NxcMutex);
+ 
+-    if (UninitializeCompleteEvent)
++    if (CompleteNow && UninitializeCompleteEvent)
+         KeSetEvent(&UninitializeCompleteEvent->Event, IO_NO_INCREMENT, FALSE);
+-    return TRUE;
++    return Result;
+ }
+ 
+ VOID
+@@ -1329,6 +1397,7 @@ CcUnpinData(
+     IN PVOID Bcb)
+ {
+     NXC_BCB *iBcb = CONTAINING_RECORD(Bcb, NXC_BCB, PFCB);
++    NXC_MAP *Map = iBcb->Map;
+ 
+     if (iBcb->PinCount > 0)
+         iBcb->PinCount--;
+@@ -1337,6 +1406,7 @@ CcUnpinData(
+     {
+         ExAcquireFastMutex(&NxcMutex);
+         NxcPutBlock(iBcb->Block);
++        NxcTryFinalizeMapLocked(Map);
+         if (NxcCacheBcbLocked(iBcb))
+             iBcb = NULL;
+         ExReleaseFastMutex(&NxcMutex);
+@@ -1434,9 +1504,12 @@ CcFlushCache(
+     Map = SectionObjectPointers->SharedCacheMap;
+     if (Map != NULL)
+     {
++        NTSTATUS Status;
+         Start = FileOffset != NULL ? FileOffset->QuadPart : 0;
+         End = FileOffset != NULL ? Start + Length : MAXLONGLONG;
+-        NxcFlushMap(Map, Start, End, FALSE, IoStatus);
++        Status = NxcFlushMap(Map, Start, End, FALSE, IoStatus);
++        if (NT_SUCCESS(Status))
++            NxcTryFinalizeMapLocked(Map);
+     }
+     ExReleaseFastMutex(&NxcMutex);
+ }
+@@ -1464,26 +1537,36 @@ CcIsThereDirtyData(
+ }
+ 
+ /* Flush absolutely everything (shutdown, power-down, lazy-writer waits). */
+-static VOID
++static NTSTATUS
+ NxcFlushAll(VOID)
+ {
+     PLIST_ENTRY Entry;
++    NTSTATUS Status = STATUS_SUCCESS;
+ 
+     ExAcquireFastMutex(&NxcMutex);
+ restart:
+     for (Entry = NxcMapList.Flink; Entry != &NxcMapList; Entry = Entry->Flink)
+     {
+         NXC_MAP *Map = CONTAINING_RECORD(Entry, NXC_MAP, MapLinks);
++        if (Map->UninitializePending && NxcTryFinalizeMapLocked(Map))
++            goto restart;
+         for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
+         {
+             if (NxcBlocks[i].Map == Map && NxcBlocks[i].Dirty)
+             {
+-                NxcFlushMap(Map, 0, MAXLONGLONG, FALSE, NULL);
++                Status = NxcFlushMap(Map, 0, MAXLONGLONG, FALSE, NULL);
++                if (!NT_SUCCESS(Status))
++                {
++                    ExReleaseFastMutex(&NxcMutex);
++                    return Status;
++                }
++                NxcTryFinalizeMapLocked(Map);
+                 goto restart;   /* list may have changed while unlocked */
+             }
+         }
+     }
+     ExReleaseFastMutex(&NxcMutex);
++    return Status;
+ }
+ 
+ NTSTATUS
+@@ -1491,8 +1574,7 @@ NTAPI
+ CcWaitForCurrentLazyWriterActivity(VOID)
+ {
+     /* No lazy writer: the equivalent guarantee is everything flushed. */
+-    NxcFlushAll();
+-    return STATUS_SUCCESS;
++    return NxcFlushAll();
+ }
+ 
+ VOID
+@@ -1513,9 +1595,9 @@ CcRosFlushDirtyPages(
+     UNREFERENCED_PARAMETER(Target);
+     UNREFERENCED_PARAMETER(Wait);
+     UNREFERENCED_PARAMETER(CalledFromLazy);
+-    NxcFlushAll();
++    NTSTATUS Status = NxcFlushAll();
+     if (Count) *Count = 0;
+-    return STATUS_SUCCESS;
++    return Status;
+ }
+ 
+ LARGE_INTEGER
+diff --git a/tests/host/cache/check-flush-lifetime.py b/tests/host/cache/check-flush-lifetime.py
+new file mode 100644
+index 00000000..0c3626a0
+--- /dev/null
++++ b/tests/host/cache/check-flush-lifetime.py
+@@ -0,0 +1,251 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Fault inject the production cache flush and finalization bodies."""
++
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++source = (root / "ntoskrnl/xb/mm/cache.c").read_text()
++flush_block = extract.function(source, "NxcFlushBlock")
++flush_map = extract.function(source, "NxcFlushMap")
++
++shim = r'''
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef int32_t NTSTATUS;
++typedef unsigned int ULONG;
++typedef long long LONGLONG;
++typedef size_t SIZE_T;
++typedef SIZE_T *PSIZE_T;
++typedef int BOOLEAN;
++typedef void *PVOID;
++typedef void VOID;
++#define IN
++#define OUT
++#define OPTIONAL
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(status) ((status) >= 0)
++#define STATUS_SUCCESS ((NTSTATUS)0)
++#define STATUS_DEVICE_DATA_ERROR ((NTSTATUS)0xc000009c)
++#define PAGE_SIZE 4
++#define NXC_BLOCK_SIZE 16
++#define NXC_TOTAL_BLOCKS 3
++#define MAXLONGLONG INT64_MAX
++#define ROUND_UP(value, align) (((value) + (align) - 1) & ~((align) - 1))
++#define min(a, b) ((a) < (b) ? (a) : (b))
++#define ASSERT assert
++
++typedef struct { LONGLONG QuadPart; } LARGE_INTEGER;
++typedef struct {
++    NTSTATUS Status;
++    SIZE_T Information;
++} IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
++typedef struct _LIST_ENTRY {
++    struct _LIST_ENTRY *Flink;
++    struct _LIST_ENTRY *Blink;
++} LIST_ENTRY;
++typedef struct {
++    void *FileObject;
++    LARGE_INTEGER FileSize;
++    LARGE_INTEGER ValidDataLength;
++} NXC_MAP;
++typedef struct {
++    NXC_MAP *Map;
++    LONGLONG Offset;
++    unsigned char *Data;
++    ULONG RefCount;
++    BOOLEAN Valid;
++    BOOLEAN Dirty;
++    BOOLEAN Busy;
++    LIST_ENTRY LruLink;
++} NXC_BLOCK;
++
++static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
++static int NxcMutex, held;
++static ULONG CcDataFlushes, CcLazyWriteIos, CcLazyWritePages, NxcWbDepth;
++static NTSTATUS io_status;
++static SIZE_T io_bytes;
++static unsigned io_calls;
++
++static void ExReleaseFastMutex(int *mutex)
++{
++    (void)mutex;
++    assert(held);
++    held = 0;
++}
++
++static void ExAcquireFastMutex(int *mutex)
++{
++    (void)mutex;
++    assert(!held);
++    held = 1;
++}
++
++static NTSTATUS NxcPagingIo(void *file, void *buffer, LONGLONG offset,
++                           ULONG length, BOOLEAN write, SIZE_T *transferred)
++{
++    (void)file;
++    (void)buffer;
++    (void)offset;
++    (void)length;
++    assert(write && !held);
++    ++io_calls;
++    *transferred = io_bytes;
++    return io_status;
++}
++
++static void NxcShortWait(void)
++{
++    assert(!"unexpected busy wait");
++}
++
++static void RemoveEntryList(LIST_ENTRY *entry)
++{
++    entry->Blink->Flink = entry->Flink;
++    entry->Flink->Blink = entry->Blink;
++}
++'''
++
++cases = r'''
++static unsigned char bytes[NXC_TOTAL_BLOCKS][NXC_BLOCK_SIZE];
++static NXC_MAP map;
++
++static void setup(void)
++{
++    memset(&map, 0, sizeof(map));
++    memset(NxcBlocks, 0, sizeof(NxcBlocks));
++    map.FileObject = &map;
++    map.FileSize.QuadPart = NXC_BLOCK_SIZE * NXC_TOTAL_BLOCKS;
++    held = 1;
++    io_status = STATUS_SUCCESS;
++    io_bytes = NXC_BLOCK_SIZE;
++    io_calls = CcDataFlushes = CcLazyWriteIos = CcLazyWritePages = 0;
++    NxcWbDepth = 0;
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i) {
++        NxcBlocks[i].Map = &map;
++        NxcBlocks[i].Offset = i * NXC_BLOCK_SIZE;
++        NxcBlocks[i].Data = bytes[i];
++        NxcBlocks[i].RefCount = 1;
++        NxcBlocks[i].Valid = TRUE;
++        NxcBlocks[i].Dirty = TRUE;
++        NxcBlocks[i].Busy = TRUE;
++    }
++}
++
++static void test_block_completions(void)
++{
++    SIZE_T written;
++    NTSTATUS status;
++
++    setup();
++    status = NxcFlushBlock(&NxcBlocks[0], &written);
++    assert(status == STATUS_SUCCESS && written == NXC_BLOCK_SIZE);
++    assert(!NxcBlocks[0].Dirty && !NxcBlocks[0].Busy);
++    assert(CcDataFlushes == 1 && CcLazyWriteIos == 1 &&
++           CcLazyWritePages == NXC_BLOCK_SIZE / PAGE_SIZE);
++
++    setup();
++    io_bytes = NXC_BLOCK_SIZE / 2;
++    status = NxcFlushBlock(&NxcBlocks[0], &written);
++    assert(status == STATUS_DEVICE_DATA_ERROR && written == io_bytes);
++    assert(NxcBlocks[0].Dirty && !NxcBlocks[0].Busy);
++    assert(CcDataFlushes == 0 && CcLazyWriteIos == 0 && CcLazyWritePages == 0);
++
++    setup();
++    io_status = (NTSTATUS)0xc0000185;
++    io_bytes = 0;
++    status = NxcFlushBlock(&NxcBlocks[0], &written);
++    assert(status == io_status && written == 0);
++    assert(NxcBlocks[0].Dirty && !NxcBlocks[0].Busy);
++}
++
++static unsigned flush_calls;
++static NTSTATUS flush_status;
++static SIZE_T flush_bytes;
++
++static NTSTATUS FakeFlushBlock(NXC_BLOCK *block, SIZE_T *written)
++{
++    ++flush_calls;
++    assert(flush_calls <= NXC_TOTAL_BLOCKS);
++    block->Busy = FALSE;
++    *written = flush_bytes;
++    if (NT_SUCCESS(flush_status))
++        block->Dirty = FALSE;
++    return flush_status;
++}
++
++#define NxcFlushBlock FakeFlushBlock
++'''
++
++# The map fixture needs a stubbed block completion, while the block fixture
++# above exercises the real production completion body.
++flush_map_stubbed = flush_map.replace("NxcFlushBlock", "FakeFlushBlock")
++
++map_cases = r'''
++static void test_map_error_is_bounded(void)
++{
++    IO_STATUS_BLOCK iosb;
++    NTSTATUS status;
++
++    setup();
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i) {
++        NxcBlocks[i].RefCount = 0;
++        NxcBlocks[i].Busy = FALSE;
++    }
++    flush_calls = 0;
++    flush_status = (NTSTATUS)0xc0000185;
++    flush_bytes = 0;
++    status = NxcFlushMap(&map, 0, MAXLONGLONG, FALSE, &iosb);
++    assert(status == flush_status && iosb.Status == flush_status);
++    assert(flush_calls == 1 && NxcBlocks[0].Dirty);
++    assert(!NxcBlocks[0].Busy && NxcBlocks[0].RefCount == 0);
++
++    setup();
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i) {
++        NxcBlocks[i].RefCount = 0;
++        NxcBlocks[i].Busy = FALSE;
++    }
++    flush_calls = 0;
++    flush_status = STATUS_SUCCESS;
++    flush_bytes = NXC_BLOCK_SIZE;
++    status = NxcFlushMap(&map, 0, MAXLONGLONG, FALSE, &iosb);
++    assert(status == STATUS_SUCCESS && iosb.Status == STATUS_SUCCESS);
++    assert(flush_calls == NXC_TOTAL_BLOCKS);
++    assert(iosb.Information == NXC_TOTAL_BLOCKS * NXC_BLOCK_SIZE);
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i)
++        assert(!NxcBlocks[i].Dirty && !NxcBlocks[i].Busy &&
++               NxcBlocks[i].RefCount == 0);
++}
++
++int main(void)
++{
++    test_block_completions();
++    test_map_error_is_bounded();
++    puts("cache flush: full, short, failed and bounded map completion PASS");
++    return 0;
++}
++'''
++
++fixture = out / "flush-lifetime.c"
++fixture.write_text(shim + flush_block + cases + flush_map_stubbed + map_cases)
++binary = out / "flush-lifetime"
++subprocess.run([
++    "cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
++    str(fixture), "-o", str(binary)
++], check=True)
++subprocess.run([str(binary)], check=True)
+diff --git a/tests/host/cache/check-map-lifetime.py b/tests/host/cache/check-map-lifetime.py
+new file mode 100644
+index 00000000..68368dd8
+--- /dev/null
++++ b/tests/host/cache/check-map-lifetime.py
+@@ -0,0 +1,218 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production deferred cache-map finalizer."""
++
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++source = (root / "ntoskrnl/xb/mm/cache.c").read_text()
++body = extract.function(source, "NxcTryFinalizeMapLocked")
++uninitialize = extract.function(source, "CcUninitializeCacheMap")
++assert "FlushStatus = NxcFlushMap" in uninitialize
++assert "Result = FALSE" in uninitialize
++assert "NxcFlushMap(Map, 0, MAXLONGLONG, TRUE" not in uninitialize
++
++shim = r'''
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef unsigned int ULONG;
++typedef int BOOLEAN;
++typedef void VOID;
++#define IN
++#define TRUE 1
++#define FALSE 0
++#define NXC_TOTAL_BLOCKS 2
++#define NXC_TAG 0
++#define IO_NO_INCREMENT 0
++#define ASSERT assert
++
++typedef struct _LIST_ENTRY {
++    struct _LIST_ENTRY *Flink;
++    struct _LIST_ENTRY *Blink;
++} LIST_ENTRY;
++typedef struct { int signaled; } EVENT;
++typedef struct { EVENT Event; } CACHE_UNINITIALIZE_EVENT,
++    *PCACHE_UNINITIALIZE_EVENT;
++typedef struct _SECTION_OBJECT_POINTERS {
++    void *SharedCacheMap;
++} SECTION_OBJECT_POINTERS;
++typedef struct _FILE_OBJECT {
++    SECTION_OBJECT_POINTERS *SectionObjectPointer;
++} FILE_OBJECT, *PFILE_OBJECT;
++typedef struct _NXC_MAP {
++    ULONG OpenCount;
++    BOOLEAN UninitializePending;
++    PCACHE_UNINITIALIZE_EVENT UninitializeCompleteEvent;
++    PFILE_OBJECT FileObject;
++    LIST_ENTRY MapLinks;
++    LIST_ENTRY PrivateList;
++} NXC_MAP;
++typedef struct _NXC_BLOCK {
++    NXC_MAP *Map;
++    unsigned char *Data;
++    ULONG RefCount;
++    BOOLEAN Valid;
++    BOOLEAN Dirty;
++    BOOLEAN Busy;
++    LIST_ENTRY LruLink;
++} NXC_BLOCK;
++
++static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
++static int NxcMutex, held, freed, dereferenced;
++
++static int IsListEmpty(const LIST_ENTRY *head)
++{
++    return head->Flink == head;
++}
++static void RemoveEntryList(LIST_ENTRY *entry)
++{
++    entry->Blink->Flink = entry->Flink;
++    entry->Flink->Blink = entry->Blink;
++}
++static void ExFreePoolWithTag(void *pointer, int tag)
++{
++    (void)pointer;
++    (void)tag;
++    assert(held);
++    ++freed;
++}
++static void ExReleaseFastMutex(int *mutex)
++{
++    (void)mutex;
++    assert(held);
++    held = 0;
++}
++static void ExAcquireFastMutex(int *mutex)
++{
++    (void)mutex;
++    assert(!held);
++    held = 1;
++}
++static void KeSetEvent(EVENT *event, int increment, int wait)
++{
++    (void)increment;
++    (void)wait;
++    assert(!held);
++    event->signaled = 1;
++}
++static void ObDereferenceObject(PFILE_OBJECT file)
++{
++    (void)file;
++    assert(!held);
++    ++dereferenced;
++}
++'''
++
++cases = r'''
++static LIST_ENTRY map_list;
++static SECTION_OBJECT_POINTERS section;
++static FILE_OBJECT file;
++static CACHE_UNINITIALIZE_EVENT complete;
++static NXC_MAP map;
++static unsigned char data[NXC_TOTAL_BLOCKS];
++
++static void link_tail(LIST_ENTRY *head, LIST_ENTRY *entry)
++{
++    entry->Blink = head->Blink;
++    entry->Flink = head;
++    head->Blink->Flink = entry;
++    head->Blink = entry;
++}
++
++static void setup(void)
++{
++    memset(&map, 0, sizeof(map));
++    memset(NxcBlocks, 0, sizeof(NxcBlocks));
++    memset(&complete, 0, sizeof(complete));
++    map_list.Flink = map_list.Blink = &map_list;
++    map.PrivateList.Flink = map.PrivateList.Blink = &map.PrivateList;
++    link_tail(&map_list, &map.MapLinks);
++    section.SharedCacheMap = &map;
++    file.SectionObjectPointer = &section;
++    map.FileObject = &file;
++    map.UninitializePending = TRUE;
++    map.UninitializeCompleteEvent = &complete;
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i) {
++        NxcBlocks[i].Map = &map;
++        NxcBlocks[i].Data = &data[i];
++        NxcBlocks[i].Valid = TRUE;
++        NxcBlocks[i].LruLink.Flink = NxcBlocks[i].LruLink.Blink =
++            &NxcBlocks[i].LruLink;
++    }
++    held = 1;
++    freed = dereferenced = 0;
++}
++
++static void retained(void)
++{
++    assert(section.SharedCacheMap == &map);
++    assert(freed == 0 && dereferenced == 0 && held);
++    assert(!complete.Event.signaled);
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i)
++        assert(NxcBlocks[i].Map == &map && NxcBlocks[i].Valid);
++}
++
++int main(void)
++{
++    setup();
++    map.UninitializePending = FALSE;
++    assert(!NxcTryFinalizeMapLocked(&map));
++    retained();
++
++    setup();
++    map.OpenCount = 1;
++    assert(!NxcTryFinalizeMapLocked(&map));
++    retained();
++
++    setup();
++    NxcBlocks[0].Dirty = TRUE;
++    assert(!NxcTryFinalizeMapLocked(&map));
++    retained();
++
++    setup();
++    NxcBlocks[0].RefCount = 1;
++    assert(!NxcTryFinalizeMapLocked(&map));
++    retained();
++
++    setup();
++    NxcBlocks[0].Busy = TRUE;
++    assert(!NxcTryFinalizeMapLocked(&map));
++    retained();
++
++    setup();
++    assert(NxcTryFinalizeMapLocked(&map));
++    assert(section.SharedCacheMap == NULL);
++    assert(freed == 1 && dereferenced == 1 && held);
++    assert(complete.Event.signaled);
++    assert(map_list.Flink == &map_list && map_list.Blink == &map_list);
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i)
++        assert(NxcBlocks[i].Map == NULL && !NxcBlocks[i].Valid &&
++               !NxcBlocks[i].Dirty);
++
++    puts("cache map lifetime: failed/active maps retained; clean idle map finalized PASS");
++    return 0;
++}
++'''
++
++fixture = out / "map-lifetime.c"
++binary = out / "map-lifetime"
++fixture.write_text(shim + body + cases)
++subprocess.run([
++    "cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
++    str(fixture), "-o", str(binary)
++], check=True)
++subprocess.run([str(binary)], check=True)
+diff --git a/tests/host/cache/check-pin-arguments.py b/tests/host/cache/check-pin-arguments.py
+index d3dda494..51d07cd6 100644
+--- a/tests/host/cache/check-pin-arguments.py
++++ b/tests/host/cache/check-pin-arguments.py
+@@ -98,6 +98,7 @@ static NXC_BLOCK *NxcGetBlock(NXC_MAP *map,LONGLONG off,BOOLEAN wait) {
+  ++block.RefCount; return &block;
+ }
+ static void NxcPutBlock(NXC_BLOCK *b) { assert(held && b->RefCount); --b->RefCount; ++block_puts; }
++static BOOLEAN NxcTryFinalizeMapLocked(NXC_MAP *map) { (void)map; return FALSE; }
+ static LONG InterlockedDecrement(LONG *p) { return __atomic_sub_fetch(p,1,__ATOMIC_SEQ_CST); }
+ static LONG InterlockedIncrement(LONG *p) { return __atomic_add_fetch(p,1,__ATOMIC_SEQ_CST); }
+ void CcUnpinData(PVOID);
+diff --git a/tests/host/cache/check-pin-reuse.py b/tests/host/cache/check-pin-reuse.py
+index bc3b35fb..a84b6267 100644
+--- a/tests/host/cache/check-pin-reuse.py
++++ b/tests/host/cache/check-pin-reuse.py
+@@ -98,6 +98,7 @@ static NXC_BLOCK *NxcGetBlock(NXC_MAP *map,LONGLONG off,BOOLEAN wait) {
+  ++block.RefCount; return &block;
+ }
+ static void NxcPutBlock(NXC_BLOCK *b) { assert(held && b->RefCount); --b->RefCount; ++block_puts; }
++static BOOLEAN NxcTryFinalizeMapLocked(NXC_MAP *map) { (void)map; return FALSE; }
+ static LONG InterlockedDecrement(LONG *p) { return __atomic_sub_fetch(p,1,__ATOMIC_SEQ_CST); }
+ static LONG InterlockedIncrement(LONG *p) { return __atomic_add_fetch(p,1,__ATOMIC_SEQ_CST); }
+ void CcUnpinData(PVOID);
+diff --git a/tests/host/metadata/check.py b/tests/host/metadata/check.py
+index 0199d5e7..bda9c1ee 100644
+--- a/tests/host/metadata/check.py
++++ b/tests/host/metadata/check.py
+@@ -48,6 +48,7 @@ typedef struct { FILE_OBJECT *FATFileObject; struct { ULONG FatType; } FatInfo;
+ #define STATUS_SUCCESS 0
+ #define STATUS_END_OF_FILE -2
+ #define STATUS_DISK_CORRUPT_ERROR -3
++#define STATUS_DEVICE_DATA_ERROR -4
+ #define FCB_IS_DIRTY 1
+ #define FCB_IS_FAT 4
+ #define FCB_IS_VOLUME 8
+-- 
+2.47.3

@@ -54,7 +54,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 76376508f92d2cc37c61b5e40fc47eb2e41daf5c
+            test "$actual_tree" = f5ec1c687c3a54d0347d86a170691a92b0727321
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -82,6 +82,8 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-reuse.py" "$output/cache-pin-reuse" >"$output/cache-pin-reuse.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-writeback.py" "$output/cache-writeback" >"$output/cache-writeback.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-shrink.py" "$output/cache-shrink" >"$output/cache-shrink.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/cache/check-flush-lifetime.py" "$output/cache-flush-lifetime" >"$output/cache-flush-lifetime.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/cache/check-map-lifetime.py" "$output/cache-map-lifetime" >"$output/cache-map-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-fatx32.py" "$output/fatx32" >"$output/fatx32.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-mount-resources.py" "$output/fatx-mount-resources" >"$output/fatx-mount-resources.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-name-bounds.py" "$output/fatx-name-bounds" >"$output/fatx-name-bounds.log" 2>&1
@@ -131,7 +133,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '76376508f92d2cc37c61b5e40fc47eb2e41daf5c', result
+          assert result['source_tree'] == 'f5ec1c687c3a54d0347d86a170691a92b0727321', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
