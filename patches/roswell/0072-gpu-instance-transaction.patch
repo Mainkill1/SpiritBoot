@@ -320,7 +320,7 @@ new file mode 100644
 index 00000000..b1f7b282
 --- /dev/null
 +++ b/tests/xbe/gpu-instance/main.c
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,127 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + * Finite public-ABI ownership test. No display initialization or GPU writes:
 + * the guest temporarily owns instance pages, then shuts down via the SMC.
@@ -378,7 +378,13 @@ index 00000000..b1f7b282
 +    check(before != UINT32_MAX, "public available-page query succeeds");
 +    base = MmClaimGpuInstanceMemory(16384, &padding);
 +    check(base == NULL, "unreclaimable owner rejects growth");
-+    check(available() == before, "failed growth preserves free count");
++    duplicate = pin(0x03fec000);
++    check(duplicate == (PVOID)0x83fec000,
++          "failed growth leaves unclaimed frame reusable");
++    if (duplicate != NULL) {
++        MmFreeContiguousMemory(duplicate);
++        duplicate = NULL;
++    }
 +    check(bytes(held, 0xa5), "failed growth preserves owner bytes");
 +    check(MmClaimGpuInstanceMemory(UINT32_MAX, NULL) == (PVOID)0x83ff0000,
 +          "query sentinel remains read-only fixed-base operation");
