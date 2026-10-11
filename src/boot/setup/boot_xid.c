@@ -94,6 +94,7 @@ bool sb_xid_decode_report(const uint8_t *r, size_t bytes, uint32_t *buttons)
         return false;
     digital = (uint16_t)r[2] | ((uint16_t)r[3] << 8);
     if (digital & 0x0010u) out |= SB_START;
+    if (digital & 0x0020u) out |= SB_BACK;
     if (digital & 0x0001u) out |= SB_UP;
     if (digital & 0x0002u) out |= SB_DOWN;
     if (digital & 0x0004u) out |= SB_LEFT;
