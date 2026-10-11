@@ -54,7 +54,7 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = d648430c2ad686c2100c7833eeda87ec080b9c76
+            test "$actual_tree" = f07a93d8167fc818916a449f9ad6226fdcde044a
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -68,6 +68,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/bootvid-lifetime/check.py" "$output/bootvid-lifetime" >"$output/bootvid-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/pciide-pnp-lifetime/check.py" "$output/pciide-pnp-lifetime" >"$output/pciide-pnp-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/contig-retry/check.py" "$output/contig-retry" >"$output/contig-retry.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/gpu-instance/check.py" "$output/gpu-instance" >"$output/gpu-instance.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-overwrite.py" "$output/fatx-overwrite" >"$output/fatx-overwrite.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-directory-slots.py" "$output/fatx-directory-slots" >"$output/fatx-directory-slots.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-image/check.py" >"$output/boot-image.log" 2>&1
@@ -122,7 +123,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'd648430c2ad686c2100c7833eeda87ec080b9c76', result
+          assert result['source_tree'] == 'f07a93d8167fc818916a449f9ad6226fdcde044a', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
@@ -225,6 +226,7 @@ jobs:
             artifacts/xdvdfs-related-directory-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/critical-section-contention-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/io-apc-order-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/gpu-instance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/performance-counter-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/io-completion-probe-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/thread-base-priority-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
