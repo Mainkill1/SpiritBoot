@@ -1,0 +1,310 @@
+From 6bb45e44f794d5bca131e27e9ad2e09627f274b4 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 19:44:48 -0700
+Subject: [PATCH] vfatfs: skip duplicate aliased name comparison
+
+---
+ drivers/filesystems/vfatfs/fcb.c     |   4 +-
+ tests/host/fatx/check-name-lookup.py | 275 +++++++++++++++++++++++++++
+ 2 files changed, 278 insertions(+), 1 deletion(-)
+ create mode 100644 tests/host/fatx/check-name-lookup.py
+
+diff --git a/drivers/filesystems/vfatfs/fcb.c b/drivers/filesystems/vfatfs/fcb.c
+index 19d2b30..649edde 100644
+--- a/drivers/filesystems/vfatfs/fcb.c
++++ b/drivers/filesystems/vfatfs/fcb.c
+@@ -880,7 +880,9 @@ vfatDirFindFile(
+                 continue;
+             }
+             FoundLong = RtlEqualUnicodeString(FileToFindU, &DirContext.LongNameU, TRUE);
+-            if (FoundLong == FALSE)
++            if (FoundLong == FALSE &&
++                (DirContext.LongNameU.Buffer != DirContext.ShortNameU.Buffer ||
++                 DirContext.LongNameU.Length != DirContext.ShortNameU.Length))
+             {
+                 FoundShort = RtlEqualUnicodeString(FileToFindU, &DirContext.ShortNameU, TRUE);
+             }
+diff --git a/tests/host/fatx/check-name-lookup.py b/tests/host/fatx/check-name-lookup.py
+new file mode 100644
+index 0000000..69178fd
+--- /dev/null
++++ b/tests/host/fatx/check-name-lookup.py
+@@ -0,0 +1,275 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production vfatDirFindFile name-comparison path."""
++
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++
++source = (root / "drivers/filesystems/vfatfs/fcb.c").read_text()
++body = extract.function(source, "vfatDirFindFile")
++
++shim = r'''
++#include <assert.h>
++#include <ctype.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef int32_t NTSTATUS;
++typedef uint8_t BOOLEAN;
++typedef uint16_t USHORT;
++typedef uint16_t WCHAR;
++typedef void *PVOID;
++typedef struct {
++    USHORT Length;
++    USHORT MaximumLength;
++    WCHAR *Buffer;
++} UNICODE_STRING, *PUNICODE_STRING;
++typedef struct {
++    UNICODE_STRING PathNameU;
++    unsigned id;
++} VFATFCB, *PVFATFCB;
++typedef struct {
++    int fatx;
++} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
++typedef struct {
++    unsigned DirIndex;
++    unsigned StartIndex;
++    UNICODE_STRING LongNameU;
++    UNICODE_STRING ShortNameU;
++    struct { int volume; } DirEntry;
++    PDEVICE_EXTENSION DeviceExt;
++} VFAT_DIRENTRY_CONTEXT;
++
++#define TRUE 1
++#define FALSE 0
++#define STATUS_SUCCESS ((NTSTATUS)0)
++#define STATUS_NO_MORE_ENTRIES ((NTSTATUS)0x8000001a)
++#define STATUS_OBJECT_NAME_NOT_FOUND ((NTSTATUS)0xc0000034)
++#define STATUS_FILE_CORRUPT_ERROR ((NTSTATUS)0xc0000102)
++#define NT_SUCCESS(s) ((NTSTATUS)(s) >= 0)
++#define ENTRY_VOLUME(fatx, entry) ((void)(fatx), (entry)->volume)
++#define ASSERT assert
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define VFAT_BREAK_ON_CORRUPTION 1
++static struct { unsigned Flags; } global_data;
++#define VfatGlobalData (&global_data)
++
++typedef struct {
++    const char *long_name;
++    const char *short_name;
++    BOOLEAN alias;
++    BOOLEAN volume;
++    NTSTATUS status;
++} TEST_ENTRY;
++
++static const TEST_ENTRY *test_entries;
++static unsigned test_entry_count;
++static unsigned test_cursor;
++static unsigned comparisons;
++static unsigned unpins;
++static VFATFCB found_fcbs[1001];
++
++static USHORT ascii_to_unicode(const char *source, WCHAR *dest,
++                               USHORT capacity)
++{
++    USHORT length = 0;
++    while (*source) {
++        assert(length < capacity);
++        dest[length++] = (unsigned char)*source++;
++    }
++    return (USHORT)(length * sizeof(WCHAR));
++}
++
++static BOOLEAN vfatVolumeIsFatX(PDEVICE_EXTENSION device)
++{
++    return device->fatx;
++}
++
++static NTSTATUS VfatGetNextDirEntry(
++    PDEVICE_EXTENSION device, PVOID *context, PVOID *page,
++    PVFATFCB directory, VFAT_DIRENTRY_CONTEXT *entry, BOOLEAN first)
++{
++    const TEST_ENTRY *next;
++    WCHAR *long_buffer = entry->LongNameU.Buffer;
++    USHORT long_capacity = entry->LongNameU.MaximumLength / sizeof(WCHAR);
++    WCHAR *short_buffer = entry->ShortNameU.Buffer;
++    USHORT short_capacity = entry->ShortNameU.MaximumLength / sizeof(WCHAR);
++    (void)device;
++    (void)context;
++    (void)page;
++    (void)directory;
++    (void)first;
++    if (test_cursor == test_entry_count)
++        return STATUS_NO_MORE_ENTRIES;
++    next = &test_entries[test_cursor++];
++    if (!NT_SUCCESS(next->status))
++        return next->status;
++    entry->DirEntry.volume = next->volume;
++    entry->LongNameU.Buffer = long_buffer;
++    entry->LongNameU.MaximumLength = (USHORT)(long_capacity * sizeof(WCHAR));
++    entry->LongNameU.Length = ascii_to_unicode(next->long_name, long_buffer,
++                                               long_capacity);
++    if (next->alias) {
++        entry->ShortNameU = entry->LongNameU;
++    } else {
++        entry->ShortNameU.Buffer = short_buffer;
++        entry->ShortNameU.MaximumLength =
++            (USHORT)(short_capacity * sizeof(WCHAR));
++        entry->ShortNameU.Length = ascii_to_unicode(next->short_name,
++                                                    short_buffer,
++                                                    short_capacity);
++    }
++    return STATUS_SUCCESS;
++}
++
++static BOOLEAN RtlEqualUnicodeString(const UNICODE_STRING *left,
++                                     const UNICODE_STRING *right,
++                                     BOOLEAN case_insensitive)
++{
++    unsigned chars;
++    ++comparisons;
++    assert(case_insensitive);
++    if (left->Length != right->Length)
++        return FALSE;
++    chars = left->Length / sizeof(WCHAR);
++    for (unsigned i = 0; i < chars; ++i) {
++        if (tolower((unsigned char)left->Buffer[i]) !=
++            tolower((unsigned char)right->Buffer[i]))
++            return FALSE;
++    }
++    return TRUE;
++}
++
++static NTSTATUS vfatMakeFCBFromDirEntry(
++    PDEVICE_EXTENSION device, PVFATFCB directory,
++    VFAT_DIRENTRY_CONTEXT *entry, PVFATFCB *found)
++{
++    (void)device;
++    (void)directory;
++    *found = &found_fcbs[entry->DirIndex];
++    (*found)->id = entry->DirIndex;
++    return STATUS_SUCCESS;
++}
++
++static void CcUnpinData(PVOID context)
++{
++    (void)context;
++    ++unpins;
++}
++'''
++
++cases = r'''
++static UNICODE_STRING make_name(const char *name, WCHAR *buffer,
++                                USHORT capacity)
++{
++    UNICODE_STRING result = {
++        .Length = ascii_to_unicode(name, buffer, capacity),
++        .MaximumLength = (USHORT)(capacity * sizeof(WCHAR)),
++        .Buffer = buffer,
++    };
++    return result;
++}
++
++static NTSTATUS find(PDEVICE_EXTENSION device, const TEST_ENTRY *entries,
++                     unsigned count, const char *name, PVFATFCB *found)
++{
++    VFATFCB directory = {0};
++    WCHAR name_buffer[64];
++    UNICODE_STRING wanted = make_name(name, name_buffer, 64);
++    test_entries = entries;
++    test_entry_count = count;
++    test_cursor = comparisons = unpins = 0;
++    *found = NULL;
++    return vfatDirFindFile(device, &directory, &wanted, found);
++}
++
++static void alias_misses(unsigned count)
++{
++    TEST_ENTRY entries[1000];
++    DEVICE_EXTENSION device = {.fatx = TRUE};
++    PVFATFCB found;
++    assert(count <= 1000);
++    for (unsigned i = 0; i < count; ++i) {
++        entries[i] = (TEST_ENTRY){"other", "ignored", TRUE, FALSE,
++                                  STATUS_SUCCESS};
++    }
++    assert(find(&device, entries, count, "target", &found) ==
++           STATUS_OBJECT_NAME_NOT_FOUND);
++    assert(found == NULL);
++    assert(comparisons == count);
++    assert(unpins == 0);
++}
++
++int main(void)
++{
++    DEVICE_EXTENSION fatx16 = {.fatx = TRUE};
++    DEVICE_EXTENSION fatx32 = {.fatx = TRUE};
++    DEVICE_EXTENSION fat = {.fatx = FALSE};
++    PVFATFCB found;
++
++    alias_misses(1);
++    alias_misses(100);
++    alias_misses(1000);
++
++    const TEST_ENTRY last_hit[] = {
++        {"first", "ignored", TRUE, FALSE, STATUS_SUCCESS},
++        {"second", "ignored", TRUE, FALSE, STATUS_SUCCESS},
++        {"TaRgEt", "ignored", TRUE, FALSE, STATUS_SUCCESS},
++    };
++    assert(find(&fatx16, last_hit, 3, "target", &found) == STATUS_SUCCESS);
++    assert(found && found->id == 2 && comparisons == 3 && unpins == 1);
++    assert(find(&fatx32, last_hit, 3, "TARGET", &found) == STATUS_SUCCESS);
++    assert(found && found->id == 2 && comparisons == 3 && unpins == 1);
++
++    const TEST_ENTRY separate_short[] = {
++        {"long-name", "SHORT", FALSE, FALSE, STATUS_SUCCESS},
++    };
++    assert(find(&fat, separate_short, 1, "short", &found) == STATUS_SUCCESS);
++    assert(found && found->id == 0 && comparisons == 2 && unpins == 1);
++
++    const TEST_ENTRY empty_then_hit[] = {
++        {"", "", TRUE, FALSE, STATUS_SUCCESS},
++        {"valid", "ignored", TRUE, FALSE, STATUS_SUCCESS},
++    };
++    assert(find(&fatx16, empty_then_hit, 2, "valid", &found) == STATUS_SUCCESS);
++    assert(found && found->id == 1 && comparisons == 1 && unpins == 1);
++
++    const TEST_ENTRY volume_then_miss[] = {
++        {"target", "ignored", TRUE, TRUE, STATUS_SUCCESS},
++    };
++    assert(find(&fatx16, volume_then_miss, 1, "target", &found) ==
++           STATUS_OBJECT_NAME_NOT_FOUND);
++    assert(found == NULL && comparisons == 0 && unpins == 0);
++
++    const TEST_ENTRY invalid[] = {
++        {"ignored", "ignored", TRUE, FALSE, STATUS_FILE_CORRUPT_ERROR},
++    };
++    assert(find(&fatx16, invalid, 1, "target", &found) ==
++           STATUS_FILE_CORRUPT_ERROR);
++    assert(found == NULL && comparisons == 0 && unpins == 0);
++
++    puts("PASS: production FATX name lookup avoids aliased comparison");
++}
++'''
++
++c = out / "name-lookup.c"
++c.write_text(shim + body + cases)
++subprocess.run([
++    "cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
++    "-fsanitize=undefined", str(c), "-o", str(out / "name-lookup")
++], check=True)
++subprocess.run([str(out / "name-lookup")], check=True)
+-- 
+2.47.3
+

@@ -1,0 +1,229 @@
+From d6745df27f790685b2bc7405ac9d25d2711ef5d0 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 18:21:45 -0700
+Subject: [PATCH] VFAT: validate request endpoints without wraparound
+
+---
+ drivers/filesystems/vfatfs/rw.c   | 46 +++++++++++++++++++++++++------
+ tests/host/fatx/check-read-eof.py | 35 +++++++++++++++++++++--
+ 2 files changed, 70 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index de048758..11d40a96 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -30,6 +30,23 @@
+ 
+ /* FUNCTIONS *****************************************************************/
+ 
++static
++BOOLEAN
++VfatComputeRequestEnd(
++    LARGE_INTEGER ByteOffset,
++    ULONG Length,
++    PLARGE_INTEGER RequestEnd)
++{
++    if (ByteOffset.QuadPart < 0 ||
++        ByteOffset.QuadPart > MAXLONGLONG - Length)
++    {
++        return FALSE;
++    }
++
++    RequestEnd->QuadPart = ByteOffset.QuadPart + Length;
++    return TRUE;
++}
++
+ /*
+  * Return the next cluster in a FAT chain, possibly extending the chain if
+  * necessary
+@@ -551,6 +568,7 @@ VfatCommonRead(
+     ULONG CompletionLength;
+     ULONG BytesPerSector;
+     LARGE_INTEGER ByteOffset;
++    LARGE_INTEGER RequestEnd;
+     ULONG ReturnedLength = 0;
+     BOOLEAN PagingIo, CanWait, IsVolume, NoCache;
+ 
+@@ -565,6 +583,11 @@ VfatCommonRead(
+     CompletionLength = Length;
+     BytesPerSector = IrpContext->DeviceExt->FatInfo.BytesPerSector;
+ 
++    if (!VfatComputeRequestEnd(ByteOffset, Length, &RequestEnd))
++    {
++        return STATUS_INVALID_PARAMETER;
++    }
++
+ #ifndef SARCH_XBOX
+     /* No lock entry points on the Xbox ABI; no file lock can exist. */
+     if (!PagingIo &&
+@@ -583,7 +606,7 @@ VfatCommonRead(
+     {
+         // cached read
+         Status = STATUS_SUCCESS;
+-        if (ByteOffset.u.LowPart + Length > Fcb->RFCB.FileSize.u.LowPart)
++        if (RequestEnd.QuadPart > Fcb->RFCB.FileSize.QuadPart)
+         {
+             Length = Fcb->RFCB.FileSize.u.LowPart - ByteOffset.u.LowPart;
+             Status = /*STATUS_END_OF_FILE*/STATUS_SUCCESS;
+@@ -636,7 +659,7 @@ VfatCommonRead(
+             goto ByeBye;
+         }
+ 
+-        if (ByteOffset.QuadPart + Length > ROUND_UP_64(Fcb->RFCB.FileSize.QuadPart, BytesPerSector))
++        if (RequestEnd.QuadPart > ROUND_UP_64(Fcb->RFCB.FileSize.QuadPart, BytesPerSector))
+         {
+             Length = (ULONG)(ROUND_UP_64(Fcb->RFCB.FileSize.QuadPart, BytesPerSector) - ByteOffset.QuadPart);
+         }
+@@ -922,6 +945,7 @@ VfatWrite(
+     PVFATFCB Fcb;
+     PERESOURCE Resource = NULL;
+     LARGE_INTEGER ByteOffset;
++    LARGE_INTEGER RequestEnd;
+     LARGE_INTEGER OldFileSize;
+     NTSTATUS Status = STATUS_SUCCESS;
+     ULONG Length = 0;
+@@ -990,10 +1014,16 @@ VfatWrite(
+         goto ByeBye;
+     }
+ 
++    if (!VfatComputeRequestEnd(ByteOffset, Length, &RequestEnd))
++    {
++        Status = STATUS_INVALID_PARAMETER;
++        goto ByeBye;
++    }
++
+     if (IsFAT || IsVolume ||
+         vfatDirEntryGetFirstCluster(IrpContext->DeviceExt, &Fcb->entry) == 1)
+     {
+-        if (ByteOffset.QuadPart + Length > Fcb->RFCB.FileSize.QuadPart)
++        if (RequestEnd.QuadPart > Fcb->RFCB.FileSize.QuadPart)
+         {
+             // we can't extend the FAT, the volume or the root on FAT12/FAT16
+             Status = STATUS_END_OF_FILE;
+@@ -1023,13 +1053,13 @@ VfatWrite(
+ 
+     if (PagingIo)
+     {
+-        if (ByteOffset.u.LowPart + Length > Fcb->RFCB.AllocationSize.u.LowPart)
++        if (RequestEnd.QuadPart > Fcb->RFCB.AllocationSize.QuadPart)
+         {
+             Status = STATUS_INVALID_PARAMETER;
+             goto ByeBye;
+         }
+ 
+-        if (ByteOffset.u.LowPart + Length > ROUND_UP(Fcb->RFCB.AllocationSize.u.LowPart, BytesPerSector))
++        if (RequestEnd.QuadPart > ROUND_UP_64(Fcb->RFCB.AllocationSize.QuadPart, BytesPerSector))
+         {
+             Length =  ROUND_UP(Fcb->RFCB.FileSize.u.LowPart, BytesPerSector) - ByteOffset.u.LowPart;
+         }
+@@ -1101,7 +1131,7 @@ VfatWrite(
+ 
+     if (!CanWait && !IsVolume)
+     {
+-        if (ByteOffset.u.LowPart + Length > Fcb->RFCB.AllocationSize.u.LowPart)
++        if (RequestEnd.QuadPart > Fcb->RFCB.AllocationSize.QuadPart)
+         {
+             Status = STATUS_PENDING;
+             goto ByeBye;
+@@ -1111,7 +1141,7 @@ VfatWrite(
+     Buffer = VfatGetUserBuffer(IrpContext->Irp, PagingIo);
+ 
+     if (!IsFAT && !IsVolume && !PagingIo &&
+-        ByteOffset.u.LowPart + Length > Fcb->RFCB.FileSize.u.LowPart)
++        RequestEnd.QuadPart > Fcb->RFCB.FileSize.QuadPart)
+     {
+         LARGE_INTEGER AllocationSize;
+ 
+@@ -1121,7 +1151,7 @@ VfatWrite(
+             goto ByeBye;
+         }
+ 
+-        AllocationSize.QuadPart = ByteOffset.u.LowPart + Length;
++        AllocationSize = RequestEnd;
+         Status = VfatSetAllocationSizeInformation(IrpContext->FileObject, Fcb,
+                                                   IrpContext->DeviceExt, &AllocationSize,
+                                                   FALSE);
+diff --git a/tests/host/fatx/check-read-eof.py b/tests/host/fatx/check-read-eof.py
+index 7895b6d8..6fc11550 100644
+--- a/tests/host/fatx/check-read-eof.py
++++ b/tests/host/fatx/check-read-eof.py
+@@ -14,7 +14,12 @@ spec = importlib.util.spec_from_file_location('extract', root / 'tests/host/kern
+ extract = importlib.util.module_from_spec(spec)
+ spec.loader.exec_module(extract)
+ source = (root / 'drivers/filesystems/vfatfs/rw.c').read_text()
+-body = extract.function(source, 'VfatCommonRead')
++body = extract.function(source, 'VfatComputeRequestEnd')
++body += extract.function(source, 'VfatCommonRead')
++write_body = extract.function(source, 'VfatWrite')
++assert 'ByteOffset.u.LowPart + Length' not in write_body
++assert 'VfatComputeRequestEnd(ByteOffset, Length, &RequestEnd)' in write_body
++assert 'AllocationSize = RequestEnd;' in write_body
+ shim = r'''
+ #include <stdint.h>
+ #include <stdio.h>
+@@ -26,14 +31,17 @@ shim = r'''
+ #define FCB_IS_VOLUME 8
+ #define STATUS_SUCCESS 0
+ #define STATUS_PENDING 0x103
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000d)
+ #define NT_SUCCESS(s) ((s) >= 0)
+ #define ASSERT(x) assert(x)
+ #define FALSE 0
++#define TRUE 1
+ #define IoWriteAccess 1
+ #define EXCEPTION_EXECUTE_HANDLER 0
+ #define BooleanFlagOn(x, f) (((x) & (f)) != 0)
+-#define ROUND_UP_64(v, a) (((v) + (a) - 1) & ~((uint64_t)(a) - 1))
++#define ROUND_UP_64(v, a) (((v) + (a) - 1) & ~((int64_t)(a) - 1))
+ #define min(a, b) ((a) < (b) ? (a) : (b))
++#define MAXLONGLONG INT64_MAX
+ #define vfatAddToStat(...) ((void)0)
+ #define _SEH2_TRY if (1)
+ #define _SEH2_EXCEPT(x) else
+@@ -43,7 +51,8 @@ typedef uint32_t ULONG, *PULONG;
+ typedef int32_t NTSTATUS;
+ typedef int BOOLEAN;
+ typedef void *PVOID, *PCC_FILE_SIZES;
+-typedef union { uint64_t QuadPart; struct { ULONG LowPart; int32_t HighPart; } u; } LARGE_INTEGER;
++typedef union { int64_t QuadPart; struct { ULONG LowPart; int32_t HighPart; } u; } LARGE_INTEGER;
++typedef LARGE_INTEGER *PLARGE_INTEGER;
+ typedef struct { NTSTATUS Status; ULONG Information; } IOSB;
+ typedef struct { ULONG Flags; IOSB IoStatus; } IRP;
+ typedef struct { LARGE_INTEGER FileSize, AllocationSize; } RFCB;
+@@ -93,6 +102,25 @@ static void run(unsigned flags, unsigned fcb_flags, uint64_t file_size, unsigned
+     }
+ }
+ int main(void) {
++    LARGE_INTEGER offset, end;
++    offset.QuadPart = INT64_MAX - 7;
++    ++checks;
++    if (VfatComputeRequestEnd(offset, 8, &end)) {
++        ++failures;
++        printf("FAIL signed endpoint overflow accepted\n");
++    }
++    offset.QuadPart = -1;
++    ++checks;
++    if (VfatComputeRequestEnd(offset, 1, &end)) {
++        ++failures;
++        printf("FAIL negative endpoint accepted\n");
++    }
++    offset.QuadPart = INT64_MAX - 8;
++    ++checks;
++    if (!VfatComputeRequestEnd(offset, 8, &end) || end.QuadPart != INT64_MAX) {
++        ++failures;
++        printf("FAIL maximum endpoint rejected\n");
++    }
+     run(IRP_NOCACHE, 0, 65573, 65536, 512, 512, 0, 37, 512);
+     run(IRP_NOCACHE, 0, 65573, 65536, 8192, 512, 0, 37, 512);
+     run(IRP_NOCACHE, 0, 65573, 4096, 512, 512, 0, 512, 512);
+@@ -102,6 +130,7 @@ int main(void) {
+     run(IRP_NOCACHE, FCB_IS_VOLUME, 65573, 65536, 512, 512, 0, 512, 512);
+     run(IRP_NOCACHE, 0, 65573, 65536, 512, 0, -1, 99, 512);
+     run(0, 0, 65573, 65536, 8192, 0, 0, 37, 0);
++    run(0, 0, UINT64_C(0xffffffff), 0xfffffe00u, 4096, 0, 0, 511, 0);
+     run(IRP_NOCACHE, 0, UINT64_C(0x100010025), 65536, 512, 512, 0, 512, 512);
+     printf("%u production VfatCommonRead cases, %u failures\n", checks, failures);
+     return failures ? 1 : 0;
+-- 
+2.47.3
+

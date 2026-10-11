@@ -1,0 +1,150 @@
+From 5987e5877e5598ef2675eecb335e302bb848c2c7 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 20:42:47 -0700
+Subject: [PATCH] xb: publish thread shadow stack bounds
+
+---
+ ntoskrnl/xb/xbe.c                 |   8 ++-
+ tests/host/thread-shadow/check.py | 104 ++++++++++++++++++++++++++++++
+ 2 files changed, 110 insertions(+), 2 deletions(-)
+ create mode 100644 tests/host/thread-shadow/check.py
+
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index a2aea642..9f6ae35f 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -240,8 +240,10 @@ static PCWSTR const XeTitleSearchPaths[] = {
+ /* Fills the process-facing fields of the shadow (xb/procobj.c). */
+ VOID NxkPublishThreadProcess(_Out_writes_bytes_(0x80) PUCHAR Shadow);
+ 
+-#define XBE_KTHREAD_TLSDATA  0x28      /* Xbox KTHREAD.TlsData offset */
+-#define XBE_TIB_STACKBASE    0x04      /* fs:[] offset for the TLS pointer */
++#define XBE_KTHREAD_STACKBASE  0x1c    /* Xbox KTHREAD.StackBase offset */
++#define XBE_KTHREAD_STACKLIMIT 0x20    /* Xbox KTHREAD.StackLimit offset */
++#define XBE_KTHREAD_TLSDATA    0x28    /* Xbox KTHREAD.TlsData offset */
++#define XBE_TIB_STACKBASE      0x04    /* fs:[] offset for the TLS pointer */
+ 
+ typedef VOID (NTAPI *PKSTART_ROUTINE_X)(PVOID StartContext);
+ 
+@@ -253,6 +255,8 @@ XeRegisterThread(_In_opt_ PVOID TlsData, _In_ ULONG_PTR Fs4)
+     PKTHREAD self = KeGetCurrentThread();
+ 
+     RtlZeroMemory(self->XeXboxShadow, sizeof(self->XeXboxShadow));
++    *(PVOID *)(self->XeXboxShadow + XBE_KTHREAD_STACKBASE) = self->StackBase;
++    *(PVOID *)(self->XeXboxShadow + XBE_KTHREAD_STACKLIMIT) = self->StackLimit;
+     *(PVOID *)(self->XeXboxShadow + XBE_KTHREAD_TLSDATA) = TlsData;
+     /* The rest of the process-facing view (xb/procobj.c). */
+     NxkPublishThreadProcess(self->XeXboxShadow);
+diff --git a/tests/host/thread-shadow/check.py b/tests/host/thread-shadow/check.py
+new file mode 100644
+index 00000000..a7e85d16
+--- /dev/null
++++ b/tests/host/thread-shadow/check.py
+@@ -0,0 +1,104 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production Xbox thread-shadow registration body."""
++
++import argparse
++from pathlib import Path
++import re
++import subprocess
++
++
++root = Path(__file__).resolve().parents[3]
++parser = argparse.ArgumentParser()
++parser.add_argument("output", type=Path)
++args = parser.parse_args()
++out = args.output.resolve()
++out.mkdir(parents=True, exist_ok=True)
++
++source = (root / "ntoskrnl/xb/xbe.c").read_text()
++match = re.search(r"static PVOID\s+XeRegisterThread\s*\([^;]*?\)\s*\{", source, re.S)
++assert match, "XeRegisterThread"
++start = match.start()
++brace = source.index("{", match.start())
++depth = 1
++end = brace + 1
++while depth:
++    depth += (source[end] == "{") - (source[end] == "}")
++    end += 1
++body = source[start:end] + "\n"
++
++shim = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef void VOID, *PVOID;
++typedef unsigned char UCHAR, *PUCHAR;
++typedef uintptr_t ULONG_PTR;
++typedef unsigned long ULONG;
++#define _In_opt_
++#define _In_
++#define RtlZeroMemory(pointer, length) memset((pointer), 0, (length))
++#define XBE_KTHREAD_STACKBASE  0x1c
++#define XBE_KTHREAD_STACKLIMIT 0x20
++#define XBE_KTHREAD_TLSDATA    0x28
++
++typedef struct _KTHREAD {
++    PVOID StackBase;
++    PVOID StackLimit;
++    UCHAR XeXboxShadow[0x80];
++    ULONG_PTR XeXboxFs4;
++    PVOID XeBaseSeh;
++} KTHREAD, *PKTHREAD;
++
++static KTHREAD thread;
++static PKTHREAD KeGetCurrentThread(void) { return &thread; }
++static ULONG __readfsdword(unsigned offset)
++{
++    assert(offset == 0);
++    return 0xfeed0000;
++}
++static VOID NxkPublishThreadProcess(PUCHAR shadow)
++{
++    shadow[0x32] = 7;
++    shadow[0x70] = 8;
++}
++'''
++
++cases = r'''
++int main(void)
++{
++    thread.StackBase = (PVOID)(uintptr_t)0x863de000;
++    thread.StackLimit = (PVOID)(uintptr_t)0x863db000;
++    assert(XeRegisterThread((PVOID)(uintptr_t)0x11223000, 0x11224000) ==
++           thread.XeXboxShadow);
++    assert(*(PVOID *)(thread.XeXboxShadow + 0x1c) == thread.StackBase);
++    assert(*(PVOID *)(thread.XeXboxShadow + 0x20) == thread.StackLimit);
++    assert(*(PVOID *)(thread.XeXboxShadow + 0x28) ==
++           (PVOID)(uintptr_t)0x11223000);
++    assert(thread.XeXboxShadow[0x32] == 7);
++    assert(thread.XeXboxShadow[0x70] == 8);
++    assert(thread.XeXboxFs4 == 0x11224000);
++    assert(thread.XeBaseSeh == (PVOID)(uintptr_t)0xfeed0000);
++
++    thread.StackBase = (PVOID)(uintptr_t)0x81235000;
++    thread.StackLimit = (PVOID)(uintptr_t)0x81231000;
++    assert(XeRegisterThread(NULL, 0) == thread.XeXboxShadow);
++    assert(*(PVOID *)(thread.XeXboxShadow + 0x1c) == thread.StackBase);
++    assert(*(PVOID *)(thread.XeXboxShadow + 0x20) == thread.StackLimit);
++    assert(*(PVOID *)(thread.XeXboxShadow + 0x28) == NULL);
++    assert(thread.XeXboxFs4 == 0);
++    puts("PASS: production Xbox thread shadow publishes live stack bounds");
++    return 0;
++}
++'''
++
++fixture = out / "thread-shadow.c"
++binary = out / "thread-shadow"
++fixture.write_text(shim + body + cases)
++subprocess.run([
++    "cc", "-m32", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
++    "-fsanitize=address,undefined", str(fixture), "-o", str(binary)
++], check=True)
++subprocess.run([str(binary)], check=True)
+-- 
+2.47.3
+

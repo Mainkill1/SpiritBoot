@@ -1,0 +1,207 @@
+From 27c19f9ce7749bf7a33454e496d76565d509825d Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 20:18:21 -0700
+Subject: [PATCH] ex: omit disabled Xbox worker escalation
+
+---
+ ntoskrnl/ex/work.c                            |   5 +
+ .../workqueue/check-fixed-worker-queue.py     | 158 ++++++++++++++++++
+ 2 files changed, 163 insertions(+)
+ create mode 100644 tests/host/workqueue/check-fixed-worker-queue.py
+
+diff --git a/ntoskrnl/ex/work.c b/ntoskrnl/ex/work.c
+index 95df4778..218daf41 100644
+--- a/ntoskrnl/ex/work.c
++++ b/ntoskrnl/ex/work.c
+@@ -769,12 +769,16 @@ ExQueueWorkItem(IN PWORK_QUEUE_ITEM WorkItem,
+     KeInsertQueue(&WorkQueue->WorkerQueue, &WorkItem->List);
+     ASSERT(!WorkQueue->Info.QueueDisabled);
+ 
++#ifndef SARCH_XBOX
+     /*
+      * Check if we need a new thread. Our decision is as follows:
+      *  - This queue type must support Dynamic Threads (duh!)
+      *  - It actually has to have unprocessed items
+      *  - We have CPUs which could be handling another thread
+      *  - We haven't abused our usage of dynamic threads.
++     *
++     * Xbox uses a fixed worker set and does not create the balance manager,
++     * so this path cannot provide a consumer for the event there.
+      */
+     if ((WorkQueue->Info.MakeThreadsAsNecessary) &&
+         (!IsListEmpty(&WorkQueue->WorkerQueue.EntryListHead)) &&
+@@ -788,6 +792,7 @@ ExQueueWorkItem(IN PWORK_QUEUE_ITEM WorkItem,
+                 WorkQueue->WorkerQueue.MaximumCount);
+         KeSetEvent(&ExpThreadSetManagerEvent, 0, FALSE);
+     }
++#endif
+ }
+ 
+ /* EOF */
+diff --git a/tests/host/workqueue/check-fixed-worker-queue.py b/tests/host/workqueue/check-fixed-worker-queue.py
+new file mode 100644
+index 00000000..3c587cbf
+--- /dev/null
++++ b/tests/host/workqueue/check-fixed-worker-queue.py
+@@ -0,0 +1,158 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Verify Xbox ExQueueWorkItem omits unavailable dynamic escalation."""
++
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++body = extract.function((root / "ntoskrnl/ex/work.c").read_text(),
++                        "ExQueueWorkItem")
++
++header = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++
++#define IN
++#define VOID void
++#define NTAPI
++#define ASSERT assert
++#define DPRINT1(...) ((void)0)
++#define WORKER_INVALID 0xe4
++#define FALSE 0
++
++typedef uintptr_t ULONG_PTR;
++typedef unsigned long ULONG;
++typedef int BOOLEAN;
++typedef struct _LIST_ENTRY {
++    struct _LIST_ENTRY *Flink;
++    struct _LIST_ENTRY *Blink;
++} LIST_ENTRY;
++typedef void (*PWORKER_THREAD_ROUTINE)(void *);
++typedef struct _WORK_QUEUE_ITEM {
++    LIST_ENTRY List;
++    PWORKER_THREAD_ROUTINE WorkerRoutine;
++    void *Parameter;
++} WORK_QUEUE_ITEM, *PWORK_QUEUE_ITEM;
++typedef enum {
++    CriticalWorkQueue,
++    DelayedWorkQueue,
++    HyperCriticalWorkQueue,
++    MaximumWorkQueue
++} WORK_QUEUE_TYPE;
++typedef struct {
++    LIST_ENTRY EntryListHead;
++    long CurrentCount;
++    long MaximumCount;
++} KQUEUE;
++typedef struct {
++    struct {
++        unsigned QueueDisabled : 1;
++        unsigned MakeThreadsAsNecessary : 1;
++    } Info;
++    KQUEUE WorkerQueue;
++    long DynamicThreadCount;
++} EX_WORK_QUEUE, *PEX_WORK_QUEUE;
++
++extern EX_WORK_QUEUE ExWorkerQueue[MaximumWorkQueue];
++extern ULONG_PTR MmUserProbeAddress;
++extern int ExpThreadSetManagerEvent;
++long KeInsertQueue(KQUEUE *queue, LIST_ENTRY *entry);
++void KeBugCheckEx(unsigned code, ULONG_PTR one, ULONG_PTR two,
++                  ULONG_PTR three, ULONG_PTR four);
++BOOLEAN IsListEmpty(const LIST_ENTRY *head);
++long KeSetEvent(int *event, int increment, BOOLEAN wait);
++'''
++
++runner = r'''
++EX_WORK_QUEUE ExWorkerQueue[MaximumWorkQueue];
++ULONG_PTR MmUserProbeAddress = 1;
++int ExpThreadSetManagerEvent;
++static unsigned inserts, events, list_tests;
++
++long KeInsertQueue(KQUEUE *queue, LIST_ENTRY *entry)
++{
++    (void)queue;
++    (void)entry;
++    ++inserts;
++    return 0;
++}
++
++void KeBugCheckEx(unsigned code, ULONG_PTR one, ULONG_PTR two,
++                  ULONG_PTR three, ULONG_PTR four)
++{
++    (void)code; (void)one; (void)two; (void)three; (void)four;
++    assert(!"unexpected bugcheck");
++}
++
++BOOLEAN IsListEmpty(const LIST_ENTRY *head)
++{
++    (void)head;
++    ++list_tests;
++    return 0;
++}
++
++long KeSetEvent(int *event, int increment, BOOLEAN wait)
++{
++    (void)event; (void)increment; (void)wait;
++    ++events;
++    return 0;
++}
++
++static void worker(void *context) { (void)context; }
++
++int main(void)
++{
++    WORK_QUEUE_ITEM item = { .WorkerRoutine = worker };
++    PEX_WORK_QUEUE queue = &ExWorkerQueue[CriticalWorkQueue];
++    queue->Info.MakeThreadsAsNecessary = 1;
++    queue->WorkerQueue.CurrentCount = 0;
++    queue->WorkerQueue.MaximumCount = 1;
++    queue->DynamicThreadCount = 0;
++    ExQueueWorkItem(&item, CriticalWorkQueue);
++    assert(inserts == 1);
++#ifdef SARCH_XBOX
++    assert(list_tests == 0 && events == 0);
++#else
++    assert(list_tests == 1 && events == 1);
++#endif
++    puts("PASS: fixed Xbox queue omits dynamic worker escalation");
++    return 0;
++}
++'''
++
++(out / "types.h").write_text(header)
++(out / "queue.c").write_text('#include "types.h"\n' + body)
++(out / "runner.c").write_text(
++    '#include "types.h"\nvoid ExQueueWorkItem(PWORK_QUEUE_ITEM, WORK_QUEUE_TYPE);\n'
++    + runner)
++
++def build(name, xbox):
++    define = ["-DSARCH_XBOX"] if xbox else []
++    obj = out / f"queue-{name}.o"
++    exe = out / f"queue-{name}"
++    common = ["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror"]
++    subprocess.run(common + define + ["-c", str(out / "queue.c"), "-o", str(obj)],
++                   check=True)
++    undefined = subprocess.check_output(["nm", "-u", str(obj)], text=True)
++    subprocess.run(common + define + [str(obj), str(out / "runner.c"),
++                                      "-o", str(exe)], check=True)
++    subprocess.run([str(exe)], check=True)
++    return undefined
++
++xbox_undefined = build("xbox", True)
++generic_undefined = build("generic", False)
++assert "KeSetEvent" not in xbox_undefined
++assert "IsListEmpty" not in xbox_undefined
++assert "KeSetEvent" in generic_undefined
++assert "IsListEmpty" in generic_undefined
+-- 
+2.47.3
+

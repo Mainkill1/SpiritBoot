@@ -1,0 +1,238 @@
+From bf0833412b92da8dd705634c99418ae9b2552dd7 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 18:18:10 -0700
+Subject: [PATCH] FATX: bound on-disk name conversion
+
+---
+ drivers/filesystems/vfatfs/direntry.c |  26 +++++-
+ drivers/filesystems/vfatfs/fsctl.c    |   9 +-
+ drivers/filesystems/vfatfs/vfat.h     |   5 ++
+ tests/host/fatx/check-name-bounds.py  | 122 ++++++++++++++++++++++++++
+ 4 files changed, 154 insertions(+), 8 deletions(-)
+ create mode 100644 tests/host/fatx/check-name-bounds.py
+
+diff --git a/drivers/filesystems/vfatfs/direntry.c b/drivers/filesystems/vfatfs/direntry.c
+index c2d210b9..cde44476 100644
+--- a/drivers/filesystems/vfatfs/direntry.c
++++ b/drivers/filesystems/vfatfs/direntry.c
+@@ -477,6 +477,23 @@ FATGetNextDirEntry(
+ }
+ #endif /* !SARCH_XBOX */
+ 
++NTSTATUS
++VfatFatXNameToUnicode(
++    IN const FATX_DIR_ENTRY *DirEntry,
++    OUT PUNICODE_STRING Name)
++{
++    OEM_STRING StringO;
++
++    if (DirEntry->FilenameLength > sizeof(DirEntry->Filename))
++    {
++        return STATUS_FILE_CORRUPT_ERROR;
++    }
++
++    StringO.Buffer = (PCHAR)DirEntry->Filename;
++    StringO.Length = StringO.MaximumLength = DirEntry->FilenameLength;
++    return RtlOemStringToUnicodeString(Name, &StringO, FALSE);
++}
++
+ NTSTATUS
+ FATXGetNextDirEntry(
+     PVOID *pContext,
+@@ -487,7 +504,6 @@ FATXGetNextDirEntry(
+ {
+     LARGE_INTEGER FileOffset;
+     PFATX_DIR_ENTRY fatxDirEntry;
+-    OEM_STRING StringO;
+     ULONG DirIndex = DirContext->DirIndex;
+     NTSTATUS Status;
+ 
+@@ -611,9 +627,11 @@ FATXGetNextDirEntry(
+             fatxDirEntry++;
+         }
+     }
+-    StringO.Buffer = (PCHAR)fatxDirEntry->Filename;
+-    StringO.Length = StringO.MaximumLength = fatxDirEntry->FilenameLength;
+-    RtlOemStringToUnicodeString(&DirContext->LongNameU, &StringO, FALSE);
++    Status = VfatFatXNameToUnicode(fatxDirEntry, &DirContext->LongNameU);
++    if (!NT_SUCCESS(Status))
++    {
++        return Status;
++    }
+     DirContext->ShortNameU = DirContext->LongNameU;
+     return STATUS_SUCCESS;
+ }
+diff --git a/drivers/filesystems/vfatfs/fsctl.c b/drivers/filesystems/vfatfs/fsctl.c
+index a9ebbc7b..2681aa40 100644
+--- a/drivers/filesystems/vfatfs/fsctl.c
++++ b/drivers/filesystems/vfatfs/fsctl.c
+@@ -364,7 +364,6 @@ ReadVolumeLabel(
+     LARGE_INTEGER FileOffset;
+     ULONG SizeDirEntry;
+     ULONG EntriesPerPage;
+-    OEM_STRING StringO;
+     BOOLEAN NoCache = (Start != 0);
+     PVOID Buffer;
+     NTSTATUS Status = STATUS_SUCCESS;
+@@ -444,9 +443,11 @@ ReadVolumeLabel(
+                 /* copy volume label */
+                 if (IsFatX)
+                 {
+-                    StringO.Buffer = (PCHAR)Entry->FatX.Filename;
+-                    StringO.MaximumLength = StringO.Length = Entry->FatX.FilenameLength;
+-                    RtlOemStringToUnicodeString(VolumeLabel, &StringO, FALSE);
++                    Status = VfatFatXNameToUnicode(&Entry->FatX, VolumeLabel);
++                    if (!NT_SUCCESS(Status))
++                    {
++                        break;
++                    }
+                 }
+ #ifndef SARCH_XBOX
+                 else
+diff --git a/drivers/filesystems/vfatfs/vfat.h b/drivers/filesystems/vfatfs/vfat.h
+index 2374deb5..07964e98 100644
+--- a/drivers/filesystems/vfatfs/vfat.h
++++ b/drivers/filesystems/vfatfs/vfat.h
+@@ -791,6 +791,11 @@ vfatDirEntryGetFirstCluster(
+     PDEVICE_EXTENSION pDeviceExt,
+     PDIR_ENTRY pDirEntry);
+ 
++NTSTATUS
++VfatFatXNameToUnicode(
++    IN const FATX_DIR_ENTRY *DirEntry,
++    OUT PUNICODE_STRING Name);
++
+ /* dirwr.c */
+ 
+ NTSTATUS
+diff --git a/tests/host/fatx/check-name-bounds.py b/tests/host/fatx/check-name-bounds.py
+new file mode 100644
+index 00000000..d23afea2
+--- /dev/null
++++ b/tests/host/fatx/check-name-bounds.py
+@@ -0,0 +1,122 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production FATX name conversion boundary."""
++
++import importlib.util
++import os
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++
++source = (root / "drivers/filesystems/vfatfs/direntry.c").read_text()
++body = extract.function(source, "VfatFatXNameToUnicode")
++
++shim = r'''
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++#define IN
++#define OUT
++typedef int32_t NTSTATUS;
++typedef uint16_t USHORT;
++typedef char *PCHAR;
++typedef struct {
++    unsigned char FilenameLength;
++    unsigned char Attrib;
++    unsigned char Filename[42];
++    unsigned char Rest[20];
++} FATX_DIR_ENTRY, *PFATX_DIR_ENTRY;
++typedef struct {
++    USHORT Length;
++    USHORT MaximumLength;
++    char *Buffer;
++} OEM_STRING;
++typedef struct {
++    USHORT Length;
++    USHORT MaximumLength;
++    uint16_t *Buffer;
++} UNICODE_STRING, *PUNICODE_STRING;
++
++#define STATUS_SUCCESS 0
++#define STATUS_FILE_CORRUPT_ERROR ((NTSTATUS)0xc0000102)
++#define FALSE 0
++
++static unsigned conversions;
++static NTSTATUS RtlOemStringToUnicodeString(PUNICODE_STRING output,
++                                             const OEM_STRING *input,
++                                             int allocate)
++{
++    (void)allocate;
++    ++conversions;
++    if (input->Length > output->MaximumLength / sizeof(uint16_t))
++        return (NTSTATUS)0xc0000023;
++    for (USHORT i = 0; i < input->Length; ++i)
++        output->Buffer[i] = (unsigned char)input->Buffer[i];
++    output->Length = input->Length * sizeof(uint16_t);
++    return STATUS_SUCCESS;
++}
++'''
++
++cases = r'''
++static int checks;
++static int failures;
++static void check(int condition, const char *label)
++{
++    ++checks;
++    if (!condition) {
++        ++failures;
++        fprintf(stderr, "FAIL: %s\n", label);
++    }
++}
++
++int main(void)
++{
++    FATX_DIR_ENTRY entry = {0};
++    uint16_t output[64] = {0};
++    UNICODE_STRING name = {0, sizeof(output), output};
++    NTSTATUS status;
++
++    memset(entry.Filename, 'A', sizeof(entry.Filename));
++    entry.FilenameLength = 42;
++    conversions = 0;
++    status = VfatFatXNameToUnicode(&entry, &name);
++    check(status == STATUS_SUCCESS && conversions == 1 && name.Length == 84,
++          "maximum physical FATX name converts");
++
++    entry.FilenameLength = 43;
++    name.Length = 0;
++    conversions = 0;
++    status = VfatFatXNameToUnicode(&entry, &name);
++    check(status == STATUS_FILE_CORRUPT_ERROR && conversions == 0 &&
++          name.Length == 0,
++          "oversized on-disk name is rejected before conversion");
++
++    entry.FilenameLength = 255;
++    status = VfatFatXNameToUnicode(&entry, &name);
++    check(status == STATUS_FILE_CORRUPT_ERROR && conversions == 0,
++          "end marker cannot become a conversion length");
++
++    printf("FATX name boundary: %d checks, %d failures\n", checks, failures);
++    return failures != 0;
++}
++'''
++
++fixture = out / "name-bounds.c"
++fixture.write_text(shim + body + cases)
++subprocess.run([
++    "cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
++    "-fsanitize=address,undefined", str(fixture), "-o", str(out / "name-bounds")
++], check=True)
++subprocess.run([str(out / "name-bounds")], check=True,
++               env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0"})
+-- 
+2.47.3
+

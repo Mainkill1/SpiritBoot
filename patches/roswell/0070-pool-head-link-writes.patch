@@ -1,0 +1,77 @@
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -264,9 +264,16 @@
+         NXP_FREE *Block = (NXP_FREE *)(Header + 1);
+         ASSERT(Header->Magic == NXP_MAGIC_FREE &&
+                Header->ClassIndex == Class);
+-        if (Block->Prev) Block->Prev->Next = Block->Next;
+-        else NxpFreeLists[Class] = Block->Next;
+-        if (Block->Next) Block->Next->Prev = Block->Prev;
++        if (Block == NxpFreeLists[Class])
++        {
++            NxpFreeLists[Class] = Block->Next;
++            if (Block->Next) Block->Next->Prev = NULL;
++        }
++        else
++        {
++            Block->Prev->Next = Block->Next;
++            if (Block->Next) Block->Next->Prev = Block->Prev;
++        }
+     }
+     NxpPageState[Index] = NXP_NOT_BUCKET;
+     return Page;
+@@ -385,7 +392,8 @@
+     if (Blk != NULL)
+     {
+         NxpFreeLists[Class] = Blk->Next;
+-        if (Blk->Next) Blk->Next->Prev = NULL;
++        /* The head has no predecessor; its Prev is never consulted.
++         * Leave it untouched here and use head identity when detaching. */
+         NxpPageState[NXP_PAGE_INDEX(Blk)]++;
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+         ASSERT((((NXP_HEADER *)Blk) - 1)->Magic == NXP_MAGIC_FREE);
+diff --git a/tests/host/pool-refill/cases.c b/tests/host/pool-refill/cases.c
+--- a/tests/host/pool-refill/cases.c
++++ b/tests/host/pool-refill/cases.c
+@@ -9,8 +9,9 @@
+ static void invariant(void) {
+  unsigned seen[NXK_POOL_WINDOW_PAGES]={0};
+  for(unsigned c=0;c<NXP_BUCKET_LISTS;c++) {
+-  unsigned traversed=0;
+-  for(NXP_FREE *f=NxpFreeLists[c];f;f=f->Next) {
++  unsigned traversed=0;NXP_FREE *previous=NULL;
++  for(NXP_FREE *f=NxpFreeLists[c];f;previous=f,f=f->Next) {
++   if(previous)assert(f->Prev==previous);
+    assert(++traversed<=NXK_POOL_WINDOW_PAGES*128u);
+    unsigned page=NXP_PAGE_INDEX(f);assert(page<NXK_POOL_WINDOW_PAGES&&used[page]);
+    NXP_HEADER *h=((NXP_HEADER*)f)-1;assert(h->Magic==NXP_MAGIC_FREE&&h->ClassIndex==c);seen[page]++;
+@@ -47,6 +48,15 @@
+  }
+  assert(NxpReclaimEmptyBucketPages()==1&&committed==0);
+  puts("PASS 512 retypes, capacity/content/free/list integrity");
++ reset();
++ a=ExAllocatePoolWithTag(NonPagedPool,1,71);assert(a);
++ prev_writes=0;b=ExAllocatePoolWithTag(NonPagedPool,1,72);assert(b);
++ if(prev_writes!=0){fprintf(stderr,"FAIL warm allocation writes redundant list-head back link (%u)\n",prev_writes);free(arena);return 2;}
++ memset(a,0xe7,ExQueryPoolBlockSize(a,NULL));
++ memset(b,0xd6,ExQueryPoolBlockSize(b,NULL));
++ invariant();ExFreePoolWithTag(a,71);ExFreePoolWithTag(b,72);
++ assert(NxpReclaimEmptyBucketPages()==1);invariant();
++ puts("PASS warm pop performs no back-link write, stale head backlink is unobserved");
+  reset();prev_writes=0;
+  a=ExAllocatePoolWithTag(NonPagedPool,1,7);assert(a);invariant();
+  assert(prev_writes<=128);ExFreePoolWithTag(a,7);
+@@ -64,9 +74,11 @@
+  for(unsigned i=0;i<128;i++){
+   ExFreePoolWithTag(blocks[i],7);ExFreePoolWithTag(blocks[128+i],7);
+  }
++ for(unsigned c=0;c<NXP_BUCKET_LISTS;c++)if(NxpFreeLists[c])
++  NxpFreeLists[c]->Prev=(NXP_FREE *)(uintptr_t)1;
+  a=ExAllocatePoolWithTag(NonPagedPool,1024,9);assert(a);invariant();
+  ExFreePoolWithTag(a,9);assert(NxpReclaimEmptyBucketPages()==2&&committed==0);
+- puts("PASS interleaved free spans retain the individual unlink fallback");
++ puts("PASS fragmented retirement ignores arbitrary head Prev and preserves non-head backlinks");
+ #if XBOX_RESERVE_UPPER_RAM
+  reset();a=ExAllocatePoolWithTag(NonPagedPool,64,21);ExFreePoolWithTag(a,21);
+  b=NxTitleAllocatePoolWithTag(1024,22);assert(committed==2);

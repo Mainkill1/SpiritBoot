@@ -1,0 +1,264 @@
+From c0c1b14c302b0ce59651a5341a90132bb86981e3 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 18:19:44 -0700
+Subject: [PATCH] FATX: reject out-of-range chain entries
+
+---
+ drivers/filesystems/vfatfs/fat.c    | 61 +++++++++++++++++++++++++----
+ tests/host/fatx/check-chain-walk.py | 57 ++++++++++++++++++++++-----
+ 2 files changed, 102 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/filesystems/vfatfs/fat.c b/drivers/filesystems/vfatfs/fat.c
+index 6902efcb..b2e8e799 100644
+--- a/drivers/filesystems/vfatfs/fat.c
++++ b/drivers/filesystems/vfatfs/fat.c
+@@ -38,6 +38,16 @@ FAT32EntryMask(
+     return DeviceExt->FatInfo.FatType == FATX32 ? 0xffffffff : 0x0fffffff;
+ }
+ 
++static
++BOOLEAN
++VfatIsValidDataCluster(
++    PDEVICE_EXTENSION DeviceExt,
++    ULONG Cluster)
++{
++    return Cluster >= 2 &&
++           Cluster - 2 < DeviceExt->FatInfo.NumberOfClusters;
++}
++
+ /*
+  * FUNCTION: Retrieve the next FAT32 cluster from the FAT table via a physical
+  *           disk read
+@@ -802,22 +812,33 @@ GetNextCluster(
+     PULONG NextCluster)
+ {
+     NTSTATUS Status;
++    ULONG Candidate;
+ 
+     DPRINT("GetNextCluster(DeviceExt %p, CurrentCluster %x)\n",
+            DeviceExt, CurrentCluster);
+ 
+-    if (CurrentCluster == 0)
++    if (!VfatIsValidDataCluster(DeviceExt, CurrentCluster))
+     {
+         DPRINT1("WARNING: File system corruption detected. You may need to run a disk repair utility.\n");
+         if (VfatGlobalData->Flags & VFAT_BREAK_ON_CORRUPTION)
+-            ASSERT(CurrentCluster != 0);
++            ASSERT(VfatIsValidDataCluster(DeviceExt, CurrentCluster));
+         return STATUS_FILE_CORRUPT_ERROR;
+     }
+ 
+     ExAcquireResourceSharedLite(&DeviceExt->FatResource, TRUE);
+-    Status = DeviceExt->GetNextCluster(DeviceExt, CurrentCluster, NextCluster);
++    Status = DeviceExt->GetNextCluster(DeviceExt, CurrentCluster, &Candidate);
+     ExReleaseResourceLite(&DeviceExt->FatResource);
+ 
++    if (NT_SUCCESS(Status))
++    {
++        if (Candidate != 0xffffffff &&
++            !VfatIsValidDataCluster(DeviceExt, Candidate))
++        {
++            return STATUS_FILE_CORRUPT_ERROR;
++        }
++        *NextCluster = Candidate;
++    }
++
+     return Status;
+ }
+ 
+@@ -877,7 +898,7 @@ WalkFatChain(
+                 ULONG FATOffset, ChunkOffset;
+                 LARGE_INTEGER Offset;
+ 
+-                if (CurrentCluster == 0)
++                if (!VfatIsValidDataCluster(DeviceExt, CurrentCluster))
+                 {
+                     Status = STATUS_FILE_CORRUPT_ERROR;
+                     break;
+@@ -909,7 +930,13 @@ WalkFatChain(
+                 CurrentCluster &= EntryMask;
+                 if (CurrentCluster >= EntryMask - 7)
+                     CurrentCluster = 0xffffffff;
+-                if (CurrentCluster == 0)
++                if (CurrentCluster == 0xffffffff)
++                {
++                    if (i + 1 < BatchLinks || Links > BatchLinks)
++                        Status = STATUS_FILE_CORRUPT_ERROR;
++                    break;
++                }
++                if (!VfatIsValidDataCluster(DeviceExt, CurrentCluster))
+                 {
+                     Status = STATUS_FILE_CORRUPT_ERROR;
+                     break;
+@@ -942,6 +969,7 @@ GetNextClusterExtend(
+     PULONG NextCluster)
+ {
+     ULONG NewCluster;
++    ULONG Candidate;
+     NTSTATUS Status;
+ 
+     DPRINT("GetNextClusterExtend(DeviceExt %p, CurrentCluster %x)\n",
+@@ -966,9 +994,20 @@ GetNextClusterExtend(
+         return STATUS_SUCCESS;
+     }
+ 
+-    Status = DeviceExt->GetNextCluster(DeviceExt, CurrentCluster, NextCluster);
++    if (!VfatIsValidDataCluster(DeviceExt, CurrentCluster))
++    {
++        ExReleaseResourceLite(&DeviceExt->FatResource);
++        return STATUS_FILE_CORRUPT_ERROR;
++    }
+ 
+-    if ((*NextCluster) == 0xFFFFFFFF)
++    Status = DeviceExt->GetNextCluster(DeviceExt, CurrentCluster, &Candidate);
++    if (!NT_SUCCESS(Status))
++    {
++        ExReleaseResourceLite(&DeviceExt->FatResource);
++        return Status;
++    }
++
++    if (Candidate == 0xFFFFFFFF)
+     {
+         /* We are after last existing cluster, we must add one to file */
+         /* Firstly, find the next available open allocation unit and
+@@ -985,6 +1024,14 @@ GetNextClusterExtend(
+         WriteCluster(DeviceExt, CurrentCluster, NewCluster);
+         *NextCluster = NewCluster;
+     }
++    else if (!VfatIsValidDataCluster(DeviceExt, Candidate))
++    {
++        Status = STATUS_FILE_CORRUPT_ERROR;
++    }
++    else
++    {
++        *NextCluster = Candidate;
++    }
+ 
+     ExReleaseResourceLite(&DeviceExt->FatResource);
+     return Status;
+diff --git a/tests/host/fatx/check-chain-walk.py b/tests/host/fatx/check-chain-walk.py
+index d8186961..366e459c 100644
+--- a/tests/host/fatx/check-chain-walk.py
++++ b/tests/host/fatx/check-chain-walk.py
+@@ -16,10 +16,12 @@ extract = importlib.util.module_from_spec(spec)
+ spec.loader.exec_module(extract)
+ fat = (root / "drivers/filesystems/vfatfs/fat.c").read_text()
+ rw = (root / "drivers/filesystems/vfatfs/rw.c").read_text()
+-names = ["FAT32EntryMask", "FAT32GetNextCluster", "FAT16GetNextCluster",
++names = ["FAT32EntryMask", "VfatIsValidDataCluster",
++         "FAT32GetNextCluster", "FAT16GetNextCluster",
+          "GetNextCluster"]
+ if "WalkFatChain(" in fat:
+     names.append("WalkFatChain")
++names.append("GetNextClusterExtend")
+ body = "\n".join(extract.function(fat, name) for name in names)
+ body += extract.function(rw, "OffsetToCluster")
+ shim = r'''
+@@ -37,11 +39,13 @@ typedef void *PVOID;
+ typedef struct { int64_t QuadPart; } LARGE_INTEGER;
+ typedef struct _DEVICE_EXTENSION DEVICE_EXTENSION, *PDEVICE_EXTENSION;
+ struct _DEVICE_EXTENSION {
+-    struct { ULONG FatType, BytesPerCluster, SectorsPerCluster, rootStart;
++    struct { ULONG FatType, BytesPerCluster, SectorsPerCluster, rootStart,
++                   NumberOfClusters;
+     } FatInfo;
+     PVOID FATFileObject;
+     int FatResource;
+     NTSTATUS (*GetNextCluster)(PDEVICE_EXTENSION, ULONG, PULONG);
++    NTSTATUS (*FindAndMarkAvailableCluster)(PDEVICE_EXTENSION, PULONG);
+ };
+ #define FAT16 2
+ #define FAT32 3
+@@ -101,25 +105,29 @@ static int ExAcquireResourceSharedLite(int *r, int wait) {
+     held = 1; links_this_lease = 0; ++acquisitions;
+     return TRUE;
+ }
++static int ExAcquireResourceExclusiveLite(int *r, int wait) {
++    return ExAcquireResourceSharedLite(r, wait);
++}
+ static void ExReleaseResourceLite(int *r) {
+     (void)r; assert(held == 1 && pins == 0);
+     held = 0; ++releases;
+ }
+-static NTSTATUS GetNextClusterExtend(PDEVICE_EXTENSION d, ULONG c, PULONG n) {
+-    return GetNextCluster(d, c, n);
++static NTSTATUS find_cluster(PDEVICE_EXTENSION d, PULONG n) {
++    (void)d; *n = 99; return STATUS_SUCCESS;
++}
++static NTSTATUS WriteCluster(PDEVICE_EXTENSION d, ULONG c, ULONG n) {
++    (void)d; (void)c; (void)n; return STATUS_SUCCESS;
+ }
+ '''
+-# Forward declaration needed by the unchanged extension adapter.
+-shim = shim.replace("static NTSTATUS GetNextClusterExtend", 
+-    "NTSTATUS GetNextCluster(PDEVICE_EXTENSION, ULONG, PULONG);\n"
+-    "static NTSTATUS GetNextClusterExtend")
+ main = r'''
+ static DEVICE_EXTENSION setup(ULONG type, ULONG chunk) {
+     DEVICE_EXTENSION d = {0};
+     d.FatInfo.FatType = type; d.FatInfo.BytesPerCluster = 4096;
+     d.FatInfo.SectorsPerCluster = 8; d.FatInfo.rootStart = 24;
++    d.FatInfo.NumberOfClusters = 16000;
+     d.GetNextCluster = (type == FAT16 || type == FATX16) ?
+                       FAT16GetNextCluster : FAT32GetNextCluster;
++    d.FindAndMarkAvailableCluster = find_cluster;
+     chunk_size = chunk;
+     memset(&disk, 0, sizeof(disk));
+     maps = unpins = pins = acquisitions = releases = held = 0;
+@@ -173,6 +181,26 @@ int main(void) {
+         check(s == STATUS_SUCCESS && next == 0xffffffffu, "terminal EOF preserved");
+         balanced();
+ 
++        d = setup(type, 16384); put(type, 2, 0xffffffffu); next = 0x1234;
++        s = OffsetToCluster(&d, 2, 2 * 4096, &next, FALSE);
++        check(s == STATUS_FILE_CORRUPT_ERROR && next == 0x1234,
++              "early EOF is corruption and preserves caller output");
++        balanced();
++
++        d = setup(type, 4096); next = 0x1234;
++        s = OffsetToCluster(&d, d.FatInfo.NumberOfClusters + 2,
++                            4096, &next, FALSE);
++        check(s == STATUS_FILE_CORRUPT_ERROR && next == 0x1234 && maps == 0,
++              "out-of-range current cluster is rejected before mapping");
++        balanced();
++
++        d = setup(type, 4096);
++        put(type, 2, d.FatInfo.NumberOfClusters + 2); next = 0x1234;
++        s = OffsetToCluster(&d, 2, 4096, &next, FALSE);
++        check(s == STATUS_FILE_CORRUPT_ERROR && next == 0x1234,
++              "out-of-range next cluster is corruption");
++        balanced();
++
+         d = setup(type, 4096); next = 0x1234;
+         s = OffsetToCluster(&d, 2, 4096, &next, FALSE);
+         check(s == STATUS_FILE_CORRUPT_ERROR && next == 0x1234,
+@@ -197,7 +225,8 @@ int main(void) {
+     check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == 0 && next == 3,
+           "DOS FAT32 masks high nibble");
+     balanced();
+-    d = setup(FATX32, 4096); put(FATX32, 2, 0xf0000003u);
++    d = setup(FATX32, 4096); d.FatInfo.NumberOfClusters = UINT32_MAX;
++    put(FATX32, 2, 0xf0000003u);
+     check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == 0 && next == 0xf0000003u,
+           "FATX32 retains full-width entry");
+     balanced();
+@@ -205,6 +234,16 @@ int main(void) {
+     check(OffsetToCluster(&d, 2, 4096, &next, TRUE) == 0 && next == 3,
+           "extension route unchanged");
+     balanced();
++    d = setup(FATX16, 4096); next = 0x1234;
++    check(GetNextClusterExtend(&d, d.FatInfo.NumberOfClusters + 2, &next) ==
++          STATUS_FILE_CORRUPT_ERROR && next == 0x1234,
++          "extension rejects out-of-range current cluster");
++    balanced();
++    d = setup(FATX16, 4096); next = 0x1234;
++    put(FATX16, 2, d.FatInfo.NumberOfClusters + 2);
++    check(GetNextClusterExtend(&d, 2, &next) == STATUS_FILE_CORRUPT_ERROR &&
++          next == 0x1234, "extension rejects out-of-range next cluster");
++    balanced();
+     d = setup(FATX16, 4096);
+     check(OffsetToCluster(&d, 1, 8192, &next, FALSE) == 0 && next == 40 && !maps,
+           "root sentinel route unchanged");
+-- 
+2.47.3
+

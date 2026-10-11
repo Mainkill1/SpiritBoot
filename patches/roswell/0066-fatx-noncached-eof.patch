@@ -1,0 +1,294 @@
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index b96b1b0a..f039a6b5 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -548,6 +548,7 @@ VfatCommonRead(
+     PVOID Buffer;
+     NTSTATUS Status;
+     ULONG Length = 0;
++    ULONG CompletionLength;
+     ULONG BytesPerSector;
+     LARGE_INTEGER ByteOffset;
+     ULONG ReturnedLength = 0;
+@@ -561,6 +562,7 @@ VfatCommonRead(
+ 
+     ByteOffset = IrpContext->Stack->Parameters.Read.ByteOffset;
+     Length = IrpContext->Stack->Parameters.Read.Length;
++    CompletionLength = Length;
+     BytesPerSector = IrpContext->DeviceExt->FatInfo.BytesPerSector;
+ 
+ #ifndef SARCH_XBOX
+@@ -639,6 +641,17 @@ VfatCommonRead(
+             Length = (ULONG)(ROUND_UP_64(Fcb->RFCB.FileSize.QuadPart, BytesPerSector) - ByteOffset.QuadPart);
+         }
+ 
++        /* Ordinary noncached reads may need a sector-rounded transfer from
++         * the backing device.  Only bytes through the logical EOF belong to
++         * the file and may be published to the caller.  Paging and raw-volume
++         * reads retain their physical-transfer completion semantics. */
++        if (!PagingIo && !IsVolume &&
++            CompletionLength > Fcb->RFCB.FileSize.QuadPart - ByteOffset.QuadPart)
++        {
++            CompletionLength =
++                Fcb->RFCB.FileSize.QuadPart - ByteOffset.QuadPart;
++        }
++
+         if (!IsVolume)
+         {
+             vfatAddToStat(IrpContext->DeviceExt, Fat.NonCachedReads, 1);
+@@ -653,7 +666,9 @@ VfatCommonRead(
+         Status = VfatReadFileData(IrpContext, Length, ByteOffset, &ReturnedLength);
+         if (NT_SUCCESS(Status))
+         {
+-            IrpContext->Irp->IoStatus.Information = ReturnedLength;
++            IrpContext->Irp->IoStatus.Information =
++                !PagingIo && !IsVolume ? min(ReturnedLength, CompletionLength) :
++                                         ReturnedLength;
+         }
+     }
+ 
+diff --git a/tests/host/fatx/check-read-eof.py b/tests/host/fatx/check-read-eof.py
+new file mode 100644
+index 00000000..7895b6d8
+--- /dev/null
++++ b/tests/host/fatx/check-read-eof.py
+@@ -0,0 +1,114 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Execute production VfatCommonRead with controlled disk completion lengths."""
++import importlib.util
++import os
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1])
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location('extract', root / 'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++source = (root / 'drivers/filesystems/vfatfs/rw.c').read_text()
++body = extract.function(source, 'VfatCommonRead')
++shim = r'''
++#include <stdint.h>
++#include <stdio.h>
++#include <assert.h>
++#define SARCH_XBOX 1
++#define IRP_PAGING_IO 1
++#define IRP_NOCACHE 2
++#define IRPCONTEXT_CANWAIT 4
++#define FCB_IS_VOLUME 8
++#define STATUS_SUCCESS 0
++#define STATUS_PENDING 0x103
++#define NT_SUCCESS(s) ((s) >= 0)
++#define ASSERT(x) assert(x)
++#define FALSE 0
++#define IoWriteAccess 1
++#define EXCEPTION_EXECUTE_HANDLER 0
++#define BooleanFlagOn(x, f) (((x) & (f)) != 0)
++#define ROUND_UP_64(v, a) (((v) + (a) - 1) & ~((uint64_t)(a) - 1))
++#define min(a, b) ((a) < (b) ? (a) : (b))
++#define vfatAddToStat(...) ((void)0)
++#define _SEH2_TRY if (1)
++#define _SEH2_EXCEPT(x) else
++#define _SEH2_END
++#define _SEH2_GetExceptionCode() (-1)
++typedef uint32_t ULONG, *PULONG;
++typedef int32_t NTSTATUS;
++typedef int BOOLEAN;
++typedef void *PVOID, *PCC_FILE_SIZES;
++typedef union { uint64_t QuadPart; struct { ULONG LowPart; int32_t HighPart; } u; } LARGE_INTEGER;
++typedef struct { NTSTATUS Status; ULONG Information; } IOSB;
++typedef struct { ULONG Flags; IOSB IoStatus; } IRP;
++typedef struct { LARGE_INTEGER FileSize, AllocationSize; } RFCB;
++typedef struct { ULONG Flags; RFCB RFCB; } FCB, *PVFATFCB;
++typedef struct { void *FsContext, *PrivateCacheMap; } FILE_OBJECT;
++typedef struct { struct { struct { LARGE_INTEGER ByteOffset; ULONG Length; } Read; } Parameters; } STACK;
++typedef struct { struct { ULONG BytesPerSector; } FatInfo; } DEVICE;
++typedef struct { IRP *Irp; FILE_OBJECT *FileObject; STACK *Stack; DEVICE *DeviceExt; ULONG Flags; } CONTEXT, *PVFAT_IRP_CONTEXT;
++static struct { void *CacheMgrCallbacks; } global, *VfatGlobalData = &global;
++static ULONG disk_returned, disk_length, lock_length;
++static NTSTATUS disk_status;
++static void *VfatGetUserBuffer(IRP *irp, int paging) { (void)irp; (void)paging; return &global; }
++static NTSTATUS VfatLockUserBuffer(IRP *irp, ULONG length, int access) {
++    (void)irp; (void)access; lock_length = length; return 0;
++}
++static void CcInitializeCacheMap(FILE_OBJECT *f, void *sizes, int pin, void *callbacks, FCB *context) {
++    (void)sizes; (void)pin; (void)callbacks; (void)context; f->PrivateCacheMap = &global;
++}
++static int CcCopyRead(FILE_OBJECT *f, LARGE_INTEGER *off, ULONG length, int wait, void *buffer, IOSB *iosb) {
++    (void)f; (void)off; (void)wait; (void)buffer; iosb->Status = 0; iosb->Information = length; return 1;
++}
++static NTSTATUS VfatReadFileData(CONTEXT *c, ULONG length, LARGE_INTEGER offset, ULONG *got) {
++    (void)c; (void)offset; disk_length = length; *got = disk_returned; return disk_status;
++}
++'''
++tests = r'''
++static unsigned checks, failures;
++static void run(unsigned flags, unsigned fcb_flags, uint64_t file_size, unsigned offset,
++                unsigned requested, unsigned physical, NTSTATUS backend,
++                unsigned expected, unsigned expected_disk) {
++    FCB fcb = { .Flags = fcb_flags, .RFCB.FileSize.QuadPart = file_size };
++    IRP irp = { .Flags = flags, .IoStatus.Information = 99 };
++    FILE_OBJECT file = { .FsContext = &fcb };
++    STACK stack = { .Parameters.Read.ByteOffset.QuadPart = offset,
++                    .Parameters.Read.Length = requested };
++    DEVICE device = { .FatInfo.BytesPerSector = 512 };
++    CONTEXT context = { &irp, &file, &stack, &device, IRPCONTEXT_CANWAIT };
++    disk_returned = physical; disk_status = backend; disk_length = lock_length = 0;
++    NTSTATUS status = VfatCommonRead(&context);
++    ++checks;
++    if (status != backend || irp.IoStatus.Information != expected ||
++        disk_length != expected_disk || (flags && lock_length != requested)) {
++        ++failures;
++        printf("FAIL flags=%u volume=%u off=%u request=%u disk=%u got=%u want=%u\n",
++            flags, fcb_flags, offset, requested, disk_length,
++            irp.IoStatus.Information, expected);
++    }
++}
++int main(void) {
++    run(IRP_NOCACHE, 0, 65573, 65536, 512, 512, 0, 37, 512);
++    run(IRP_NOCACHE, 0, 65573, 65536, 8192, 512, 0, 37, 512);
++    run(IRP_NOCACHE, 0, 65573, 4096, 512, 512, 0, 512, 512);
++    run(IRP_NOCACHE, 0, 65573, 65536, 512, 17, 0, 17, 512);
++    run(IRP_NOCACHE, 0, 65573, 65536, 512, 0, 0, 0, 512);
++    run(IRP_NOCACHE | IRP_PAGING_IO, 0, 65573, 65536, 512, 512, 0, 512, 512);
++    run(IRP_NOCACHE, FCB_IS_VOLUME, 65573, 65536, 512, 512, 0, 512, 512);
++    run(IRP_NOCACHE, 0, 65573, 65536, 512, 0, -1, 99, 512);
++    run(0, 0, 65573, 65536, 8192, 0, 0, 37, 0);
++    run(IRP_NOCACHE, 0, UINT64_C(0x100010025), 65536, 512, 512, 0, 512, 512);
++    printf("%u production VfatCommonRead cases, %u failures\n", checks, failures);
++    return failures ? 1 : 0;
++}
++'''
++(out / 'read.c').write_text(shim + body + tests)
++subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
++                '-fsanitize=address,undefined', str(out/'read.c'), '-o', str(out/'read')], check=True)
++subprocess.run([str(out/'read')], check=True,
++               env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0'})
+diff --git a/tests/xbe/fatx-noncached-eof/Makefile b/tests/xbe/fatx-noncached-eof/Makefile
+new file mode 100644
+index 00000000..2f95aec6
+--- /dev/null
++++ b/tests/xbe/fatx-noncached-eof/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = FATX-NONCACHED-EOF
++GEN_XISO = fatx-noncached-eof.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../third_party/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/fatx-noncached-eof/main.c b/tests/xbe/fatx-noncached-eof/main.c
+new file mode 100644
+index 00000000..1035ae4d
+--- /dev/null
++++ b/tests/xbe/fatx-noncached-eof/main.c
+@@ -0,0 +1,107 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Distinguish logical EOF from a sector-rounded noncached disk transfer. */
++#include <stdio.h>
++#include <string.h>
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <nxdk/mount.h>
++#include "../regression.h"
++
++#define FILE_BYTES (65536 + 37)
++static unsigned char data[8192] __attribute__((aligned(4096)));
++static IO_STATUS_BLOCK iosb;
++static volatile LONG callbacks;
++static ULONG callback_bytes;
++static NTSTATUS callback_status;
++
++static void NTAPI completed(PVOID context, PIO_STATUS_BLOCK result,
++                           ULONG reserved)
++{
++    (void)reserved;
++    if (context != &iosb || result != &iosb) return;
++    callback_status = result->Status;
++    callback_bytes = result->Information;
++    InterlockedIncrement(&callbacks);
++}
++
++static void read_check(HANDLE reader, HANDLE event, unsigned mode,
++                       unsigned offset, unsigned length, unsigned expected)
++{
++    LARGE_INTEGER position = { .QuadPart = offset };
++    memset(data, 0xcc, sizeof(data));
++    iosb.Status = STATUS_PENDING;
++    iosb.Information = 0;
++    callbacks = 0;
++    callback_bytes = 0;
++    callback_status = STATUS_PENDING;
++    ResetEvent(event);
++    NTSTATUS status = NtReadFile(reader, mode && mode != 3 ? event : NULL,
++        mode == 3 ? completed : NULL, mode == 3 ? &iosb : NULL,
++        &iosb, data, length, &position);
++    if (!expected) {
++        regression_require(status == (NTSTATUS)STATUS_END_OF_FILE,
++            "beyond EOF terminates without an outstanding request");
++        regression_check(iosb.Information == 0, "EOF completes zero bytes");
++        return;
++    }
++    regression_require(NT_SUCCESS(status), "read accepted");
++    if (mode == 3) {
++        DWORD end = GetTickCount() + 5000;
++        while (!callbacks && (LONG)(end - GetTickCount()) > 0)
++            SleepEx(10, TRUE);
++        regression_require(callbacks == 1, "one native APC is delivered");
++        regression_check(callback_status == STATUS_SUCCESS,
++            "APC reports successful completion");
++        regression_check(callback_bytes == expected,
++            "APC reports logical file bytes, not sector padding");
++    } else if (mode) {
++        regression_require(WaitForSingleObject(event, 5000) == WAIT_OBJECT_0,
++            "event observes completion before buffer reuse");
++    }
++    regression_check(iosb.Status == STATUS_SUCCESS, "IOSB completion succeeds");
++    regression_check(iosb.Information == expected,
++        "IOSB reports logical file bytes, not sector padding");
++    unsigned wrong = 0;
++    for (unsigned i = 0; i < expected; ++i)
++        wrong += data[i] != (unsigned char)((offset + i) ^ ((offset + i) >> 8));
++    regression_check(!wrong, "every logical completed byte matches");
++    tap_comment("fatx_eof mode=%u offset=%u requested=%u expected=%u actual=%lu",
++        mode, offset, length, expected, iosb.Information);
++}
++
++int main(void)
++{
++    regression_begin();
++    if (!nxIsDriveMounted('E'))
++        nxMountDrive('E', "\\Device\\Harddisk0\\Partition1");
++    HANDLE writer = CreateFile("E:\\fatx-eof-regression.bin", GENERIC_WRITE,
++        0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
++    regression_require(writer != INVALID_HANDLE_VALUE, "private fixture opens");
++    for (unsigned offset = 0; offset < FILE_BYTES; offset += sizeof(data)) {
++        unsigned length = FILE_BYTES - offset;
++        if (length > sizeof(data)) length = sizeof(data);
++        for (unsigned i = 0; i < length; ++i)
++            data[i] = (unsigned char)((offset + i) ^ ((offset + i) >> 8));
++        DWORD written = 0;
++        regression_require(WriteFile(writer, data, length, &written, NULL) &&
++            written == length, "fixture block written exactly");
++    }
++    regression_require(CloseHandle(writer), "writer closes before reading");
++    HANDLE event = CreateEvent(NULL, TRUE, FALSE, NULL);
++    regression_require(event != NULL, "completion event created");
++    for (unsigned mode = 0; mode < 4; ++mode) {
++        DWORD flags = FILE_ATTRIBUTE_NORMAL;
++        if (mode) flags |= FILE_FLAG_OVERLAPPED;
++        if (mode >= 2) flags |= FILE_FLAG_NO_BUFFERING;
++        HANDLE reader = CreateFile("E:\\fatx-eof-regression.bin", GENERIC_READ,
++            FILE_SHARE_READ, NULL, OPEN_EXISTING, flags, NULL);
++        regression_require(reader != INVALID_HANDLE_VALUE, "reader opens");
++        read_check(reader, event, mode, 4096, 512, 512);
++        read_check(reader, event, mode, 65536, 512, 37);
++        read_check(reader, event, mode, 65536, 8192, 37);
++        read_check(reader, event, mode, 66048, 512, 0);
++        CloseHandle(reader);
++    }
++    CloseHandle(event);
++    regression_finish();
++}

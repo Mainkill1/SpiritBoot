@@ -1,0 +1,157 @@
+From 697beabc49c7bff3244923ee148940b486b1c8f4 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 20:20:53 -0700
+Subject: [PATCH] vfatfs: specialize first-cluster access for Xbox
+
+---
+ drivers/filesystems/vfatfs/direntry.c  |   5 ++
+ tests/host/fatx/check-first-cluster.py | 114 +++++++++++++++++++++++++
+ 2 files changed, 119 insertions(+)
+ create mode 100644 tests/host/fatx/check-first-cluster.py
+
+diff --git a/drivers/filesystems/vfatfs/direntry.c b/drivers/filesystems/vfatfs/direntry.c
+index cde44476..856bcbba 100644
+--- a/drivers/filesystems/vfatfs/direntry.c
++++ b/drivers/filesystems/vfatfs/direntry.c
+@@ -19,6 +19,10 @@ vfatDirEntryGetFirstCluster(
+     PDEVICE_EXTENSION pDeviceExt,
+     PDIR_ENTRY pFatDirEntry)
+ {
++#ifdef SARCH_XBOX
++    UNREFERENCED_PARAMETER(pDeviceExt);
++    return pFatDirEntry->FatX.FirstCluster;
++#else
+     ULONG cluster;
+ 
+     if (pDeviceExt->FatInfo.FatType == FAT32)
+@@ -36,6 +40,7 @@ vfatDirEntryGetFirstCluster(
+     }
+ 
+     return  cluster;
++#endif
+ }
+ 
+ #ifndef SARCH_XBOX
+diff --git a/tests/host/fatx/check-first-cluster.py b/tests/host/fatx/check-first-cluster.py
+new file mode 100644
+index 00000000..0e6ac187
+--- /dev/null
++++ b/tests/host/fatx/check-first-cluster.py
+@@ -0,0 +1,114 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production first-cluster accessor for Xbox and generic builds."""
++
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++body = extract.function(
++    (root / "drivers/filesystems/vfatfs/direntry.c").read_text(),
++    "vfatDirEntryGetFirstCluster")
++
++header = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++
++typedef uint16_t USHORT;
++typedef uint32_t ULONG;
++typedef int BOOLEAN;
++#define FAT32 3
++#define UNREFERENCED_PARAMETER(value) ((void)(value))
++
++typedef struct {
++    struct { ULONG FatType; } FatInfo;
++    BOOLEAN IsFatX;
++} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
++typedef union {
++    struct {
++        uint8_t pad0[0x14];
++        USHORT FirstCluster;
++        uint8_t pad1[4];
++        USHORT FirstClusterHigh;
++    } Fat;
++    struct {
++        uint8_t pad[0x2c];
++        ULONG FirstCluster;
++    } FatX;
++} DIR_ENTRY, *PDIR_ENTRY;
++
++BOOLEAN vfatVolumeIsFatX(PDEVICE_EXTENSION device);
++ULONG vfatDirEntryGetFirstCluster(PDEVICE_EXTENSION, PDIR_ENTRY);
++'''
++
++runner = r'''
++static unsigned format_tests;
++
++BOOLEAN vfatVolumeIsFatX(PDEVICE_EXTENSION device)
++{
++    ++format_tests;
++    return device->IsFatX;
++}
++
++int main(void)
++{
++    DEVICE_EXTENSION device = { 0 };
++    DIR_ENTRY entry = { 0 };
++    entry.FatX.FirstCluster = 0xfedcba98;
++#ifdef SARCH_XBOX
++    device.IsFatX = 1;
++    assert(vfatDirEntryGetFirstCluster(&device, &entry) == 0xfedcba98);
++    device.FatInfo.FatType = 16;
++    entry.FatX.FirstCluster = 0;
++    assert(vfatDirEntryGetFirstCluster(&device, &entry) == 0);
++    assert(format_tests == 0);
++#else
++    device.FatInfo.FatType = FAT32;
++    entry.Fat.FirstCluster = 0x5678;
++    entry.Fat.FirstClusterHigh = 0x1234;
++    assert(vfatDirEntryGetFirstCluster(&device, &entry) == 0x12345678);
++    device.FatInfo.FatType = 16;
++    device.IsFatX = 1;
++    entry.FatX.FirstCluster = 0xfedcba98;
++    assert(vfatDirEntryGetFirstCluster(&device, &entry) == 0xfedcba98);
++    device.IsFatX = 0;
++    entry.Fat.FirstCluster = 0xbeef;
++    assert(vfatDirEntryGetFirstCluster(&device, &entry) == 0xbeef);
++    assert(format_tests == 2);
++#endif
++    puts("PASS: production first-cluster format specialization");
++    return 0;
++}
++'''
++
++(out / "types.h").write_text(header)
++(out / "cluster.c").write_text('#include "types.h"\n' + body)
++(out / "runner.c").write_text('#include "types.h"\n' + runner)
++
++def build(name, xbox):
++    define = ["-DSARCH_XBOX"] if xbox else []
++    obj = out / f"cluster-{name}.o"
++    exe = out / f"cluster-{name}"
++    common = ["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror"]
++    subprocess.run(common + define + ["-c", str(out / "cluster.c"),
++                                      "-o", str(obj)], check=True)
++    undefined = subprocess.check_output(["nm", "-u", str(obj)], text=True)
++    subprocess.run(common + define + [str(obj), str(out / "runner.c"),
++                                      "-o", str(exe)], check=True)
++    subprocess.run([str(exe)], check=True)
++    return undefined
++
++xbox_undefined = build("xbox", True)
++generic_undefined = build("generic", False)
++assert "vfatVolumeIsFatX" not in xbox_undefined
++assert "vfatVolumeIsFatX" in generic_undefined
+-- 
+2.47.3
+

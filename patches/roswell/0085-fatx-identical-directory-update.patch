@@ -1,0 +1,310 @@
+From 75e002f5c91fd79423e76fe3935c254802913a0d Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Sat, 10 Oct 2026 20:29:40 -0700
+Subject: [PATCH] vfatfs: skip byte-identical directory updates
+
+---
+ drivers/filesystems/vfatfs/dirwr.c          |  15 +-
+ tests/host/fatx/check-update-entry-dirty.py | 223 ++++++++++++++++++++
+ tests/host/metadata/check.py                |   7 +-
+ 3 files changed, 239 insertions(+), 6 deletions(-)
+ create mode 100644 tests/host/fatx/check-update-entry-dirty.py
+
+diff --git a/drivers/filesystems/vfatfs/dirwr.c b/drivers/filesystems/vfatfs/dirwr.c
+index 825916af..0179fa7e 100644
+--- a/drivers/filesystems/vfatfs/dirwr.c
++++ b/drivers/filesystems/vfatfs/dirwr.c
+@@ -123,6 +123,7 @@ VfatUpdateEntry(
+     ULONG SizeDirEntry;
+     ULONG dirIndex;
+     NTSTATUS Status;
++    BOOLEAN Changed;
+ 
+     ASSERT(pFcb);
+ 
+@@ -165,10 +166,18 @@ VfatUpdateEntry(
+     }
+     _SEH2_END;
+ 
+-    VfatRecordMetadataUpdate(DeviceExt->FatInfo.FatType, PinEntry, &pFcb->entry);
++    /* Clear before comparing so a serialized successor that changes the FCB
++     * after this point can republish FCB_IS_DIRTY for a later update. */
+     pFcb->Flags &= ~FCB_IS_DIRTY;
+-    RtlCopyMemory(PinEntry, &pFcb->entry, SizeDirEntry);
+-    CcSetDirtyPinnedData(Context, NULL);
++    Changed = RtlCompareMemory(PinEntry, &pFcb->entry, SizeDirEntry) !=
++              SizeDirEntry;
++    VfatRecordMetadataUpdate(DeviceExt->FatInfo.FatType, PinEntry,
++                             &pFcb->entry);
++    if (Changed)
++    {
++        RtlCopyMemory(PinEntry, &pFcb->entry, SizeDirEntry);
++        CcSetDirtyPinnedData(Context, NULL);
++    }
+     CcUnpinData(Context);
+     return STATUS_SUCCESS;
+ }
+diff --git a/tests/host/fatx/check-update-entry-dirty.py b/tests/host/fatx/check-update-entry-dirty.py
+new file mode 100644
+index 00000000..f843b565
+--- /dev/null
++++ b/tests/host/fatx/check-update-entry-dirty.py
+@@ -0,0 +1,223 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise production VfatUpdateEntry dirty publication decisions."""
++
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++body = extract.function((root / "drivers/filesystems/vfatfs/dirwr.c").read_text(),
++                        "VfatUpdateEntry")
++
++shim = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++#define IN
++#define ASSERT assert
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define PIN_WAIT 1
++#define STATUS_SUCCESS 0
++#define STATUS_UNSUCCESSFUL (-1)
++#define NT_SUCCESS(value) ((value) >= 0)
++#define FCB_CACHE_INITIALIZED 0x01
++#define FCB_IS_DIRTY 0x02
++#define FCB_IS_FAT 0x04
++#define FCB_IS_VOLUME 0x08
++#define BooleanFlagOn(value, flags) (((value) & (flags)) != 0)
++#define _SEH2_TRY if (1)
++#define _SEH2_EXCEPT(value) else if (0)
++#define _SEH2_YIELD(value) value
++#define _SEH2_GetExceptionCode() STATUS_UNSUCCESSFUL
++#define _SEH2_END
++#define EXCEPTION_EXECUTE_HANDLER 1
++
++typedef int32_t NTSTATUS;
++typedef uint32_t ULONG;
++typedef int BOOLEAN;
++typedef void *PVOID;
++typedef struct { struct { ULONG LowPart; int32_t HighPart; } u; } LARGE_INTEGER;
++typedef union _DIR_ENTRY {
++    struct { uint8_t Bytes[32]; } Fat;
++    struct { uint8_t Bytes[64]; } FatX;
++    uint8_t Raw[64];
++} DIR_ENTRY, *PDIR_ENTRY;
++typedef struct _VFATFCB {
++    ULONG Flags;
++    ULONG startIndex;
++    ULONG dirIndex;
++    int Root;
++    void *FileObject;
++    struct _VFATFCB *parentFcb;
++    DIR_ENTRY entry;
++} VFATFCB, *PVFATFCB;
++typedef struct {
++    struct { ULONG FatType; } FatInfo;
++    int FatX;
++} DEVICE_EXTENSION, *PDEVICE_EXTENSION;
++
++#define FATX_DIR_ENTRY ((struct { uint8_t Bytes[64]; }){0})
++#define FAT_DIR_ENTRY ((struct { uint8_t Bytes[32]; }){0})
++
++static DIR_ENTRY disk_entry;
++static int init_status, pins, unpins, dirty_calls, metadata_calls;
++static int block_dirty;
++static ULONG last_offset, last_length;
++static int context_cookie;
++static PVFATFCB inject_after_compare;
++
++static int vfatVolumeIsFatX(PDEVICE_EXTENSION device) { return device->FatX; }
++static int vfatFCBIsRoot(PVFATFCB fcb) { return fcb->Root; }
++static NTSTATUS vfatFCBInitializeCacheFromVolume(PDEVICE_EXTENSION device,
++                                                 PVFATFCB parent)
++{
++    (void)device; (void)parent;
++    return init_status;
++}
++static void CcPinRead(void *file, LARGE_INTEGER *offset, ULONG length,
++                      int wait, PVOID *context, PVOID *entry)
++{
++    (void)file; (void)wait;
++    ++pins;
++    last_offset = offset->u.LowPart;
++    last_length = length;
++    *context = &context_cookie;
++    *(PDIR_ENTRY *)entry = &disk_entry;
++}
++static void CcSetDirtyPinnedData(PVOID context, void *lsn)
++{
++    (void)lsn;
++    assert(context == &context_cookie);
++    ++dirty_calls;
++    block_dirty = 1;
++}
++static void CcUnpinData(PVOID context)
++{
++    assert(context == &context_cookie);
++    ++unpins;
++}
++ULONG RtlCompareMemory(const void *left, const void *right, ULONG length)
++{
++    const uint8_t *a = left, *b = right;
++    ULONG matched = 0;
++    while (matched < length && a[matched] == b[matched]) ++matched;
++    if (inject_after_compare)
++    {
++        inject_after_compare->entry.Raw[0] ^= 0xff;
++        inject_after_compare->Flags |= FCB_IS_DIRTY;
++        inject_after_compare = NULL;
++    }
++    return matched;
++}
++#define RtlCopyMemory memcpy
++static void VfatRecordMetadataUpdate(ULONG type, const void *before,
++                                     const void *after)
++{
++    (void)type; (void)before; (void)after;
++    ++metadata_calls;
++}
++'''
++
++cases = r'''
++static void reset(PDEVICE_EXTENSION device, PVFATFCB parent, PVFATFCB fcb,
++                  int fatx)
++{
++    memset(&disk_entry, 0, sizeof(disk_entry));
++    memset(device, 0, sizeof(*device));
++    memset(parent, 0, sizeof(*parent));
++    memset(fcb, 0, sizeof(*fcb));
++    device->FatX = fatx;
++    device->FatInfo.FatType = fatx ? 4 : 2;
++    fcb->Flags = FCB_IS_DIRTY;
++    fcb->startIndex = 3;
++    fcb->dirIndex = 5;
++    fcb->parentFcb = parent;
++    parent->FileObject = parent;
++    init_status = STATUS_SUCCESS;
++    pins = unpins = dirty_calls = metadata_calls = block_dirty = 0;
++    last_offset = last_length = 0;
++    inject_after_compare = NULL;
++}
++
++int main(void)
++{
++    DEVICE_EXTENSION device;
++    VFATFCB parent, fcb;
++
++    reset(&device, &parent, &fcb, 1);
++    memset(disk_entry.Raw, 0x31, 64);
++    memcpy(fcb.entry.Raw, disk_entry.Raw, 64);
++    assert(VfatUpdateEntry(&device, &fcb) == STATUS_SUCCESS);
++    assert(pins == 1 && unpins == 1 && metadata_calls == 1);
++    assert(dirty_calls == 0 && block_dirty == 0);
++    assert((fcb.Flags & FCB_IS_DIRTY) == 0);
++    assert(last_offset == 3 * 64 && last_length == 64);
++
++    reset(&device, &parent, &fcb, 1);
++    memset(disk_entry.Raw, 0x42, 64);
++    memcpy(fcb.entry.Raw, disk_entry.Raw, 64);
++    block_dirty = 1;
++    assert(VfatUpdateEntry(&device, &fcb) == STATUS_SUCCESS);
++    assert(dirty_calls == 0 && block_dirty == 1);
++
++    reset(&device, &parent, &fcb, 1);
++    memset(disk_entry.Raw, 0x48, 64);
++    memcpy(fcb.entry.Raw, disk_entry.Raw, 64);
++    inject_after_compare = &fcb;
++    assert(VfatUpdateEntry(&device, &fcb) == STATUS_SUCCESS);
++    assert(dirty_calls == 0 && (fcb.Flags & FCB_IS_DIRTY));
++    assert(memcmp(disk_entry.Raw, fcb.entry.Raw, 64) != 0);
++
++    reset(&device, &parent, &fcb, 1);
++    memset(disk_entry.Raw, 0x53, 64);
++    memcpy(fcb.entry.Raw, disk_entry.Raw, 64);
++    fcb.entry.Raw[37] ^= 0xff;
++    assert(VfatUpdateEntry(&device, &fcb) == STATUS_SUCCESS);
++    assert(dirty_calls == 1 && block_dirty == 1);
++    assert(memcmp(disk_entry.Raw, fcb.entry.Raw, 64) == 0);
++
++    reset(&device, &parent, &fcb, 0);
++    memset(disk_entry.Raw, 0x64, 64);
++    memcpy(fcb.entry.Raw, disk_entry.Raw, 64);
++    fcb.entry.Raw[4] ^= 0xff;
++    assert(VfatUpdateEntry(&device, &fcb) == STATUS_SUCCESS);
++    assert(dirty_calls == 1 && last_offset == 5 * 32 && last_length == 32);
++    assert(memcmp(disk_entry.Raw, fcb.entry.Raw, 32) == 0);
++    for (unsigned i = 32; i < 64; ++i) assert(disk_entry.Raw[i] == 0x64);
++
++    reset(&device, &parent, &fcb, 1);
++    fcb.Root = 1;
++    assert(VfatUpdateEntry(&device, &fcb) == STATUS_SUCCESS && pins == 0);
++    reset(&device, &parent, &fcb, 1);
++    fcb.Flags |= FCB_IS_VOLUME;
++    assert(VfatUpdateEntry(&device, &fcb) == STATUS_SUCCESS && pins == 0);
++
++    reset(&device, &parent, &fcb, 1);
++    init_status = STATUS_UNSUCCESSFUL;
++    assert(VfatUpdateEntry(&device, &fcb) == STATUS_UNSUCCESSFUL);
++    assert(pins == 0 && unpins == 0 && (fcb.Flags & FCB_IS_DIRTY));
++
++    puts("PASS: production VfatUpdateEntry publishes dirty state only on change");
++    return 0;
++}
++'''
++
++c = out / "update-entry-dirty.c"
++c.write_text(shim + body + cases)
++subprocess.run([
++    "cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
++    "-fsanitize=undefined", str(c), "-o", str(out / "update-entry-dirty")
++], check=True)
++subprocess.run([str(out / "update-entry-dirty")], check=True)
+diff --git a/tests/host/metadata/check.py b/tests/host/metadata/check.py
+index 3e5adc23..0199d5e7 100644
+--- a/tests/host/metadata/check.py
++++ b/tests/host/metadata/check.py
+@@ -174,7 +174,7 @@ int main(void) {
+         VfatFlushWriteThrough(&device,&file);
+         assert(!memcmp(platter+3*64,&file.entry,64));
+     }
+-    assert(reads==1 && writes==100 && dirty_calls==100 && pins==unpins && block.RefCount==0);
++    assert(reads==1 && writes==0 && dirty_calls==0 && pins==unpins && block.RefCount==0);
+ #ifdef NXK_METADATA_COUNTERS
+     assert(VfatMetadataCounters.Count[1][0]==100);
+     assert(VfatMetadataCounters.Magic==0x4d455431 && VfatMetadataCounters.Schema==1);
+@@ -211,7 +211,8 @@ int main(void) {
+             if(mask&4) file.entry.Fat.lCase=9;
+         }
+         assert(VfatUpdateEntry(&device,&file)==0); VfatFlushWriteThrough(&device,&file);
+-        assert(VfatMetadataCounters.Count[format][mask]==1 && writes==1 && dirty_calls==1 && pins==unpins);
++        assert(VfatMetadataCounters.Count[format][mask]==1 &&
++               writes==(mask != 0) && dirty_calls==(mask != 0) && pins==unpins);
+     }
+     /* FAT16 extended-attribute word is not FAT32's high cluster word. */
+     reset(); fatx_mode=0; device.FatInfo.FatType=FAT16;
+@@ -234,7 +235,7 @@ int main(void) {
+         assert(VfatUpdateEntry(&device,&file)==0); VfatFlushWriteThrough(&device,&file);
+         assert(!memcmp(platter+3*64,&file.entry,64));
+     }
+-    assert(reads==100 && writes==100 && dirty_calls==100 && pins==unpins);
++    assert(reads==100 && writes==0 && dirty_calls==0 && pins==unpins);
+     reset(); block.Valid=1; memcpy(buffer,platter,sizeof buffer); block.Dirty=1; buffer[0]=0x77;
+     assert(VfatUpdateEntry(&device,&file)==0); VfatFlushWriteThrough(&device,&file);
+     assert(writes==1 && platter[0]==0x77);
+-- 
+2.47.3
+
