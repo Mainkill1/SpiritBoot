@@ -14,11 +14,12 @@
 #endif
 
 #define SB_WINDOW_MS 3000u
+#define SB_CREDITS_PAGE_COUNT 3u
 #define SB_PAGE_SIZE 4096u
 
 /* Normalized inputs, NOT Xbox USB packet bits. Source includes device generation. */
 enum { SB_START=1u, SB_UP=2u, SB_DOWN=4u, SB_LEFT=8u, SB_RIGHT=16u,
-       SB_A=32u, SB_B=64u, SB_X=128u };
+       SB_A=32u, SB_B=64u, SB_X=128u, SB_BACK=256u };
 typedef struct { uint32_t ms, source, buttons; bool valid; } SbInput;
 typedef enum { SB_GATE_WAIT, SB_GATE_ENTER, SB_GATE_BOOT } SbGateResult;
 typedef struct {
@@ -46,7 +47,7 @@ typedef struct {
 } SbSettingsStore;
 typedef enum {
     SB_MENU_EDIT, SB_MENU_CONFIRM_SAVE, SB_MENU_CONFIRM_DISCARD,
-    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY
+    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY, SB_MENU_CREDITS
 } SbMenuState;
 typedef struct {
     SbSettings original, edited;
@@ -54,6 +55,7 @@ typedef struct {
     SbSetupRow row;
     SbMenuState state;
     SbCommitResult last_save;
+    uint8_t credits_page;  /* valid only in SB_MENU_CREDITS */
     bool armed, source_seen;
 } SbSetup;
 SB_INIT_CODE void sb_setup_open(SbSetup *setup, SbSettings initial, uint32_t supported);
