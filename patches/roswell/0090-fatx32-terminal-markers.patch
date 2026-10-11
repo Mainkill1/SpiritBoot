@@ -1,0 +1,126 @@
+diff --git a/drivers/filesystems/vfatfs/fat.c b/drivers/filesystems/vfatfs/fat.c
+index de041f6c..4cbf3bc5 100644
+--- a/drivers/filesystems/vfatfs/fat.c
++++ b/drivers/filesystems/vfatfs/fat.c
+@@ -38,6 +38,18 @@ FAT32EntryMask(
+     return DeviceExt->FatInfo.FatType == FATX32 ? 0xffffffff : 0x0fffffff;
+ }
+ 
++/* FATX32 volumes in the field use both the full-width FATX end markers and
++ * the conventional FAT32 28-bit markers.  Keep full-width data-cluster values
++ * intact while accepting either terminal encoding. */
++static
++BOOLEAN
++FAT32IsEndOfChain(
++    ULONG Entry)
++{
++    return (Entry >= 0x0ffffff8 && Entry <= 0x0fffffff) ||
++           Entry >= 0xfffffff8;
++}
++
+ static
+ BOOLEAN
+ VfatIsValidDataCluster(
+@@ -117,7 +129,7 @@ FAT32GetNextCluster(
+     _SEH2_END;
+ 
+     CurrentCluster = (*(PULONG)((char*)BaseAddress + (FATOffset % ChunkSize))) & EntryMask;
+-    if (CurrentCluster >= EntryMask - 7)
++    if (FAT32IsEndOfChain(CurrentCluster))
+         CurrentCluster = 0xffffffff;
+ 
+     if (CurrentCluster == 0)
+@@ -961,7 +973,10 @@ WalkFatChain(
+                     CurrentCluster = *(PULONG)((char *)BaseAddress +
+                                               FATOffset % ChunkSize);
+                 CurrentCluster &= EntryMask;
+-                if (CurrentCluster >= EntryMask - 7)
++                if ((EntrySize == sizeof(USHORT) &&
++                     CurrentCluster >= EntryMask - 7) ||
++                    (EntrySize == sizeof(ULONG) &&
++                     FAT32IsEndOfChain(CurrentCluster)))
+                     CurrentCluster = 0xffffffff;
+                 if (CurrentCluster == 0xffffffff)
+                 {
+@@ -1096,7 +1111,10 @@ GetContiguousClusterRun(
+                     CurrentCluster = *(PULONG)((char *)BaseAddress +
+                                               FATOffset % ChunkSize);
+                 CurrentCluster &= EntryMask;
+-                if (CurrentCluster >= EntryMask - 7)
++                if ((EntrySize == sizeof(USHORT) &&
++                     CurrentCluster >= EntryMask - 7) ||
++                    (EntrySize == sizeof(ULONG) &&
++                     FAT32IsEndOfChain(CurrentCluster)))
+                     CurrentCluster = 0xffffffff;
+                 if (CurrentCluster != 0xffffffff &&
+                     !VfatIsValidDataCluster(DeviceExt, CurrentCluster))
+diff --git a/tests/host/fatx/check-chain-walk.py b/tests/host/fatx/check-chain-walk.py
+index 9ad26d3c..bea93f61 100644
+--- a/tests/host/fatx/check-chain-walk.py
++++ b/tests/host/fatx/check-chain-walk.py
+@@ -16,7 +16,7 @@ extract = importlib.util.module_from_spec(spec)
+ spec.loader.exec_module(extract)
+ fat = (root / "drivers/filesystems/vfatfs/fat.c").read_text()
+ rw = (root / "drivers/filesystems/vfatfs/rw.c").read_text()
+-names = ["FAT32EntryMask", "VfatIsValidDataCluster",
++names = ["FAT32EntryMask", "FAT32IsEndOfChain", "VfatIsValidDataCluster",
+          "FAT32GetNextCluster", "FAT16GetNextCluster",
+          "GetNextCluster"]
+ if "WalkFatChain(" in fat:
+@@ -256,6 +256,11 @@ int main(void) {
+     check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == 0 && next == 0x10000003u,
+           "FATX32 retains full-width entry");
+     balanced();
++    d = setup(FATX32, 4096); put(FATX32, 2, 0x0fffffffu);
++    check(OffsetToCluster(&d, 2, 4096, &next, FALSE) == 0 &&
++          next == 0xffffffffu,
++          "FATX32 accepts legacy 28-bit terminal entry");
++    balanced();
+     d = setup(FATX16, 4096); put(FATX16, 2, 3);
+     check(OffsetToCluster(&d, 2, 4096, &next, TRUE) == 0 && next == 3,
+           "extension route unchanged");
+@@ -303,6 +308,13 @@ int main(void) {
+               "terminal run reports included clusters and EOF");
+         balanced();
+ 
++        d = setup(FATX32, 4096);
++        put(FATX32, 590, 0x0fffffffu); count = next = 0;
++        check(GetContiguousClusterRun(&d, 590, 1, &count, &next) ==
++              STATUS_SUCCESS && count == 1 && next == 0xffffffffu,
++              "single-cluster FATX32 directory accepts 28-bit terminal");
++        balanced();
++
+         d = setup(FATX32, 4096); count = 77; next = 88;
+         check(GetContiguousClusterRun(&d, 2, 4, &count, &next) ==
+               STATUS_FILE_CORRUPT_ERROR && count == 77 && next == 88,
+diff --git a/tests/host/fatx/check-fatx32.py b/tests/host/fatx/check-fatx32.py
+index 1d480941..eb93f687 100644
+--- a/tests/host/fatx/check-fatx32.py
++++ b/tests/host/fatx/check-fatx32.py
+@@ -26,6 +26,8 @@ names = ['FAT32GetNextCluster', 'FAT32FindAndMarkAvailableCluster',
+          'FAT16GetNextCluster', 'FAT16WriteCluster']
+ if 'FAT32EntryMask(' in text:
+     names.insert(0, 'FAT32EntryMask')
++if 'FAT32IsEndOfChain(' in text:
++    names.insert(1, 'FAT32IsEndOfChain')
+ body = '\n'.join(extract.function(text, name) for name in names)
+ shim = r'''
+ #include <stdint.h>
+@@ -36,6 +38,7 @@ shim = r'''
+ typedef uint32_t ULONG, *PULONG;
+ typedef uint16_t USHORT, *PUSHORT;
+ typedef int32_t LONG, *PLONG, NTSTATUS;
++typedef int BOOLEAN;
+ typedef uintptr_t ULONG_PTR;
+ typedef void *PVOID;
+ typedef struct { int64_t QuadPart; } LARGE_INTEGER;
+@@ -123,7 +126,8 @@ int main(void) {
+     check(next == 0xf0000003u, "FATX32 traversal retains high cluster bits");
+     fat[2] = 0x0fffffffu;
+     FAT32GetNextCluster(&d, 2, &next);
+-    check(next == 0x0fffffffu, "DOS end marker is not a FATX32 end marker");
++    check(next == 0xffffffffu,
++          "FATX32 accepts conventional 28-bit end marker");
+     fat[2] = 0xfffffff8u;
+     FAT32GetNextCluster(&d, 2, &next);
+     check(next == 0xffffffffu, "FATX32 end-range traversal normalizes EOF");
