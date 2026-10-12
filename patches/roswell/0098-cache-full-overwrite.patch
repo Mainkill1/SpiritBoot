@@ -1,0 +1,597 @@
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index 7377a5662a8eb778871a76ed02fda0c30577e3c6..27dd5e751b1b70b0b4107ff53729a31b24bce474 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -229,6 +229,8 @@ endif()
+ option(NXK_MM_CACHE "Use the nxmm file cache instead of the ROS Cc" ON)
+ option(NXK_CACHE_WAIT_COUNTERS
+     "Diagnostic aggregate nxcache completion-wait counters" OFF)
++option(NXK_CACHE_OVERWRITE_COUNTERS
++    "Diagnostic aggregate nxcache full-overwrite counters" OFF)
+ if(NXK_MM_CACHE)
+     list(REMOVE_ITEM NTOSKRNL_SOURCE
+         ${REACTOS_SOURCE_DIR}/ntoskrnl/cc/cacheman.c
+@@ -252,6 +254,9 @@ if(NXK_MM_CACHE)
+     if(NXK_CACHE_WAIT_COUNTERS)
+         add_definitions(-DNXK_CACHE_WAIT_COUNTERS=1)
+     endif()
++    if(NXK_CACHE_OVERWRITE_COUNTERS)
++        add_definitions(-DNXK_CACHE_OVERWRITE_COUNTERS=1)
++    endif()
+ endif()
+ 
+ add_executable(ntoskrnl
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index 47bc77a6815e1dd74193577cb5e840087bd055bf..998471dbd9b5002aac3efabf896def07c8db1e62 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -129,6 +129,12 @@ typedef struct _NXC_WAIT_ENTRY
+ #endif
+ } NXC_WAIT_ENTRY;
+ 
++typedef struct _NXC_OVERWRITE_CLAIM
++{
++    NXC_BLOCK *Block;
++    BOOLEAN NewClaim;
++} NXC_OVERWRITE_CLAIM;
++
+ #ifdef NXK_CACHE_WAIT_COUNTERS
+ typedef struct _NXC_CACHE_WAIT_COUNTERS
+ {
+@@ -145,6 +151,25 @@ typedef struct _NXC_CACHE_WAIT_COUNTERS
+ NXC_CACHE_WAIT_COUNTERS NxcCacheWaitCounters;
+ #endif
+ 
++#ifdef NXK_CACHE_OVERWRITE_COUNTERS
++typedef struct _NXC_CACHE_OVERWRITE_COUNTERS
++{
++    ULONGLONG FullOverwriteAttempts;
++    ULONGLONG FullOverwriteClaims;
++    ULONGLONG ColdReadsSkipped;
++    ULONGLONG BytesReadSkipped;
++    ULONGLONG RollbackCount;
++    ULONGLONG FallbackPartialCount;
++} NXC_CACHE_OVERWRITE_COUNTERS;
++
++/* Diagnostic builds read this symbol from xboxkrnl.unstripped.exe. */
++NXC_CACHE_OVERWRITE_COUNTERS NxcCacheOverwriteCounters;
++#define NXC_OVERWRITE_COUNT(Field, Amount) \
++    (NxcCacheOverwriteCounters.Field += (Amount))
++#else
++#define NXC_OVERWRITE_COUNT(Field, Amount) ((VOID)0)
++#endif
++
+ typedef struct _NXC_BCB
+ {
+     PUBLIC_BCB PFCB;                /* must be first: callers hand &PFCB back */
+@@ -707,6 +732,111 @@ NxcGetBlock(
+     }
+ }
+ 
++/* Claim a complete block without reading its old contents.  The caller holds
++ * NxcMutex and promises to initialize every byte before publishing a new
++ * claim.  Existing valid blocks keep the ordinary referenced-block contract.
++ * Busy and capacity waits always relookup after #210's completion wake. */
++static VOID
++NxcAcquireFullOverwriteLocked(
++    IN NXC_MAP *Map,
++    IN LONGLONG Offset,
++    OUT NXC_OVERWRITE_CLAIM *Claim)
++{
++    NXC_BLOCK *Block;
++
++    ASSERT((Offset & (NXC_BLOCK_SIZE - 1)) == 0);
++
++    for (;;)
++    {
++        Block = NxcLookupBlock(Map, Offset);
++        if (Block != NULL)
++        {
++            if (Block->Busy)
++            {
++                NxcWaitOnListLocked(&Block->BusyWaiters);
++#ifdef NXK_CACHE_WAIT_COUNTERS
++                Block = NxcLookupBlock(Map, Offset);
++                if (Block != NULL && Block->Busy)
++                    NxcCacheWaitCounters.SpuriousRetryCount++;
++#endif
++                continue;
++            }
++
++            Block->RefCount++;
++            RemoveEntryList(&Block->LruLink);
++            InsertTailList(&NxcLruList, &Block->LruLink);
++            Claim->Block = Block;
++            Claim->NewClaim = !Block->Valid;
++            if (Claim->NewClaim)
++            {
++                ASSERT(!Block->Dirty);
++                Block->Busy = TRUE;
++            }
++            return;
++        }
++
++        Block = NxcClaimSlot(TRUE);
++        ASSERT(Block != NULL);
++
++        /* Claiming a dirty victim can drop the mutex for writeback. */
++        if (NxcLookupBlock(Map, Offset) != NULL)
++        {
++            Block->Map = NULL;
++            NxcPutBlock(Block);
++            continue;
++        }
++
++        Block->Map = Map;
++        Block->Offset = Offset;
++        Block->Valid = FALSE;
++        Block->Dirty = FALSE;
++        Block->Busy = TRUE;
++        InsertTailList(&NxcLruList, &Block->LruLink);
++        Claim->Block = Block;
++        Claim->NewClaim = TRUE;
++        return;
++    }
++}
++
++static VOID
++NxcPublishFullOverwriteLocked(
++    IN OUT NXC_OVERWRITE_CLAIM *Claim)
++{
++    NXC_BLOCK *Block = Claim->Block;
++
++    ASSERT(Block != NULL && Block->RefCount > 0);
++    Block->Dirty = TRUE;
++    if (Claim->NewClaim)
++    {
++        ASSERT(Block->Busy && !Block->Valid);
++        Block->Valid = TRUE;
++        NXC_OVERWRITE_COUNT(FullOverwriteClaims, 1);
++        NXC_OVERWRITE_COUNT(ColdReadsSkipped, 1);
++        NXC_OVERWRITE_COUNT(BytesReadSkipped, NXC_BLOCK_SIZE);
++        NxcPublishBlockIdleLocked(Block);
++    }
++    NxcPutBlock(Block);
++    Claim->Block = NULL;
++}
++
++static VOID
++NxcRollbackFullOverwriteLocked(
++    IN OUT NXC_OVERWRITE_CLAIM *Claim)
++{
++    NXC_BLOCK *Block = Claim->Block;
++
++    ASSERT(Claim->NewClaim && Block != NULL);
++    ASSERT(Block->Busy && !Block->Valid && Block->RefCount > 0);
++    RemoveEntryList(&Block->LruLink);
++    Block->Map = NULL;
++    Block->Offset = 0;
++    Block->Dirty = FALSE;
++    NXC_OVERWRITE_COUNT(RollbackCount, 1);
++    NxcPublishBlockIdleLocked(Block);
++    NxcPutBlock(Block);
++    Claim->Block = NULL;
++}
++
+ /* MAP LIFETIME *************************************************************/
+ 
+ VOID
+@@ -1187,7 +1317,24 @@ CcCopyWrite(
+         LONGLONG BlockOffset = Current & ~(LONGLONG)(NXC_BLOCK_SIZE - 1);
+         ULONG At = (ULONG)(Current - BlockOffset);
+         ULONG Chunk = min(Length - Done, NXC_BLOCK_SIZE - At);
+-        NXC_BLOCK *Block = NxcGetBlock(Map, BlockOffset, Wait);
++        NXC_BLOCK *Block;
++        NXC_OVERWRITE_CLAIM Claim = {0};
++        BOOLEAN FullOverwrite = At == 0 && Chunk == NXC_BLOCK_SIZE;
++
++        if (FullOverwrite)
++            NXC_OVERWRITE_COUNT(FullOverwriteAttempts, 1);
++        else
++            NXC_OVERWRITE_COUNT(FallbackPartialCount, 1);
++
++        if (FullOverwrite && Wait)
++        {
++            NxcAcquireFullOverwriteLocked(Map, BlockOffset, &Claim);
++            Block = Claim.Block;
++        }
++        else
++        {
++            Block = NxcGetBlock(Map, BlockOffset, Wait);
++        }
+ 
+         if (Block == NULL)
+         {
+@@ -1201,13 +1348,21 @@ CcCopyWrite(
+         }
+         _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
+         {
+-            NxcPutBlock(Block);
++            if (Claim.NewClaim)
++                NxcRollbackFullOverwriteLocked(&Claim);
++            else
++                NxcPutBlock(Block);
+             ExReleaseFastMutex(&NxcMutex);
+             ExRaiseStatus(STATUS_INVALID_USER_BUFFER);
+         }
+         _SEH2_END;
+-        Block->Dirty = TRUE;
+-        NxcPutBlock(Block);
++        if (FullOverwrite && Wait)
++            NxcPublishFullOverwriteLocked(&Claim);
++        else
++        {
++            Block->Dirty = TRUE;
++            NxcPutBlock(Block);
++        }
+ 
+         In += Chunk;
+         Current += Chunk;
+@@ -1356,7 +1511,24 @@ CcZeroData(
+         LONGLONG BlockOffset = Current & ~(LONGLONG)(NXC_BLOCK_SIZE - 1);
+         ULONG At = (ULONG)(Current - BlockOffset);
+         ULONG Chunk = (ULONG)min(End - Current, NXC_BLOCK_SIZE - At);
+-        NXC_BLOCK *Block = NxcGetBlock(Map, BlockOffset, Wait);
++        NXC_BLOCK *Block;
++        NXC_OVERWRITE_CLAIM Claim = {0};
++        BOOLEAN FullOverwrite = At == 0 && Chunk == NXC_BLOCK_SIZE;
++
++        if (FullOverwrite)
++            NXC_OVERWRITE_COUNT(FullOverwriteAttempts, 1);
++        else
++            NXC_OVERWRITE_COUNT(FallbackPartialCount, 1);
++
++        if (FullOverwrite && Wait)
++        {
++            NxcAcquireFullOverwriteLocked(Map, BlockOffset, &Claim);
++            Block = Claim.Block;
++        }
++        else
++        {
++            Block = NxcGetBlock(Map, BlockOffset, Wait);
++        }
+ 
+         if (Block == NULL)
+         {
+@@ -1365,8 +1537,13 @@ CcZeroData(
+         }
+ 
+         RtlZeroMemory(Block->Data + At, Chunk);
+-        Block->Dirty = TRUE;
+-        NxcPutBlock(Block);
++        if (FullOverwrite && Wait)
++            NxcPublishFullOverwriteLocked(&Claim);
++        else
++        {
++            Block->Dirty = TRUE;
++            NxcPutBlock(Block);
++        }
+         Current += Chunk;
+     }
+     ExReleaseFastMutex(&NxcMutex);
+diff --git a/tests/host/cache/check-full-overwrite.py b/tests/host/cache/check-full-overwrite.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..5d141c50d6996eef60b89c8adb36cd7dfacfab17
+--- /dev/null
++++ b/tests/host/cache/check-full-overwrite.py
+@@ -0,0 +1,237 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production full-block overwrite claim lifecycle."""
++
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++source = (root / "ntoskrnl/xb/mm/cache.c").read_text()
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++
++bodies = ""
++for name in (
++    "NxcAcquireFullOverwriteLocked",
++    "NxcPublishFullOverwriteLocked",
++    "NxcRollbackFullOverwriteLocked",
++):
++    body = extract.function(source, name)
++    assert "NxcReadBlock" not in body
++    bodies += body + "\n"
++
++copy_write = extract.function(source, "CcCopyWrite")
++zero_data = extract.function(source, "CcZeroData")
++for body in (copy_write, zero_data):
++    assert "FullOverwrite && Wait" in body
++    assert "NxcAcquireFullOverwriteLocked" in body
++    assert "NxcPublishFullOverwriteLocked" in body
++assert "NxcRollbackFullOverwriteLocked" in copy_write
++assert "NxcRollbackFullOverwriteLocked" not in zero_data
++
++shim = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef int BOOLEAN;
++typedef int64_t LONGLONG;
++typedef uint32_t ULONG;
++typedef uint64_t ULONGLONG;
++typedef void VOID;
++#define IN
++#define OUT
++#define TRUE 1
++#define FALSE 0
++#define ASSERT assert
++#define NXC_BLOCK_SIZE 16384
++#define PAGE_SIZE 4096
++
++typedef struct _LIST_ENTRY {
++    struct _LIST_ENTRY *Flink;
++    struct _LIST_ENTRY *Blink;
++} LIST_ENTRY, *PLIST_ENTRY;
++static void InitializeListHead(PLIST_ENTRY l) { l->Flink=l->Blink=l; }
++static int IsListEmpty(PLIST_ENTRY l) { return l->Flink==l; }
++static void InsertTailList(PLIST_ENTRY h, PLIST_ENTRY e) {
++    e->Blink=h->Blink; e->Flink=h; h->Blink->Flink=e; h->Blink=e;
++}
++static void RemoveEntryList(PLIST_ENTRY e) {
++    e->Blink->Flink=e->Flink; e->Flink->Blink=e->Blink;
++    InitializeListHead(e);
++}
++
++typedef struct _NXC_MAP { int Id; } NXC_MAP;
++typedef struct _NXC_BLOCK {
++    NXC_MAP *Map;
++    LONGLONG Offset;
++    unsigned char *Data;
++    LIST_ENTRY LruLink;
++    LIST_ENTRY BusyWaiters;
++    ULONG RefCount;
++    BOOLEAN Valid;
++    BOOLEAN Dirty;
++    BOOLEAN Busy;
++} NXC_BLOCK;
++typedef struct _NXC_OVERWRITE_CLAIM {
++    NXC_BLOCK *Block;
++    BOOLEAN NewClaim;
++} NXC_OVERWRITE_CLAIM;
++
++typedef struct _NXC_CACHE_WAIT_COUNTERS {
++    ULONGLONG SpuriousRetryCount;
++} NXC_CACHE_WAIT_COUNTERS;
++static NXC_CACHE_WAIT_COUNTERS NxcCacheWaitCounters;
++
++typedef struct _NXC_CACHE_OVERWRITE_COUNTERS {
++    ULONGLONG FullOverwriteAttempts;
++    ULONGLONG FullOverwriteClaims;
++    ULONGLONG ColdReadsSkipped;
++    ULONGLONG BytesReadSkipped;
++    ULONGLONG RollbackCount;
++    ULONGLONG FallbackPartialCount;
++} NXC_CACHE_OVERWRITE_COUNTERS;
++#ifdef NXK_CACHE_OVERWRITE_COUNTERS
++NXC_CACHE_OVERWRITE_COUNTERS NxcCacheOverwriteCounters;
++#define NXC_OVERWRITE_COUNT(Field, Amount) \
++    (NxcCacheOverwriteCounters.Field += (Amount))
++#else
++#define NXC_OVERWRITE_COUNT(Field, Amount) ((VOID)0)
++#endif
++
++static LIST_ENTRY NxcLruList;
++static NXC_BLOCK block;
++static unsigned char data[NXC_BLOCK_SIZE];
++static unsigned capacity_wakes, busy_wakes, waits;
++static NXC_MAP *reuse_map;
++
++static NXC_BLOCK *NxcLookupBlock(NXC_MAP *map, LONGLONG offset) {
++    return block.Data != NULL && block.Map == map && block.Offset == offset
++        ? &block : NULL;
++}
++static NXC_BLOCK *NxcClaimSlot(BOOLEAN wait) {
++    assert(wait && block.Data != NULL && block.RefCount == 0 && !block.Busy);
++    if (block.Map != NULL) {
++        assert(block.Valid && !block.Dirty);
++        RemoveEntryList(&block.LruLink);
++        block.Map=NULL; block.Valid=FALSE;
++    }
++    block.RefCount=1; return &block;
++}
++static void NxcPutBlock(NXC_BLOCK *b) {
++    assert(b->RefCount); b->RefCount--;
++    if (!b->RefCount) capacity_wakes++;
++}
++static void NxcPublishBlockIdleLocked(NXC_BLOCK *b) {
++    assert(b->Busy); b->Busy=FALSE; busy_wakes++; capacity_wakes++;
++}
++static void NxcWaitOnListLocked(PLIST_ENTRY list) {
++    (void)list; waits++;
++    assert(block.Busy && reuse_map != NULL);
++    RemoveEntryList(&block.LruLink);
++    block.Busy=FALSE; block.Map=reuse_map; block.Valid=TRUE;
++    block.RefCount=0; InsertTailList(&NxcLruList,&block.LruLink);
++}
++static void reset(void) {
++    memset(&block,0,sizeof(block)); memset(data,0xcc,sizeof(data));
++    block.Data=data; InitializeListHead(&NxcLruList);
++    InitializeListHead(&block.LruLink); InitializeListHead(&block.BusyWaiters);
++    capacity_wakes=busy_wakes=waits=0; reuse_map=NULL;
++#ifdef NXK_CACHE_OVERWRITE_COUNTERS
++    memset(&NxcCacheOverwriteCounters,0,sizeof(NxcCacheOverwriteCounters));
++#endif
++}
++'''
++
++cases = r'''
++static void test_absent_publish(void) {
++    NXC_MAP map={1}; NXC_OVERWRITE_CLAIM claim={0}; reset();
++    NxcAcquireFullOverwriteLocked(&map,0,&claim);
++    assert(claim.Block==&block && claim.NewClaim);
++    assert(block.Map==&map && block.Busy && !block.Valid && block.RefCount==1);
++    memset(block.Data,0x5a,NXC_BLOCK_SIZE);
++    NxcPublishFullOverwriteLocked(&claim);
++    assert(claim.Block==NULL && block.Valid && block.Dirty && !block.Busy);
++    assert(block.RefCount==0);
++    for (unsigned i=0;i<NXC_BLOCK_SIZE;i++) assert(block.Data[i]==0x5a);
++#ifdef NXK_CACHE_OVERWRITE_COUNTERS
++    assert(NxcCacheOverwriteCounters.FullOverwriteClaims==1);
++    assert(NxcCacheOverwriteCounters.ColdReadsSkipped==1);
++    assert(NxcCacheOverwriteCounters.BytesReadSkipped==NXC_BLOCK_SIZE);
++#endif
++}
++static void test_valid_reuse(void) {
++    NXC_MAP map={1}; NXC_OVERWRITE_CLAIM claim={0}; reset();
++    block.Map=&map; block.Valid=TRUE; InsertTailList(&NxcLruList,&block.LruLink);
++    NxcAcquireFullOverwriteLocked(&map,0,&claim);
++    assert(!claim.NewClaim && !block.Busy && block.RefCount==1);
++    memset(block.Data,0x71,NXC_BLOCK_SIZE);
++    NxcPublishFullOverwriteLocked(&claim);
++    assert(block.Valid && block.Dirty && block.RefCount==0);
++#ifdef NXK_CACHE_OVERWRITE_COUNTERS
++    assert(NxcCacheOverwriteCounters.ColdReadsSkipped==0);
++#endif
++}
++static void test_invalid_recovery(void) {
++    NXC_MAP map={1}; NXC_OVERWRITE_CLAIM claim={0}; reset();
++    block.Map=&map; InsertTailList(&NxcLruList,&block.LruLink);
++    NxcAcquireFullOverwriteLocked(&map,0,&claim);
++    assert(claim.NewClaim && block.Busy);
++    memset(block.Data,0x22,NXC_BLOCK_SIZE);
++    NxcPublishFullOverwriteLocked(&claim);
++    assert(block.Valid && block.Dirty && !block.Busy && block.RefCount==0);
++}
++static void test_fault_rollback(void) {
++    NXC_MAP map={1}; NXC_OVERWRITE_CLAIM claim={0}; reset();
++    NxcAcquireFullOverwriteLocked(&map,0,&claim);
++    memset(block.Data,0x33,NXC_BLOCK_SIZE/2);
++    NxcRollbackFullOverwriteLocked(&claim);
++    assert(claim.Block==NULL && block.Map==NULL && block.Offset==0);
++    assert(!block.Valid && !block.Dirty && !block.Busy && block.RefCount==0);
++    assert(IsListEmpty(&NxcLruList) && busy_wakes==1 && capacity_wakes>=1);
++#ifdef NXK_CACHE_OVERWRITE_COUNTERS
++    assert(NxcCacheOverwriteCounters.RollbackCount==1);
++#endif
++}
++static void test_busy_generation_relookup(void) {
++    NXC_MAP wanted={1}, other={2}; NXC_OVERWRITE_CLAIM claim={0}; reset();
++    block.Map=&wanted; block.Busy=TRUE; block.RefCount=1;
++    InsertTailList(&NxcLruList,&block.LruLink); reuse_map=&other;
++    NxcAcquireFullOverwriteLocked(&wanted,0,&claim);
++    assert(waits==1 && claim.NewClaim && block.Map==&wanted && block.Busy);
++    assert(block.RefCount==1);
++    memset(block.Data,0x44,NXC_BLOCK_SIZE);
++    NxcPublishFullOverwriteLocked(&claim);
++    assert(block.Valid && block.Dirty && !block.Busy);
++}
++int main(void) {
++    test_absent_publish(); test_valid_reuse(); test_invalid_recovery();
++    test_fault_rollback(); test_busy_generation_relookup();
++    puts("cache full overwrite: claim, publish, rollback, reuse PASS");
++    return 0;
++}
++'''
++
++fixture = out / "full-overwrite.c"
++fixture.write_text(shim + bodies + cases)
++for enabled in (False, True):
++    binary = out / ("full-overwrite-counters" if enabled else "full-overwrite")
++    command = [
++        "cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
++        "-fsanitize=address,undefined", "-DNXK_CACHE_WAIT_COUNTERS=1",
++    ]
++    if enabled:
++        command.append("-DNXK_CACHE_OVERWRITE_COUNTERS=1")
++    subprocess.run(command + [str(fixture), "-o", str(binary)], check=True)
++    subprocess.run([str(binary)], check=True,
++                   env={"ASAN_OPTIONS": "detect_leaks=0"})
++    symbols = subprocess.check_output(["nm", str(binary)], text=True)
++    assert ("NxcCacheOverwriteCounters" in symbols) == enabled
+diff --git a/tests/xbe/api-regression/mm/cache.c b/tests/xbe/api-regression/mm/cache.c
+index c392fa175e4b9e57eb2e49602f29b537f906748f..f1b2801351f756968b062c6b13486d2cefe8ea56 100644
+--- a/tests/xbe/api-regression/mm/cache.c
++++ b/tests/xbe/api-regression/mm/cache.c
+@@ -28,6 +28,7 @@
+ #define MB(n) ((SIZE_T)(n) * 1024 * 1024)
+ 
+ #define CHUNK 0x10000u /* 64 KB */
++#define CACHE_BLOCK 0x4000u /* nxcache block: 16 KB */
+ 
+ static unsigned char g_buf[CHUNK];
+ 
+@@ -384,6 +385,63 @@ static bool t_fsc_cache_size(void)
+     return true;
+ }
+ 
++/* Exercise the cold full-block write path through the file API, then mix in
++ * a partial update to prove that bytes outside the partial range are still
++ * read and preserved.  The host production-body fixture supplies the direct
++ * lower-read counter oracle. */
++static bool t_full_overwrite_roundtrip(void)
++{
++    HANDLE h = NULL;
++    IO_STATUS_BLOCK iosb;
++    NTSTATUS s;
++    bool ok;
++
++    unlink_path(CACHE_A);
++    s = open_path(CACHE_A, &h, GENERIC_READ | GENERIC_WRITE,
++                  FILE_OVERWRITE_IF, 0, &iosb);
++    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
++    ok = write_at(h, 0, CACHE_BLOCK * 2, 0x19);
++    if (ok)
++        ok = NtFlushBuffersFile(h, &iosb) == STATUS_SUCCESS;
++    NtClose(h);
++    FscInvalidateIdleBlocks();
++    if (!ok) {
++        unlink_path(CACHE_A);
++        FAIL_AND_RETURN("prepare full-overwrite file");
++    }
++
++    s = open_path(CACHE_A, &h, GENERIC_READ | GENERIC_WRITE,
++                  FILE_OPEN, 0, &iosb);
++    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
++    ok = write_at(h, 0, CACHE_BLOCK, 0xD4) &&
++         write_at(h, CACHE_BLOCK + 4096, 4096, 0x77);
++    if (ok)
++        ok = NtFlushBuffersFile(h, &iosb) == STATUS_SUCCESS;
++    NtClose(h);
++    FscInvalidateIdleBlocks();
++
++    if (ok) {
++        s = open_path(CACHE_A, &h, GENERIC_READ, FILE_OPEN, 0, &iosb);
++        if (!NT_SUCCESS(s)) {
++            unlink_path(CACHE_A);
++            FAIL_AND_RETURN("reopen full-overwrite file -> 0x%08x",
++                            (unsigned)s);
++        }
++        ok = read_check_at(h, 0, CACHE_BLOCK, 0xD4,
++                           "full-block overwrite") &&
++             read_check_at(h, CACHE_BLOCK, 4096, 0x19,
++                           "partial prefix preserved") &&
++             read_check_at(h, CACHE_BLOCK + 4096, 4096, 0x77,
++                           "partial replacement") &&
++             read_check_at(h, CACHE_BLOCK + 8192, 8192, 0x19,
++                           "partial suffix preserved");
++        NtClose(h);
++    }
++
++    unlink_path(CACHE_A);
++    return ok;
++}
++
+ /* Two callers enter the same cold cache block together.  The first request
+  * owns the fill; the second must wait for that exact busy generation, then
+  * relookup and receive identical bytes.  This is also a native no-hang check
+@@ -566,5 +624,6 @@ static const test_entry_t mm_cache_entries[] = {
+     {"truncate_shrinks",      t_truncate_shrinks},
+     {"truncate_purges_dirty", t_truncate_purges_dirty},
+     {"fsc_cache_size",        t_fsc_cache_size},
++    {"full_overwrite_roundtrip", t_full_overwrite_roundtrip},
+     {"parallel_cold_read",    t_parallel_cold_read},
+ };
