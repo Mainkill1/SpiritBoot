@@ -1,0 +1,575 @@
+--- a/ntoskrnl/xb/bootsetup_native.c
++++ b/ntoskrnl/xb/bootsetup_native.c
+@@ -88,6 +88,16 @@
+ 
+ #define BS_SUPPORTED_FIELDS SB_ALL_FIELDS
+ #define BS_INIT CODE_SEG("INIT") DECLSPEC_NOINLINE
++#define BS_LEFT 32u
++#define BS_TEXT_RIGHT 383u
++#define BS_SCROLL_RIGHT 607u
++#define BS_TITLE_TOP 24u
++#define BS_TITLE_BOTTOM 79u
++#define BS_FIRST_ROW_Y 80u
++#define BS_ROW_PITCH 14u
++#define BS_FOOTER_Y 248u
++#define BS_FOOTER_BOTTOM 275u
++#define BS_CONTENT_BOTTOM 455u
+ 
+ /* The HCCA must be 256-byte aligned and the ED/TDs 16-byte aligned.  A page
+  * allocation gives both; the explicit padding fixes the control offset. */
+@@ -130,18 +140,19 @@
+     "\r\n  SpiritBoot Settings\r\n"
+     "  D-pad: move/edit  A: select  B: back  X: save  BACK: credits\r\n\r\n";
+ DATA_SEG("INITDATA")
+-static const CHAR BsMenuLine[] = "  %c %-24s %s\r\n";
+-DATA_SEG("INITDATA")
+-static const CHAR BsBlankLine[] = "\r\n";
+-DATA_SEG("INITDATA")
+-static const CHAR BsConfirmSave[] =
+-    "  Save these settings and reboot?  A=yes, B=no\r\n";
+-DATA_SEG("INITDATA")
+-static const CHAR BsConfirmDiscard[] =
+-    "  Discard changes and continue?  A=yes, B=no\r\n";
+-DATA_SEG("INITDATA")
+-static const CHAR BsRecovery[] =
+-    "  EEPROM write was incomplete. Press A to repair/retry.\r\n";
++static const CHAR BsMenuLine[] = "  %c %-20.20s %.19s";
++DATA_SEG("INITDATA")
++static const CHAR BsConfirmSave1[] = "Save these settings and reboot?";
++DATA_SEG("INITDATA")
++static const CHAR BsConfirmSave2[] = "A: yes   B: no";
++DATA_SEG("INITDATA")
++static const CHAR BsConfirmDiscard1[] = "Discard changes and continue?";
++DATA_SEG("INITDATA")
++static const CHAR BsConfirmDiscard2[] = "A: yes   B: no";
++DATA_SEG("INITDATA")
++static const CHAR BsRecovery1[] = "EEPROM write was incomplete.";
++DATA_SEG("INITDATA")
++static const CHAR BsRecovery2[] = "Press A to repair/retry.";
+ DATA_SEG("INITDATA")
+ static const CHAR BsCreditsCore[] =
+     "Core firmware and runtime\r\n"
+@@ -791,15 +802,16 @@
+ 
+     /* The credits are left of the logo. Keep the right-hand artwork
+      * unchanged when changing page, and never scroll into it. */
+-    InbvSolidColorFill(32, 72, SCREEN_WIDTH - 257, 455,
++    InbvSolidColorFill(BS_LEFT, 72, BS_TEXT_RIGHT, BS_CONTENT_BOTTOM,
+                        BV_COLOR_BLACK);
+     InbvSetTextColor(BV_COLOR_WHITE);
+-    InbvSetScrollRegion(32, 80, SCREEN_WIDTH - 257, 420);
++    InbvSetScrollRegion(BS_LEFT, 80, BS_SCROLL_RIGHT, 420);
+     InbvDisplayString((PCHAR)BsCreditsPages[Page]);
+ 
+-    sprintf(PageLine, "Page %lu/%u  BACK/B: return",
+-            Page + 1, SB_CREDITS_PAGE_COUNT);
+-    InbvSetScrollRegion(32, 432, SCREEN_WIDTH - 257, 455);
++    _snprintf(PageLine, sizeof(PageLine), "Page %lu/%u  BACK/B: return",
++              Page + 1, SB_CREDITS_PAGE_COUNT);
++    PageLine[sizeof(PageLine) - 1] = '\0';
++    InbvSetScrollRegion(BS_LEFT, 432, BS_SCROLL_RIGHT, BS_CONTENT_BOTTOM);
+     InbvDisplayString(PageLine);
+ }
+ 
+@@ -807,56 +819,123 @@
+ static VOID
+ BsRenderCredits(const SbSetup *Setup)
+ {
++    /* The menu already owns a black background and the fox is static. Only
++     * replace text above and to the left of that artwork. */
++    InbvSolidColorFill(BS_LEFT, BS_TITLE_TOP, BS_SCROLL_RIGHT,
++                       BS_TITLE_BOTTOM, BV_COLOR_BLACK);
++    InbvSetTextColor(BV_COLOR_WHITE);
++    InbvSetScrollRegion(BS_LEFT, BS_TITLE_TOP, BS_SCROLL_RIGHT,
++                        BS_TITLE_BOTTOM);
++    InbvDisplayString("SpiritBoot Credits");
++    BsRenderCreditsPage(Setup);
++}
++
++BS_INIT
++static VOID
++BsDrawMenuRow(const SbSetup *Setup, ULONG Row)
++{
++    CHAR Value[48], Line[96];
++    ULONG Y;
++
++    if (Row >= SB_ROW_COUNT)
++        return;
++    Y = BS_FIRST_ROW_Y + BS_ROW_PITCH * Row;
++    sb_setup_field_value(Setup, (SbSetupRow)Row, Value, sizeof(Value));
++    _snprintf(Line, sizeof(Line), BsMenuLine,
++              Setup->row == (SbSetupRow)Row ? '>' : ' ',
++              sb_setup_field_label((SbSetupRow)Row), Value);
++    Line[sizeof(Line) - 1] = '\0';
++
++    InbvSolidColorFill(BS_LEFT, Y, BS_TEXT_RIGHT,
++                       Y + BS_ROW_PITCH - 1, BV_COLOR_BLACK);
++    InbvSetScrollRegion(BS_LEFT, Y, BS_SCROLL_RIGHT, BS_CONTENT_BOTTOM);
++    InbvSetTextColor(BV_COLOR_WHITE);
++    InbvDisplayString(Line);
++}
++
++BS_INIT
++static VOID
++BsDrawFooterLine(ULONG Y, PCSTR Text)
++{
++    InbvSetScrollRegion(BS_LEFT, Y, BS_SCROLL_RIGHT, BS_CONTENT_BOTTOM);
++    InbvDisplayString((PCHAR)Text);
++}
++
++BS_INIT
++static VOID
++BsRenderFooter(const SbSetup *Setup)
++{
++    InbvSolidColorFill(BS_LEFT, BS_FOOTER_Y, BS_TEXT_RIGHT,
++                       BS_FOOTER_BOTTOM, BV_COLOR_BLACK);
++    InbvSetTextColor(BV_COLOR_WHITE);
++    if (Setup->state == SB_MENU_CONFIRM_SAVE)
++    {
++        BsDrawFooterLine(BS_FOOTER_Y, BsConfirmSave1);
++        BsDrawFooterLine(BS_FOOTER_Y + BS_ROW_PITCH, BsConfirmSave2);
++    }
++    else if (Setup->state == SB_MENU_CONFIRM_DISCARD)
++    {
++        BsDrawFooterLine(BS_FOOTER_Y, BsConfirmDiscard1);
++        BsDrawFooterLine(BS_FOOTER_Y + BS_ROW_PITCH, BsConfirmDiscard2);
++    }
++    else if (Setup->state == SB_MENU_RECOVERY)
++    {
++        BsDrawFooterLine(BS_FOOTER_Y, BsRecovery1);
++        BsDrawFooterLine(BS_FOOTER_Y + BS_ROW_PITCH, BsRecovery2);
++    }
++}
++
++BS_INIT
++static VOID
++BsRenderMenuContent(const SbSetup *Setup)
++{
++    ULONG Row;
++
++    InbvSolidColorFill(BS_LEFT, BS_TITLE_TOP, BS_SCROLL_RIGHT,
++                       BS_TITLE_BOTTOM, BV_COLOR_BLACK);
++    InbvSetScrollRegion(BS_LEFT, BS_TITLE_TOP, BS_SCROLL_RIGHT,
++                        BS_CONTENT_BOTTOM);
++    InbvSetTextColor(BV_COLOR_WHITE);
++    InbvDisplayString((PCHAR)BsMenuTitle);
++    for (Row = 0; Row < SB_ROW_COUNT; ++Row)
++        BsDrawMenuRow(Setup, Row);
++    BsRenderFooter(Setup);
++}
++
++BS_INIT
++static VOID
++BsRenderMenuInitial(const SbSetup *Setup)
++{
+     PVOID Logo;
+ 
+-    /* One full clear on entering credits, never for button release or
+-     * page navigation. The bitmap and text stay in INIT/INITDATA. */
+     InbvSolidColorFill(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1,
+                        BV_COLOR_BLACK);
+     Logo = InbvGetResourceAddress(IDB_LOGO_DEFAULT);
+     if (Logo != NULL)
+         InbvBitBlt(Logo, SCREEN_WIDTH - 256, SCREEN_HEIGHT - 256);
+-
+-    InbvSetTextColor(BV_COLOR_WHITE);
+-    InbvSetScrollRegion(32, 24, SCREEN_WIDTH - 257, 68);
+-    InbvDisplayString("SpiritBoot Credits");
+-    BsRenderCreditsPage(Setup);
+-}
+-
+-BS_INIT
+-static VOID
+-BsRenderMenu(const SbSetup *Setup)
+-{
+-    CHAR Value[48], Line[128];
++    BsRenderMenuContent(Setup);
++}
++
++BS_INIT
++static ULONG
++BsMenuDirtyRows(const SbSetup *Before, const SbSetup *After)
++{
++    CHAR BeforeValue[48], AfterValue[48];
++    ULONG Dirty = 0;
+     ULONG Row;
+-    PVOID Logo;
+-
+-    InbvSolidColorFill(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1,
+-                       BV_COLOR_BLACK);
+-    /* Keep the boot identity present while setup is open. The 256x256 image
+-     * fits exactly in the lower-right quadrant and remains backed by the
+-     * same discardable ROM resource as the splash. */
+-    Logo = InbvGetResourceAddress(IDB_LOGO_DEFAULT);
+-    if (Logo != NULL)
+-        InbvBitBlt(Logo, SCREEN_WIDTH - 256, SCREEN_HEIGHT - 256);
+-    InbvSetScrollRegion(32, 24, SCREEN_WIDTH - 33, SCREEN_HEIGHT - 25);
+-    InbvSetTextColor(BV_COLOR_WHITE);
+-    InbvDisplayString((PCHAR)BsMenuTitle);
++
++    if (Before->row != After->row)
++        Dirty |= (1u << Before->row) | (1u << After->row);
+     for (Row = 0; Row < SB_ROW_COUNT; ++Row)
+     {
+-        sb_setup_field_value(Setup, (SbSetupRow)Row, Value, sizeof(Value));
+-        sprintf(Line, BsMenuLine,
+-                Setup->row == (SbSetupRow)Row ? '>' : ' ',
+-                sb_setup_field_label((SbSetupRow)Row), Value);
+-        InbvDisplayString(Line);
+-    }
+-    InbvDisplayString((PCHAR)BsBlankLine);
+-    if (Setup->state == SB_MENU_CONFIRM_SAVE)
+-        InbvDisplayString((PCHAR)BsConfirmSave);
+-    else if (Setup->state == SB_MENU_CONFIRM_DISCARD)
+-        InbvDisplayString((PCHAR)BsConfirmDiscard);
+-    else if (Setup->state == SB_MENU_RECOVERY)
+-        InbvDisplayString((PCHAR)BsRecovery);
++        sb_setup_field_value(Before, (SbSetupRow)Row,
++                             BeforeValue, sizeof(BeforeValue));
++        sb_setup_field_value(After, (SbSetupRow)Row,
++                             AfterValue, sizeof(AfterValue));
++        if (strcmp(BeforeValue, AfterValue) != 0)
++            Dirty |= 1u << Row;
++    }
++    return Dirty;
+ }
+ 
+ CODE_SEG("INIT")
+@@ -873,10 +952,8 @@
+     BS_STORE StoreContext = {0};
+     SbSettingsStore Store = {&StoreContext, BsCommitSettings};
+     SbInput Input;
+-    uint32_t PreviousButtons = 0xffffffffu;
+-    uint32_t PreviousCreditsPage;
+-    SbMenuState PreviousState;
+-    SbSetupRow PreviousRow;
++    SbSetup Before;
++    ULONG DirtyRows, Row;
+ 
+     if (!InbvBootDriverInstalled)
+         return;
+@@ -900,32 +977,36 @@
+     }
+ 
+     sb_setup_open(&Setup, Initial, BS_SUPPORTED_FIELDS);
+-    BsRenderMenu(&Setup);
+-    PreviousState = Setup.state;
+-    PreviousRow = Setup.row;
+-    PreviousCreditsPage = Setup.credits_page;
++    BsRenderMenuInitial(&Setup);
+     while (Setup.state != SB_MENU_CONTINUE && Setup.state != SB_MENU_REBOOT)
+     {
+         Input = BsPadRead(&Pad, BsNowMs() + 100u);
++        Before = Setup;
+         sb_setup_input(&Setup, Input, &Store);
+         if (Setup.state == SB_MENU_CREDITS)
+         {
+-            if (PreviousState != SB_MENU_CREDITS)
++            if (Before.state != SB_MENU_CREDITS)
+                 BsRenderCredits(&Setup);
+-            else if (Setup.credits_page != PreviousCreditsPage)
++            else if (Setup.credits_page != Before.credits_page)
+                 BsRenderCreditsPage(&Setup);
+         }
+-        else if (PreviousState == SB_MENU_CREDITS ||
+-                 Setup.state != PreviousState ||
+-                 Setup.row != PreviousRow ||
+-                 Input.buttons != PreviousButtons)
+-        {
+-            BsRenderMenu(&Setup);
+-        }
+-        PreviousState = Setup.state;
+-        PreviousRow = Setup.row;
+-        PreviousCreditsPage = Setup.credits_page;
+-        PreviousButtons = Input.buttons;
++        else if (Setup.state != SB_MENU_CONTINUE &&
++                 Setup.state != SB_MENU_REBOOT)
++        {
++            if (Before.state == SB_MENU_CREDITS)
++            {
++                BsRenderMenuContent(&Setup);
++            }
++            else
++            {
++                DirtyRows = BsMenuDirtyRows(&Before, &Setup);
++                for (Row = 0; Row < SB_ROW_COUNT; ++Row)
++                    if (DirtyRows & (1u << Row))
++                        BsDrawMenuRow(&Setup, Row);
++                if (Before.state != Setup.state)
++                    BsRenderFooter(&Setup);
++            }
++        }
+         BsDelayMs(10);
+     }
+     if (!BsPadClose(&Pad))
+--- /dev/null
++++ b/tests/host/boot-menu-render/check.py
+@@ -0,0 +1,268 @@
++#!/usr/bin/env python3
++"""Exercise the production incremental boot-menu renderers with Inbv spies."""
++import re
++import subprocess
++import sys
++from pathlib import Path
++
++
++def function(text: str, name: str) -> str:
++    match = re.search(r"(?:BS_INIT\n)?static\s+\w+\s+\n?" +
++                      re.escape(name) + r"\s*\([^;]*?\)\s*\n\{", text,
++                      re.S)
++    if match is None:
++        raise AssertionError(f"missing production function {name}")
++    start = match.start()
++    body = text.index("{", match.start())
++    end = body + 1
++    depth = 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    chunk = text[start:end]
++    return chunk.removeprefix("BS_INIT\n")
++
++
++def function_body(text: str, name: str) -> str:
++    match = re.search(r"\n" + re.escape(name) + r"\s*\([^;]*?\)\s*\n\{",
++                      text, re.S)
++    if match is None:
++        raise AssertionError(f"missing production function body {name}")
++    start = text.index("{", match.start())
++    end = start + 1
++    depth = 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[start:end]
++
++
++root = Path(sys.argv[1]).resolve()
++out = Path(sys.argv[2]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++native = (root / "ntoskrnl/xb/bootsetup_native.c").read_text()
++
++required = {
++    "BS_LEFT": "32u",
++    "BS_TEXT_RIGHT": "383u",
++    "BS_FIRST_ROW_Y": "80u",
++    "BS_ROW_PITCH": "14u",
++    "BS_FOOTER_Y": "248u",
++    "BS_FOOTER_BOTTOM": "275u",
++}
++for name, value in required.items():
++    assert re.search(rf"#define\s+{name}\s+{value}\b", native), name
++assert 'BsMenuLine[] = "  %c %-20.20s %.19s";' in native
++
++loop = function_body(native, "NxkBootSetupRun")
++assert "PreviousButtons" not in loop
++assert "Input.buttons !=" not in loop
++assert "Before = Setup;" in loop
++assert "BsMenuDirtyRows(&Before, &Setup)" in loop
++
++credits = function(native, "BsRenderCredits")
++assert "SCREEN_WIDTH - 1" not in credits
++assert "InbvBitBlt" not in credits
++initial = function(native, "BsRenderMenuInitial")
++assert "SCREEN_WIDTH - 1" in initial
++assert "InbvBitBlt" in initial
++
++names = [
++    "BsRenderCreditsPage", "BsRenderCredits", "BsDrawMenuRow",
++    "BsDrawFooterLine", "BsRenderFooter", "BsRenderMenuContent",
++    "BsRenderMenuInitial", "BsMenuDirtyRows",
++]
++production = "\n\n".join(function(native, name) for name in names)
++
++fixture = out / "boot-menu-render.c"
++fixture.write_text(r'''
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef unsigned long ULONG;
++typedef void VOID;
++typedef void *PVOID;
++typedef char CHAR;
++typedef char *PCHAR;
++typedef const char *PCSTR;
++typedef enum {
++    SB_MENU_EDIT, SB_MENU_CONFIRM_SAVE, SB_MENU_CONFIRM_DISCARD,
++    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY, SB_MENU_CREDITS
++} SbMenuState;
++typedef unsigned SbSetupRow;
++enum { SB_ROW_COUNT = 11, SB_CREDITS_PAGE_COUNT = 3 };
++typedef struct {
++    SbSetupRow row;
++    SbMenuState state;
++    uint8_t credits_page;
++    char values[SB_ROW_COUNT][48];
++} SbSetup;
++
++#define SCREEN_WIDTH 640u
++#define SCREEN_HEIGHT 480u
++#define BS_LEFT 32u
++#define BS_TEXT_RIGHT 383u
++#define BS_SCROLL_RIGHT 607u
++#define BS_TITLE_TOP 24u
++#define BS_TITLE_BOTTOM 79u
++#define BS_FIRST_ROW_Y 80u
++#define BS_ROW_PITCH 14u
++#define BS_FONT_HEIGHT 13u
++#define BS_FOOTER_Y 248u
++#define BS_FOOTER_BOTTOM 275u
++#define BS_CONTENT_BOTTOM 455u
++#define BV_COLOR_BLACK 0u
++#define BV_COLOR_WHITE 15u
++#define IDB_LOGO_DEFAULT 1u
++#define _snprintf snprintf
++
++static const char BsMenuLine[] = "  %c %-20.20s %.19s";
++static const char BsMenuTitle[] = "SpiritBoot Settings";
++static const char BsConfirmSave1[] = "Save these settings and reboot?";
++static const char BsConfirmSave2[] = "A: yes   B: no";
++static const char BsConfirmDiscard1[] = "Discard changes and continue?";
++static const char BsConfirmDiscard2[] = "A: yes   B: no";
++static const char BsRecovery1[] = "EEPROM write was incomplete.";
++static const char BsRecovery2[] = "Press A to repair/retry.";
++static const char * const BsCreditsPages[] = { "core", "testing", "research" };
++static const char * const Labels[SB_ROW_COUNT] = {
++    "Language", "Aspect ratio", "480p", "720p", "1080i",
++    "PAL-60", "Audio mode", "AC-3", "DTS", "Save settings",
++    "Continue boot"
++};
++
++typedef struct { ULONG l, t, r, b; } Fill;
++static Fill fills[64];
++static unsigned fill_count, blit_count, string_count;
++static char strings[64][128];
++
++static bool intersects_logo(Fill f)
++{
++    return !(f.r < 384u || f.l > 639u || f.b < 224u || f.t > 479u);
++}
++
++static void reset_spy(void)
++{
++    fill_count = blit_count = string_count = 0;
++    memset(fills, 0, sizeof(fills));
++    memset(strings, 0, sizeof(strings));
++}
++
++static void InbvSolidColorFill(ULONG l, ULONG t, ULONG r, ULONG b, ULONG color)
++{
++    (void)color;
++    assert(fill_count < 64);
++    fills[fill_count++] = (Fill){l, t, r, b};
++}
++static void InbvSetTextColor(ULONG color) { (void)color; }
++static void InbvSetScrollRegion(ULONG l, ULONG t, ULONG r, ULONG b)
++{ (void)l; (void)t; (void)r; (void)b; }
++static void InbvDisplayString(PCHAR s)
++{
++    assert(string_count < 64);
++    snprintf(strings[string_count++], sizeof(strings[0]), "%s", s);
++}
++static PVOID InbvGetResourceAddress(ULONG id)
++{ (void)id; return (PVOID)(uintptr_t)1; }
++static void InbvBitBlt(PVOID image, ULONG x, ULONG y)
++{ (void)image; assert(x == 384u && y == 224u); ++blit_count; }
++
++static const char *sb_setup_field_label(SbSetupRow row)
++{ return row < SB_ROW_COUNT ? Labels[row] : "Unknown"; }
++static void sb_setup_field_value(const SbSetup *s, SbSetupRow row,
++                                 char *out, size_t size)
++{
++    snprintf(out, size, "%s", row < SB_ROW_COUNT ? s->values[row] : "Unknown");
++}
++''' + production + r'''
++
++static SbSetup make_setup(void)
++{
++    SbSetup s = {0};
++    unsigned i;
++    s.state = SB_MENU_EDIT;
++    for (i = 0; i < SB_ROW_COUNT; ++i)
++        snprintf(s.values[i], sizeof(s.values[i]), "value%u", i);
++    return s;
++}
++
++static void assert_no_logo_fill(void)
++{
++    unsigned i;
++    for (i = 0; i < fill_count; ++i)
++        assert(!intersects_logo(fills[i]));
++}
++
++int main(void)
++{
++    SbSetup before = make_setup();
++    SbSetup after = before;
++    ULONG dirty;
++    unsigned row;
++
++    reset_spy();
++    BsRenderMenuInitial(&before);
++    assert(blit_count == 1);
++    assert(fill_count >= 1);
++    assert(fills[0].l == 0 && fills[0].t == 0);
++    assert(fills[0].r == 639 && fills[0].b == 479);
++
++    reset_spy();
++    dirty = BsMenuDirtyRows(&before, &after);
++    assert(dirty == 0);
++    assert(fill_count == 0 && blit_count == 0 && string_count == 0);
++
++    after.row = 1;
++    dirty = BsMenuDirtyRows(&before, &after);
++    assert(dirty == ((1u << 0) | (1u << 1)));
++    for (row = 0; row < SB_ROW_COUNT; ++row)
++        if (dirty & (1u << row)) BsDrawMenuRow(&after, row);
++    assert(fill_count == 2 && blit_count == 0);
++    assert_no_logo_fill();
++    assert(strlen(strings[0]) <= 44 && strchr(strings[0], '\n') == NULL);
++
++    before = after;
++    snprintf(after.values[2], sizeof(after.values[2]), "a changed value");
++    reset_spy();
++    dirty = BsMenuDirtyRows(&before, &after);
++    assert(dirty == (1u << 2));
++    BsDrawMenuRow(&after, 2);
++    assert(fill_count == 1 && fills[0].r == 383);
++    assert_no_logo_fill();
++
++    reset_spy();
++    after.state = SB_MENU_CONFIRM_SAVE;
++    BsRenderFooter(&after);
++    assert(fill_count == 1 && string_count == 2);
++    assert(fills[0].l == 32 && fills[0].t == 248);
++    assert(fills[0].r == 383 && fills[0].b == 275);
++    assert_no_logo_fill();
++
++    reset_spy();
++    after.state = SB_MENU_CREDITS;
++    BsRenderCredits(&after);
++    assert(blit_count == 0);
++    assert_no_logo_fill();
++
++    reset_spy();
++    after.state = SB_MENU_EDIT;
++    BsRenderMenuContent(&after);
++    assert(blit_count == 0);
++    assert_no_logo_fill();
++    return 0;
++}
++''')
++
++for mode, flags in (
++    ("sanitized", ["-O1", "-fsanitize=address,undefined", "-fno-omit-frame-pointer"]),
++    ("optimized", ["-O2"]),
++):
++    binary = out / f"boot-menu-render-{mode}"
++    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
++                    *flags, str(fixture), "-o", str(binary)], check=True)
++    subprocess.run([str(binary)], check=True)
++
++print("PASS: production menu redraws only changed rows/footer and preserves logo")
