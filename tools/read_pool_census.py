@@ -160,10 +160,10 @@ def decode_census(data, address=0):
     (magic, schema, byte_count, sequence, allocations, frees, allocation_sequence,
      key_overflows, large_overflows, large_free_misses, lifetime_overflows,
      lifetime_misses, untracked_frees, saturations, page_underflows,
+     bucket_pages_current, bucket_pages_peak,
      lifetime_active, lifetime_active_peak, bin_slots, domain_count, class_count,
      page_stats_bytes, entry_count, entry_bytes, bin_allocations_offset,
-     bin_live_offset, bin_peak_offset, pages_offset, entries_offset,
-     bucket_pages_current, bucket_pages_peak) = HEADER.unpack_from(data)
+     bin_live_offset, bin_peak_offset, pages_offset, entries_offset) = HEADER.unpack_from(data)
     if magic != MAGIC or schema != SCHEMA:
         raise CensusError(f"unsupported census identity: magic={magic:#x}, schema={schema}")
     if byte_count != len(data):
@@ -173,7 +173,7 @@ def decode_census(data, address=0):
     if bin_slots != BIN_SLOTS or domain_count != len(DOMAIN_NAMES) or class_count != len(CLASS_BLOCK_BYTES):
         raise CensusError("census array dimensions do not match schema 3")
     if page_stats_bytes != PAGE_STATS.size or entry_bytes != ENTRY.size:
-        raise CensusError("census record element sizes do not match schema 2")
+        raise CensusError("census record element sizes do not match schema 3")
 
     for name, offset in (("bin allocations", bin_allocations_offset),
                          ("bin live", bin_live_offset), ("bin peak", bin_peak_offset)):
@@ -239,11 +239,11 @@ def decode_census(data, address=0):
                                                 "peak_lifetime_samples": lifetime_active_peak},
             "error_counters": error_counters,
             "incomplete": any(error_counters.values()), "bins": bins,
-            "bucket_pages": {"current": bucket_pages_current,
+            "physical_bucket_backing": {"current": bucket_pages_current,
                               "peak": bucket_pages_peak,
                               "class_domain_current_sum": page_rows_current,
                               "current_mismatch": page_total_mismatch},
-            "pages": pages, "tags": tags,
+            "attached_class_pages": pages, "tags": tags,
             "lifetime_note": "Completed samples are <1 s, 1-30 s, or >=30 s; active samples are right-censored."}
 
 

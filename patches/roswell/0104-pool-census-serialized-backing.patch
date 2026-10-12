@@ -1,0 +1,578 @@
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index ba127b79..e1e2f790 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -197,6 +197,9 @@ if(NXK_MM_POOLPAGES)
+         ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/ARM3/pool.c)
+     list(APPEND PCH_SKIP_SOURCE xb/mm/poolpages.c)
+ endif()
++if(NXK_POOL_CENSUS AND NOT NXK_MM_POOLPAGES)
++    message(FATAL_ERROR "NXK_POOL_CENSUS requires NXK_MM_POOLPAGES for serialized backing accounting")
++endif()
+ 
+ # nxphys: the per-page array allocator in xb/mm/pagesupply.c
+ # becomes the real page supply; the ARM3 colored free lists are
+diff --git a/ntoskrnl/xb/mm/pool-census.h b/ntoskrnl/xb/mm/pool-census.h
+index 4c1ba483..2dd77970 100644
+--- a/ntoskrnl/xb/mm/pool-census.h
++++ b/ntoskrnl/xb/mm/pool-census.h
+@@ -129,6 +129,9 @@ VOID NxPoolCensusFree(PVOID Address,
+                       UCHAR Domain,
+                       BOOLEAN Sampled);
+ VOID NxPoolCensusFreeLarge(PVOID Address);
++/* Physical bucket backing is accounted under the page-window and PFN locks;
++ * class attachment is a later, independent pool-list transition. */
++VOID NxPoolCensusPageAcquire(VOID);
+ VOID NxPoolCensusPageAttach(ULONG ClassIndex,
+                             UCHAR Domain,
+                             BOOLEAN Reused);
+@@ -136,6 +139,7 @@ VOID NxPoolCensusPageBecameActive(ULONG ClassIndex, UCHAR Domain);
+ VOID NxPoolCensusPageBecameEmpty(ULONG ClassIndex, UCHAR Domain);
+ VOID NxPoolCensusPageDetach(ULONG ClassIndex, UCHAR Domain);
+ VOID NxPoolCensusPageRelease(VOID);
++PVOID NxPoolPagesAllocBucket(BOOLEAN TitleData);
+ 
+ #define NXP_POOL_CENSUS_PACK_CLASS(Class, Bin, Domain, Sampled) \
+     ((USHORT)(((Class) & NXP_POOL_CENSUS_CLASS_MASK) | \
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index 38683ba7..0a56c00c 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -61,6 +61,12 @@
+ #define NXP_PAGES_FREE(Va)     MiFreePoolPages(Va)
+ #endif
+ 
++#ifdef NXK_POOL_CENSUS
++#define NXP_BUCKET_PAGES_ALLOC(TitleData) NxPoolPagesAllocBucket(TitleData)
++#else
++#define NXP_BUCKET_PAGES_ALLOC(TitleData) NXP_PAGES_ALLOC(PAGE_SIZE, TitleData)
++#endif
++
+ /* SIZE CLASSES *************************************************************/
+ 
+ /* Block sizes include the 8-byte header.  Retail-pinned: the pool-size
+@@ -450,9 +456,9 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+         if (Page == NULL)
+         {
+             KeReleaseSpinLock(&NxpLock, OldIrql);
+-            Page = NXP_PAGES_ALLOC(PAGE_SIZE, TitleData);
++            Page = NXP_BUCKET_PAGES_ALLOC(TitleData);
+             if (Page == NULL && NxpReclaimEmptyBucketPages() != 0)
+-                Page = NXP_PAGES_ALLOC(PAGE_SIZE, TitleData);
++                Page = NXP_BUCKET_PAGES_ALLOC(TitleData);
+             if (Page != NULL) KeAcquireSpinLock(&NxpLock, &OldIrql);
+         }
+         if (Page == NULL)
+@@ -667,9 +673,6 @@ NxpReclaimEmptyBucketPages(VOID)
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+ 
+         NXP_PAGES_FREE((PVOID)PageVa);
+-#ifdef NXK_POOL_CENSUS
+-        NxPoolCensusPageRelease();
+-#endif
+         Freed++;
+     }
+     return Freed;
+diff --git a/ntoskrnl/xb/mm/poolcensus.c b/ntoskrnl/xb/mm/poolcensus.c
+index d8b7dd1d..12da4ce5 100644
+--- a/ntoskrnl/xb/mm/poolcensus.c
++++ b/ntoskrnl/xb/mm/poolcensus.c
+@@ -388,6 +388,19 @@ NxpPoolCensusPageStats(ULONG ClassIndex, UCHAR Domain)
+     return &NxpPoolCensusData.Pages[Domain][Class];
+ }
+ 
++/* Leaf diagnostics: these helpers never allocate, free, or acquire allocator
++ * locks. Page backing callers already serialize the physical transition. */
++VOID
++NxPoolCensusPageAcquire(VOID)
++{
++    KIRQL OldIrql;
++    NxpPoolCensusAcquire(&OldIrql);
++    NxpPoolCensusIncrement(&NxpPoolCensusData.BucketPagesCurrent);
++    if (NxpPoolCensusData.BucketPagesCurrent > NxpPoolCensusData.BucketPagesPeak)
++        NxpPoolCensusData.BucketPagesPeak = NxpPoolCensusData.BucketPagesCurrent;
++    NxpPoolCensusRelease(OldIrql);
++}
++
+ VOID
+ NxPoolCensusPageAttach(ULONG ClassIndex, UCHAR Domain, BOOLEAN Reused)
+ {
+@@ -398,14 +411,6 @@ NxPoolCensusPageAttach(ULONG ClassIndex, UCHAR Domain, BOOLEAN Reused)
+     NxpPoolCensusIncrement(&Stats->CurrentActive);
+     if (Stats->CurrentActive > Stats->PeakActive)
+         Stats->PeakActive = Stats->CurrentActive;
+-    if (!Reused)
+-    {
+-        NxpPoolCensusIncrement(&NxpPoolCensusData.BucketPagesCurrent);
+-        if (NxpPoolCensusData.BucketPagesCurrent >
+-            NxpPoolCensusData.BucketPagesPeak)
+-            NxpPoolCensusData.BucketPagesPeak =
+-                NxpPoolCensusData.BucketPagesCurrent;
+-    }
+     NxpPoolCensusRelease(OldIrql);
+ }
+ 
+diff --git a/ntoskrnl/xb/mm/poolpages.c b/ntoskrnl/xb/mm/poolpages.c
+index b9c7fb90..da65c049 100644
+--- a/ntoskrnl/xb/mm/poolpages.c
++++ b/ntoskrnl/xb/mm/poolpages.c
+@@ -31,6 +31,9 @@
+ #include <mm/ARM3/miarm.h>
+ 
+ #include "mm.h"
++#ifdef NXK_POOL_CENSUS
++#include "pool-census.h"
++#endif
+ 
+ /* WINDOW *******************************************************************/
+ 
+@@ -46,6 +49,15 @@
+ #define NXPP_PAGES       NXK_POOL_WINDOW_PAGES    /* 16 MB of VA */
+ #define NXPP_END         (NXPP_BASE + ((ULONG_PTR)NXPP_PAGES << PAGE_SHIFT))
+ 
++#ifdef NXK_POOL_CENSUS
++/* The private run word has spare bits: the window has at most 4096 pages.
++ * Track diagnostic bucket backing without changing the free interface or
++ * allocating another ownership table. Public byte counts exclude the flag. */
++#define NXPP_CENSUS_BUCKET   0x8000U
++#define NXPP_CENSUS_RUN_MASK 0x7FFFU
++C_ASSERT(NXPP_PAGES <= NXPP_CENSUS_RUN_MASK);
++#endif
++
+ #define NXPP_PDE(Va)     (((PULONG)0xC0300000)[(ULONG_PTR)(Va) >> 22])
+ #define NXPP_PTE(Va)     (((PULONG)0xC0000000)[(ULONG_PTR)(Va) >> 12])
+ #define NXPP_PTE_BITS    0x3UL                   /* present | write */
+@@ -162,6 +174,9 @@ NxPoolPagesQueryRunBytes(PVOID BaseAddress)
+     Start = (ULONG)((Va - NXPP_BASE) >> PAGE_SHIFT);
+     KeAcquireSpinLock(&NxppLock, &OldIrql);
+     Count = NxppRunPages[Start];
++#ifdef NXK_POOL_CENSUS
++    Count &= NXPP_CENSUS_RUN_MASK;
++#endif
+     if (!(NxppUsedMap[Start >> 5] & (1UL << (Start & 31))) ||
+         Count > NXPP_PAGES - Start)
+         Count = 0;
+@@ -172,7 +187,11 @@ NxPoolPagesQueryRunBytes(PVOID BaseAddress)
+ static PVOID
+ NxpPoolPagesAlloc(
+     IN SIZE_T NumberOfBytes,
+-    IN BOOLEAN TitleData)
++    IN BOOLEAN TitleData
++#ifdef NXK_POOL_CENSUS
++    , IN BOOLEAN CensusBucket
++#endif
++    )
+ {
+     ULONG Count = (ULONG)BYTES_TO_PAGES(NumberOfBytes);
+     ULONG Start, i;
+@@ -266,10 +285,22 @@ unwind:
+          * Exceptions opt out via NxPoolPagesSetMovable. */
+         NxkPageSupplySetOwner(Pfn, (ULONG_PTR)&NXPP_PTE(PageVa));
+     }
++#ifdef NXK_POOL_CENSUS
++    if (CensusBucket)
++    {
++        ASSERT(Count == 1);
++        /* Commit backing before another pool-page operation can run. The
++         * census lock is a leaf below NxppLock and the PFN lock. */
++        NxPoolCensusPageAcquire();
++    }
++#endif
+     MiReleasePfnLock(PfnIrql);
+ 
+     NxppSetRange(Start, Count, TRUE);
+     NxppRunPages[Start] = (USHORT)Count;
++#ifdef NXK_POOL_CENSUS
++    if (CensusBucket) NxppRunPages[Start] |= NXPP_CENSUS_BUCKET;
++#endif
+     NxppCommitted += Count;
+     NxppScanHint = Start + Count;
+     if (NxppScanHint >= NXPP_PAGES) NxppScanHint = 0;
+@@ -281,15 +312,31 @@ unwind:
+ PVOID
+ NxPoolPagesAlloc(IN SIZE_T NumberOfBytes)
+ {
+-    return NxpPoolPagesAlloc(NumberOfBytes, FALSE);
++    return NxpPoolPagesAlloc(NumberOfBytes, FALSE
++#ifdef NXK_POOL_CENSUS
++                            , FALSE
++#endif
++                            );
+ }
+ 
+ PVOID
+ NxPoolPagesAllocTitle(IN SIZE_T NumberOfBytes)
+ {
+-    return NxpPoolPagesAlloc(NumberOfBytes, TRUE);
++    return NxpPoolPagesAlloc(NumberOfBytes, TRUE
++#ifdef NXK_POOL_CENSUS
++                            , FALSE
++#endif
++                            );
+ }
+ 
++#ifdef NXK_POOL_CENSUS
++PVOID
++NxPoolPagesAllocBucket(IN BOOLEAN TitleData)
++{
++    return NxpPoolPagesAlloc(PAGE_SIZE, TitleData, TRUE);
++}
++#endif
++
+ ULONG
+ NxPoolPagesFree(
+     IN PVOID BaseAddress)
+@@ -297,6 +344,9 @@ NxPoolPagesFree(
+     ULONG_PTR Va = (ULONG_PTR)BaseAddress;
+     ULONG Start, Count;
+     KIRQL OldIrql;
++#ifdef NXK_POOL_CENSUS
++    BOOLEAN CensusBucket;
++#endif
+ 
+     ASSERT(Va >= NXPP_BASE && Va < NXPP_END);
+     ASSERT((Va & (PAGE_SIZE - 1)) == 0);
+@@ -305,6 +355,10 @@ NxPoolPagesFree(
+ 
+     KeAcquireSpinLock(&NxppLock, &OldIrql);
+     Count = NxppRunPages[Start];
++#ifdef NXK_POOL_CENSUS
++    CensusBucket = (Count & NXPP_CENSUS_BUCKET) != 0;
++    Count &= NXPP_CENSUS_RUN_MASK;
++#endif
+     ASSERT(Count != 0);
+     NxppRunPages[Start] = 0;
+     {
+@@ -320,6 +374,13 @@ NxPoolPagesFree(
+             NXPP_PTE(PageVa) = 0;
+             KeInvalidateTlbEntry((PVOID)PageVa);
+         }
++#ifdef NXK_POOL_CENSUS
++        if (CensusBucket)
++        {
++            ASSERT(Count == 1);
++            NxPoolCensusPageRelease();
++        }
++#endif
+         MiReleasePfnLock(PfnIrql);
+     }
+     NxppSetRange(Start, Count, FALSE);
+diff --git a/tests/host/pool-census-pages/cases.c b/tests/host/pool-census-pages/cases.c
+new file mode 100644
+index 00000000..d68cb1c9
+--- /dev/null
++++ b/tests/host/pool-census-pages/cases.c
+@@ -0,0 +1,107 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++static void CheckBacking(void) {
++    if (NxpPoolCensusData.BucketPagesCurrent != ModelBacking ||
++        NxpPoolCensusData.BucketPagesPeak != ModelPeak) {
++        fprintf(stderr,"backing mismatch: census %u/%u, physical model %u/%u\n",
++                NxpPoolCensusData.BucketPagesCurrent,NxpPoolCensusData.BucketPagesPeak,
++                ModelBacking,ModelPeak);
++        abort();
++    }
++}
++static PVOID Allocate(SIZE_T bytes, BOOLEAN title) {
++    BOOLEAN previous = BucketRequest;
++    BucketRequest = bytes <= NXP_SMALL_MAX;
++    PVOID p = title ? NxTitleAllocatePoolWithTag(bytes,0x434e5353) :
++                      ExAllocatePoolWithTag(NonPagedPool,bytes,0x434e5353);
++    BucketRequest = previous;
++    return p;
++}
++static void PreemptAfterPageUnlock(void) {
++    int event = Preemption;
++    if (!event) return;
++    Preemption = 0;
++    PVOID p = Allocate(64,FALSE);
++    assert(p);
++    if (event == 1) {
++        ExFreePool(p);
++        assert(NxpReclaimEmptyBucketPages() == 1);
++    } else {
++        PreemptedAllocation = p;
++    }
++}
++static void CheckSettled(void) {
++    ULONG rows = 0;
++    CheckBacking();
++    for (ULONG d = 0; d < NXP_POOL_CENSUS_DOMAIN_COUNT; ++d)
++        for (ULONG c = 0; c < NXP_POOL_CENSUS_CLASS_COUNT; ++c)
++            rows += NxpPoolCensusData.Pages[d][c].CurrentActive +
++                    NxpPoolCensusData.Pages[d][c].CurrentEmpty;
++    assert(rows == ModelBacking);
++    assert(!NxpPoolCensusData.PageUnderflows && !NxpPoolCensusData.Saturations);
++    assert(!NxpPoolCensusData.KeyOverflows && !NxpPoolCensusData.LargeFreeMisses);
++    assert(!NxpPoolCensusData.UntrackedFrees && !(NxpPoolCensusData.Sequence & 1));
++    assert(!NxpLock && !NxppLock && !NxpPoolCensusLock && !PfnHeld);
++}
++static void Map(ULONG_PTR address, SIZE_T bytes) {
++    assert(mmap((PVOID)address,bytes,PROT_READ|PROT_WRITE,
++                MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0) == (PVOID)address);
++}
++int main(int argc, char **argv) {
++    assert(argc == 2);
++    Map(0xC0000000UL,4 * 1024 * 1024);
++    Map(NXK_POOL_WINDOW_BASE,NXK_POOL_WINDOW_PAGES * PAGE_SIZE);
++    PVOID metadata = calloc(1,NxPoolPagesMetadataSize());
++    assert(metadata); NxPoolPagesInitialize(metadata); InitializePool(NonPagedPool,0);
++    if (!strcmp(argv[1],"fresh") || !strcmp(argv[1],"fresh-peak")) {
++        /* Another thread acquires/releases backing before the first caller
++         * has attached its newly acquired page to a class. Physical peak=2. */
++        CheckAtUnlock = !strcmp(argv[1],"fresh"); Preemption = 1;
++        PVOID p = Allocate(32,FALSE); assert(p);
++        assert(NxPoolPagesQueryRunBytes(PAGE_ALIGN(p)) == PAGE_SIZE);
++        assert(ModelBacking == 1 && ModelPeak == 2); CheckSettled();
++        ExFreePool(p); NxpReclaimEmptyBucketPages();
++    } else if (!strcmp(argv[1],"release") || !strcmp(argv[1],"release-peak")) {
++        PVOID p = Allocate(32,FALSE); assert(p); ExFreePool(p);
++        /* Another thread refills immediately after the old physical backing
++         * has been returned. Physical peak stays one, including the refill. */
++        CheckAtUnlock = !strcmp(argv[1],"release"); Preemption = 2;
++        assert(NxpReclaimEmptyBucketPages() == 1);
++        assert(PreemptedAllocation && ModelBacking == 1 && ModelPeak == 1);
++        CheckSettled(); ExFreePool(PreemptedAllocation); NxpReclaimEmptyBucketPages();
++    } else if (!strcmp(argv[1],"rollback")) {
++        /* A failed bucket commit after PT allocation must add no backing. */
++        CheckAtUnlock = TRUE; FailDataAt = 1;
++        assert(!Allocate(32,FALSE)); assert(!ModelBacking && !ModelPeak);
++        /* The ordinary whole-page rollback may return already taken frames;
++         * those frames are not bucket backing. */
++        DataTakes = 0; FailDataAt = 2;
++        assert(!Allocate(8192,FALSE)); assert(!ModelBacking && !ModelPeak);
++        FailDataAt = 0;
++        PVOID whole = Allocate(8192,FALSE); assert(whole);
++        assert(NxPoolPagesQueryRunBytes(whole) == 8192);
++        CheckBacking(); ExFreePool(whole);
++    } else if (!strcmp(argv[1],"pt-failure")) {
++        CheckAtUnlock = TRUE; DenyPt = TRUE;
++        assert(!Allocate(32,FALSE)); assert(!ModelBacking && !ModelPeak);
++    } else if (!strcmp(argv[1],"reuse")) {
++        CheckAtUnlock = TRUE;
++        PVOID p = Allocate(32,FALSE); assert(p); ExFreePool(p);
++        ULONG takes = DataTakes;
++        PVOID same = Allocate(32,FALSE); assert(same); ExFreePool(same);
++        PVOID different = Allocate(512,FALSE); assert(different);
++        assert(PAGE_ALIGN(p) == PAGE_ALIGN(different));
++        assert(ModelBacking == 1 && ModelPeak == 1 && DataTakes == takes);
++        CheckSettled(); ExFreePool(different); NxpReclaimEmptyBucketPages();
++    } else if (!strcmp(argv[1],"domain")) {
++        CheckAtUnlock = TRUE;
++        PVOID kernel = Allocate(32,FALSE); assert(kernel); ExFreePool(kernel);
++        PVOID title = Allocate(512,TRUE); assert(title);
++        assert(ModelBacking == (XBOX_RESERVE_UPPER_RAM ? 2U : 1U));
++        CheckSettled(); ExFreePool(title); NxpReclaimEmptyBucketPages();
++    } else { assert(!"unknown test case"); }
++    CheckSettled(); assert(!ModelBacking);
++    free(metadata);
++    printf("pool census backing: reserve=%d, %s PASS (modeled schedule)\n",
++           XBOX_RESERVE_UPPER_RAM,argv[1]);
++    return 0;
++}
+diff --git a/tests/host/pool-census-pages/check.py b/tests/host/pool-census-pages/check.py
+new file mode 100644
+index 00000000..132027e0
+--- /dev/null
++++ b/tests/host/pool-census-pages/check.py
+@@ -0,0 +1,53 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Real pool/page/census bodies: backing commits and modeled preemption."""
++import argparse
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++parser = argparse.ArgumentParser(description=__doc__)
++parser.add_argument("output", type=Path)
++parser.add_argument("--source", type=Path, default=root,
++                    help="Kernel tree supplying the maintained production bodies")
++arguments = parser.parse_args()
++source_root = arguments.source.resolve()
++out = arguments.output.resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++pool = (source_root / "ntoskrnl/xb/mm/pool.c").read_text()
++pages = (source_root / "ntoskrnl/xb/mm/poolpages.c").read_text()
++header = (source_root / "ntoskrnl/xb/mm/pool-census.h").read_text().replace("#pragma once", "")
++census = (source_root / "ntoskrnl/xb/mm/poolcensus.c").read_text()
++census = census.replace("#include <ntoskrnl.h>", "").replace('#include "pool-census.h"', "")
++macros = pool[pool.index("#ifdef NXK_POOL_CENSUS"):pool.index("/* SIZE CLASSES")]
++macros = macros.replace('#include "pool-census.h"', "")
++definitions = pool[pool.index("static const USHORT NxpClassSize"):pool.index("/* BIG-BLOCK TABLE")]
++page_definitions = pages[pages.index("/* WINDOW"):pages.index("/* PUBLIC")]
++page_bodies = pages[pages.index("/* PUBLIC"):pages.index("/*\n * Make a window-mapped")]
++pool_names = ("InitializePool", "NxpDetachEmptyBucketPage", "NxpReuseEmptyBucketPage",
++              "NxpAllocFailed", "NxpAllocatePoolWithTag", "ExAllocatePoolWithTag",
++              "NxTitleAllocatePoolWithTag", "NxTitleAllocatePool", "ExFreePoolWithTag",
++              "ExFreePool", "NxpReclaimEmptyBucketPages", "ExQueryPoolBlockSize")
++pool_bodies = "".join(extract.function(pool, name) for name in pool_names)
++cases = (Path(__file__).parent / "cases.c").read_text()
++shim = (Path(__file__).parent / "shim.c").read_text()
++for reserve in (0, 1):
++    source = out / f"backing-{reserve}.c"
++    source.write_text(shim + f"\n#define XBOX_RESERVE_UPPER_RAM {reserve}\n" +
++                      header + census + page_definitions + page_bodies +
++                      macros + definitions + "\nULONG NxpReclaimEmptyBucketPages(VOID);\n" +
++                      pool_bodies + cases)
++    binary = source.with_suffix("")
++    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
++                    "-fsanitize=undefined", "-fno-sanitize-recover=all", str(source),
++                    "-o", str(binary)], check=True)
++    for case in ("fresh", "fresh-peak", "release", "release-peak", "rollback",
++                 "pt-failure", "reuse", "domain"):
++        subprocess.run([str(binary), case], check=True)
+diff --git a/tests/host/pool-census-pages/shim.c b/tests/host/pool-census-pages/shim.c
+new file mode 100644
+index 00000000..278757b2
+--- /dev/null
++++ b/tests/host/pool-census-pages/shim.c
+@@ -0,0 +1,116 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#define _GNU_SOURCE
++#include <assert.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++typedef uint32_t ULONG, POOL_TYPE, KSPIN_LOCK, PFN_NUMBER, *PULONG;
++typedef uint16_t USHORT, *PUSHORT;
++typedef uint8_t UCHAR, BOOLEAN, KIRQL, *PBOOLEAN, *PUCHAR;
++typedef uintptr_t ULONG_PTR;
++typedef uint64_t ULONGLONG;
++typedef size_t SIZE_T;
++typedef void VOID, *PVOID;
++#define IN
++#define OUT
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define DBG 0
++#define ASSERT assert
++#define NXK_MM_POOLPAGES 1
++#define NXK_POOL_CENSUS 1
++#define PAGE_SHIFT 12
++#define PAGE_SIZE 4096u
++#define NXK_POOL_WINDOW_BASE 0xC1000000UL
++#define NXK_POOL_WINDOW_PAGES 4096u
++#define BYTES_TO_PAGES(n) (((n) + PAGE_SIZE - 1) >> PAGE_SHIFT)
++#define PAGE_ALIGN(p) ((PVOID)((ULONG_PTR)(p) & ~(ULONG_PTR)(PAGE_SIZE - 1)))
++#define RTL_NUMBER_OF(a) (sizeof(a) / sizeof((a)[0]))
++#define C_ASSERT(e) _Static_assert((e), #e)
++#define FIELD_OFFSET(t,f) __builtin_offsetof(t,f)
++#define UNREFERENCED_PARAMETER(p) ((void)(p))
++#define RtlZeroMemory(p,n) memset((p),0,(n))
++#define RtlFillMemory(p,n,v) memset((p),(v),(n))
++#define MAXULONG UINT32_MAX
++#define KeMemoryBarrier() __asm__ __volatile__("" ::: "memory")
++#define DPRINT1(...) ((void)0)
++#define NonPagedPool 0
++#define BASE_POOL_TYPE_MASK 1
++#define MUST_SUCCEED_POOL_MASK 0x100
++#define POOL_RAISE_IF_ALLOCATION_FAILURE 0x10
++#define MUST_SUCCEED_POOL_EMPTY 1
++#define BAD_POOL_CALLER 2
++#define BAD_POOL_HEADER 3
++#define STATUS_INSUFFICIENT_RESOURCES 4
++#define TAG_NONE 0x656e6f4e
++static KSPIN_LOCK NxpLock, NxppLock, NxpPoolCensusLock;
++static KIRQL CurrentIrql;
++static BOOLEAN PfnHeld, CheckAtUnlock, BucketRequest, DenyPt;
++static ULONG ModelBacking, ModelPeak, DataTakes, FailDataAt;
++static UCHAR FrameUsed[1024], FrameBucket[1024];
++static int Preemption;
++static PVOID PreemptedAllocation;
++static void CheckBacking(void);
++static void PreemptAfterPageUnlock(void);
++static void KeInitializeSpinLock(KSPIN_LOCK *lock) { *lock = 0; }
++static void KeAcquireSpinLock(KSPIN_LOCK *lock, KIRQL *old) {
++    assert(!*lock && !NxpPoolCensusLock);
++    if (lock == &NxpLock) assert(!NxppLock && !PfnHeld);
++    if (lock == &NxppLock) assert(!NxpLock && !PfnHeld);
++    *old = CurrentIrql; CurrentIrql = 2; *lock = 1;
++}
++static void KeReleaseSpinLock(KSPIN_LOCK *lock, KIRQL old) {
++    assert(*lock); *lock = 0; CurrentIrql = old;
++    if (lock == &NxppLock) {
++        assert(!PfnHeld && !NxpPoolCensusLock && !NxpLock);
++        if (CheckAtUnlock) CheckBacking();
++        PreemptAfterPageUnlock();
++    }
++}
++static KIRQL MiAcquirePfnLock(void) {
++    assert(NxppLock && !PfnHeld && !NxpPoolCensusLock);
++    PfnHeld = TRUE; return CurrentIrql;
++}
++static void MiReleasePfnLock(KIRQL old) {
++    assert(PfnHeld && !NxpPoolCensusLock); PfnHeld = FALSE; CurrentIrql = old;
++}
++static ULONGLONG KeQueryInterruptTime(void) { return 0; }
++static void KeInvalidateTlbEntry(PVOID p) { (void)p; }
++static void NxkPageSupplySetOwner(PFN_NUMBER p, ULONG_PTR owner) {
++    (void)owner; assert(PfnHeld && FrameUsed[p] && !NxpPoolCensusLock);
++}
++static PFN_NUMBER TakeFrame(BOOLEAN bucket, BOOLEAN title) {
++    assert(PfnHeld && NxppLock && !NxpPoolCensusLock);
++    ULONG first = title ? 512 : 1, last = title ? 1024 : 512;
++    for (ULONG p = first; p < last; ++p) {
++        if (FrameUsed[p]) continue;
++        FrameUsed[p] = 1; FrameBucket[p] = bucket;
++        if (bucket) { ModelBacking++; if (ModelBacking > ModelPeak) ModelPeak = ModelBacking; }
++        return p;
++    }
++    return 0;
++}
++static PFN_NUMBER NxkPageSupplyTakeZero(ULONG color) {
++    (void)color; return DenyPt ? 0 : TakeFrame(FALSE,FALSE);
++}
++static PFN_NUMBER TakeData(BOOLEAN title) {
++    DataTakes++;
++    if (FailDataAt && DataTakes >= FailDataAt) return 0;
++    return TakeFrame(BucketRequest,title);
++}
++static PFN_NUMBER NxkPageSupplyTakeAny(ULONG color) { (void)color; return TakeData(FALSE); }
++static PFN_NUMBER NxkPageSupplyTakeTitleAny(ULONG color) __attribute__((unused));
++static PFN_NUMBER NxkPageSupplyTakeTitleAny(ULONG color) { (void)color; return TakeData(TRUE); }
++static void NxkPageSupplyReturn(PFN_NUMBER p) {
++    assert(PfnHeld && NxppLock && !NxpPoolCensusLock && FrameUsed[p]);
++    if (FrameBucket[p]) { assert(ModelBacking); ModelBacking--; }
++    FrameBucket[p] = 0; FrameUsed[p] = 0;
++}
++static void KeBugCheckEx(ULONG b, ULONG_PTR a, ULONG_PTR c, ULONG_PTR d, ULONG_PTR e) {
++    (void)b;(void)a;(void)c;(void)d;(void)e;assert(!"unexpected bugcheck");
++}
++static void ExRaiseStatus(ULONG status) { (void)status;assert(!"unexpected raise"); }
+diff --git a/tests/host/pool-census/check.py b/tests/host/pool-census/check.py
+index 53f46e8a..10309261 100644
+--- a/tests/host/pool-census/check.py
++++ b/tests/host/pool-census/check.py
+@@ -19,9 +19,11 @@ pool = pool_path.read_text()
+ cmake = cmake_path.read_text()
+ for hook in ("NxPoolCensusAllocate(", "NxPoolCensusFree(", "NxPoolCensusFreeLarge(",
+              "NxPoolCensusPageAttach(", "NxPoolCensusPageBecameEmpty(",
+-             "NxPoolCensusPageRelease(",
+              "NXP_POOL_CENSUS_PACK_CLASS", "NXP_POOL_CENSUS_GET_CLASS"):
+     assert hook in pool, f"production pool hook missing: {hook}"
++pages = (root / "ntoskrnl/xb/mm/poolpages.c").read_text()
++for hook in ("NxPoolCensusPageAcquire(", "NxPoolCensusPageRelease("):
++    assert hook in pages, f"production backing hook missing: {hook}"
+ assert "option(NXK_POOL_CENSUS" in cmake
+ assert "target_compile_definitions(ntoskrnl PRIVATE NXK_POOL_CENSUS=1)" in cmake
+ source = source.replace('#include <ntoskrnl.h>', '').replace('#include "pool-census.h"', '')
+@@ -172,6 +174,7 @@ int main(void) {
+     assert(E && E->LifeRetained == 1);
+     assert(NxpPoolCensusData.LifetimeActive == 0);
+ 
++    NxPoolCensusPageAcquire();
+     NxPoolCensusPageAttach(2, NXP_POOL_CENSUS_DOMAIN_SHARED, FALSE);
+     NxPoolCensusPageBecameEmpty(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
+     NxPoolCensusPageBecameActive(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
