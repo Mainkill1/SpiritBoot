@@ -1,0 +1,489 @@
+diff --git a/boot/nxldr/av-handoff.h b/boot/nxldr/av-handoff.h
+new file mode 100644
+index 00000000..514a4446
+--- /dev/null
++++ b/boot/nxldr/av-handoff.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independent display contract carried with the existing launch/RAM handoff.
++ * Addresses refer only to title-owned physical RAM aliases, never kernel state.
++ */
++#ifndef NX_AV_HANDOFF_H
++#define NX_AV_HANDOFF_H
++typedef struct _NX_AV_HANDOFF {
++    unsigned SavedAddress;
++    unsigned AllocationBytes;
++    unsigned DisplayMode;
++    unsigned SourceFormat;
++    unsigned Pitch;
++    unsigned FrameBuffer;
++} NX_AV_HANDOFF;
++#endif
+diff --git a/boot/nxldr/warm-handoff.h b/boot/nxldr/warm-handoff.h
+index 61485f9e..4024c2c8 100644
+--- a/boot/nxldr/warm-handoff.h
++++ b/boot/nxldr/warm-handoff.h
+@@ -11,7 +11,7 @@
+ #define PM_VERSION 2
+ #endif
+ #define PM_LAUNCH_MAGIC 0x6E78436CUL
+-#define PM_LAUNCH_BYTES 3616
++#define PM_LAUNCH_BYTES 3640
+ #define PM_MAX_STAGES 505u
+ 
+ typedef struct _PM_HANDOFF {
+diff --git a/hal/halx86/xbox/av.c b/hal/halx86/xbox/av.c
+index 995a5dd6..75cf5f14 100644
+--- a/hal/halx86/xbox/av.c
++++ b/hal/halx86/xbox/av.c
+@@ -28,6 +28,7 @@
+ 
+ 
+ #include "halxbox.h"
++#include "../../../boot/nxldr/av-handoff.h"
+ 
+ /* SMBus slave addresses. */
+ #define SMBUS_SMC               0x10   /* system management controller    */
+@@ -100,6 +101,10 @@
+ /* A framebuffer a prior display owner asked the kernel to preserve across a
+  * mode change (AvSetSavedDataAddress).  NULL on a cold boot -- none saved. */
+ static PVOID NxkAvSavedDataAddress = NULL;
++static ULONG NxkAvDisplayMode, NxkAvSourceFormat, NxkAvPitch;
++
++ULONG NTAPI AvSetDisplayMode(PVOID RegisterBase, ULONG Step, ULONG DisplayMode,
++                            ULONG SourceColorFormat, ULONG Pitch, ULONG FrameBuffer);
+ 
+ PVOID NTAPI
+ AvGetSavedDataAddress(VOID)
+@@ -113,6 +118,55 @@ AvSetSavedDataAddress(_In_opt_ PVOID Address)
+     NxkAvSavedDataAddress = Address;
+ }
+ 
++/* Capture after shutdown callbacks, before the RAM handoff is hashed. */
++VOID NTAPI
++NxkAvCaptureState(NX_AV_HANDOFF *State)
++{
++    extern SIZE_T NTAPI NxMmQueryAllocationSize(PVOID BaseAddress);
++    ULONG_PTR address = (ULONG_PTR)NxkAvSavedDataAddress;
++    SIZE_T size;
++    RtlZeroMemory(State, sizeof(*State));
++    if (address < 0x80000000UL || address >= 0x84000000UL ||
++        (address & (PAGE_SIZE - 1))) return;
++    size = NxMmQueryAllocationSize((PVOID)address);
++    if (!size || size > 0x84000000UL - address) return;
++    State->SavedAddress = address;
++    State->AllocationBytes = size;
++    State->DisplayMode = NxkAvDisplayMode;
++    State->SourceFormat = NxkAvSourceFormat;
++    State->Pitch = NxkAvPitch;
++    State->FrameBuffer = *(volatile ULONG *)(0xFD000000UL + NV2A_PCRTC_START);
++}
++
++/* The memory manager has already validated and admitted persistent pages.
++ * An ordinary boot or rejected range never publishes an old saved pointer. */
++CODE_SEG("INIT")
++VOID NTAPI
++NxkAvRestoreState(const NX_AV_HANDOFF *State)
++{
++    extern BOOLEAN NxkMmPersistentPage(ULONG_PTR Page);
++    ULONG address = State->SavedAddress;
++    ULONG physical, offset;
++    ULONG first, last, page;
++    if (address < 0x80000000UL || address >= 0x84000000UL ||
++        (address & (PAGE_SIZE - 1)) || !State->AllocationBytes ||
++        State->AllocationBytes > 0x84000000UL - address) return;
++    physical = address - 0x80000000UL;
++    first = physical >> PAGE_SHIFT;
++    last = (physical + State->AllocationBytes - 1) >> PAGE_SHIFT;
++    /* Adjacent saved allocations share a restored run until the launch-data
++     * page is adopted. Check this allocation's pages, not the run's base. */
++    for (page = first; page <= last; ++page)
++        if (!NxkMmPersistentPage(page)) return;
++    AvSetSavedDataAddress((PVOID)address);
++    if (State->FrameBuffer < physical) return;
++    offset = State->FrameBuffer - physical;
++    if (offset >= State->AllocationBytes || !State->Pitch ||
++        State->Pitch > State->AllocationBytes - offset) return;
++    AvSetDisplayMode((PVOID)0xFD000000UL, 0, State->DisplayMode,
++                     State->SourceFormat, State->Pitch, State->FrameBuffer);
++}
++
+ /* Probe the SMBus for the TV encoder; 0 if neither known encoder answers
+  * (an Xcalibur box, not handled here). */
+ static UCHAR
+@@ -275,8 +329,9 @@ AvSetDisplayMode(
+     UCHAR cr19, cr25;
+ 
+     UNREFERENCED_PARAMETER(Step);
+-    UNREFERENCED_PARAMETER(DisplayMode);
+-    UNREFERENCED_PARAMETER(SourceColorFormat);
++    NxkAvDisplayMode = DisplayMode;
++    NxkAvSourceFormat = SourceColorFormat;
++    NxkAvPitch = Pitch;
+ 
+     /* PCRTC_START scans out physical RAM; FrameBuffer arrives pre-masked to
+      * 0x7FFFFFFF by nxdk -- reduce it to the 64 MB physical address space. */
+diff --git a/ntoskrnl/ex/init.c b/ntoskrnl/ex/init.c
+index 034236a1..822d918e 100644
+--- a/ntoskrnl/ex/init.c
++++ b/ntoskrnl/ex/init.c
+@@ -1452,9 +1452,11 @@ Phase1InitializationDiscard(IN PVOID Context)
+         extern VOID NxkMmEnsureMmioWindow(VOID);
+         extern VOID NxConfigurePciDevicesLate(VOID);
+         extern VOID NxkInitializeVideo(VOID);
++        extern VOID NTAPI NxkRestoreSavedVideo(VOID);
+         NxkMmEnsureMmioWindow();
+         NxConfigurePciDevicesLate();
+         NxkInitializeVideo();
++        if (QuickLaunch) NxkRestoreSavedVideo();
+     }
+ 
+     if (!QuickLaunch)
+diff --git a/ntoskrnl/xb/mm/persistence.c b/ntoskrnl/xb/mm/persistence.c
+index c69855d1..3bbadf50 100644
+--- a/ntoskrnl/xb/mm/persistence.c
++++ b/ntoskrnl/xb/mm/persistence.c
+@@ -243,10 +243,14 @@ VOID NxkMmFinishWarmRestore(VOID)
+  */
+ VOID NTAPI NxkMmPublishPersistence(BOOLEAN WarmReset)
+ {
++    extern VOID NTAPI NxkPublishSavedVideo(VOID);
+     PM_HANDOFF *slot = (PM_HANDOFF *)PM_VA;
+     KIRQL irql;
+     slot->Magic = 0;
+     if (!WarmReset) return;
++    /* AV capture queries contig ownership: do it before taking the PFN lock,
++     * preserving the allocator's contig-lock -> PFN-lock order. */
++    NxkPublishSavedVideo();
+     irql = MiAcquirePfnLock();
+     slot->Version = PM_VERSION; slot->BitmapBytes = PM_BYTES;
+     slot->ImageBase = (ULONG)__ImageBase; slot->LaunchHash = PmLaunchHash();
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index d3ae28e4..92909e7c 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -29,6 +29,8 @@
+ #include "object-types.h"
+ #include "obcreate.h"
+ #include "mm/mm.h"
++#include "../../boot/nxldr/av-handoff.h"
++#include "../../boot/nxldr/warm-handoff.h"
+ 
+ /* ExMutantObjectType + MUTANT_ALL_ACCESS. */
+ #include <ndk/extypes.h>
+@@ -553,8 +555,29 @@ typedef struct _XB_PERSIST_SLOT
+     LAUNCH_DATA_HEADER Header;      /* copied from the title's LaunchDataPage */
+     UCHAR              LaunchData[3072]; /* the payload titles hand across */
+     ULONG              LaunchPagePa; /* independently added original page PA */
++    NX_AV_HANDOFF       Av;
+ } XB_PERSIST_SLOT, *PXB_PERSIST_SLOT;
+ 
++_Static_assert(sizeof(XB_PERSIST_SLOT) == PM_LAUNCH_BYTES,
++               "launch hash must cover the saved display state");
++
++VOID NTAPI NxkPublishSavedVideo(VOID)
++{
++    extern VOID NTAPI NxkAvCaptureState(NX_AV_HANDOFF *State);
++    volatile PXB_PERSIST_SLOT slot = (PXB_PERSIST_SLOT)XB_PERSIST_VA;
++    if (slot->Magic == XB_PERSIST_MAGIC)
++        NxkAvCaptureState((NX_AV_HANDOFF *)&slot->Av);
++}
++
++CODE_SEG("INIT")
++VOID NTAPI NxkRestoreSavedVideo(VOID)
++{
++    extern VOID NTAPI NxkAvRestoreState(const NX_AV_HANDOFF *State);
++    volatile PXB_PERSIST_SLOT slot = (PXB_PERSIST_SLOT)XB_PERSIST_VA;
++    if (slot->Magic == XB_PERSIST_MAGIC)
++        NxkAvRestoreState((const NX_AV_HANDOFF *)&slot->Av);
++}
++
+ /* Read-only early-boot peek. XeConsumeChainloadSlot remains the only
+  * destructive consumer of the one-shot quick-launch marker. */
+ CODE_SEG("INIT")
+diff --git a/tests/host/av-saved-image/check.py b/tests/host/av-saved-image/check.py
+new file mode 100644
+index 00000000..1e4359a3
+--- /dev/null
++++ b/tests/host/av-saved-image/check.py
+@@ -0,0 +1,114 @@
++#!/usr/bin/env python3
++"""Execute the production saved-image capture/restore on controlled MMIO/RAM admission."""
++from pathlib import Path
++import os
++import re
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1])
++out.mkdir(parents=True, exist_ok=True)
++source = (root / 'hal/halx86/xbox/av.c').read_text()
++
++def body(name):
++    match = re.search(r'(?:PVOID|VOID|ULONG) NTAPI\s+' + name + r'\s*\([^;]*?\)\s*\{', source)
++    assert match, 'missing production function: ' + name
++    end = source.index('{', match.start()) + 1
++    depth = 1
++    while depth:
++        depth += (source[end] == '{') - (source[end] == '}')
++        end += 1
++    return source[match.start():end]
++
++shim = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/mman.h>
++typedef void VOID, *PVOID;
++typedef uint32_t ULONG;
++typedef uint8_t UCHAR;
++typedef uintptr_t ULONG_PTR;
++typedef size_t SIZE_T;
++typedef int BOOLEAN;
++#define NTAPI
++#define CODE_SEG(x)
++#define _In_
++#define _In_opt_
++#define PAGE_SIZE 4096
++#define PAGE_SHIFT 12
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define UNREFERENCED_PARAMETER(x) ((void)(x))
++#define NV2A_PCRTC_START 0x600800
++#define NV2A_PRMCIO_CR_INDEX 0x6013d4
++#define NV2A_PRMCIO_CR_DATA 0x6013d5
++static PVOID NxkAvSavedDataAddress;
++static ULONG NxkAvDisplayMode, NxkAvSourceFormat, NxkAvPitch;
++static SIZE_T live, restored;
++static int adjacent;
++SIZE_T NxMmQueryAllocationSize(PVOID address)
++{ return address == (PVOID)0x82000000UL ? live : 0; }
++SIZE_T NxkMmQueryRestored(PVOID address)
++{ return !adjacent && address == (PVOID)0x82000000UL ? restored : 0; }
++BOOLEAN NxkMmPersistentPage(ULONG_PTR page)
++{ return (adjacent && page == 0x1fff) ||
++         (page >= 0x2000 && page - 0x2000 < restored / PAGE_SIZE); }
++ULONG AvSetDisplayMode(PVOID, ULONG, ULONG, ULONG, ULONG, ULONG);
++'''
++
++main = r'''
++#define SCANOUT (*(volatile ULONG *)0xfd600800UL)
++static void boot(void) { AvSetSavedDataAddress(NULL); SCANOUT = 0x03c00000; }
++int main(void)
++{
++    void *mmio = mmap((void *)0xfd000000UL, 0x800000, PROT_READ|PROT_WRITE,
++        MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE, -1, 0);
++    assert(mmio != MAP_FAILED);
++    NX_AV_HANDOFF state;
++    live = 1228864;
++    AvSetSavedDataAddress((PVOID)0x82000000UL);
++    AvSetDisplayMode(mmio, 0, 0x88070701, 30, 2560, 0x02000040);
++    NxkAvCaptureState(&state);
++    assert(state.SavedAddress == 0x82000000 && state.AllocationBytes == 1228864);
++    boot(); restored = 1232896;
++    NxkAvRestoreState(&state);
++    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL && SCANOUT == 0x02000040);
++    boot(); adjacent = 1; NxkAvRestoreState(&state);
++    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL && SCANOUT == 0x02000040);
++    adjacent = 0;
++
++    boot(); restored = 0; NxkAvRestoreState(&state);
++    assert(AvGetSavedDataAddress() == NULL && SCANOUT == 0x03c00000);
++    boot(); restored = 4096; NxkAvRestoreState(&state);
++    assert(AvGetSavedDataAddress() == NULL && SCANOUT == 0x03c00000);
++    restored = 1232896;
++    NX_AV_HANDOFF invalid = state;
++    invalid.SavedAddress = 0x7ffff000; NxkAvRestoreState(&invalid);
++    assert(AvGetSavedDataAddress() == NULL);
++    invalid = state; invalid.AllocationBytes = 0xffffffff; NxkAvRestoreState(&invalid);
++    assert(AvGetSavedDataAddress() == NULL);
++    invalid = state; invalid.FrameBuffer = 0x03f00000; NxkAvRestoreState(&invalid);
++    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.Pitch = invalid.AllocationBytes;
++    NxkAvRestoreState(&invalid);
++    assert(SCANOUT == 0x03c00000);
++    boot(); NxkAvCaptureState(&invalid);
++    assert(invalid.SavedAddress == 0 && invalid.AllocationBytes == 0);
++    AvSetSavedDataAddress((PVOID)0x82000000UL); live = 0;
++    NxkAvCaptureState(&invalid); assert(invalid.SavedAddress == 0);
++    puts("saved image capture/restore: admitted RAM, missing/short RAM, stale ranges, scanout bounds and clear pass");
++}
++'''
++text = shim + (root/'boot/nxldr/av-handoff.h').read_text()
++for name in ('AvGetSavedDataAddress', 'AvSetSavedDataAddress', 'AvSetDisplayMode',
++             'NxkAvCaptureState', 'NxkAvRestoreState'):
++    text += '\n' + body(name)
++unit = out/'check.c'; binary = out/'check'
++unit.write_text(text + main)
++subprocess.run(['cc','-std=c11','-D_GNU_SOURCE','-O2','-g','-Wall','-Wextra','-Werror',
++                # The fixed 32-bit MMIO window overlaps ASan's shadow gap.
++                '-Wno-int-to-pointer-cast','-fsanitize=undefined',
++                '-fno-omit-frame-pointer',str(unit),'-o',str(binary)],check=True)
++subprocess.run([str(binary)],check=True,env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0'))
+diff --git a/tests/host/clean-room/persistence.c b/tests/host/clean-room/persistence.c
+index 4edef078..9180a2bc 100644
+--- a/tests/host/clean-room/persistence.c
++++ b/tests/host/clean-room/persistence.c
+@@ -15,6 +15,8 @@ VOID NxkMmDonateHeapPages(ULONG_PTR pa, ULONG count)
+ { (void)pa; (void)count; abort(); }
+ static bool pinned;
+ static unsigned returned;
++static unsigned video_publications;
++VOID NTAPI NxkPublishSavedVideo(VOID) { ++video_publications; }
+ void NxkPageSupplyReturn(PFN_NUMBER page) { (void)page; ++returned; }
+ BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER page) { (void)page; return pinned; }
+ #include "../../../ntoskrnl/xb/mm/persistence.c"
+@@ -25,6 +27,7 @@ static void reset(void)
+     memset((void *)PM_VA, 0, PAGE_SIZE); memset((void *)PM_LAUNCH_VA, 0, PAGE_SIZE);
+     memset(PmSelected, 0, sizeof(PmSelected)); memset(PmRestored, 0, sizeof(PmRestored));
+     pinned = false; returned = 0;
++    video_publications = 0;
+ }
+ static void reboot_read(LOADER_PARAMETER_BLOCK *lb)
+ {
+@@ -47,6 +50,7 @@ int main(void)
+     NxkMmSetPersistentPages(0x2001011, 20, TRUE);
+     CHECK(PmBit(PmSelected, 0x2001) && !PmBit(PmSelected, 0x2000));
+     NxkMmPublishPersistence(TRUE); CHECK(slot->Magic == PM_MAGIC);
++    CHECK(video_publications == 1);
+     reboot_read(&lb); CHECK(slot->Magic == 0 && NxkMmPersistentPage(0x2001));
+     CHECK(NxkMmQueryRestored(alias) == PAGE_SIZE);
+     NxkMmSetPersistentPages(0x2001000, PAGE_SIZE, FALSE);
+@@ -69,6 +73,7 @@ int main(void)
+     reboot_read(&lb); reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
+     reset(); PmSet(PmSelected, 0x2001, TRUE); NxkMmPublishPersistence(FALSE);
+     CHECK(slot->Magic == 0);
++    CHECK(video_publications == 0);
+     reset(); NxkMmSetPersistentPages(0x30000, PAGE_SIZE, TRUE);
+     CHECK(!PmBit(PmSelected, 0x30));
+     printf("persistence host checks: %u/%u passed\n", tests - failed, tests);
+diff --git a/tests/xbe/saved-image/Makefile b/tests/xbe/saved-image/Makefile
+new file mode 100644
+index 00000000..99bce320
+--- /dev/null
++++ b/tests/xbe/saved-image/Makefile
+@@ -0,0 +1,5 @@
++XBE_TITLE = saved-image-probe
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /usr/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/saved-image/main.c b/tests/xbe/saved-image/main.c
+new file mode 100644
+index 00000000..4721cf2b
+--- /dev/null
++++ b/tests/xbe/saved-image/main.c
+@@ -0,0 +1,112 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independent public-API characterization. No reference implementation input.
++ * This tests a candidate chain; a title trace must establish its relevance.
++ */
++#include <xboxkrnl/xboxkrnl.h>
++#include <hal/video.h>
++#include <hal/xbox.h>
++#include <string.h>
++#include <stdio.h>
++#include "../api-regression/tap.h"
++
++#define MAGIC 0x53495031UL
++#define BYTES (640 * 480 * 4)
++#define HEADER_BYTES 64
++#define SCANOUT (*(volatile ULONG *)0xFD600800UL)
++typedef struct {
++    ULONG magic, pointer, physical, allocation, scanout;
++} State;
++static void check(ULONG n, BOOLEAN pass, const char *name)
++{
++    if (pass) tap_ok(n, name); else tap_not_ok(n, name);
++}
++static void stop(void)
++{
++    tap_puts("# saved_image_probe_finished\n");
++    tap_drain();
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    for (;;) __asm__ __volatile__("hlt");
++}
++static ULONG pixel(ULONG i)
++{
++    ULONG x = i % 640, y = i / 640;
++    return 0xff000000UL | ((x & 255) << 16) | ((y & 255) << 8) | ((x ^ y) & 255);
++}
++int main(void)
++{
++    State state = {0};
++    if (LaunchDataPage) memcpy(&state, LaunchDataPage->LaunchData, sizeof(state));
++    if (state.magic == MAGIC) {
++        ULONG scanout = SCANOUT;
++        PVOID saved = AvGetSavedDataAddress();
++        PULONG record = saved ? (PULONG)saved : (PULONG)state.pointer;
++        PULONG image = (PULONG)((PUCHAR)record + HEADER_BYTES);
++        tap_puts("# saved_image_stage2\n");
++        check(4, saved != NULL, "saved image is discoverable after quick title relaunch");
++        BOOLEAN contents = TRUE;
++        for (ULONG i = 0; i < BYTES / 4; ++i) if (image[i] != pixel(i)) { contents = FALSE; break; }
++        check(5, contents, "every retained image pixel survives relaunch");
++        check(6, MmQueryAllocationSize(record) == ((state.allocation + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)),
++              "retained image keeps its allocation ownership");
++        ULONG physical = MmGetPhysicalAddress(record);
++        PVOID competitor = MmAllocateContiguousMemoryEx(PAGE_SIZE, physical,
++                physical + PAGE_SIZE - 1, PAGE_SIZE, PAGE_READWRITE);
++        check(7, competitor == NULL, "retained image cannot be allocated to a new owner");
++        if (competitor) MmFreeContiguousMemory(competitor);
++        check(8, scanout == physical + HEADER_BYTES, "scanout still addresses the retained image");
++        char diagnostic[240];
++        snprintf(diagnostic, sizeof(diagnostic), "# warm pointer=%08lx saved=%08lx physical=%08lx bytes=%lu scanout_before=%08lx scanout_after=%08lx\n",
++                   state.pointer, (ULONG)saved, state.physical, state.allocation, state.scanout, scanout);
++        tap_puts(diagnostic);
++        AvSetSavedDataAddress(NULL);
++        check(9, AvGetSavedDataAddress() == NULL, "next owner clears the saved address");
++        MmPersistContiguousMemory(record, MmQueryAllocationSize(record), FALSE);
++        MmFreeContiguousMemory(record);
++        stop();
++    }
++    tap_version(14); tap_plan(9);
++    if (!XVideoSetMode(640,480,32,REFRESH_DEFAULT)) {
++        tap_not_ok(1,"required video mode is available"); stop();
++    }
++    PULONG record = MmAllocateContiguousMemoryEx(BYTES + HEADER_BYTES, 0, 0x7fffffff,
++                                                PAGE_SIZE, PAGE_READWRITE | PAGE_WRITECOMBINE);
++    if (!record) { tap_not_ok(1,"owned saved image is available"); stop(); }
++    state.pointer = (ULONG)record;
++    state.physical = MmGetPhysicalAddress(record);
++    state.allocation = MmQueryAllocationSize(record);
++    memset(record, 0, HEADER_BYTES);
++    /* Public data observed at the saved-buffer boundary: resource kind,
++     * pixel address, unlocked state, linear format, 640x480 / 2560-byte pitch.
++     * The payload below is independently generated, never a game image. */
++    record[0] = 0x81050001; record[1] = state.physical + HEADER_BYTES;
++    record[3] = 0x00011e29; record[4] = 0x271df27f;
++    PULONG image = (PULONG)((PUCHAR)record + HEADER_BYTES);
++    for (ULONG i = 0; i < BYTES / 4; ++i) image[i] = pixel(i);
++    __asm__ __volatile__("sfence" ::: "memory");
++    ULONG step = 0;
++    do { step = AvSetDisplayMode((PVOID)0xfd000000, step, 0x88070701, 30,
++                                 2560, state.physical + HEADER_BYTES); } while (step);
++    state.scanout = SCANOUT;
++    PVOID other = MmAllocateContiguousMemory(PAGE_SIZE);
++    if (!other) { tap_not_ok(1,"owned saved-slot replacement is available"); stop(); }
++    AvSetSavedDataAddress(record);
++    check(1, AvGetSavedDataAddress() == record, "saved slot returns the owned image address");
++    AvSetSavedDataAddress(other);
++    check(2, AvGetSavedDataAddress() == other, "saved slot replaces the previous address");
++    AvSetSavedDataAddress(NULL);
++    check(3, AvGetSavedDataAddress() == NULL, "saved slot accepts an explicit clear");
++    MmFreeContiguousMemory(other);
++    AvSetSavedDataAddress(record);
++    MmPersistContiguousMemory(record, state.allocation, TRUE);
++    state.magic = MAGIC;
++    if (!LaunchDataPage) LaunchDataPage = MmAllocateContiguousMemory(PAGE_SIZE);
++    if (!LaunchDataPage) { tap_puts("# launch page setup failed\n"); stop(); }
++    memset(LaunchDataPage, 0, PAGE_SIZE);
++    LaunchDataPage->Header.dwLaunchDataType = 0;
++    strcpy(LaunchDataPage->Header.szLaunchPath, "\\Device\\CdRom0\\default.xbe");
++    memcpy(LaunchDataPage->LaunchData, &state, sizeof(state));
++    MmPersistContiguousMemory(LaunchDataPage, PAGE_SIZE, TRUE);
++    tap_puts("# saved_image_stage1_quick_relaunch\n"); tap_drain();
++    HalReturnToFirmware(HalQuickRebootRoutine);
++    tap_puts("# relaunch unexpectedly returned\n"); stop();
++}

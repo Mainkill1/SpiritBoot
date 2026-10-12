@@ -55,7 +55,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 356889f1713d473ed435a89512275af28ad8fb69
+            test "$actual_tree" = c5cef281b35d546d43e36912cd52d3ac3b7b451b
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -63,6 +63,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" >"$output/upper-ram-config.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/warm-stage/check.py" >"$output/warm-stage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/av-encoder-option/check.py" "$GUEST_SOURCE" "$output/av-encoder-option" >"$output/av-encoder-option.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/av-saved-image/check.py" "$output/av-saved-image" >"$output/av-saved-image.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-writeback-context.py" "$output/cache-writeback-context" >"$output/cache-writeback-context.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-completion-waits.py" "$output/cache-completion-waits" >"$output/cache-completion-waits.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-full-overwrite.py" "$output/cache-full-overwrite" >"$output/cache-full-overwrite.log" 2>&1
@@ -142,7 +143,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '356889f1713d473ed435a89512275af28ad8fb69', result
+          assert result['source_tree'] == 'c5cef281b35d546d43e36912cd52d3ac3b7b451b', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
