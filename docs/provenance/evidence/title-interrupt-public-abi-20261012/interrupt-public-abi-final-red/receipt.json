@@ -1,0 +1,47 @@
+{
+  "source_ref": "776dd972",
+  "source_commit": "776dd9726f36a68251fb90e312cce05a7408d2b7",
+  "source_tree": "22a477eb82ed0111f2b7ad0d94c7a33a67ab8a94",
+  "production_input_sha256": {
+    "ntoskrnl/ke/i386/irqobj.c": "8de18ba7e812898f730db3165fdfa804d3f8c4f9641aa3e8aa07373e7a21b9eb",
+    "ntoskrnl/xb/interrupt.c": "82cd27cfa93da6f05469d95dc25ce5074fc2cb9eb847ddcb17ef99e68615fd10"
+  },
+  "native_function_sha256": {
+    "KeInitializeInterrupt": "85c055911084ee8ef4c84642ac472def08025302fc4848ed08a74e921113d456",
+    "KiInterruptDispatch": "14cd942dc49c66fb776749d908ca494d21d07762ff3d8d4d774998580e4b91a6",
+    "KiChainedDispatch": "5530d76698ddda69dd90074fcc635a5d8af22238d230ce2fefdfd2acb3e042ea",
+    "KeConnectInterrupt": "a925cb6dafad47c5ca92f03f334b229e07d641541197ff19d7727eb2a96575bf",
+    "KeDisconnectInterrupt": "ea2d19254ad5f07e90440e2300b9cbdfb2e51c431d17188909b662f923ada061",
+    "KeSynchronizeExecution": "f3266c771884d3a68ad5c8faba540724f093e7fddc706c0aa260912ec719b50d"
+  },
+  "fixture_input_sha256": {
+    "shim.c": "f9f659bdb4bc6b01a5fd5d0c48e1822dd94f3c0186b3934b06afaadbd597fd1f",
+    "cases.c": "aab47961f8451ce22ea0a2c82ff649d3e7ef80a30cbb7823274eac500355ff64",
+    "check.py": "15c4eadb0bf53422d2f480e2a6a5f796003a82e0c76c159ad89b5c99a443d02e"
+  },
+  "production_unit_sha256": "03924f2ebc28edb2a899bf031cb2b07ec481f52aa4b131fe7fe127f924dc459c",
+  "mutant": null,
+  "compile_command": [
+    "cc",
+    "-m32",
+    "-std=c11",
+    "-DSARCH_XBOX",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wno-unused-parameter",
+    "-fno-strict-aliasing",
+    "-fno-pie",
+    "-no-pie",
+    "-fsanitize=undefined",
+    "-fno-sanitize-recover=all",
+    "/work/.scratch/spiritboot-halo-20261012/interrupt-public-abi-final-red/production.c",
+    "-o",
+    "/work/.scratch/spiritboot-halo-20261012/interrupt-public-abi-final-red/fixture"
+  ],
+  "compiler": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "qualification": "i386 actual-body host semantics; hardware and trap exit shimmed; no native timing claim",
+  "compile_exit": 0,
+  "run_exit": 1,
+  "executable_sha256": "07780cec078116772f133727ab264a0ea174c5f47bdfc9d20e9c4ce77cfd3e0c"
+}

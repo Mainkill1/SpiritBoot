@@ -1,0 +1,73 @@
+{
+  "toolchain_image": "sha256:ae07b0897b48d511a166e9892c223118aaac7da21cdbf1f502c36b527b7310ca",
+  "results": {
+    "red": {
+      "source_commit": "776dd9726f36a68251fb90e312cce05a7408d2b7",
+      "source_tree": "22a477eb82ed0111f2b7ad0d94c7a33a67ab8a94",
+      "compile_exit": 0,
+      "run_exit": 1,
+      "assertions": 310,
+      "failures": 68,
+      "receipt_sha256": "f86f703c22bcc481b12395585124451a43543d22d0483d47f30235bf4d6aab3e",
+      "production_unit_sha256": "03924f2ebc28edb2a899bf031cb2b07ec481f52aa4b131fe7fe127f924dc459c",
+      "fixture_input_sha256": {
+        "shim.c": "f9f659bdb4bc6b01a5fd5d0c48e1822dd94f3c0186b3934b06afaadbd597fd1f",
+        "cases.c": "aab47961f8451ce22ea0a2c82ff649d3e7ef80a30cbb7823274eac500355ff64",
+        "check.py": "15c4eadb0bf53422d2f480e2a6a5f796003a82e0c76c159ad89b5c99a443d02e"
+      },
+      "production_input_sha256": {
+        "ntoskrnl/ke/i386/irqobj.c": "8de18ba7e812898f730db3165fdfa804d3f8c4f9641aa3e8aa07373e7a21b9eb",
+        "ntoskrnl/xb/interrupt.c": "82cd27cfa93da6f05469d95dc25ce5074fc2cb9eb847ddcb17ef99e68615fd10"
+      }
+    },
+    "green": {
+      "source_commit": "16130e5edda5494803dd8a45dd43cf490b4a9ca4",
+      "source_tree": "87486d2eb062924316cbde63928982637b962a6b",
+      "compile_exit": 0,
+      "run_exit": 0,
+      "assertions": 310,
+      "failures": 0,
+      "receipt_sha256": "a984116c031731b2a4d912a2c2fcb6e821b61c6ccfc8f421a6639abbaf4ad6e1",
+      "production_unit_sha256": "210777a2c6e16c08c1675d01af233fbced43cf9fe90fdb3f498ef57cac26fdc7",
+      "fixture_input_sha256": {
+        "shim.c": "f9f659bdb4bc6b01a5fd5d0c48e1822dd94f3c0186b3934b06afaadbd597fd1f",
+        "cases.c": "aab47961f8451ce22ea0a2c82ff649d3e7ef80a30cbb7823274eac500355ff64",
+        "check.py": "15c4eadb0bf53422d2f480e2a6a5f796003a82e0c76c159ad89b5c99a443d02e"
+      },
+      "production_input_sha256": {
+        "ntoskrnl/ke/i386/irqobj.c": "8de18ba7e812898f730db3165fdfa804d3f8c4f9641aa3e8aa07373e7a21b9eb",
+        "ntoskrnl/xb/interrupt.c": "81c35015bc8b5659c7b0a86ceaedb8e4ff14b2eba4d914001707d66da11c1fc7"
+      }
+    },
+    "mirror-mutant": {
+      "source_commit": "16130e5edda5494803dd8a45dd43cf490b4a9ca4",
+      "source_tree": "87486d2eb062924316cbde63928982637b962a6b",
+      "compile_exit": 0,
+      "run_exit": 1,
+      "assertions": 310,
+      "failures": 2,
+      "receipt_sha256": "3bfd4034386cf3b70661fbf2f0a15561560ad5e2d086986c100c5f68f5f2959e",
+      "production_unit_sha256": "7382447e36e573212a99d7346541c173c194be93eb890699edab504eddc846d7",
+      "fixture_input_sha256": {
+        "shim.c": "f9f659bdb4bc6b01a5fd5d0c48e1822dd94f3c0186b3934b06afaadbd597fd1f",
+        "cases.c": "aab47961f8451ce22ea0a2c82ff649d3e7ef80a30cbb7823274eac500355ff64",
+        "check.py": "15c4eadb0bf53422d2f480e2a6a5f796003a82e0c76c159ad89b5c99a443d02e"
+      },
+      "production_input_sha256": {
+        "ntoskrnl/ke/i386/irqobj.c": "8de18ba7e812898f730db3165fdfa804d3f8c4f9641aa3e8aa07373e7a21b9eb",
+        "ntoskrnl/xb/interrupt.c": "81c35015bc8b5659c7b0a86ceaedb8e4ff14b2eba4d914001707d66da11c1fc7"
+      }
+    }
+  },
+  "other_checks": {
+    "interrupt-admission": {
+      "assertions": 247,
+      "failures": 0
+    },
+    "clean-room-ide": {
+      "assertions": 24,
+      "failures": 0
+    }
+  },
+  "limits": "i386 actual-body host semantics, hardware and exit shims; no guest or title correctness/timing claim"
+}

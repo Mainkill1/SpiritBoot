@@ -1,0 +1,24 @@
+TAP version 14
+# public_object=000228c0 bytes=112 irq3_vector=51 irql=23 context=00022000
+ok 1 - public interrupt structure is 112 bytes
+ok 2 - IRQ3 yields a usable public vector and IRQL
+ok 3 - initialization stays within the public object
+ok 4 - initialization publishes the hardware IRQ level
+ok 5 - initialization publishes the service routine
+ok 6 - initialization publishes the supplied context
+ok 7 - initialization publishes the public IRQL
+ok 8 - initialization publishes sharing and trigger mode
+ok 9 - initialized interrupt starts disconnected
+# initialized_bus_level=3 irql=23 connected=0 service_count=2779096485
+ok 10 - owned interrupt connects
+ok 11 - connect publishes public connected state
+# wait=00000000 callbacks=1 received_object=000228c0 received_context=00022000
+ok 12 - bounded vblank interrupt reaches the owned handler
+ok 13 - handler receives the original public interrupt object
+ok 14 - handler receives the supplied context
+ok 15 - owned interrupt disconnects
+ok 16 - disconnect clears public connected state
+ok 17 - complete lifecycle preserves neighboring guards
+# checks=17 failures=0
+1..17
+# interrupt_identity_probe_finished

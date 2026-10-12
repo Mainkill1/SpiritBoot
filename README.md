@@ -49,6 +49,11 @@ field query used by Forza Motorsport: the progressive display path returns a
 deterministic field value, and calls without an output pointer remain valid.
 Window sizing and final presentation remain xemu responsibilities.
 
+The [public interrupt ABI repair](docs/provenance/TITLE_INTERRUPT_PUBLIC_ABI.md)
+initializes the title object and preserves its identity in actual ISR callbacks.
+Its direct17-check probe passes; the separately reproduced Halo boot failures
+remain unresolved.
+
 ## Project goals
 
 SpiritBoot should eventually provide:

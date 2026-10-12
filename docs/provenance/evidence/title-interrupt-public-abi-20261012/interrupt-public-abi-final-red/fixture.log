@@ -1,0 +1,69 @@
+interrupt public ABI: 310 assertions, 68 failures; i386 public=112 native=484
+FAIL public.header.routine (line 873): object->Public.ServiceRoutine == title_isr
+FAIL public.header.context (line 874): object->Public.ServiceContext == call
+FAIL public.header.bus_level (line 875): object->Public.BusInterruptLevel == vector - 0x30
+FAIL public.header.irql (line 876): object->Public.Irql == call->Irql
+FAIL public.header.disconnected (line 877): object->Public.Connected == FALSE
+FAIL public.header.share (line 878): object->Public.ShareVector == share
+FAIL public.header.mode (line 879): object->Public.Mode == (UCHAR)mode
+FAIL public.header.routine (line 873): object->Public.ServiceRoutine == title_isr
+FAIL public.header.context (line 874): object->Public.ServiceContext == call
+FAIL public.header.bus_level (line 875): object->Public.BusInterruptLevel == vector - 0x30
+FAIL public.header.irql (line 876): object->Public.Irql == call->Irql
+FAIL public.header.disconnected (line 877): object->Public.Connected == FALSE
+FAIL public.header.share (line 878): object->Public.ShareVector == share
+FAIL public.header.mode (line 879): object->Public.Mode == (UCHAR)mode
+FAIL dispatch.original_public_identity (line 848): interrupt == call->Expected
+FAIL dispatch.public_connected (line 850): public->Connected == TRUE
+FAIL dispatch.before_connect_return.connected (line 855): public->Connected == TRUE
+FAIL lifecycle.public_connected (line 919): first.Public.Connected == TRUE && n1->Connected == TRUE
+FAIL lifecycle.second_public_connected (line 923): second.Public.Connected == TRUE
+FAIL lifecycle.repeat_connect_false (line 924): XeKeConnectInterrupt(public_key(&first)) == FALSE && first.Public.Connected == TRUE
+FAIL dispatch.original_public_identity (line 848): interrupt == call->Expected
+FAIL dispatch.public_connected (line 850): public->Connected == TRUE
+FAIL dispatch.original_public_identity (line 848): interrupt == call->Expected
+FAIL dispatch.public_connected (line 850): public->Connected == TRUE
+FAIL lifecycle.public_disconnected (line 940): first.Public.Connected == FALSE && n1->Connected == FALSE
+FAIL lifecycle.repeat_disconnect_false (line 941): XeKeDisconnectInterrupt(public_key(&first)) == FALSE && first.Public.Connected == FALSE
+FAIL lifecycle.other_key_still_connected (line 942): second.Public.Connected == TRUE && n2->Connected == TRUE
+FAIL lifecycle.second_disconnect (line 943): XeKeDisconnectInterrupt(public_key(&second)) == TRUE && second.Public.Connected == FALSE
+FAIL public.header.routine (line 873): object->Public.ServiceRoutine == title_isr
+FAIL public.header.context (line 874): object->Public.ServiceContext == call
+FAIL public.header.bus_level (line 875): object->Public.BusInterruptLevel == vector - 0x30
+FAIL public.header.irql (line 876): object->Public.Irql == call->Irql
+FAIL public.header.disconnected (line 877): object->Public.Connected == FALSE
+FAIL public.header.share (line 878): object->Public.ShareVector == share
+FAIL public.header.mode (line 879): object->Public.Mode == (UCHAR)mode
+FAIL dispatch.original_public_identity (line 848): interrupt == call->Expected
+FAIL dispatch.public_connected (line 850): public->Connected == TRUE
+FAIL public.header.routine (line 873): object->Public.ServiceRoutine == title_isr
+FAIL public.header.context (line 874): object->Public.ServiceContext == call
+FAIL public.header.bus_level (line 875): object->Public.BusInterruptLevel == vector - 0x30
+FAIL public.header.irql (line 876): object->Public.Irql == call->Irql
+FAIL public.header.disconnected (line 877): object->Public.Connected == FALSE
+FAIL public.header.share (line 878): object->Public.ShareVector == share
+FAIL public.header.mode (line 879): object->Public.Mode == (UCHAR)mode
+FAIL public.header.routine (line 873): object->Public.ServiceRoutine == title_isr
+FAIL public.header.context (line 874): object->Public.ServiceContext == call
+FAIL public.header.bus_level (line 875): object->Public.BusInterruptLevel == vector - 0x30
+FAIL public.header.irql (line 876): object->Public.Irql == call->Irql
+FAIL public.header.disconnected (line 877): object->Public.Connected == FALSE
+FAIL public.header.share (line 878): object->Public.ShareVector == share
+FAIL public.header.mode (line 879): object->Public.Mode == (UCHAR)mode
+FAIL dispatch.original_public_identity (line 848): interrupt == call->Expected
+FAIL dispatch.public_connected (line 850): public->Connected == TRUE
+FAIL dispatch.original_public_identity (line 848): interrupt == call->Expected
+FAIL dispatch.public_connected (line 850): public->Connected == TRUE
+FAIL chain.first_disconnect (line 972): XeKeDisconnectInterrupt(public_key(&first)) == TRUE && first.Public.Connected == FALSE
+FAIL chain.remaining_native_route (line 973): installed[0x3b].Type == NormalConnect && second.Public.Connected == TRUE
+FAIL dispatch.original_public_identity (line 848): interrupt == call->Expected
+FAIL dispatch.public_connected (line 850): public->Connected == TRUE
+FAIL chain.final_disconnect (line 976): XeKeDisconnectInterrupt(public_key(&second)) == TRUE && second.Public.Connected == FALSE
+FAIL public.header.routine (line 873): object->Public.ServiceRoutine == title_isr
+FAIL public.header.context (line 874): object->Public.ServiceContext == call
+FAIL public.header.bus_level (line 875): object->Public.BusInterruptLevel == vector - 0x30
+FAIL public.header.irql (line 876): object->Public.Irql == call->Irql
+FAIL public.header.disconnected (line 877): object->Public.Connected == FALSE
+FAIL public.header.share (line 878): object->Public.ShareVector == share
+FAIL public.header.mode (line 879): object->Public.Mode == (UCHAR)mode
+FAIL failed_enable.rollback_public_disconnected (line 1064): object.Public.Connected == FALSE && installed[0x3b].Type == NoConnect && hal_disables == 1

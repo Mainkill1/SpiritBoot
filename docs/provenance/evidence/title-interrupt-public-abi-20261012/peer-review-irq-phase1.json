@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "reviewer": "issue215_handle_lookup",
+  "reviewed_kernel_commit": "16130e5edda5494803dd8a45dd43cf490b4a9ca4",
+  "reviewed_kernel_tree": "87486d2eb062924316cbde63928982637b962a6b",
+  "reviewed_source": "ntoskrnl/xb/interrupt.c",
+  "source_sha256": "81c35015bc8b5659c7b0a86ceaedb8e4ff14b2eba4d914001707d66da11c1fc7",
+  "baseline_interrupt_blob": "cebe50d6ead091dfbadb6002cde6fb88cbf45dfa",
+  "mode": "Read-only production diff, public header, native dispatcher/affinity and frozen public probe review. No reviewer compilation or native run.",
+  "source_findings": [],
+  "reviewed_boundaries": [
+    "Explicit 112-byte public facade matches NXDK field widths/offsets and is separate from the built 484-byte native object. Public size/offset and native storage-capacity assertions pin those boundaries.",
+    "Initializer updates only the observed public header fields, preserving the named padding, ServiceCount and opaque dispatch tail. Routine/context publication and native initialization occur under HIGH_LEVEL.",
+    "Native callback context is the stable shadow. Broker reads the public routine/context, forwards the original public key and exact BOOLEAN return, and mirrors native Connected before invoking title code.",
+    "Generic lifecycle wrappers mirror actual native Connected on return, including no-IRQ, duplicate and failed calls.",
+    "Getter, binder, native selector, synchronization and all DriverOwned branches are byte-identical to baseline. Borrowed ownership/lifecycle protection is retained.",
+    "Connected reinitialization retains unsupported legacy semantics; only writes are serialized. The source review does not claim it repaired that lifecycle."
+  ],
+  "first_delivery_finding": {
+    "initial_issue": "Native Connect can enable delivery before the wrapper's post-return mirror, allowing the first callback to observe stale public Connected.",
+    "resolution_in_reviewed_source": "Broker stores Public->Connected = Native->Connected immediately before invoking the title callback.",
+    "irql_boundary": "Actual UP SYNCH_LEVEL equals DISPATCH_LEVEL; KeSetSystemAffinityThread requires IRQL <=DISPATCH_LEVEL. No HIGH/device-IRQL guard is added around native lifecycle calls.",
+    "required_evidence": "Actual-body fixture must inject delivery after native connection/install but before native Connect returns, assert callback sees Connected TRUE, and prove removal of the broker mirror fails this assertion. Keep this mutation distinct from baseline facade failures."
+  },
+  "observed_control": {
+    "frozen_v2_iso_sha256": "102a01ecad92e9b85cd590c3415e1403f3fafce47b7387fe705209ca639e9c9e",
+    "reference_checks": 17,
+    "reference_failures": 0,
+    "released_spiritboot_failures": 9,
+    "established_contract": "Public header initialization, hardware bus level3 for vector51, original public ISR pointer/context and exact Connected publication/clearing.",
+    "separate_unrepaired_observation": "IRQ3 HalGetInterruptVector returns IRQL23 on reference and24 on released SpiritBoot. Both are accepted by the current usable-IRQL check; this repair does not change that mapping."
+  },
+  "required_qualification": [
+    "Production-body i386 baseline red/candidate green with header/canary/tail/ServiceCount, return/context, duplicate/failure and borrowed-owner coverage.",
+    "Injected first-delivery regression and mirror-removal mutation as specified above.",
+    "Matched frozen v2 candidate/control public-API guest result and exact firmware/source identities.",
+    "Matched Halo/Halo2 cold boots, then normal-user gameplay confirmation before claiming either game repaired.",
+    "Final source lock, CI/provenance and supported-profile qualification."
+  ],
+  "disposition": "No source or reviewed actual-body evidence blocker. Native public-API, game and release qualification remain separate and pending in this receipt.",
+  "actual_body_evidence_review": {
+    "reviewed_utc": "2026-10-12T23:24:48.738130+00:00",
+    "summary_sha256": "a4a0d1fe0bc7bf931b90ef710c05d5d46166a05a225004bb77f921cd2f178330",
+    "review_mode": "Read-only source/extraction/receipt/hash verification; no reviewer compilation or execution.",
+    "assertions_each": 310,
+    "baseline_failures": 68,
+    "candidate_failures": 0,
+    "broker_mirror_only_mutant_failures": 2,
+    "receipt_sha256": {
+      "red": "f86f703c22bcc481b12395585124451a43543d22d0483d47f30235bf4d6aab3e",
+      "green": "a984116c031731b2a4d912a2c2fcb6e821b61c6ccfc8f421a6639abbaf4ad6e1",
+      "mirror-mutant": "3bfd4034386cf3b70661fbf2f0a15561560ad5e2d086986c100c5f68f5f2959e"
+    },
+    "first_delivery_requirement_met": "Injection at KiReleaseDispatcherLock occurs after install and HAL enable, while exported Connect remains active. Removing only the broker Connected store fails dispatch.public_connected and dispatch.before_connect_return.connected; wrapper return mirror is retained.",
+    "coverage": "Actual native initialize/connect/disconnect/synchronize and normal/chained C dispatch bodies, complete Xe module, independent112-byte public/484-byte native layouts, canary/padding/ServiceCount/tail preservation, original callback/context, two keys, duplicate/failed lifecycle, borrowed owner and protected tombstone.",
+    "explicit_boundaries": "Hardware vector/PIC, trap exit and private dispatch template are test shims; native template bytes are not executed. No guest/game or native timing inference."
+  },
+  "remaining_qualification": [
+    "Matched frozen v2 candidate/control public-API guest and exact firmware/source identities.",
+    "Matched Halo/Halo2 cold boots and normal-user gameplay confirmation before claiming either game repaired.",
+    "Final source lock, CI/provenance and supported-profile qualification."
+  ]
+}

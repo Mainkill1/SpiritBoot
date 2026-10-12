@@ -1,0 +1,1231 @@
+diff --git a/ntoskrnl/xb/interrupt.c b/ntoskrnl/xb/interrupt.c
+index cebe50d6..1b11fcf8 100644
+--- a/ntoskrnl/xb/interrupt.c
++++ b/ntoskrnl/xb/interrupt.c
+@@ -22,6 +22,28 @@ KeInitializeInterrupt(IN PKINTERRUPT Interrupt,
+ NTKERNELAPI BOOLEAN NTAPI KeConnectInterrupt(IN PKINTERRUPT Interrupt);
+ NTKERNELAPI BOOLEAN NTAPI KeDisconnectInterrupt(IN PKINTERRUPT Interrupt);
+ 
++/* The public Xbox object has a different header from NT's KINTERRUPT.
++ * Keep that layout explicit even though the exported prototypes use the
++ * native pointer typedef. The dispatch-code tail belongs to the public ABI;
++ * our native IDT route does not execute or modify it. */
++typedef struct _XE_PUBLIC_INTERRUPT
++{
++    PKSERVICE_ROUTINE ServiceRoutine;
++    PVOID ServiceContext;
++    ULONG BusInterruptLevel;
++    ULONG Irql;
++    BOOLEAN Connected;
++    BOOLEAN ShareVector;
++    UCHAR Mode;
++    UCHAR Padding;
++    ULONG ServiceCount;
++    ULONG DispatchCode[22];
++} XE_PUBLIC_INTERRUPT;
++
++C_ASSERT(sizeof(XE_PUBLIC_INTERRUPT) == 112);
++C_ASSERT(FIELD_OFFSET(XE_PUBLIC_INTERRUPT, Connected) == 0x10);
++C_ASSERT(FIELD_OFFSET(XE_PUBLIC_INTERRUPT, DispatchCode) == 0x18);
++
+ /* KINTERRUPT shadow.  Xbox KINTERRUPT is 112 bytes; NT's is 484 (60-byte
+  * header + 424-byte DispatchCode tail).  Letting NT initialise into the
+  * caller's buffer writes 372 bytes past the end.  Maintain an NT-shaped
+@@ -39,6 +61,7 @@ typedef struct _XBE_INTERRUPT_SHADOW
+ #define XBE_INTERRUPT_SHADOW_SLOTS 8
+ 
+ static XBE_INTERRUPT_SHADOW XeInterruptShadows[XBE_INTERRUPT_SHADOW_SLOTS];
++C_ASSERT(sizeof(KINTERRUPT) <= sizeof(XeInterruptShadows[0].NtInterruptStorage));
+ 
+ static XBE_INTERRUPT_SHADOW *
+ XeInterruptGetShadow(PKINTERRUPT XboxInt, BOOLEAN Allocate)
+@@ -92,11 +115,25 @@ static PKINTERRUPT XeInterruptNative(XBE_INTERRUPT_SHADOW *shadow)
+            (PKINTERRUPT)shadow->NtInterruptStorage;
+ }
+ 
++/* NT dispatch passes its own object to an ISR. Translate at that boundary so
++ * title code sees its original public object and caller-supplied context. */
++static BOOLEAN NTAPI
++XeInterruptDispatch(PKINTERRUPT Native, PVOID Context)
++{
++    XBE_INTERRUPT_SHADOW *Shadow = Context;
++    XE_PUBLIC_INTERRUPT *Public = (XE_PUBLIC_INTERRUPT *)Shadow->XboxInterrupt;
++
++    /* An IRQ may arrive as native Connect lowers IRQL, before the exported
++     * wrapper returns. Publish its actual state before entering title code. */
++    Public->Connected = Native->Connected;
++    return Public->ServiceRoutine(Shadow->XboxInterrupt, Public->ServiceContext);
++}
++
+ /* Xbox KeInitializeInterrupt has no caller-supplied spin lock and no SMP
+  * params; NT's does.  Pass NULL for the lock (use KINTERRUPT's built-in
+  * one), mirror Irql as the synchronize IRQL, pin processor 0 without FP
+- * save.  Writes 484 bytes into the *shadow*; the title's buffer is left
+- * alone (its address is still the lookup key for Connect/Disconnect). */
++ * save. Initialize the public header separately from the native shadow.
++ * ServiceCount and the opaque public dispatch tail retain their contents. */
+ VOID NTAPI
+ XeKeInitializeInterrupt(PKINTERRUPT Interrupt,
+                           PKSERVICE_ROUTINE ServiceRoutine,
+@@ -107,6 +144,8 @@ XeKeInitializeInterrupt(PKINTERRUPT Interrupt,
+                           BOOLEAN ShareVector)
+ {
+     XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, TRUE);
++    XE_PUBLIC_INTERRUPT *Public = (XE_PUBLIC_INTERRUPT *)Interrupt;
++    KIRQL OldIrql;
+     if (Shadow == NULL)
+     {
+         XbDbg("KeInitializeInterrupt: shadow table full, KINTERRUPT %p "
+@@ -114,10 +153,21 @@ XeKeInitializeInterrupt(PKINTERRUPT Interrupt,
+         return;
+     }
+     if (Shadow->DriverOwned) return; /* title cannot replace active IRQ owner */
++
++    /* Publish the routine/context together while hardware IRQs are excluded. */
++    KeRaiseIrql(HIGH_LEVEL, &OldIrql);
++    Public->ServiceRoutine = ServiceRoutine;
++    Public->ServiceContext = ServiceContext;
++    Public->BusInterruptLevel = Vector - 0x30;
++    Public->Irql = Irql;
++    Public->Connected = FALSE;
++    Public->ShareVector = ShareVector;
++    Public->Mode = (UCHAR)InterruptMode;
+     KeInitializeInterrupt((PKINTERRUPT)Shadow->NtInterruptStorage,
+-                          ServiceRoutine, ServiceContext,
++                          XeInterruptDispatch, Shadow,
+                           NULL, Vector, Irql, Irql, InterruptMode,
+                           ShareVector, 0, FALSE);
++    KeLowerIrql(OldIrql);
+ }
+ 
+ /* Title KINTERRUPT leaves ActualLock NULL.  NT's KeSynchronizeExecution
+@@ -161,6 +211,8 @@ BOOLEAN NTAPI
+ XeKeConnectInterrupt(PKINTERRUPT Interrupt)
+ {
+     XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, FALSE);
++    PKINTERRUPT Native;
++    BOOLEAN Connected;
+     if (Shadow == NULL)
+     {
+         XbDbg("KeConnectInterrupt(%p): no shadow; ignored\n", Interrupt);
+@@ -174,15 +226,23 @@ XeKeConnectInterrupt(PKINTERRUPT Interrupt)
+         if (old < DISPATCH_LEVEL) KeLowerIrql(old);
+         return connected;
+     }
+-    return KeConnectInterrupt(XeInterruptNative(Shadow));
++    Native = XeInterruptNative(Shadow);
++    Connected = KeConnectInterrupt(Native);
++    ((XE_PUBLIC_INTERRUPT *)Interrupt)->Connected = Native->Connected;
++    return Connected;
+ }
+ 
+ BOOLEAN NTAPI
+ XeKeDisconnectInterrupt(PKINTERRUPT Interrupt)
+ {
+     XBE_INTERRUPT_SHADOW *Shadow = XeInterruptGetShadow(Interrupt, FALSE);
++    PKINTERRUPT Native;
++    BOOLEAN Disconnected;
+     if (Shadow == NULL)
+         return FALSE;
+     if (Shadow->DriverOwned) return FALSE; /* driver owns lifecycle, even detached */
+-    return KeDisconnectInterrupt(XeInterruptNative(Shadow));
++    Native = XeInterruptNative(Shadow);
++    Disconnected = KeDisconnectInterrupt(Native);
++    ((XE_PUBLIC_INTERRUPT *)Interrupt)->Connected = Native->Connected;
++    return Disconnected;
+ }
+diff --git a/tests/host/interrupt-admission/README.md b/tests/host/interrupt-admission/README.md
+index 5113fba3..0980cc7f 100644
+--- a/tests/host/interrupt-admission/README.md
++++ b/tests/host/interrupt-admission/README.md
+@@ -13,3 +13,9 @@ executes every invalid PIC and disconnect case under UBSan, plus all sixteen
+ valid connect/disconnect and interrupt-begin paths, sharing-chain handoff and
+ borrowed driver lifecycle. This is a host semantic fixture, not a native interrupt
+ or real hardware qualification. Exception IDT query/register APIs are unmodified.
++
++The title object used by the facade checks has a distinct public header, so
++Connect/Disconnect's public Connected writes do not overlap native test fields.
++Its layout follows the host pointer width in this older fixture. The separate
++`interrupt-public-abi` fixture qualifies every public/native byte offset and
++actual ISR identity under the i386 calling conventions.
+diff --git a/tests/host/interrupt-admission/cases.c b/tests/host/interrupt-admission/cases.c
+index a1286e56..f7447cb7 100644
+--- a/tests/host/interrupt-admission/cases.c
++++ b/tests/host/interrupt-admission/cases.c
+@@ -61,14 +61,20 @@ int main(void) {
+  CHECK(installed[63].Type==ChainConnect && first.InterruptListEntry.Flink==&second.InterruptListEntry);
+  CHECK(KeDisconnectInterrupt(&first) && second.Connected && installed[63].Interrupt==&second && installed[63].Type==NormalConnect);
+  CHECK(KeDisconnectInterrupt(&second) && !second.Connected);
+- reset(); KINTERRUPT title=object(64),borrowed=object(63);
+- CHECK(!XeKeConnectInterrupt(&title) && !XeKeDisconnectInterrupt(&title));
++ reset(); XE_PUBLIC_INTERRUPT title={0}; KINTERRUPT borrowed=object(63);
++ PKINTERRUPT title_key=(PKINTERRUPT)&title;
++ CHECK(!XeKeConnectInterrupt(title_key) && !XeKeDisconnectInterrupt(title_key));
+  shadow_present=TRUE; shadow.Native=object(64);
+- CHECK(!XeKeConnectInterrupt(&title) && effects==0);
++ CHECK(!XeKeConnectInterrupt(title_key) && effects==0 && !title.Connected);
++ shadow.Native=object(63);
++ CHECK(XeKeConnectInterrupt(title_key) && title.Connected);
++ CHECK(!XeKeConnectInterrupt(title_key) && title.Connected);
++ CHECK(XeKeDisconnectInterrupt(title_key) && !title.Connected);
++ effects=0;
+  shadow.DriverOwned=TRUE; shadow.BorrowedInterrupt=&borrowed; borrowed.Connected=TRUE;
+- CHECK(XeKeConnectInterrupt(&title) && effects==0 && current_irql==0);
+- CHECK(!XeKeDisconnectInterrupt(&title) && borrowed.Connected && effects==0);
+- borrowed.Connected=FALSE; CHECK(!XeKeConnectInterrupt(&title));
+- shadow.BorrowedInterrupt=NULL; CHECK(!XeKeConnectInterrupt(&title));
++ CHECK(XeKeConnectInterrupt(title_key) && effects==0 && current_irql==0);
++ CHECK(!XeKeDisconnectInterrupt(title_key) && borrowed.Connected && effects==0);
++ borrowed.Connected=FALSE; CHECK(!XeKeConnectInterrupt(title_key));
++ shadow.BorrowedInterrupt=NULL; CHECK(!XeKeConnectInterrupt(title_key));
+  printf("%u assertions, %u failures\n",checks,failures); return failures ? 1 : 0;
+ }
+diff --git a/tests/host/interrupt-admission/shim.c b/tests/host/interrupt-admission/shim.c
+index 5df2c598..2935962a 100644
+--- a/tests/host/interrupt-admission/shim.c
++++ b/tests/host/interrupt-admission/shim.c
+@@ -32,6 +32,15 @@ typedef struct KINTERRUPT {
+  BOOLEAN FloatingSave,Connected,ShareVector; KINTERRUPT_MODE Mode;
+  LIST_ENTRY InterruptListEntry;
+ } KINTERRUPT,*PKINTERRUPT;
++typedef BOOLEAN (*PKSERVICE_ROUTINE)(PKINTERRUPT, void *);
++/* This older admission fixture runs at the host pointer width. Public ABI
++ * byte offsets are qualified separately by interrupt-public-abi under i386. */
++typedef struct {
++ PKSERVICE_ROUTINE ServiceRoutine; void *ServiceContext;
++ ULONG BusInterruptLevel,Irql;
++ BOOLEAN Connected,ShareVector; UCHAR Mode,Padding;
++ ULONG ServiceCount,DispatchCode[22];
++} XE_PUBLIC_INTERRUPT;
+ typedef enum {NoConnect,NormalConnect,ChainConnect,UnknownConnect} CONNECT_TYPE;
+ typedef struct { CONNECT_TYPE Type; PKINTERRUPT Interrupt; } DISPATCH_INFO;
+ typedef struct { ULONG IDR; KIRQL Irql; } KPCR,*PKPCR;
+diff --git a/tests/host/interrupt-public-abi/README.md b/tests/host/interrupt-public-abi/README.md
+new file mode 100644
+index 00000000..7d72848a
+--- /dev/null
++++ b/tests/host/interrupt-public-abi/README.md
+@@ -0,0 +1,64 @@
++# Public interrupt ABI regression
++
++`python3 check.py OUTPUT` compiles the current production interrupt facade and
++the actual native initializer, connect/disconnect, synchronize, normal dispatch
++and chained dispatch bodies. It requires an i386 C toolchain with multilib libc
++and UBSan. `--source-ref REVISION` reads immutable production files from Git;
++the test sources remain identical between the baseline and candidate runs.
++
++The fixture independently defines the public Xbox object's 112-byte header and
++NT5/i386's 484-byte native object. Unconditional static assertions check their
++sizes and consumed offsets; the title ISR and synchronization callbacks use
++`stdcall`, while native dispatchers use `fastcall`. Production layout assertions
++also execute under i386. The public objects have before/after guards, seeded
++ServiceCount, padding and opaque dispatch tails. An original, deterministic
++test-owned template is copied by the native initializer and patched within its
++native dispatch-code tail; those bytes are never executed or sourced from a
++reference kernel.
++
++The expected behavior covers public header initialization, original ISR object
++and context, connected state, two distinct address keys, repeat lifecycle calls,
++reinitialization, normal/spurious/chained dispatch and chain handoff. The actual
++native synchronization routine must hold the object's actual lock at its
++synchronize IRQL, restore the caller's IRQL, pass the original context and return
++the callback result. Missing shadows, invalid vectors, failed hardware enable
++rollback and the eight-slot bound are also exercised.
++
++The dispatcher-lock release shim admits an IRQ after native Connect has set
++Connected and installed/enabled the route, but before Connect returns to its
++Xbox wrapper. The title callback must already see the public Connected flag.
++`--mutant omit-connected-mirror` removes only the production broker's mirror;
++the injected callback then rejects the stale state. It does not change the
++ordinary post-return checks or public-header expectations.
++
++Driver-owned objects use a separate native ISR and lock. Title initialization
++and disconnect must preserve that owner and the public bytes. Synchronization
++must enter the native routine with teardown excluded at DPC level. After unbind,
++the fixture protects released native storage with `mprotect(PROT_NONE)` and
++exercises the tombstone's connect/synchronize/disconnect and reinitialization
++paths, then rebinds a replacement owner.
++
++Hardware admission, IDT installation, affinity, IRQL primitives, spinlocks and
++trap exit are bounded shims. Their assertions retain the native lifecycle's
++allowed IRQL, lock and installed-vector contracts. Chained dispatch covers a
++bounded level-sensitive pair, with the first ISR declining and the second
++handling the interrupt. This is an actual-body host semantic test; it makes no
++claim about real interrupt timing, HAL scheduling, game booting or guest speed.
++
++For the pinned firmware toolchain used by this investigation:
++
++```sh
++docker run --rm -v "$PWD":/work -w /work \
++  sha256:ae07b0897b48d511a166e9892c223118aaac7da21cdbf1f502c36b527b7310ca \
++  python3 tests/host/interrupt-public-abi/check.py /work/out/interrupt-public-abi
++```
++
++The original reconstructed source commit `776dd972` (tree
++`22a477eb82ed0111f2b7ad0d94c7a33a67ab8a94`) compiles successfully and fails 68 of
++310 assertions, including public header, identity and lifecycle checks. The
++edited production commit `16130e5e` (tree
++`87486d2eb062924316cbde63928982637b962a6b`) passes all 310. Removing only the broker
++Connected mirror produces two failures at the injected pre-return callback.
++Each output directory retains the compiled production unit, compiler log,
++fixture log and a JSON receipt with exact source/function/test hashes, compiler
++identity, compile command and exit statuses.
+diff --git a/tests/host/interrupt-public-abi/cases.c b/tests/host/interrupt-public-abi/cases.c
+new file mode 100644
+index 00000000..09426d74
+--- /dev/null
++++ b/tests/host/interrupt-public-abi/cases.c
+@@ -0,0 +1,299 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++typedef struct {
++    UCHAR Before[32];
++    HOST_PUBLIC_INTERRUPT Public;
++    UCHAR After[32];
++} GUARDED_PUBLIC;
++typedef struct {
++    PKINTERRUPT Expected;
++    PVOID Tag;
++    KIRQL Irql;
++    unsigned Calls;
++    BOOLEAN Handled, InConnect, SawConnectWindow;
++} ISR_CONTEXT;
++typedef struct {
++    PKSPIN_LOCK Lock;
++    KIRQL Irql;
++    unsigned Calls;
++    BOOLEAN Result;
++} SYNC_CONTEXT;
++static SYNC_CONTEXT *expected_sync_context;
++
++static VOID reset(void)
++{
++    memset(XeInterruptShadows, 0, sizeof(XeInterruptShadows));
++    memset(installed, 0, sizeof(installed));
++    memset(&prcb, 0, sizeof(prcb));
++    current_irql = 0;
++    held_lock = NULL;
++    protected_borrow = NULL;
++    hal_admit = hal_enable_result = TRUE;
++    hal_enables = hal_disables = exits = spurious_exits = 0;
++    native_sync_acquires = affinity_calls = dispatcher_depth = 0;
++    inject_at_release = FALSE;
++    injected_dispatches = 0;
++    expected_sync_context = NULL;
++    for (ULONG i = 0; i < DISPATCH_LENGTH; ++i)
++        HostTemplate.Words[i] = 0x10203040u ^ (i * 0x01010101u);
++}
++static PKINTERRUPT public_key(GUARDED_PUBLIC *object)
++{ return (PKINTERRUPT)&object->Public; }
++static VOID seed(GUARDED_PUBLIC *object, UCHAR fill)
++{ memset(object, fill, sizeof(*object)); object->Public.ServiceCount = 0x12345678; }
++static VOID retained(const GUARDED_PUBLIC *object, const GUARDED_PUBLIC *before)
++{
++    CHECK("public.guard.before", !memcmp(object->Before, before->Before, sizeof(object->Before)));
++    CHECK("public.guard.after", !memcmp(object->After, before->After, sizeof(object->After)));
++    CHECK("public.service_count.preserved", object->Public.ServiceCount == before->Public.ServiceCount);
++    CHECK("public.dispatch_tail.preserved", !memcmp(object->Public.DispatchCode, before->Public.DispatchCode, sizeof(object->Public.DispatchCode)));
++    CHECK("public.padding.preserved", object->Public.Padding == before->Public.Padding);
++}
++static BOOLEAN NTAPI title_isr(PKINTERRUPT interrupt, PVOID context)
++{
++    ISR_CONTEXT *call = context;
++    HOST_PUBLIC_INTERRUPT *public = (HOST_PUBLIC_INTERRUPT *)interrupt;
++    ++call->Calls;
++    CHECK("dispatch.original_public_identity", interrupt == call->Expected);
++    CHECK("dispatch.original_context", context == call->Tag);
++    CHECK("dispatch.public_connected", public->Connected == TRUE);
++    CHECK("dispatch.at_device_irql", current_irql == call->Irql);
++    CHECK("dispatch.native_lock_held", held_lock != NULL && *held_lock == 1);
++    if (call->InConnect) {
++        call->SawConnectWindow = TRUE;
++        CHECK("dispatch.before_connect_return.connected", public->Connected == TRUE);
++    }
++    return call->Handled;
++}
++static BOOLEAN NTAPI sync_callback(PVOID context)
++{
++    SYNC_CONTEXT *call = context;
++    ++call->Calls;
++    CHECK("synchronize.original_context", call == expected_sync_context);
++    CHECK("synchronize.actual_irql", current_irql == call->Irql);
++    CHECK("synchronize.actual_lock", held_lock == call->Lock);
++    return call->Result;
++}
++static VOID initialize(GUARDED_PUBLIC *object, ISR_CONTEXT *call, ULONG vector,
++                       KINTERRUPT_MODE mode, BOOLEAN share)
++{
++    XeKeInitializeInterrupt(public_key(object), title_isr, call, vector,
++                            call->Irql, mode, share);
++    CHECK("public.header.routine", object->Public.ServiceRoutine == title_isr);
++    CHECK("public.header.context", object->Public.ServiceContext == call);
++    CHECK("public.header.bus_level", object->Public.BusInterruptLevel == vector - 0x30);
++    CHECK("public.header.irql", object->Public.Irql == call->Irql);
++    CHECK("public.header.disconnected", object->Public.Connected == FALSE);
++    CHECK("public.header.share", object->Public.ShareVector == share);
++    CHECK("public.header.mode", object->Public.Mode == (UCHAR)mode);
++}
++static ISR_CONTEXT isr_context(GUARDED_PUBLIC *object, KIRQL irql, BOOLEAN handled)
++{
++    ISR_CONTEXT call = { public_key(object), NULL, irql, 0, handled, FALSE, FALSE };
++    return call;
++}
++
++static VOID facade_lifecycle(void)
++{
++    reset();
++    GUARDED_PUBLIC first, second;
++    seed(&first, 0xa5); seed(&second, 0x5a);
++    GUARDED_PUBLIC first_before = first, second_before = second;
++    ISR_CONTEXT one = isr_context(&first, 12, TRUE);
++    ISR_CONTEXT two = isr_context(&second, 11, TRUE);
++    one.Tag = &one; two.Tag = &two;
++    initialize(&first, &one, 0x3b, LevelSensitive, FALSE);
++    initialize(&second, &two, 0x3c, Latched, TRUE);
++    GUARDED_PUBLIC second_initialized = second;
++    retained(&first, &first_before); retained(&second, &second_before);
++    XBE_INTERRUPT_SHADOW *s1 = XeInterruptGetShadow(public_key(&first), FALSE);
++    XBE_INTERRUPT_SHADOW *s2 = XeInterruptGetShadow(public_key(&second), FALSE);
++    CHECK("shadow.two_distinct_address_keys", s1 && s2 && s1 != s2);
++    CHECK("shadow.repeated_lookup_same_key", s1 == XeInterruptGetShadow(public_key(&first), FALSE));
++    if (!s1 || !s2) return;
++    PKINTERRUPT n1 = XeInterruptNative(s1), n2 = XeInterruptNative(s2);
++    CHECK("shadow.native_separate_from_public", n1 != public_key(&first) && n2 != public_key(&second));
++    CHECK("shadow.native_size", n1->Size == 484 && n2->Size == 484);
++    CHECK("shadow.built_in_actual_lock", n1->ActualLock == &n1->SpinLock && n2->ActualLock == &n2->SpinLock);
++    CHECK("shadow.private_vector_irql", n1->Vector == 0x3b && n1->Irql == 12 && n1->SynchronizeIrql == 12);
++    CHECK("shadow.private_mode_share", n2->Mode == Latched && n2->ShareVector == TRUE && n2->Number == 0 && !n2->FloatingSave);
++    CHECK("shadow.native_template_patch", n1->DispatchCode[DISPATCH_LENGTH - 1] == PtrToUlong(n1));
++
++    /* Native release lowers dispatcher IRQL after installation/enabling. An
++     * admitted IRQ can run here while the exported Connect is still active. */
++    inject_vector = 0x3b; inject_at_release = TRUE; one.InConnect = TRUE;
++    CHECK("lifecycle.first_connect", XeKeConnectInterrupt(public_key(&first)) == TRUE);
++    one.InConnect = FALSE;
++    CHECK("dispatch.connect_window_exercised", injected_dispatches == 1 && one.Calls == 1 && one.SawConnectWindow);
++    CHECK("lifecycle.public_connected", first.Public.Connected == TRUE && n1->Connected == TRUE);
++    CHECK("lifecycle.old_irql_restored", current_irql == 0 && !held_lock);
++    CHECK("lifecycle.second_key_unchanged", !memcmp(&second, &second_initialized, sizeof(second)));
++    CHECK("lifecycle.second_connect", XeKeConnectInterrupt(public_key(&second)) == TRUE);
++    CHECK("lifecycle.second_public_connected", second.Public.Connected == TRUE);
++    CHECK("lifecycle.repeat_connect_false", XeKeConnectInterrupt(public_key(&first)) == FALSE && first.Public.Connected == TRUE);
++    KiInterruptDispatch(NULL, n1); KiInterruptDispatch(NULL, n2);
++    CHECK("dispatch.two_contexts_independent", one.Calls == 2 && two.Calls == 1 && prcb.InterruptCount == 3);
++    CHECK("dispatch.exit_restores_irql", exits == 3 && current_irql == 0 && !held_lock);
++    hal_admit = FALSE;
++    KiInterruptDispatch(NULL, n1);
++    CHECK("dispatch.spurious_does_not_call", one.Calls == 2 && exits == 4 && spurious_exits == 1 && current_irql == 0);
++    hal_admit = TRUE;
++
++    SYNC_CONTEXT sync = {n1->ActualLock, 12, 0, TRUE};
++    expected_sync_context = &sync;
++    CHECK("synchronize.true_return", XeKeSynchronizeExecution(public_key(&first), sync_callback, &sync) == TRUE);
++    sync.Result = FALSE;
++    CHECK("synchronize.false_return", XeKeSynchronizeExecution(public_key(&first), sync_callback, &sync) == FALSE);
++    CHECK("synchronize.native_body_used", sync.Calls == 2 && native_sync_acquires == 2 && current_irql == 0 && !held_lock);
++    CHECK("lifecycle.first_disconnect", XeKeDisconnectInterrupt(public_key(&first)) == TRUE);
++    CHECK("lifecycle.public_disconnected", first.Public.Connected == FALSE && n1->Connected == FALSE);
++    CHECK("lifecycle.repeat_disconnect_false", XeKeDisconnectInterrupt(public_key(&first)) == FALSE && first.Public.Connected == FALSE);
++    CHECK("lifecycle.other_key_still_connected", second.Public.Connected == TRUE && n2->Connected == TRUE);
++    CHECK("lifecycle.second_disconnect", XeKeDisconnectInterrupt(public_key(&second)) == TRUE && second.Public.Connected == FALSE);
++    retained(&first, &first_before); retained(&second, &second_before);
++
++    /* Reinitialization replaces only the documented header and private native
++     * state; it retains the key, count, padding, opaque tail and guard bytes. */
++    one.Irql = 10;
++    initialize(&first, &one, 0x3d, Latched, TRUE);
++    CHECK("lifecycle.reinitialize_same_shadow", s1 == XeInterruptGetShadow(public_key(&first), FALSE) && n1->Vector == 0x3d);
++    CHECK("lifecycle.reinitialized_connect", XeKeConnectInterrupt(public_key(&first)) == TRUE);
++    KiInterruptDispatch(NULL, n1);
++    CHECK("lifecycle.reinitialized_callback", one.Calls == 3);
++    CHECK("lifecycle.reinitialized_disconnect", XeKeDisconnectInterrupt(public_key(&first)) == TRUE);
++    retained(&first, &first_before);
++}
++
++static VOID chain_dispatch(void)
++{
++    reset();
++    GUARDED_PUBLIC first, second; seed(&first, 0x36); seed(&second, 0x63);
++    GUARDED_PUBLIC a = first, b = second;
++    ISR_CONTEXT one = isr_context(&first, 12, FALSE), two = isr_context(&second, 12, TRUE);
++    one.Tag = &one; two.Tag = &two;
++    initialize(&first, &one, 0x3b, LevelSensitive, TRUE);
++    initialize(&second, &two, 0x3b, LevelSensitive, TRUE);
++    CHECK("chain.first_connect", XeKeConnectInterrupt(public_key(&first)) == TRUE);
++    CHECK("chain.second_connect", XeKeConnectInterrupt(public_key(&second)) == TRUE);
++    CHECK("chain.native_route", installed[0x3b].Type == ChainConnect);
++    KiChainedDispatch(NULL, installed[0x3b].Interrupt);
++    CHECK("chain.both_public_identities", one.Calls == 1 && two.Calls == 1 && current_irql == 0 && !held_lock);
++    CHECK("chain.first_disconnect", XeKeDisconnectInterrupt(public_key(&first)) == TRUE && first.Public.Connected == FALSE);
++    CHECK("chain.remaining_native_route", installed[0x3b].Type == NormalConnect && second.Public.Connected == TRUE);
++    KiInterruptDispatch(NULL, installed[0x3b].Interrupt);
++    CHECK("chain.remaining_public_identity", one.Calls == 1 && two.Calls == 2);
++    CHECK("chain.final_disconnect", XeKeDisconnectInterrupt(public_key(&second)) == TRUE && second.Public.Connected == FALSE);
++    retained(&first, &a); retained(&second, &b);
++}
++
++static BOOLEAN NTAPI driver_isr(PKINTERRUPT interrupt, PVOID context)
++{
++    CHECK("driver.native_isr_identity", interrupt == context);
++    CHECK("driver.native_isr_connected", interrupt->Connected == TRUE);
++    return TRUE;
++}
++static VOID driver_owned_tombstone(void)
++{
++    reset();
++    GUARDED_PUBLIC title; seed(&title, 0x69); GUARDED_PUBLIC before = title;
++    PKINTERRUPT native = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++    assert(native != MAP_FAILED);
++    KeInitializeInterrupt(native, driver_isr, native, NULL, 0x3b, 12, 12, LevelSensitive, FALSE, 0, FALSE);
++    CHECK("driver.native_connect", KeConnectInterrupt(native) == TRUE);
++    XeInterruptBindNative(public_key(&title), native);
++    XBE_INTERRUPT_SHADOW *shadow = XeInterruptGetShadow(public_key(&title), FALSE);
++    CHECK("driver.binding", shadow && shadow->DriverOwned && shadow->BorrowedInterrupt == native);
++    KINTERRUPT native_before = *native;
++    unsigned connections = hal_enables, affinity = affinity_calls;
++    ISR_CONTEXT prohibited = isr_context(&title, 12, TRUE); prohibited.Tag = &prohibited;
++    XeKeInitializeInterrupt(public_key(&title), title_isr, &prohibited, 0x3c, 11, Latched, TRUE);
++    CHECK("driver.initialize_cannot_replace_owner", !memcmp(&title, &before, sizeof(title)) && !memcmp(native, &native_before, sizeof(*native)));
++    CHECK("driver.connect_observes_owner", XeKeConnectInterrupt(public_key(&title)) == TRUE);
++    CHECK("driver.disconnect_refused", XeKeDisconnectInterrupt(public_key(&title)) == FALSE && native->Connected == TRUE);
++    CHECK("driver.lifecycle_no_native_mutation", hal_enables == connections && affinity_calls == affinity && current_irql == 0);
++    protected_borrow = native;
++    SYNC_CONTEXT sync = {native->ActualLock, 12, 0, TRUE};
++    expected_sync_context = &sync;
++    CHECK("driver.synchronize_routes_to_owner", XeKeSynchronizeExecution(public_key(&title), sync_callback, &sync) == TRUE);
++    CHECK("driver.synchronize_native_irql_lock", sync.Calls == 1 && native_sync_acquires == 1 && current_irql == 0);
++    protected_borrow = NULL;
++    KiInterruptDispatch(NULL, native);
++    CHECK("driver.title_isr_never_called", prohibited.Calls == 0);
++    CHECK("driver.public_bytes_untouched", !memcmp(&title, &before, sizeof(title)));
++    CHECK("driver.native_disconnect", KeDisconnectInterrupt(native) == TRUE);
++    XeInterruptBindNative(public_key(&title), NULL);
++    CHECK("driver.tombstone_retains_ownership", shadow->DriverOwned && shadow->BorrowedInterrupt == NULL);
++    CHECK("driver.released_storage_poisoned", mprotect(native, 4096, PROT_NONE) == 0);
++    CHECK("driver.tombstone_connect_false", XeKeConnectInterrupt(public_key(&title)) == FALSE);
++    CHECK("driver.tombstone_sync_false", XeKeSynchronizeExecution(public_key(&title), sync_callback, &sync) == FALSE);
++    CHECK("driver.tombstone_disconnect_false", XeKeDisconnectInterrupt(public_key(&title)) == FALSE);
++    XeKeInitializeInterrupt(public_key(&title), title_isr, &prohibited, 0x3b, 12, LevelSensitive, FALSE);
++    CHECK("driver.tombstone_init_cannot_take_ownership", !memcmp(&title, &before, sizeof(title)) && sync.Calls == 1 && prohibited.Calls == 0);
++    KINTERRUPT replacement = {0};
++    KeInitializeInterrupt(&replacement, driver_isr, &replacement, NULL, 0x3b, 12, 12, LevelSensitive, FALSE, 0, FALSE);
++    CHECK("driver.replacement_connect", KeConnectInterrupt(&replacement) == TRUE);
++    XeInterruptBindNative(public_key(&title), &replacement);
++    CHECK("driver.rebind_observes_new_owner", XeKeConnectInterrupt(public_key(&title)) == TRUE);
++    sync.Lock = replacement.ActualLock;
++    protected_borrow = &replacement;
++    CHECK("driver.rebind_synchronize", XeKeSynchronizeExecution(public_key(&title), sync_callback, &sync) == TRUE);
++    protected_borrow = NULL;
++    CHECK("driver.rebind_keeps_public_bytes", sync.Calls == 2 && !memcmp(&title, &before, sizeof(title)) && current_irql == 0);
++    CHECK("driver.replacement_disconnect", KeDisconnectInterrupt(&replacement) == TRUE);
++    XeInterruptBindNative(public_key(&title), NULL);
++    CHECK("driver.released_storage_unmapped", munmap(native, 4096) == 0);
++}
++
++static VOID rejection_and_capacity(void)
++{
++    reset();
++    GUARDED_PUBLIC object; seed(&object, 0x7e); GUARDED_PUBLIC before = object;
++    CHECK("missing_shadow.connect_false", XeKeConnectInterrupt(public_key(&object)) == FALSE);
++    CHECK("missing_shadow.disconnect_false", XeKeDisconnectInterrupt(public_key(&object)) == FALSE);
++    SYNC_CONTEXT fallback = {NULL, 0, 0, FALSE};
++    expected_sync_context = &fallback;
++    CHECK("missing_shadow.synchronize_fallback", XeKeSynchronizeExecution(public_key(&object), sync_callback, &fallback) == FALSE && fallback.Calls == 1 && native_sync_acquires == 0);
++    CHECK("missing_shadow.public_untouched", !memcmp(&object, &before, sizeof(object)));
++    const ULONG invalid[] = {0, 0x2f, 0x40, 255, 256, UINT32_MAX};
++    ISR_CONTEXT call = isr_context(&object, 12, TRUE); call.Tag = &call;
++    for (unsigned i = 0; i < sizeof(invalid) / sizeof(*invalid); ++i) {
++        reset();
++        XeKeInitializeInterrupt(public_key(&object), title_isr, &call, invalid[i], 12, LevelSensitive, FALSE);
++        GUARDED_PUBLIC initialized = object;
++        CHECK("invalid_vector.connect_false", XeKeConnectInterrupt(public_key(&object)) == FALSE);
++        CHECK("invalid_vector.disconnect_false", XeKeDisconnectInterrupt(public_key(&object)) == FALSE);
++        CHECK("invalid_vector.no_hardware_or_public_mutation", affinity_calls == 0 && hal_enables == 0 && hal_disables == 0 && !memcmp(&object, &initialized, sizeof(object)));
++        retained(&object, &before);
++    }
++    reset();
++    seed(&object, 0x7e);
++    initialize(&object, &call, 0x3b, LevelSensitive, FALSE);
++    hal_enable_result = FALSE;
++    CHECK("failed_enable.connect_false", XeKeConnectInterrupt(public_key(&object)) == FALSE);
++    CHECK("failed_enable.rollback_public_disconnected", object.Public.Connected == FALSE && installed[0x3b].Type == NoConnect && hal_disables == 1);
++    retained(&object, &before);
++
++    reset();
++    GUARDED_PUBLIC objects[9]; ISR_CONTEXT contexts[9];
++    for (unsigned i = 0; i < 9; ++i) {
++        seed(&objects[i], 0x42); contexts[i] = isr_context(&objects[i], 12, TRUE); contexts[i].Tag = &contexts[i];
++        GUARDED_PUBLIC saved = objects[i];
++        XeKeInitializeInterrupt(public_key(&objects[i]), title_isr, &contexts[i], 0x3b, 12, LevelSensitive, FALSE);
++        CHECK("shadow.capacity_bound", (XeInterruptGetShadow(public_key(&objects[i]), FALSE) != NULL) == (i < 8));
++        retained(&objects[i], &saved);
++        if (i == 8) {
++            CHECK("shadow.full_table_public_untouched", !memcmp(&objects[i], &saved, sizeof(saved)));
++            CHECK("shadow.full_table_connect_false", XeKeConnectInterrupt(public_key(&objects[i])) == FALSE);
++        }
++    }
++    CHECK("shadow.exhaustion_does_not_replace_first_key", XeInterruptGetShadow(public_key(&objects[0]), FALSE)->XboxInterrupt == public_key(&objects[0]));
++}
++
++int main(void)
++{
++    facade_lifecycle();
++    chain_dispatch();
++    driver_owned_tombstone();
++    rejection_and_capacity();
++    printf("interrupt public ABI: %u assertions, %u failures; i386 public=112 native=484\n", checks, failures);
++    return failures ? 1 : 0;
++}
+diff --git a/tests/host/interrupt-public-abi/check.py b/tests/host/interrupt-public-abi/check.py
+new file mode 100644
+index 00000000..e3892d18
+--- /dev/null
++++ b/tests/host/interrupt-public-abi/check.py
+@@ -0,0 +1,88 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Compile actual native/title interrupt bodies using the i386 ABI."""
++import argparse
++import hashlib
++import importlib.util
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++HERE = Path(__file__).resolve().parent
++ROOT = HERE.parents[2]
++NATIVE_NAMES = (
++    "KeInitializeInterrupt", "KiInterruptDispatch", "KiChainedDispatch",
++    "KeConnectInterrupt", "KeDisconnectInterrupt", "KeSynchronizeExecution",
++)
++
++
++def digest(data):
++    return hashlib.sha256(data).hexdigest()
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("output", type=Path)
++    parser.add_argument("--source-ref", help="immutable Git revision, instead of current files")
++    parser.add_argument("--mutant", choices=("omit-connected-mirror",))
++    args = parser.parse_args()
++    output = args.output.resolve()
++    output.mkdir(parents=True, exist_ok=True)
++    spec = importlib.util.spec_from_file_location("extract", ROOT / "tests/host/kernel-performance/check.py")
++    extract = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(extract)
++    inputs = {}
++
++    def read(path):
++        data = subprocess.check_output(["git", "show", f"{args.source_ref}:{path}"], cwd=ROOT) if args.source_ref else (ROOT / path).read_bytes()
++        inputs[path] = digest(data)
++        return data.decode()
++
++    native = read("ntoskrnl/ke/i386/irqobj.c")
++    wrapper = read("ntoskrnl/xb/interrupt.c")
++    if args.mutant:
++        mirror = "    Public->Connected = Native->Connected;\n"
++        assert wrapper.count(mirror) == 1, "broker mirror mutation must match exactly once"
++        wrapper = wrapper.replace(mirror, "", 1)
++    # Headers are replaced by a test-owned ABI shim. Function bodies and the
++    # public shadow declarations remain byte-for-byte production text.
++    wrapper = "\n".join(line for line in wrapper.splitlines() if not line.startswith("#include")) + "\n"
++    native_bodies = {name: extract.function(native, name) for name in NATIVE_NAMES}
++    unit = (HERE / "shim.c").read_text() + "\n" + "\n".join(native_bodies.values()) + "\n" + wrapper + "\n" + (HERE / "cases.c").read_text()
++    source = output / "production.c"
++    source.write_text(unit)
++    command = [os.environ.get("CC", "cc"), "-m32", "-std=c11", "-DSARCH_XBOX", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter", "-fno-strict-aliasing", "-fno-pie", "-no-pie", "-fsanitize=undefined", "-fno-sanitize-recover=all", str(source), "-o", str(output / "fixture")]
++    identity = {
++        "source_ref": args.source_ref,
++        "source_commit": subprocess.check_output(["git", "rev-parse", args.source_ref or "HEAD"], cwd=ROOT, text=True).strip(),
++        "source_tree": subprocess.check_output(["git", "rev-parse", (args.source_ref or "HEAD") + "^{tree}"], cwd=ROOT, text=True).strip(),
++        "production_input_sha256": inputs,
++        "native_function_sha256": {name: digest(body.encode()) for name, body in native_bodies.items()},
++        "fixture_input_sha256": {name: digest((HERE / name).read_bytes()) for name in ("shim.c", "cases.c", "check.py")},
++        "production_unit_sha256": digest(unit.encode()),
++        "mutant": args.mutant,
++        "compile_command": command,
++        "compiler": subprocess.check_output([command[0], "--version"], text=True).splitlines()[0],
++        "qualification": "i386 actual-body host semantics; hardware and trap exit shimmed; no native timing claim",
++    }
++    compiled = subprocess.run(command, capture_output=True, text=True)
++    (output / "compile.log").write_text(compiled.stdout + compiled.stderr)
++    identity["compile_exit"] = compiled.returncode
++    if compiled.returncode:
++        (output / "receipt.json").write_text(json.dumps(identity, indent=2) + "\n")
++        print(compiled.stdout + compiled.stderr, end="")
++        return compiled.returncode
++    run = subprocess.run([str(output / "fixture")], capture_output=True, text=True)
++    (output / "fixture.log").write_text(run.stdout + run.stderr)
++    identity["run_exit"] = run.returncode
++    identity["executable_sha256"] = digest((output / "fixture").read_bytes())
++    (output / "receipt.json").write_text(json.dumps(identity, indent=2) + "\n")
++    print(run.stdout + run.stderr, end="")
++    return run.returncode
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/host/interrupt-public-abi/shim.c b/tests/host/interrupt-public-abi/shim.c
+new file mode 100644
+index 00000000..b14a8743
+--- /dev/null
++++ b/tests/host/interrupt-public-abi/shim.c
+@@ -0,0 +1,191 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#define _GNU_SOURCE
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <assert.h>
++#include <sys/mman.h>
++
++typedef uint32_t ULONG, *PULONG, ULONG_PTR, KSPIN_LOCK, *PKSPIN_LOCK;
++typedef uint8_t UCHAR, BOOLEAN, KIRQL, *PKIRQL;
++typedef int8_t CHAR, CCHAR;
++typedef int16_t CSHORT;
++typedef void VOID, *PVOID;
++typedef enum { LevelSensitive, Latched } KINTERRUPT_MODE;
++#define NTAPI __attribute__((stdcall))
++#define FASTCALL __attribute__((fastcall))
++#define IN
++#define OUT
++#define OPTIONAL
++#define _In_
++#define _In_opt_
++#define NTKERNELAPI
++#define TRUE 1
++#define FALSE 0
++#define HIGH_LEVEL 31
++#define DISPATCH_LEVEL 2
++#define IPI_LEVEL 29
++#define MAXULONG UINT32_MAX
++#define DISPATCH_LENGTH 106
++#define InterruptObject 22
++#define ASSERT assert
++#define C_ASSERT(c) _Static_assert(c, #c)
++#define FIELD_OFFSET(t, f) offsetof(t, f)
++#define CONTAINING_RECORD(p, t, f) ((t *)((char *)(p) - offsetof(t, f)))
++#define PtrToUlong(p) ((ULONG)(uintptr_t)(p))
++#define RtlZeroMemory(p, n) memset(p, 0, n)
++#define XbDbg(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define UNREFERENCED_PARAMETER(x) ((void)(x))
++
++typedef struct _KINTERRUPT KINTERRUPT, *PKINTERRUPT;
++typedef BOOLEAN (NTAPI *PKSERVICE_ROUTINE)(PKINTERRUPT, PVOID);
++typedef BOOLEAN (NTAPI *PKSYNCHRONIZE_ROUTINE)(PVOID);
++typedef struct _LIST_ENTRY {
++    struct _LIST_ENTRY *Flink, *Blink;
++} LIST_ENTRY, *PLIST_ENTRY;
++typedef struct { ULONG unused; } KTRAP_FRAME, *PKTRAP_FRAME;
++typedef VOID (FASTCALL *PKINTERRUPT_ROUTINE)(PKTRAP_FRAME, PKINTERRUPT);
++
++/* Test-owned NT5/i386 layout. Every field consumed by the extracted bodies is
++ * present; the native dispatch-code bytes are copied but never executed. */
++struct _KINTERRUPT {
++    CSHORT Type, Size;
++    LIST_ENTRY InterruptListEntry;
++    PKSERVICE_ROUTINE ServiceRoutine;
++    PVOID ServiceContext;
++    KSPIN_LOCK SpinLock;
++    ULONG TickCount;
++    PKSPIN_LOCK ActualLock;
++    PKINTERRUPT_ROUTINE DispatchAddress;
++    ULONG Vector;
++    KIRQL Irql, SynchronizeIrql;
++    BOOLEAN FloatingSave, Connected;
++    CCHAR Number;
++    BOOLEAN ShareVector;
++    KINTERRUPT_MODE Mode;
++    ULONG ServiceCount, DispatchCount;
++    ULONG DispatchCode[DISPATCH_LENGTH];
++};
++C_ASSERT(sizeof(void *) == 4);
++C_ASSERT(sizeof(KINTERRUPT) == 484);
++C_ASSERT(FIELD_OFFSET(KINTERRUPT, ServiceRoutine) == 0x0c);
++C_ASSERT(FIELD_OFFSET(KINTERRUPT, ActualLock) == 0x1c);
++C_ASSERT(FIELD_OFFSET(KINTERRUPT, Connected) == 0x2b);
++C_ASSERT(FIELD_OFFSET(KINTERRUPT, DispatchCode) == 0x3c);
++
++/* Independent public Xbox header: neither the production facade declaration
++ * nor its native-pointer typedef is used as the expected memory layout. */
++typedef struct {
++    PKSERVICE_ROUTINE ServiceRoutine;
++    PVOID ServiceContext;
++    ULONG BusInterruptLevel, Irql;
++    BOOLEAN Connected, ShareVector;
++    UCHAR Mode, Padding;
++    ULONG ServiceCount;
++    ULONG DispatchCode[22];
++} HOST_PUBLIC_INTERRUPT;
++C_ASSERT(sizeof(HOST_PUBLIC_INTERRUPT) == 112);
++C_ASSERT(FIELD_OFFSET(HOST_PUBLIC_INTERRUPT, ServiceRoutine) == 0);
++C_ASSERT(FIELD_OFFSET(HOST_PUBLIC_INTERRUPT, ServiceContext) == 4);
++C_ASSERT(FIELD_OFFSET(HOST_PUBLIC_INTERRUPT, Connected) == 0x10);
++C_ASSERT(FIELD_OFFSET(HOST_PUBLIC_INTERRUPT, ServiceCount) == 0x14);
++C_ASSERT(FIELD_OFFSET(HOST_PUBLIC_INTERRUPT, DispatchCode) == 0x18);
++
++typedef enum { NoConnect, NormalConnect, ChainConnect, UnknownConnect } CONNECT_TYPE;
++typedef struct { CONNECT_TYPE Type; PKINTERRUPT Interrupt; } DISPATCH_INFO;
++typedef struct { ULONG InterruptCount; } HOST_PRCB;
++static HOST_PRCB prcb;
++static DISPATCH_INFO installed[64];
++static KIRQL current_irql;
++static CHAR KeNumberProcessors = 1;
++static unsigned checks, failures, hal_enables, hal_disables, exits, spurious_exits;
++static unsigned native_sync_acquires, affinity_calls, dispatcher_depth;
++static BOOLEAN hal_admit = TRUE, hal_enable_result = TRUE;
++static PKSPIN_LOCK held_lock;
++static PKINTERRUPT protected_borrow;
++static BOOLEAN inject_at_release;
++static ULONG inject_vector;
++static unsigned injected_dispatches;
++
++#define CHECK(label, condition) do { \
++    ++checks; if (!(condition)) { ++failures; \
++    fprintf(stderr, "FAIL %s (line %u): %s\n", label, __LINE__, #condition); } \
++} while (0)
++
++/* A private deterministic initializer template, not copied reference code.
++ * Its object marker makes native KeInitializeInterrupt patch within its own
++ * 424-byte tail. The host calls the extracted C dispatchers directly. */
++static struct { ULONG Words[DISPATCH_LENGTH]; ULONG Object; } HostTemplate;
++#define KiInterruptTemplate (HostTemplate.Words)
++#define KiInterruptTemplateObject (HostTemplate.Object)
++
++VOID FASTCALL KiInterruptDispatch(PKTRAP_FRAME, PKINTERRUPT);
++VOID FASTCALL KiChainedDispatch(PKTRAP_FRAME, PKINTERRUPT);
++BOOLEAN NTAPI KeDisconnectInterrupt(PKINTERRUPT);
++
++static HOST_PRCB *KeGetCurrentPrcb(void) { return &prcb; }
++static KIRQL KeGetCurrentIrql(void) { return current_irql; }
++static VOID KeRaiseIrql(KIRQL next, PKIRQL old)
++{
++    assert(next >= current_irql && next <= HIGH_LEVEL);
++    /* Native synchronize reads the borrowed IRQL before this boundary. The
++     * wrapper must already have excluded pageable teardown at DPC level. */
++    if (protected_borrow && next == protected_borrow->SynchronizeIrql)
++        CHECK("driver.synchronize.guard_irql", current_irql >= DISPATCH_LEVEL);
++    *old = current_irql;
++    current_irql = next;
++}
++static VOID KeLowerIrql(KIRQL next) { assert(next <= current_irql); current_irql = next; }
++static KIRQL KfRaiseIrql(KIRQL next) { KIRQL old; KeRaiseIrql(next, &old); return old; }
++static VOID KfLowerIrql(KIRQL next) { KeLowerIrql(next); }
++static VOID KeInitializeSpinLock(PKSPIN_LOCK lock) { *lock = 0; }
++static VOID KxAcquireSpinLock(PKSPIN_LOCK lock)
++{
++    assert(lock && !held_lock && !*lock && current_irql >= DISPATCH_LEVEL);
++    *lock = 1; held_lock = lock;
++}
++static VOID KxReleaseSpinLock(PKSPIN_LOCK lock)
++{
++    assert(lock && lock == held_lock && *lock == 1);
++    *lock = 0; held_lock = NULL;
++}
++static VOID KeAcquireSpinLockAtDpcLevel(PKSPIN_LOCK lock)
++{ ++native_sync_acquires; KxAcquireSpinLock(lock); }
++static VOID KeReleaseSpinLockFromDpcLevel(PKSPIN_LOCK lock) { KxReleaseSpinLock(lock); }
++static VOID InitializeListHead(PLIST_ENTRY head) { head->Flink = head->Blink = head; }
++static VOID InsertTailList(PLIST_ENTRY head, PLIST_ENTRY entry)
++{ entry->Flink = head; entry->Blink = head->Blink; head->Blink->Flink = entry; head->Blink = entry; }
++static VOID RemoveEntryList(PLIST_ENTRY entry)
++{ entry->Blink->Flink = entry->Flink; entry->Flink->Blink = entry->Blink; }
++static VOID KeSetSystemAffinityThread(ULONG affinity)
++{ assert(affinity == 1 && current_irql <= DISPATCH_LEVEL); ++affinity_calls; }
++static VOID KeRevertToUserAffinityThread(void) { assert(current_irql <= DISPATCH_LEVEL); }
++static KIRQL KiAcquireDispatcherLock(void)
++{ assert(current_irql <= DISPATCH_LEVEL && !dispatcher_depth); dispatcher_depth = 1; return KfRaiseIrql(DISPATCH_LEVEL); }
++static VOID KiReleaseDispatcherLock(KIRQL old)
++{
++    assert(dispatcher_depth == 1 && current_irql == DISPATCH_LEVEL);
++    dispatcher_depth = 0; KeLowerIrql(old);
++    if (inject_at_release) {
++        DISPATCH_INFO dispatch = installed[inject_vector];
++        inject_at_release = FALSE;
++        assert(dispatch.Type == NormalConnect && dispatch.Interrupt->Connected);
++        ++injected_dispatches;
++        KiInterruptDispatch(NULL, dispatch.Interrupt);
++    }
++}
++static VOID KiGetVectorDispatch(ULONG vector, DISPATCH_INFO *dispatch)
++{ assert(vector >= 0x30 && vector < 0x40); *dispatch = installed[vector]; }
++static VOID KiConnectVectorToInterrupt(PKINTERRUPT interrupt, CONNECT_TYPE type)
++{ assert(interrupt->Vector >= 0x30 && interrupt->Vector < 0x40); installed[interrupt->Vector] = (DISPATCH_INFO){type, interrupt}; }
++static BOOLEAN HalEnableSystemInterrupt(ULONG vector, KIRQL irql, KINTERRUPT_MODE mode)
++{ assert(vector >= 0x30 && vector < 0x40); (void)irql; (void)mode; ++hal_enables; return hal_enable_result; }
++static VOID HalDisableSystemInterrupt(ULONG vector, KIRQL irql)
++{ assert(vector >= 0x30 && vector < 0x40); (void)irql; ++hal_disables; }
++static BOOLEAN HalBeginSystemInterrupt(KIRQL irql, ULONG vector, PKIRQL old)
++{ assert(vector >= 0x30 && vector < 0x40); *old = current_irql; if (!hal_admit) return FALSE; current_irql = irql; return TRUE; }
++static VOID KiExitInterrupt(PKTRAP_FRAME frame, KIRQL old, BOOLEAN spurious)
++{ (void)frame; assert(!held_lock); ++exits; spurious_exits += spurious; current_irql = old; }
+diff --git a/tests/xbe/interrupt-public-abi/Makefile b/tests/xbe/interrupt-public-abi/Makefile
+new file mode 100644
+index 00000000..c3e7c89e
+--- /dev/null
++++ b/tests/xbe/interrupt-public-abi/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = interrupt-identity-probe
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /usr/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c
++CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/interrupt-public-abi/README.md b/tests/xbe/interrupt-public-abi/README.md
+new file mode 100644
+index 00000000..45e5e92f
+--- /dev/null
++++ b/tests/xbe/interrupt-public-abi/README.md
+@@ -0,0 +1,7 @@
++# Public interrupt ABI probe
++
++This independently authored XBE checks the 112-byte Xbox interrupt object, public initialization fields, Connected transitions, bounds guards, and actual NV2A IRQ3 callback identity/context. It does not inspect reference implementation instructions. A real vblank triggers the handler and a two-second wait bounds delivery. The probe restores the saved PMC/PCRTC enables, disconnects, prints its 17 numbered TAP checks, and requests power-off.
++
++Build with the pinned nxdk container from `sources/firmware-lock.json` and run on a fresh 64 MiB xemu session with COM1 capture. The original test payload is frozen in the accompanying provenance evidence. See `docs/provenance/TITLE_INTERRUPT_PUBLIC_ABI.md` for controls and limits.
++
++This checks cold-boot interrupt behavior. Hardware testing, live connected reinitialization, and title-generated public dispatch code are outside this probe.
+diff --git a/tests/xbe/interrupt-public-abi/main.c b/tests/xbe/interrupt-public-abi/main.c
+new file mode 100644
+index 00000000..89e1e0c4
+--- /dev/null
++++ b/tests/xbe/interrupt-public-abi/main.c
+@@ -0,0 +1,128 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independently authored public ABI probe; no reference implementation input.
++ */
++#include <xboxkrnl/xboxkrnl.h>
++#include <stdio.h>
++#include <string.h>
++#include "tap.h"
++
++#define PMC_INTR_ENABLE (*(volatile ULONG *)0xfd000140UL)
++#define PCRTC_INTR (*(volatile ULONG *)0xfd600100UL)
++#define PCRTC_INTR_ENABLE (*(volatile ULONG *)0xfd600140UL)
++#define VBLANK 1UL
++
++static struct {
++    ULONG prefix[16];
++    KINTERRUPT interrupt;
++    ULONG suffix[128];
++} guarded;
++static KEVENT observed;
++static volatile ULONG callback_count;
++static volatile ULONG callback_interrupt;
++static volatile ULONG callback_context;
++static ULONG owned_context = 0x49525133UL;
++static unsigned checks;
++static unsigned failures;
++
++static void check(int pass, const char *name)
++{
++    ++checks;
++    if (pass) tap_ok(checks, name);
++    else { ++failures; tap_not_ok(checks, name); }
++}
++
++static BOOLEAN NTAPI service(PKINTERRUPT interrupt, PVOID context)
++{
++    if (!(PCRTC_INTR & VBLANK)) return FALSE;
++    PCRTC_INTR = VBLANK;
++    callback_interrupt = (ULONG)interrupt;
++    callback_context = (ULONG)context;
++    ++callback_count;
++    KeSetEvent(&observed, 0, FALSE);
++    return TRUE;
++}
++
++static int guards_ok(void)
++{
++    unsigned i;
++    for (i = 0; i < sizeof(guarded.prefix)/sizeof(guarded.prefix[0]); ++i)
++        if (guarded.prefix[i] != 0xa5a5a5a5UL) return 0;
++    for (i = 0; i < sizeof(guarded.suffix)/sizeof(guarded.suffix[0]); ++i)
++        if (guarded.suffix[i] != 0xa5a5a5a5UL) return 0;
++    return 1;
++}
++
++static void finish(void) __attribute__((noreturn));
++static void finish(void)
++{
++    tap_comment("checks=%u failures=%u", checks, failures);
++    tap_plan(checks);
++    tap_puts("# interrupt_identity_probe_finished\n");
++    tap_drain();
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    for (;;) __asm__ __volatile__("hlt");
++}
++
++int main(void)
++{
++    KIRQL irql = 0;
++    ULONG vector, pmc, pcrtc;
++    BOOLEAN connected, disconnected;
++    NTSTATUS wait_status = STATUS_UNSUCCESSFUL;
++    LARGE_INTEGER timeout;
++
++    tap_version(14);
++    memset(&guarded, 0xa5, sizeof(guarded));
++    KeInitializeEvent(&observed, NotificationEvent, FALSE);
++    vector = HalGetInterruptVector(3, &irql);
++    tap_comment("public_object=%08lx bytes=%lu irq3_vector=%lu irql=%u context=%08lx",
++                (ULONG)&guarded.interrupt, (ULONG)sizeof(KINTERRUPT), vector,
++                (unsigned)irql, (ULONG)&owned_context);
++    check(sizeof(KINTERRUPT) == 112, "public interrupt structure is 112 bytes");
++    check(vector != 0 && irql > DISPATCH_LEVEL, "IRQ3 yields a usable public vector and IRQL");
++    if (!vector) finish();
++
++    KeInitializeInterrupt(&guarded.interrupt, service, &owned_context,
++                          vector, irql, LevelSensitive, TRUE);
++    check(guards_ok(), "initialization stays within the public object");
++    check(guarded.interrupt.BusInterruptLevel == 3,
++          "initialization publishes the hardware IRQ level");
++    check(guarded.interrupt.ServiceRoutine == service, "initialization publishes the service routine");
++    check(guarded.interrupt.ServiceContext == &owned_context, "initialization publishes the supplied context");
++    check(guarded.interrupt.Irql == irql, "initialization publishes the public IRQL");
++    check(guarded.interrupt.ShareVector && guarded.interrupt.Mode == LevelSensitive,
++          "initialization publishes sharing and trigger mode");
++    check(!guarded.interrupt.Connected, "initialized interrupt starts disconnected");
++    tap_comment("initialized_bus_level=%lu irql=%lu connected=%u service_count=%lu",
++                guarded.interrupt.BusInterruptLevel, guarded.interrupt.Irql,
++                (unsigned)guarded.interrupt.Connected, guarded.interrupt.ServiceCount);
++
++    pmc = PMC_INTR_ENABLE;
++    pcrtc = PCRTC_INTR_ENABLE;
++    PCRTC_INTR_ENABLE = 0;
++    PCRTC_INTR = VBLANK;
++    connected = KeConnectInterrupt(&guarded.interrupt);
++    check(connected, "owned interrupt connects");
++    check(guarded.interrupt.Connected == TRUE, "connect publishes public connected state");
++    if (connected) {
++        PCRTC_INTR_ENABLE = VBLANK;
++        PMC_INTR_ENABLE = 1;
++        timeout.QuadPart = -20000000LL;
++        wait_status = KeWaitForSingleObject(&observed, Executive, KernelMode,
++                                            FALSE, &timeout);
++    }
++    PCRTC_INTR_ENABLE = 0;
++    PMC_INTR_ENABLE = pmc;
++    PCRTC_INTR = VBLANK;
++    disconnected = connected ? KeDisconnectInterrupt(&guarded.interrupt) : FALSE;
++    PCRTC_INTR_ENABLE = pcrtc;
++    tap_comment("wait=%08lx callbacks=%lu received_object=%08lx received_context=%08lx",
++                (ULONG)wait_status, callback_count, callback_interrupt, callback_context);
++    check(wait_status == STATUS_SUCCESS && callback_count != 0, "bounded vblank interrupt reaches the owned handler");
++    check(callback_interrupt == (ULONG)&guarded.interrupt, "handler receives the original public interrupt object");
++    check(callback_context == (ULONG)&owned_context, "handler receives the supplied context");
++    check(disconnected, "owned interrupt disconnects");
++    check(!guarded.interrupt.Connected, "disconnect clears public connected state");
++    check(guards_ok(), "complete lifecycle preserves neighboring guards");
++    finish();
++}
+diff --git a/tests/xbe/interrupt-public-abi/tap.c b/tests/xbe/interrupt-public-abi/tap.c
+new file mode 100644
+index 00000000..009bb8a8
+--- /dev/null
++++ b/tests/xbe/interrupt-public-abi/tap.c
+@@ -0,0 +1,166 @@
++/*
++ * TAP 14 emitter.  Bytes go out the LPC47M157 SuperIO's COM1 at 115200 8N1
++ * (I/O 0x3F8).  We program the UART ourselves at first call so the suite
++ * works against both nxkrnl (which already programs it for DbgPrint) and
++ * the retail kernel (which doesn't).  isa-debugcon (port 0xE9) was the
++ * historical target but the upstream xemu AppImage builds without it.
++ */
++
++#include "tap.h"
++#include <stdio.h>
++#include <stdarg.h>
++
++#define COM1     0x3F8
++#define COM1_THR (COM1 + 0)
++#define COM1_DLL (COM1 + 0)
++#define COM1_IER (COM1 + 1)
++#define COM1_DLH (COM1 + 1)
++#define COM1_LCR (COM1 + 3)
++#define COM1_MCR (COM1 + 4)
++#define COM1_LSR (COM1 + 5)
++
++#define LSR_THRE 0x20  /* transmit holding register empty */
++#define LSR_TEMT 0x40  /* transmitter empty (shift + holding both drained) */
++#define LCR_DLAB 0x80
++#define LCR_8N1  0x03
++
++static inline void outb(unsigned short port, unsigned char val)
++{
++    __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
++}
++
++static inline unsigned char inb(unsigned short port)
++{
++    unsigned char ret;
++    __asm__ __volatile__("inb %1, %0" : "=a"(ret) : "Nd"(port));
++    return ret;
++}
++
++/* Xbox is single-CPU: prevent a scheduled kernel/debug writer from entering
++ * between bytes. Restore the caller's full flags, including an already-clear
++ * IF. Formatting stays outside this span; no kernel-private lock is borrowed. */
++static inline unsigned int tap_irq_save(void)
++{
++    unsigned int flags;
++    __asm__ __volatile__("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
++    return flags;
++}
++
++static inline void tap_irq_restore(unsigned int flags)
++{
++    __asm__ __volatile__("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
++}
++
++static void com_init(void)
++{
++    static int initialized = 0;
++    if (initialized) return;
++    initialized = 1;
++    outb(COM1_IER, 0x00);             /* disable all interrupts */
++    outb(COM1_LCR, LCR_DLAB);         /* DLAB=1 to set divisor */
++    outb(COM1_DLL, 0x01);             /* 115200 baud (1.8432 MHz / 16 / 1) */
++    outb(COM1_DLH, 0x00);
++    outb(COM1_LCR, LCR_8N1);          /* DLAB=0, 8N1 */
++    /* Retain the existing FIFO mode and queued bytes. THRE polling works
++     * with either the reset/default UART or a kernel-configured FIFO; changing
++     * FIFO enable or clearing it could discard the preceding debug message. */
++    outb(COM1_MCR, 0x0B);             /* DTR + RTS + OUT2 */
++}
++
++static void com_putc(char c)
++{
++    while ((inb(COM1_LSR) & LSR_THRE) == 0) { }
++    outb(COM1_THR, (unsigned char)c);
++}
++
++void tap_drain(void)
++{
++    while ((inb(COM1_LSR) & LSR_TEMT) == 0) { }
++}
++
++static void com_puts(const char *s)
++{
++    unsigned int flags = tap_irq_save();
++    com_init();
++    while (*s) com_putc(*s++);
++    tap_irq_restore(flags);
++}
++
++static void com_vprintf(const char *fmt, va_list ap)
++{
++    char buf[256];
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_puts(buf);
++}
++
++static void com_printf(const char *fmt, ...)
++{
++    va_list ap;
++    va_start(ap, fmt);
++    com_vprintf(fmt, ap);
++    va_end(ap);
++}
++
++void tap_puts(const char *s)
++{
++    com_puts(s);
++}
++
++void tap_version(unsigned int v)
++{
++    com_printf("TAP version %u\n", v);
++}
++
++void tap_plan(unsigned int n)
++{
++    com_printf("1..%u\n", n);
++}
++
++void tap_ok(unsigned int n, const char *desc)
++{
++    com_printf("ok %u - %s\n", n, desc);
++}
++
++void tap_not_ok(unsigned int n, const char *desc)
++{
++    com_printf("not ok %u - %s\n", n, desc);
++}
++
++void tap_diag_begin(void)
++{
++    com_puts("  ---\n");
++}
++
++void tap_diag_end(void)
++{
++    com_puts("  ...\n");
++}
++
++void tap_diag_kv(const char *key, const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("  %s: %s\n", key, buf);
++}
++
++void tap_comment(const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("# %s\n", buf);
++}
+diff --git a/tests/xbe/interrupt-public-abi/tap.h b/tests/xbe/interrupt-public-abi/tap.h
+new file mode 100644
+index 00000000..0f39d98a
+--- /dev/null
++++ b/tests/xbe/interrupt-public-abi/tap.h
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include <stdarg.h>
++#include <stdbool.h>
++
++void tap_version(unsigned int v);
++void tap_plan(unsigned int n);
++void tap_ok(unsigned int n, const char *desc);
++void tap_not_ok(unsigned int n, const char *desc);
++
++/* Open / close a YAML diagnostic block underneath a `not ok` line. */
++void tap_diag_begin(void);
++void tap_diag_end(void);
++void tap_diag_kv(const char *key, const char *fmt, ...);
++
++void tap_comment(const char *fmt, ...);
++
++/* Drop a raw string verbatim (no formatting / framing).  Used for the
++ * "== api-regression begin ==" / "== ... end ==" markers in main.c so
++ * the runner can slice the TAP block out of the surrounding kernel
++ * debug stream. */
++void tap_puts(const char *s);
++
++/* Block until the UART transmitter is fully drained.  Call before
++ * issuing an SMC shutdown so the final bytes aren't lost. */
++void tap_drain(void);
