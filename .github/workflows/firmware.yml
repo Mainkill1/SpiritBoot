@@ -225,6 +225,16 @@ jobs:
                            expected_memory_mib=${{ matrix.memory_mib }})
           assert len(result['workloads']) == 41, result
           PY
+      - name: Print clean-room transcript on test failure
+        if: failure()
+        run: |
+          log="artifacts/clean-room-contracts-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/serial.log"
+          if [[ -f "$log" ]]; then
+            cat "$log"
+          else
+            echo "Missing transcript: $log"
+            find artifacts -maxdepth 3 -type f -path '*clean-room-contracts*' -print
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
