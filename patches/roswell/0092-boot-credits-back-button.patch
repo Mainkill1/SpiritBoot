@@ -1,0 +1,224 @@
+--- a/ntoskrnl/xb/boot_setup.h
++++ b/ntoskrnl/xb/boot_setup.h
+@@ -14,11 +14,12 @@
+ #endif
+ 
+ #define SB_WINDOW_MS 3000u
++#define SB_CREDITS_PAGE_COUNT 3u
+ #define SB_PAGE_SIZE 4096u
+ 
+ /* Normalized inputs, NOT Xbox USB packet bits. Source includes device generation. */
+ enum { SB_START=1u, SB_UP=2u, SB_DOWN=4u, SB_LEFT=8u, SB_RIGHT=16u,
++       SB_A=32u, SB_B=64u, SB_X=128u, SB_BACK=256u };
+-       SB_A=32u, SB_B=64u, SB_X=128u };
+ typedef struct { uint32_t ms, source, buttons; bool valid; } SbInput;
+ typedef enum { SB_GATE_WAIT, SB_GATE_ENTER, SB_GATE_BOOT } SbGateResult;
+ typedef struct {
+@@ -46,7 +47,7 @@
+ } SbSettingsStore;
+ typedef enum {
+     SB_MENU_EDIT, SB_MENU_CONFIRM_SAVE, SB_MENU_CONFIRM_DISCARD,
++    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY, SB_MENU_CREDITS
+-    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY
+ } SbMenuState;
+ typedef struct {
+     SbSettings original, edited;
+@@ -54,6 +55,7 @@
+     SbSetupRow row;
+     SbMenuState state;
+     SbCommitResult last_save;
++    uint8_t credits_page;  /* valid only in SB_MENU_CREDITS */
+     bool armed, source_seen;
+ } SbSetup;
+ SB_INIT_CODE void sb_setup_open(SbSetup *setup, SbSettings initial, uint32_t supported);
+--- a/ntoskrnl/xb/boot_setup.c
++++ b/ntoskrnl/xb/boot_setup.c
+@@ -162,6 +162,18 @@
+     edges = in.buttons & ~s->previous_buttons;
+     s->previous_buttons = in.buttons;
+     if (!edges || (edges & (edges-1u))) return;
++    if (s->state == SB_MENU_CREDITS) {
++        if (edges == SB_BACK || edges == SB_B)
++            s->state = SB_MENU_EDIT;
++        else if (edges == SB_UP || edges == SB_LEFT)
++            s->credits_page = (uint8_t)((s->credits_page +
++                                        SB_CREDITS_PAGE_COUNT - 1u) %
++                                       SB_CREDITS_PAGE_COUNT);
++        else if (edges == SB_DOWN || edges == SB_RIGHT)
++            s->credits_page = (uint8_t)((s->credits_page + 1u) %
++                                       SB_CREDITS_PAGE_COUNT);
++        return;
++    }
+     if (s->state == SB_MENU_RECOVERY) {
+         if (edges == SB_A) save(s,store);
+         return;
+@@ -175,6 +187,11 @@
+         return;
+     }
+     if (s->state != SB_MENU_EDIT) return;
++    if (edges == SB_BACK) {
++        s->state = SB_MENU_CREDITS;
++        s->credits_page = 0;
++        return;
++    }
+     if (edges == SB_UP) s->row = (SbSetupRow)((s->row+SB_ROW_COUNT-1u)%SB_ROW_COUNT);
+     else if (edges == SB_DOWN) s->row = (SbSetupRow)((s->row+1u)%SB_ROW_COUNT);
+     else if (edges == SB_B || (edges == SB_A && s->row == SB_CONTINUE))
+--- a/ntoskrnl/xb/boot_xid.c
++++ b/ntoskrnl/xb/boot_xid.c
+@@ -94,6 +94,7 @@
+         return false;
+     digital = (uint16_t)r[2] | ((uint16_t)r[3] << 8);
+     if (digital & 0x0010u) out |= SB_START;
++    if (digital & 0x0020u) out |= SB_BACK;
+     if (digital & 0x0001u) out |= SB_UP;
+     if (digital & 0x0002u) out |= SB_DOWN;
+     if (digital & 0x0004u) out |= SB_LEFT;
+--- a/ntoskrnl/xb/bootsetup_native.c
++++ b/ntoskrnl/xb/bootsetup_native.c
+@@ -128,7 +128,7 @@
+ DATA_SEG("INITDATA")
+ static const CHAR BsMenuTitle[] =
+     "\r\n  SpiritBoot Settings\r\n"
++    "  D-pad: move/edit  A: select  B: back  X: save  BACK: credits\r\n\r\n";
+-    "  D-pad: move/change   A: select   B: back   X: save\r\n\r\n";
+ DATA_SEG("INITDATA")
+ static const CHAR BsMenuLine[] = "  %c %-24s %s\r\n";
+ DATA_SEG("INITDATA")
+@@ -142,7 +142,42 @@
+ DATA_SEG("INITDATA")
+ static const CHAR BsRecovery[] =
+     "  EEPROM write was incomplete. Press A to repair/retry.\r\n";
++DATA_SEG("INITDATA")
++static const CHAR BsCreditsCore[] =
++    "Core firmware and runtime\r\n"
++    "\r\n"
++    "SpiritBoot - firmware integration\r\n"
++    "Roswell - Xbox kernel and loader\r\n"
++    "ReactOS - NT kernel foundation\r\n"
++    "Cromwell - hardware init reference\r\n"
++    "XZ Embedded - loader decompression\r\n";
++DATA_SEG("INITDATA")
++static const CHAR BsCreditsTesting[] =
++    "Development and testing\r\n"
++    "\r\n"
++    "xemu - Xbox hardware emulation\r\n"
++    "QEMU - machine emulation framework\r\n"
++    "nxdk - Xbox SDK and test executables\r\n"
++    "xemu-dashboard - test HDD fixture\r\n";
++DATA_SEG("INITDATA")
++static const CHAR BsCreditsResearch[] =
++    "Additional research and references\r\n"
++    "\r\n"
++    "Cxbx-Reloaded - Xbox software model\r\n"
++    "xdvdfs - disc filesystem reference\r\n"
++    "XboxDevWiki - hardware docs\r\n"
++    "xboxpy - console probing tools\r\n"
++    "xbox-linux - platform driver research\r\n"
++    "\r\n"
++    "Thanks to all project contributors.\r\n"
++    "Details: Mainkill1/SpiritBoot\r\n"
++    "docs/CREDITS.md and source licenses\r\n";
++DATA_SEG("INITDATA")
++static const CHAR * const BsCreditsPages[SB_CREDITS_PAGE_COUNT] = {
++    BsCreditsCore, BsCreditsTesting, BsCreditsResearch
++};
+ 
++
+ BS_INIT
+ static ULONG
+ BsNowMs(VOID)
+@@ -746,6 +781,50 @@
+ 
+ BS_INIT
+ static VOID
++BsRenderCreditsPage(const SbSetup *Setup)
++{
++    CHAR PageLine[48];
++    ULONG Page = Setup->credits_page;
++
++    if (Page >= SB_CREDITS_PAGE_COUNT)
++        Page = 0;
++
++    /* The credits are left of the logo. Keep the right-hand artwork
++     * unchanged when changing page, and never scroll into it. */
++    InbvSolidColorFill(32, 72, SCREEN_WIDTH - 257, 455,
++                       BV_COLOR_BLACK);
++    InbvSetTextColor(BV_COLOR_WHITE);
++    InbvSetScrollRegion(32, 80, SCREEN_WIDTH - 257, 420);
++    InbvDisplayString((PCHAR)BsCreditsPages[Page]);
++
++    sprintf(PageLine, "Page %lu/%u  BACK/B: return",
++            Page + 1, SB_CREDITS_PAGE_COUNT);
++    InbvSetScrollRegion(32, 432, SCREEN_WIDTH - 257, 455);
++    InbvDisplayString(PageLine);
++}
++
++BS_INIT
++static VOID
++BsRenderCredits(const SbSetup *Setup)
++{
++    PVOID Logo;
++
++    /* One full clear on entering credits, never for button release or
++     * page navigation. The bitmap and text stay in INIT/INITDATA. */
++    InbvSolidColorFill(0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1,
++                       BV_COLOR_BLACK);
++    Logo = InbvGetResourceAddress(IDB_LOGO_DEFAULT);
++    if (Logo != NULL)
++        InbvBitBlt(Logo, SCREEN_WIDTH - 256, SCREEN_HEIGHT - 256);
++
++    InbvSetTextColor(BV_COLOR_WHITE);
++    InbvSetScrollRegion(32, 24, SCREEN_WIDTH - 257, 68);
++    InbvDisplayString("SpiritBoot Credits");
++    BsRenderCreditsPage(Setup);
++}
++
++BS_INIT
++static VOID
+ BsRenderMenu(const SbSetup *Setup)
+ {
+     CHAR Value[48], Line[128];
+@@ -795,6 +874,7 @@
+     SbSettingsStore Store = {&StoreContext, BsCommitSettings};
+     SbInput Input;
+     uint32_t PreviousButtons = 0xffffffffu;
++    uint32_t PreviousCreditsPage;
+     SbMenuState PreviousState;
+     SbSetupRow PreviousRow;
+ 
+@@ -823,18 +903,29 @@
+     BsRenderMenu(&Setup);
+     PreviousState = Setup.state;
+     PreviousRow = Setup.row;
++    PreviousCreditsPage = Setup.credits_page;
+     while (Setup.state != SB_MENU_CONTINUE && Setup.state != SB_MENU_REBOOT)
+     {
+         Input = BsPadRead(&Pad, BsNowMs() + 100u);
+         sb_setup_input(&Setup, Input, &Store);
++        if (Setup.state == SB_MENU_CREDITS)
++        {
++            if (PreviousState != SB_MENU_CREDITS)
++                BsRenderCredits(&Setup);
++            else if (Setup.credits_page != PreviousCreditsPage)
++                BsRenderCreditsPage(&Setup);
++        }
++        else if (PreviousState == SB_MENU_CREDITS ||
++                 Setup.state != PreviousState ||
++                 Setup.row != PreviousRow ||
++                 Input.buttons != PreviousButtons)
+-        if (Setup.state != PreviousState || Setup.row != PreviousRow ||
+-            Input.buttons != PreviousButtons)
+         {
+             BsRenderMenu(&Setup);
+-            PreviousState = Setup.state;
+-            PreviousRow = Setup.row;
+-            PreviousButtons = Input.buttons;
+         }
++        PreviousState = Setup.state;
++        PreviousRow = Setup.row;
++        PreviousCreditsPage = Setup.credits_page;
++        PreviousButtons = Input.buttons;
+         BsDelayMs(10);
+     }
+     if (!BsPadClose(&Pad))

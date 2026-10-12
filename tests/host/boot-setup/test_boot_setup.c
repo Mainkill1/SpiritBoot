@@ -66,6 +66,19 @@ static void xid_report_decodes_menu_controls(void) {
     assert(!sb_xid_decode_report(report,sizeof(report),&buttons));
     assert(!sb_xid_decode_report(report,19,&buttons));
 }
+static void xid_back_is_not_analog_b(void) {
+    uint8_t report[20] = {0};
+    uint32_t buttons = 0;
+    report[1] = 20;
+    report[2] = 0x20; /* digital BACK, not face B */
+    assert(sb_xid_decode_report(report, sizeof(report), &buttons));
+    assert(buttons == SB_BACK);
+    report[2] = 0;
+    report[5] = 0xff;
+    assert(sb_xid_decode_report(report, sizeof(report), &buttons));
+    assert(buttons == SB_B);
+}
+
 static void held_at_boot_enters_immediately(void) {
     SbBootGate g; sb_boot_gate_init(&g,100);
     assert(sb_boot_gate_poll(&g,input(100,3,SB_X,true))==SB_GATE_ENTER);
@@ -272,6 +285,71 @@ static void missing_writer_rejects_without_claiming_success(void) {
     press(&s,SB_A,NULL); press(&s,SB_X,NULL); press(&s,SB_A,NULL);
     assert(s.state==SB_MENU_EDIT && s.last_save==SB_COMMIT_REJECTED);
 }
+static void credits_navigation_keeps_edits_and_does_not_write(void) {
+    Store f = {0};
+    SbSettingsStore io = {&f, commit};
+    SbSetup s;
+    sb_setup_open(&s, initial(), SB_ALL_FIELDS);
+    press(&s, SB_A, &io); /* modify language */
+    assert(sb_setup_changed(&s) == SB_LANGUAGE_WORD);
+    press(&s, SB_BACK, &io);
+    assert(s.state == SB_MENU_CREDITS && s.credits_page == 0);
+    press(&s, SB_DOWN, &io);
+    assert(s.credits_page == 1);
+    press(&s, SB_RIGHT, &io);
+    assert(s.credits_page == 2);
+    press(&s, SB_DOWN, &io);
+    assert(s.credits_page == 0);
+    press(&s, SB_UP, &io);
+    assert(s.credits_page == 2);
+    press(&s, SB_BACK, &io);
+    assert(s.state == SB_MENU_EDIT && s.edited.language == 2);
+    assert(sb_setup_changed(&s) == SB_LANGUAGE_WORD && f.calls == 0);
+    press(&s, SB_BACK, &io);
+    assert(s.state == SB_MENU_CREDITS && s.credits_page == 0);
+    press(&s, SB_B, &io); /* B returns, not discard */
+    assert(s.state == SB_MENU_EDIT && f.calls == 0);
+}
+
+static void credits_respect_arming_and_confirmation(void) {
+    Store f = {0};
+    SbSettingsStore io = {&f, commit};
+    SbSetup s;
+    sb_setup_open(&s, initial(), SB_ALL_FIELDS);
+    sample(&s, SB_BACK, 1, true, &io); /* not armed */
+    sample(&s, SB_BACK, 1, true, &io); /* held */
+    assert(s.state == SB_MENU_EDIT);
+    sample(&s, 0, 1, true, &io); /* arm on neutral report */
+    sample(&s, SB_BACK, 1, true, &io);
+    assert(s.state == SB_MENU_CREDITS);
+    sample(&s, SB_BACK, 1, true, &io);
+    assert(s.state == SB_MENU_CREDITS);
+    press(&s, SB_BACK, &io);
+    assert(s.state == SB_MENU_EDIT);
+    press(&s, SB_A, &io);
+    press(&s, SB_X, &io);
+    assert(s.state == SB_MENU_CONFIRM_SAVE);
+    press(&s, SB_BACK, &io); /* credits cannot bypass confirmation */
+    assert(s.state == SB_MENU_CONFIRM_SAVE && f.calls == 0);
+    press(&s, SB_B, &io);
+    assert(s.state == SB_MENU_EDIT);
+    press(&s, SB_A | SB_BACK, &io); /* multi-edge ignored */
+    assert(s.state == SB_MENU_EDIT && f.calls == 0);
+}
+
+static void credits_cannot_leave_uncertain_eeprom_recovery(void) {
+    Store f = {.result = SB_COMMIT_UNCERTAIN};
+    SbSettingsStore io = {&f, commit};
+    SbSetup s;
+    sb_setup_open(&s, initial(), SB_ALL_FIELDS);
+    press(&s, SB_A, &io);
+    press(&s, SB_X, &io);
+    press(&s, SB_A, &io);
+    assert(s.state == SB_MENU_RECOVERY && f.calls == 1);
+    press(&s, SB_BACK, &io);
+    assert(s.state == SB_MENU_RECOVERY && f.calls == 1);
+}
+
 static void display_is_bounded_and_unknown_values_are_visible(void) {
     SbSetup s; char b[32], tiny[2]={'!','!'};
     sb_setup_open(&s,(SbSettings){999,0x110000,3},SB_ALL_FIELDS);
@@ -339,7 +417,7 @@ int main(void) {
     RUN(ohci_control_rejects_unsafe_layouts);
     RUN(ohci_completion_requires_retired_clean_chain);
     RUN(ohci_zero_length_checks_status_td);
-    RUN(xid_report_decodes_menu_controls);
+    RUN(xid_report_decodes_menu_controls); RUN(xid_back_is_not_analog_b);
     RUN(held_at_boot_enters_immediately); RUN(start_does_not_enter_setup); RUN(one_x_press_enters);
     RUN(invalid_x_is_ignored); RUN(any_connected_controller_can_enter);
     RUN(missing_input_has_bounded_timeout); RUN(late_press_does_not_extend_boot_window);
@@ -353,7 +431,11 @@ int main(void) {
     RUN(clean_continue_never_calls_writer); RUN(dirty_discard_needs_confirmation_and_never_writes);
     RUN(save_requires_second_press_and_verified_result); RUN(no_change_save_performs_no_write);
     RUN(rejected_commit_can_be_cancelled); RUN(uncertain_commit_blocks_continue_and_edits);
-    RUN(rejected_retry_cannot_clear_prior_uncertainty); RUN(missing_writer_rejects_without_claiming_success); RUN(display_is_bounded_and_unknown_values_are_visible);
+    RUN(rejected_retry_cannot_clear_prior_uncertainty); RUN(missing_writer_rejects_without_claiming_success);
+    RUN(credits_navigation_keeps_edits_and_does_not_write);
+    RUN(credits_respect_arming_and_confirmation);
+    RUN(credits_cannot_leave_uncertain_eeprom_recovery);
+    RUN(display_is_bounded_and_unknown_values_are_visible);
     RUN(retirement_quiesces_scrubs_then_releases); RUN(failed_quiesce_does_not_clear_or_free_memory);
     RUN(failed_release_retries_without_calling_retired_code); RUN(invalid_arena_ranges_are_rejected_before_callbacks);
     RUN(descriptor_and_callback_context_cannot_be_retired);

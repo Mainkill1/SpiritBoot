@@ -16,7 +16,10 @@ There is no resident menu worker, callback, allocation, or title-time polling.
 
 Hold **X** during the fixed **3-second** bounded splash/input window.
 Release all buttons before navigating. D-pad selects/edits, A activates, X
-requests save, B requests discard. Save and discard of changed values require
+requests save, B requests discard. The controller's dedicated **Back** button
+(not the B face button) opens project credits while editing. D-pad Up/Down or
+Left/Right changes credits pages; **Back** or **B** returns to the menu without
+saving or discarding edits. Save and discard of changed values require
 confirmation. A held key cannot serve as both selection and confirmation.
 Absent input times out; disconnection or a device-generation change disarms menu
 controls until a fresh neutral report arrives.
@@ -67,6 +70,10 @@ semi-animated boot presentation can replace or surround this function without
 changing controller enumeration, menu state, or EEPROM transactions. Keep future
 art, animation state, and rendering helpers in INIT (or a separately admitted ROM
 overlay), and preserve the same teardown boundary before title launch.
+The credits view uses three paginated INIT-only text pages and the same logo.
+It does not alter EEPROM settings; full project/license credits are tracked
+in [CREDITS.md](../../../docs/CREDITS.md).
+
 The static fox remains visible in the menu's lower-right quadrant using the
 same discardable bitmap resource; opening setup does not allocate or decode a
 second copy.

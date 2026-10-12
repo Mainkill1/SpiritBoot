@@ -162,6 +162,18 @@ void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
     edges = in.buttons & ~s->previous_buttons;
     s->previous_buttons = in.buttons;
     if (!edges || (edges & (edges-1u))) return;
+    if (s->state == SB_MENU_CREDITS) {
+        if (edges == SB_BACK || edges == SB_B)
+            s->state = SB_MENU_EDIT;
+        else if (edges == SB_UP || edges == SB_LEFT)
+            s->credits_page = (uint8_t)((s->credits_page +
+                                        SB_CREDITS_PAGE_COUNT - 1u) %
+                                       SB_CREDITS_PAGE_COUNT);
+        else if (edges == SB_DOWN || edges == SB_RIGHT)
+            s->credits_page = (uint8_t)((s->credits_page + 1u) %
+                                       SB_CREDITS_PAGE_COUNT);
+        return;
+    }
     if (s->state == SB_MENU_RECOVERY) {
         if (edges == SB_A) save(s,store);
         return;
@@ -175,6 +187,11 @@ void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
         return;
     }
     if (s->state != SB_MENU_EDIT) return;
+    if (edges == SB_BACK) {
+        s->state = SB_MENU_CREDITS;
+        s->credits_page = 0;
+        return;
+    }
     if (edges == SB_UP) s->row = (SbSetupRow)((s->row+SB_ROW_COUNT-1u)%SB_ROW_COUNT);
     else if (edges == SB_DOWN) s->row = (SbSetupRow)((s->row+1u)%SB_ROW_COUNT);
     else if (edges == SB_B || (edges == SB_A && s->row == SB_CONTINUE))
