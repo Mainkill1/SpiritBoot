@@ -1,9 +1,9 @@
 diff --git a/boot/nxldr/av-handoff.h b/boot/nxldr/av-handoff.h
 new file mode 100644
-index 00000000..f24b663f
+index 00000000..493aea61
 --- /dev/null
 +++ b/boot/nxldr/av-handoff.h
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,26 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + * Independent display contract carried with the existing launch/RAM handoff.
 + * Addresses refer only to title-owned physical RAM aliases, never kernel state.
@@ -21,10 +21,17 @@ index 00000000..f24b663f
 +    unsigned Height;
 +    unsigned PixelFormat;
 +    unsigned GeneralControl;
++    /* VGA reset clears the linear CPU-framebuffer path independently of
++     * the NV2A accelerated surface. Carry its actual outgoing controls. */
++    unsigned char Sequencer[5];
++    unsigned char Graphics[9];
++    unsigned char Attributes[21];
++    unsigned char AttributeIndex;
++    unsigned char CrtcMode, MaxScan, LineCompare, Overflow;
 +} NX_AV_HANDOFF;
 +#endif
 diff --git a/boot/nxldr/warm-handoff.h b/boot/nxldr/warm-handoff.h
-index 61485f9e..b9af0bd5 100644
+index 61485f9e..62a974e7 100644
 --- a/boot/nxldr/warm-handoff.h
 +++ b/boot/nxldr/warm-handoff.h
 @@ -11,7 +11,7 @@
@@ -32,12 +39,12 @@ index 61485f9e..b9af0bd5 100644
  #endif
  #define PM_LAUNCH_MAGIC 0x6E78436CUL
 -#define PM_LAUNCH_BYTES 3616
-+#define PM_LAUNCH_BYTES 3656
++#define PM_LAUNCH_BYTES 3696
  #define PM_MAX_STAGES 505u
  
  typedef struct _PM_HANDOFF {
 diff --git a/hal/halx86/xbox/av.c b/hal/halx86/xbox/av.c
-index 995a5dd6..4c2861c1 100644
+index 995a5dd6..ef4d3458 100644
 --- a/hal/halx86/xbox/av.c
 +++ b/hal/halx86/xbox/av.c
 @@ -28,6 +28,7 @@
@@ -48,15 +55,20 @@ index 995a5dd6..4c2861c1 100644
  
  /* SMBus slave addresses. */
  #define SMBUS_SMC               0x10   /* system management controller    */
-@@ -51,6 +52,7 @@
+@@ -51,6 +52,12 @@
  #define NV2A_PCRTC_START        0x600800
  #define NV2A_PRMCIO_CR_INDEX    0x6013D4
  #define NV2A_PRMCIO_CR_DATA     0x6013D5
 +#define NV2A_PRAMDAC_GENERAL_CONTROL 0x680600
++#define NV2A_PRMVIO_SEQ_INDEX    0x0C03C4
++#define NV2A_PRMVIO_GR_INDEX     0x0C03CE
++#define NV2A_PRMCIO_ATTR_INDEX   0x6013C0
++#define NV2A_PRMCIO_ATTR_READ    0x6013C1
++#define NV2A_PRMCIO_STATUS       0x6013DA
  
  /* ACPI I/O port gating video output (cromwell BootVgaInitialization.c). */
  #define ACPI_VIDEO_GATE         0x80D3
-@@ -100,6 +102,56 @@
+@@ -100,6 +107,137 @@
  /* A framebuffer a prior display owner asked the kernel to preserve across a
   * mode change (AvSetSavedDataAddress).  NULL on a cold boot -- none saved. */
  static PVOID NxkAvSavedDataAddress = NULL;
@@ -71,6 +83,87 @@ index 995a5dd6..4c2861c1 100644
 +{
 +    *(volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_INDEX) = Index;
 +    *(volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_DATA) = Value;
++}
++
++static UCHAR NxkAvReadByte(PVOID RegisterBase, ULONG Offset)
++{
++    return *(volatile UCHAR *)((ULONG_PTR)RegisterBase + Offset);
++}
++static VOID NxkAvWriteByte(PVOID RegisterBase, ULONG Offset, UCHAR Value)
++{
++    *(volatile UCHAR *)((ULONG_PTR)RegisterBase + Offset) = Value;
++}
++
++static VOID NTAPI NxkAvCaptureVga(PVOID RegisterBase, NX_AV_HANDOFF *State)
++{
++    UCHAR i, seq = NxkAvReadByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX);
++    UCHAR gr = NxkAvReadByte(RegisterBase, NV2A_PRMVIO_GR_INDEX);
++    (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++    State->AttributeIndex = NxkAvReadByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX);
++    for (i = 0; i < sizeof(State->Sequencer); ++i) {
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX, i);
++        State->Sequencer[i] = NxkAvReadByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX + 1);
++    }
++    for (i = 0; i < sizeof(State->Graphics); ++i) {
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_GR_INDEX, i);
++        State->Graphics[i] = NxkAvReadByte(RegisterBase, NV2A_PRMVIO_GR_INDEX + 1);
++    }
++    for (i = 0; i < sizeof(State->Attributes); ++i) {
++        (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++        NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX,
++                      i | (State->AttributeIndex & 0x20));
++        State->Attributes[i] = NxkAvReadByte(RegisterBase, NV2A_PRMCIO_ATTR_READ);
++    }
++    NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX, seq);
++    NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_GR_INDEX, gr);
++    (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++    NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX, State->AttributeIndex);
++    State->CrtcMode = NxkAvReadCrtc(RegisterBase, 0x17);
++    State->MaxScan = NxkAvReadCrtc(RegisterBase, 9);
++    State->LineCompare = NxkAvReadCrtc(RegisterBase, 0x18);
++    State->Overflow = NxkAvReadCrtc(RegisterBase, 7);
++}
++
++static VOID NTAPI NxkAvRestoreVga(PVOID RegisterBase, const NX_AV_HANDOFF *State)
++{
++    UCHAR i;
++    UCHAR protect = NxkAvReadCrtc(RegisterBase, 0x11);
++    /* Unlock the extended CRTC after device reset. Restore row addressing
++     * and line compare too: dimensions alone cannot describe VGA scanout. */
++    NxkAvWriteCrtc(RegisterBase, 0x1f, 0x57);
++    NxkAvWriteCrtc(RegisterBase, 0x17, State->CrtcMode);
++    NxkAvWriteCrtc(RegisterBase, 9, State->MaxScan);
++    NxkAvWriteCrtc(RegisterBase, 0x18, State->LineCompare);
++    NxkAvWriteCrtc(RegisterBase, 0x11, protect & ~0x80);
++    NxkAvWriteCrtc(RegisterBase, 7, State->Overflow);
++    NxkAvWriteCrtc(RegisterBase, 0x11, protect);
++    for (i = 0; i < sizeof(State->Sequencer); ++i) {
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX, i);
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX + 1, State->Sequencer[i]);
++    }
++    for (i = 0; i < sizeof(State->Graphics); ++i) {
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_GR_INDEX, i);
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_GR_INDEX + 1, State->Graphics[i]);
++    }
++    for (i = 0; i < sizeof(State->Attributes); ++i) {
++        (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++        NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX,
++                      i | (State->AttributeIndex & 0x20));
++        NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX, State->Attributes[i]);
++    }
++    (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++    NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX, State->AttributeIndex);
++}
++
++static VOID NTAPI NxkAvSetPitch(PVOID RegisterBase, ULONG Pitch)
++{
++    ULONG raw = Pitch >> 3;
++    NxkAvWriteCrtc(RegisterBase, 0x13, raw & 0xff);
++    NxkAvWriteCrtc(RegisterBase, 0x19,
++        (NxkAvReadCrtc(RegisterBase, 0x19) & ~0xe0) | (((raw >> 8) & 7) << 5));
++    NxkAvWriteCrtc(RegisterBase, 0x25,
++        (NxkAvReadCrtc(RegisterBase, 0x25) & ~0x20) | (((raw >> 11) & 1) << 5));
++    NxkAvWriteCrtc(RegisterBase, 0x39, 0xff);
 +}
 +
 +/* Public nxdk mode identifiers describe the active area independently of
@@ -113,7 +206,7 @@ index 995a5dd6..4c2861c1 100644
  
  PVOID NTAPI
  AvGetSavedDataAddress(VOID)
-@@ -113,6 +165,99 @@ AvSetSavedDataAddress(_In_opt_ PVOID Address)
+@@ -113,6 +251,119 @@ AvSetSavedDataAddress(_In_opt_ PVOID Address)
      NxkAvSavedDataAddress = Address;
  }
  
@@ -142,6 +235,7 @@ index 995a5dd6..4c2861c1 100644
 +    State->Height = ((ULONG)NxkAvReadCrtc((PVOID)0xFD000000UL, 0x12) |
 +                    ((overflow & 2) << 7) | ((overflow & 0x40) << 3)) + 1;
 +    State->PixelFormat = NxkAvReadCrtc((PVOID)0xFD000000UL, 0x28);
++    NxkAvCaptureVga((PVOID)0xFD000000UL, State);
 +    *(volatile UCHAR *)(0xFD000000UL + NV2A_PRMCIO_CR_INDEX) = index;
 +    State->GeneralControl = *(volatile ULONG *)(0xFD000000UL + NV2A_PRAMDAC_GENERAL_CONTROL);
 +}
@@ -149,43 +243,62 @@ index 995a5dd6..4c2861c1 100644
 +/* The memory manager has already validated and admitted persistent pages.
 + * An ordinary boot or rejected range never publishes an old saved pointer. */
 +CODE_SEG("INIT")
-+VOID NTAPI
++BOOLEAN NTAPI
 +NxkAvRestoreState(const NX_AV_HANDOFF *State)
 +{
 +    extern BOOLEAN NxkMmPersistentPage(ULONG_PTR Page);
 +    ULONG address = State->SavedAddress;
 +    ULONG physical, offset;
 +    ULONG first, last, page;
-+    ULONG depth, bytesPerPixel;
++    ULONG depth, bytesPerPixel, lineCompare;
 +    if (address < 0x80000000UL || address >= 0x84000000UL ||
 +        (address & (PAGE_SIZE - 1)) || !State->AllocationBytes ||
-+        State->AllocationBytes > 0x84000000UL - address) return;
++        State->AllocationBytes > 0x84000000UL - address) return FALSE;
 +    physical = address - 0x80000000UL;
 +    first = physical >> PAGE_SHIFT;
 +    last = (physical + State->AllocationBytes - 1) >> PAGE_SHIFT;
 +    /* Adjacent saved allocations share a restored run until late adoption.
 +     * Check this allocation's pages, not the run's base. */
 +    for (page = first; page <= last; ++page)
-+        if (!NxkMmPersistentPage(page)) return;
++        if (!NxkMmPersistentPage(page)) return FALSE;
 +    AvSetSavedDataAddress((PVOID)address);
-+    if (State->FrameBuffer < physical) return;
++    if (State->FrameBuffer < physical) return FALSE;
 +    offset = State->FrameBuffer - physical;
 +    if (offset >= State->AllocationBytes || !State->Pitch ||
-+        State->Pitch > State->AllocationBytes - offset) return;
++        State->Pitch > State->AllocationBytes - offset) return FALSE;
 +    depth = State->PixelFormat & 3;
 +    bytesPerPixel = depth == 3 ? 4 : depth;
 +    if (!State->Width || State->Width > 2048 || (State->Width & 7) ||
 +        !State->Height || State->Height > 1024 ||
-+        State->PixelFormat > 255 || !depth ||
++        State->PixelFormat > 255 || depth < 2 ||
 +        State->Width > State->Pitch / bytesPerPixel ||
-+        State->Height > (State->AllocationBytes - offset) / State->Pitch) return;
++        State->Height > (State->AllocationBytes - offset) / State->Pitch) return FALSE;
++    /* This bounded handoff covers packed 15/16/32-bit linear images. Planar,
++     * palette, split-screen and repeated-scan modes need a different extent
++     * contract; do not restore them against these linear frame bounds. */
++    lineCompare = State->LineCompare | ((State->Overflow & 0x10) << 4) |
++                  ((State->MaxScan & 0x40) << 3);
++    /* SR1's screen-off flag affects frontend presentation, not linear row
++     * addressing. Preserve the title's outgoing visibility state. */
++    if ((State->Sequencer[0] & 3) != 3 || (State->Sequencer[1] & 8) ||
++        (State->Graphics[5] & 0x60) != 0x40 || !(State->Graphics[6] & 1) ||
++        !(State->AttributeIndex & 0x20) || (State->CrtcMode & 3) != 3 ||
++        (State->MaxScan & 0x9f) || lineCompare < State->Height - 1) return FALSE;
 +    /* Boot video can use a 720-pixel viewport. Restore the active area of
 +     * the title's image independently of the firmware's boot mode. */
-+    AvSetDisplayMode((PVOID)0xFD000000UL, 0, State->DisplayMode,
-+                     State->SourceFormat, State->Pitch, State->FrameBuffer);
++    /* Do not run cold video initialization: it publishes the boot buffer
++     * and mutes the encoder. Device reset still requires VGA graphics state.
++     * Publish the owned image only after all display controls are restored. */
++    NxkAvRestoreVga((PVOID)0xFD000000UL, State);
 +    NxkAvSetActiveArea((PVOID)0xFD000000UL, State->Width, State->Height,
 +                      State->PixelFormat);
++    NxkAvSetPitch((PVOID)0xFD000000UL, State->Pitch);
 +    *(volatile ULONG *)(0xFD000000UL + NV2A_PRAMDAC_GENERAL_CONTROL) = State->GeneralControl;
++    NxkAvDisplayMode = State->DisplayMode;
++    NxkAvSourceFormat = State->SourceFormat;
++    NxkAvPitch = State->Pitch;
++    *(volatile ULONG *)(0xFD000000UL + NV2A_PCRTC_START) = State->FrameBuffer;
++    return TRUE;
 +}
 +
 +/* Run after INIT/workspace bytes have been restored, before the next title.
@@ -213,7 +326,7 @@ index 995a5dd6..4c2861c1 100644
  /* Probe the SMBus for the TV encoder; 0 if neither known encoder answers
   * (an Xcalibur box, not handled here). */
  static UCHAR
-@@ -249,8 +394,9 @@ AvSendTVEncoderOption(
+@@ -249,8 +500,9 @@ AvSendTVEncoderOption(
   * Program the NV2A CRTC for a display mode.  Title drives this in a
   * do/while loop -- the function returns the next Step to run, 0 when done.
   * Retail staggers PLL relock and encoder handoff across steps; on the
@@ -225,21 +338,21 @@ index 995a5dd6..4c2861c1 100644
   * buffer flip; AvSendTVEncoderOption owns the encoder.  RegisterBase is
   * nxdk's VIDEO_BASE (0xFD000000), reached through the MMIO identity window.
   */
-@@ -272,16 +418,32 @@ AvSetDisplayMode(
-     volatile UCHAR *cr_data =
-         (volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_DATA);
-     ULONG raw = Pitch >> 3;     /* xemu shifts by 3 */
+@@ -267,44 +519,38 @@ AvSetDisplayMode(
+      *   line_offset = (CR[0x13] | ((CR[0x19]&0xE0)<<3) | ((CR[0x25]&0x20)<<6)) << 3
+      * as the byte pitch.  Build that 12-bit raw value from Pitch/8 and write
+      * it back through PRMCIO so the display path samples the right scanline. */
+-    volatile UCHAR *cr_index =
+-        (volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_INDEX);
+-    volatile UCHAR *cr_data =
+-        (volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_DATA);
+-    ULONG raw = Pitch >> 3;     /* xemu shifts by 3 */
+-    UCHAR cr19, cr25;
 +    ULONG size = NxkAvModeSize(DisplayMode), depth = 0;
-     UCHAR cr19, cr25;
  
      UNREFERENCED_PARAMETER(Step);
 -    UNREFERENCED_PARAMETER(DisplayMode);
 -    UNREFERENCED_PARAMETER(SourceColorFormat);
--
--    /* PCRTC_START scans out physical RAM; FrameBuffer arrives pre-masked to
--     * 0x7FFFFFFF by nxdk -- reduce it to the 64 MB physical address space. */
--    *(volatile ULONG *)((ULONG_PTR)RegisterBase + NV2A_PCRTC_START) =
--        FrameBuffer & 0x03FFFFFF;
 +    NxkAvDisplayMode = DisplayMode;
 +    NxkAvSourceFormat = SourceColorFormat;
 +    NxkAvPitch = Pitch;
@@ -262,33 +375,55 @@ index 995a5dd6..4c2861c1 100644
 +            }
 +        }
 +    }
++
++    NxkAvSetPitch(RegisterBase, Pitch);
  
-     /* CR[0x13] holds raw bits 7:0. */
-     *cr_index = 0x13;
-@@ -306,5 +468,10 @@ AvSetDisplayMode(
-     *cr_index = 0x39;
-     *cr_data  = 0xFF;
- 
+-    /* PCRTC_START scans out physical RAM; FrameBuffer arrives pre-masked to
+-     * 0x7FFFFFFF by nxdk -- reduce it to the 64 MB physical address space. */
 +    /* Publish scanout after the active area, depth and pitch are ready.
 +     * nxdk supplies a physical address; this display aperture is low 64 MiB. */
-+    *(volatile ULONG *)((ULONG_PTR)RegisterBase + NV2A_PCRTC_START) =
-+        FrameBuffer & 0x03FFFFFF;
-+
+     *(volatile ULONG *)((ULONG_PTR)RegisterBase + NV2A_PCRTC_START) =
+         FrameBuffer & 0x03FFFFFF;
+ 
+-    /* CR[0x13] holds raw bits 7:0. */
+-    *cr_index = 0x13;
+-    *cr_data  = (UCHAR)(raw & 0xFF);
+-
+-    /* CR[0x19] bits 7:5 hold raw bits 10:8; preserve the other bits. */
+-    *cr_index = 0x19;
+-    cr19 = (*cr_data & ~0xE0) | (UCHAR)(((raw >> 8) & 0x07) << 5);
+-    *cr_data = cr19;
+-
+-    /* CR[0x25] bit 5 holds raw bit 11; preserve the other bits.  640x480x32
+-     * needs raw=0x140 so bit 11 is 0 -- still write to defang any cromwell
+-     * leftover that happens to have it set. */
+-    *cr_index = 0x25;
+-    cr25 = (*cr_data & ~0x20) | (UCHAR)(((raw >> 11) & 0x01) << 5);
+-    *cr_data = cr25;
+-
+-    /* CR[0x39] = 0xFF disables interlace mode (xemu treats any other value
+-     * as interlaced and doubles the display height, producing two stacked
+-     * copies of the framebuffer on screen).  Progressive 480p / 480i without
+-     * interlace from the GPU's side is what nxdk's triangle expects. */
+-    *cr_index = 0x39;
+-    *cr_data  = 0xFF;
+-
      return 0;   /* single step -- done */
  }
 diff --git a/ntoskrnl/ex/init.c b/ntoskrnl/ex/init.c
-index 034236a1..822d918e 100644
+index 034236a1..15caf06a 100644
 --- a/ntoskrnl/ex/init.c
 +++ b/ntoskrnl/ex/init.c
-@@ -1452,9 +1452,11 @@ Phase1InitializationDiscard(IN PVOID Context)
+@@ -1451,10 +1451,10 @@ Phase1InitializationDiscard(IN PVOID Context)
+     {
          extern VOID NxkMmEnsureMmioWindow(VOID);
          extern VOID NxConfigurePciDevicesLate(VOID);
-         extern VOID NxkInitializeVideo(VOID);
-+        extern VOID NTAPI NxkRestoreSavedVideo(VOID);
+-        extern VOID NxkInitializeVideo(VOID);
++        extern VOID NTAPI NxkInitializeBootVideo(BOOLEAN QuickLaunch);
          NxkMmEnsureMmioWindow();
          NxConfigurePciDevicesLate();
-         NxkInitializeVideo();
-+        if (QuickLaunch) NxkRestoreSavedVideo();
+-        NxkInitializeVideo();
++        NxkInitializeBootVideo(QuickLaunch);
      }
  
      if (!QuickLaunch)
@@ -312,7 +447,7 @@ index c69855d1..3bbadf50 100644
      slot->Version = PM_VERSION; slot->BitmapBytes = PM_BYTES;
      slot->ImageBase = (ULONG)__ImageBase; slot->LaunchHash = PmLaunchHash();
 diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
-index d3ae28e4..a8937c8b 100644
+index d3ae28e4..c3c3f955 100644
 --- a/ntoskrnl/xb/xbe.c
 +++ b/ntoskrnl/xb/xbe.c
 @@ -29,6 +29,8 @@
@@ -324,7 +459,7 @@ index d3ae28e4..a8937c8b 100644
  
  /* ExMutantObjectType + MUTANT_ALL_ACCESS. */
  #include <ndk/extypes.h>
-@@ -553,8 +555,29 @@ typedef struct _XB_PERSIST_SLOT
+@@ -553,8 +555,41 @@ typedef struct _XB_PERSIST_SLOT
      LAUNCH_DATA_HEADER Header;      /* copied from the title's LaunchDataPage */
      UCHAR              LaunchData[3072]; /* the payload titles hand across */
      ULONG              LaunchPagePa; /* independently added original page PA */
@@ -343,18 +478,30 @@ index d3ae28e4..a8937c8b 100644
 +}
 +
 +CODE_SEG("INIT")
-+VOID NTAPI NxkRestoreSavedVideo(VOID)
++BOOLEAN NTAPI NxkRestoreSavedVideo(VOID)
 +{
-+    extern VOID NTAPI NxkAvRestoreState(const NX_AV_HANDOFF *State);
++    extern BOOLEAN NTAPI NxkAvRestoreState(const NX_AV_HANDOFF *State);
 +    volatile PXB_PERSIST_SLOT slot = (PXB_PERSIST_SLOT)XB_PERSIST_VA;
-+    if (slot->Magic == XB_PERSIST_MAGIC)
++    return slot->Magic == XB_PERSIST_MAGIC &&
 +        NxkAvRestoreState((const NX_AV_HANDOFF *)&slot->Av);
++}
++
++/* Restore a validated retained display, including VGA reset controls. The cold driver
++ * changes scanout to the boot buffer and mutes/reprograms the encoder;
++ * doing that before restoring the image introduces a visible interruption.
++ * Invalid or absent saved displays still require ordinary initialization. */
++CODE_SEG("INIT")
++VOID NTAPI NxkInitializeBootVideo(BOOLEAN QuickLaunch)
++{
++    extern VOID NxkInitializeVideo(VOID);
++    if (!QuickLaunch || !NxkRestoreSavedVideo())
++        NxkInitializeVideo();
 +}
 +
  /* Read-only early-boot peek. XeConsumeChainloadSlot remains the only
   * destructive consumer of the one-shot quick-launch marker. */
  CODE_SEG("INIT")
-@@ -3734,6 +3757,12 @@ XeConsumeChainloadSlot(VOID)
+@@ -3734,6 +3769,12 @@ XeConsumeChainloadSlot(VOID)
      if (slot->Magic != XB_PERSIST_MAGIC)
          return NULL;          /* cold boot -- caller falls back to search */
  
@@ -369,10 +516,10 @@ index d3ae28e4..a8937c8b 100644
  
 diff --git a/tests/host/av-saved-image/check.py b/tests/host/av-saved-image/check.py
 new file mode 100644
-index 00000000..1d0f3b59
+index 00000000..dc7fed59
 --- /dev/null
 +++ b/tests/host/av-saved-image/check.py
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,302 @@
 +#!/usr/bin/env python3
 +"""Execute the production saved-image capture/restore on controlled MMIO/RAM admission."""
 +from pathlib import Path
@@ -386,15 +533,15 @@ index 00000000..1d0f3b59
 +out.mkdir(parents=True, exist_ok=True)
 +source = (root / 'hal/halx86/xbox/av.c').read_text()
 +
-+def body(name):
-+    match = re.search(r'(?:PVOID|VOID|ULONG) NTAPI\s+' + name + r'\s*\([^;]*?\)\s*\{', source)
++def body(name, text=source):
++    match = re.search(r'(?:PVOID|VOID|ULONG|BOOLEAN) NTAPI\s+' + name + r'\s*\([^;]*?\)\s*\{', text)
 +    assert match, 'missing production function: ' + name
-+    end = source.index('{', match.start()) + 1
++    end = text.index('{', match.start()) + 1
 +    depth = 1
 +    while depth:
-+        depth += (source[end] == '{') - (source[end] == '}')
++        depth += (text[end] == '{') - (text[end] == '}')
 +        end += 1
-+    return source[match.start():end]
++    return text[match.start():end]
 +
 +shim = r'''
 +#include <assert.h>
@@ -409,6 +556,8 @@ index 00000000..1d0f3b59
 +typedef size_t SIZE_T;
 +typedef int BOOLEAN;
 +#define NTAPI
++#define TRUE 1
++#define FALSE 0
 +#define CODE_SEG(x)
 +#define _In_
 +#define _In_opt_
@@ -420,7 +569,49 @@ index 00000000..1d0f3b59
 +#define NV2A_PRMCIO_CR_INDEX 0x6013d4
 +#define NV2A_PRMCIO_CR_DATA 0x6013d5
 +#define NV2A_PRAMDAC_GENERAL_CONTROL 0x680600
++#define NV2A_PRMVIO_SEQ_INDEX 0x0c03c4
++#define NV2A_PRMVIO_GR_INDEX 0x0c03ce
++#define NV2A_PRMCIO_ATTR_INDEX 0x6013c0
++#define NV2A_PRMCIO_ATTR_READ 0x6013c1
++#define NV2A_PRMCIO_STATUS 0x6013da
 +static UCHAR crtc[256];
++static UCHAR sequencer[5], graphics[9], attributes[21], attribute_index;
++static UCHAR sequencer_index, graphics_index, attribute_phase;
++static UCHAR NxkAvReadByte(PVOID base, ULONG offset)
++{
++    assert(base == (PVOID)0xfd000000UL);
++    switch (offset) {
++    case NV2A_PRMVIO_SEQ_INDEX: return sequencer_index;
++    case NV2A_PRMVIO_SEQ_INDEX + 1:
++        assert(sequencer_index < sizeof(sequencer)); return sequencer[sequencer_index];
++    case NV2A_PRMVIO_GR_INDEX: return graphics_index;
++    case NV2A_PRMVIO_GR_INDEX + 1:
++        assert(graphics_index < sizeof(graphics)); return graphics[graphics_index];
++    case NV2A_PRMCIO_ATTR_INDEX: return attribute_phase ? 0 : attribute_index;
++    case NV2A_PRMCIO_ATTR_READ:
++        assert((attribute_index & 31) < sizeof(attributes)); return attributes[attribute_index & 31];
++    case NV2A_PRMCIO_STATUS: attribute_phase = 0; return 0;
++    default: assert(0); return 0;
++    }
++}
++static VOID NxkAvWriteByte(PVOID base, ULONG offset, UCHAR value)
++{
++    assert(base == (PVOID)0xfd000000UL);
++    switch (offset) {
++    case NV2A_PRMVIO_SEQ_INDEX: sequencer_index = value; break;
++    case NV2A_PRMVIO_SEQ_INDEX + 1:
++        assert(sequencer_index < sizeof(sequencer)); sequencer[sequencer_index] = value; break;
++    case NV2A_PRMVIO_GR_INDEX: graphics_index = value; break;
++    case NV2A_PRMVIO_GR_INDEX + 1:
++        assert(graphics_index < sizeof(graphics)); graphics[graphics_index] = value; break;
++    case NV2A_PRMCIO_ATTR_INDEX:
++        if (!attribute_phase) { attribute_index = value | 0x20; attribute_phase = 1; }
++        else { assert((attribute_index & 31) < sizeof(attributes));
++               attributes[attribute_index & 31] = value; attribute_phase = 0; }
++        break;
++    default: assert(0);
++    }
++}
 +static UCHAR NxkAvReadCrtc(PVOID base, UCHAR index)
 +{ assert(base == (PVOID)0xfd000000UL); return crtc[index]; }
 +static VOID NxkAvWriteCrtc(PVOID base, UCHAR index, UCHAR value)
@@ -451,16 +642,49 @@ index 00000000..1d0f3b59
 +    return 1;
 +}
 +ULONG AvSetDisplayMode(PVOID, ULONG, ULONG, ULONG, ULONG, ULONG);
++BOOLEAN NxkRestoreSavedVideo(VOID);
 +'''
 +
 +main = r'''
 +#define SCANOUT (*(volatile ULONG *)0xfd600800UL)
 +#define GENERAL_CONTROL (*(volatile ULONG *)0xfd680600UL)
++static const NX_AV_HANDOFF *warm_state;
++static unsigned cold_video_calls, restore_video_calls;
++BOOLEAN NxkRestoreSavedVideo(VOID)
++{ ++restore_video_calls; return NxkAvRestoreState(warm_state); }
++VOID NxkInitializeVideo(VOID)
++{ ++cold_video_calls; SCANOUT = 0x03c00000; }
 +static void boot(void)
 +{
 +    AvSetSavedDataAddress(NULL); SCANOUT = 0x03c00000;
 +    crtc[1] = 89; crtc[7] = 2; crtc[0x12] = 223;
 +    crtc[0x28] = 3; crtc[0x11] = 0x80; GENERAL_CONTROL = 0;
++    crtc[0x17] = 0xe3; crtc[0x18] = 0xff;
++    crtc[7] |= 0x10; crtc[9] = 0x40;
++    sequencer[0] = 3; sequencer[1] = 1; sequencer[2] = 15; sequencer[4] = 6;
++    graphics[5] = 0x40; graphics[6] = 5; graphics[7] = 15; graphics[8] = 255;
++    attributes[0x10] = 0x4a; attributes[3] = 7; attribute_index = 0x20;
++    sequencer_index = 2; graphics_index = 7; attribute_phase = 1;
++}
++static void device_reset(void)
++{
++    AvSetSavedDataAddress(NULL); SCANOUT = 0; GENERAL_CONTROL = 0;
++    memset(crtc, 0, sizeof(crtc)); memset(sequencer, 0, sizeof(sequencer));
++    memset(graphics, 0, sizeof(graphics)); memset(attributes, 0, sizeof(attributes));
++    attribute_index = 0;
++    sequencer_index = graphics_index = attribute_phase = 0;
++}
++static void check_linear_renderer(void)
++{
++    /* The actual CPU framebuffer frontend is blank without the attribute
++     * enable/graphics bits; a zero shift mode selects planar pixels instead.
++     * CR17 and line compare independently govern row address progression. */
++    assert(attribute_index & 0x20);
++    assert((graphics[6] & 1) && (graphics[5] & 0x60) == 0x40);
++    assert(!(sequencer[1] & 8));
++    assert((crtc[0x17] & 3) == 3 && !(crtc[9] & 0x9f));
++    ULONG compare = crtc[0x18] | ((crtc[7] & 0x10) << 4) | ((crtc[9] & 0x40) << 3);
++    assert(compare >= 479);
 +}
 +int main(void)
 +{
@@ -476,8 +700,9 @@ index 00000000..1d0f3b59
 +    NxkAvCaptureState(&state);
 +    assert(state.SavedAddress == 0x82000000 && state.AllocationBytes == 1228864);
 +    assert(state.Width == 640 && state.Height == 480 && state.PixelFormat == 3);
++    assert(sequencer_index == 2 && graphics_index == 7 && attribute_index == 0x20);
 +    boot(); restored = 1232896;
-+    NxkAvRestoreState(&state);
++    assert(NxkAvRestoreState(&state));
 +    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL && SCANOUT == 0x02000040);
 +    assert(crtc[1] == 79 && crtc[0x12] == 223 && (crtc[7] & 0x42) == 2);
 +    assert(crtc[0x11] == 0x80 && GENERAL_CONTROL == 0x00100030);
@@ -514,10 +739,45 @@ index 00000000..1d0f3b59
 +    assert(SCANOUT == 0x03c00000 && crtc[1] == 89);
 +    boot(); invalid = state; invalid.PixelFormat = 0; NxkAvRestoreState(&invalid);
 +    assert(SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.PixelFormat = 1;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.Sequencer[1] |= 0x20;
++    assert(NxkAvRestoreState(&invalid) && sequencer[1] == 0x21);
++    boot(); invalid = state; invalid.Sequencer[1] |= 8;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.Graphics[5] = 0;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.Graphics[6] &= ~1;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.AttributeIndex &= ~0x20;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.CrtcMode &= ~1;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.MaxScan |= 1;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.LineCompare = 0; invalid.Overflow &= ~0x10;
++    invalid.MaxScan &= ~0x40;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
 +    boot(); NxkAvCaptureState(&invalid);
 +    assert(invalid.SavedAddress == 0 && invalid.AllocationBytes == 0);
 +    AvSetSavedDataAddress((PVOID)0x82000000UL); live = 0;
 +    NxkAvCaptureState(&invalid); assert(invalid.SavedAddress == 0);
++    /* A valid retained image must never pass through boot scanout. Invalid
++     * or cold handoffs still need the ordinary video initialization path. */
++    warm_state = &state; device_reset(); restored = 1232896;
++    NxkInitializeBootVideo(TRUE);
++    assert(cold_video_calls == 0 && restore_video_calls == 1 && SCANOUT == 0x02000040);
++    check_linear_renderer();
++    assert(!memcmp(sequencer, state.Sequencer, sizeof(sequencer)));
++    assert(!memcmp(graphics, state.Graphics, sizeof(graphics)));
++    assert(!memcmp(attributes, state.Attributes, sizeof(attributes)));
++    boot(); restored = 0; NxkInitializeBootVideo(TRUE);
++    assert(cold_video_calls == 1 && restore_video_calls == 2 && SCANOUT == 0x03c00000);
++    boot(); restored = 1232896; NxkInitializeBootVideo(FALSE);
++    assert(cold_video_calls == 2 && restore_video_calls == 2 && SCANOUT == 0x03c00000);
++    invalid = state; invalid.Height = 481; warm_state = &invalid;
++    NxkInitializeBootVideo(TRUE);
++    assert(cold_video_calls == 3 && restore_video_calls == 3 && SCANOUT == 0x03c00000);
 +    /* Mode dimensions must come from the public identifier, not padded pitch
 +     * or the 720-pixel boot viewport. Exercise both observed title formats. */
 +    const ULONG modes[][4] = {
@@ -549,10 +809,12 @@ index 00000000..1d0f3b59
 +}
 +'''
 +text = shim + (root/'boot/nxldr/av-handoff.h').read_text()
-+for name in ('NxkAvModeSize', 'NxkAvSetActiveArea',
++for name in ('NxkAvModeSize', 'NxkAvSetActiveArea', 'NxkAvSetPitch',
++             'NxkAvCaptureVga', 'NxkAvRestoreVga',
 +             'AvGetSavedDataAddress', 'AvSetSavedDataAddress', 'AvSetDisplayMode',
 +             'NxkAvCaptureState', 'NxkAvRestoreState', 'NxkAvAdoptSavedAllocation'):
 +    text += '\n' + body(name)
++text += '\n' + body('NxkInitializeBootVideo', (root/'ntoskrnl/xb/xbe.c').read_text())
 +unit = out/'check.c'; binary = out/'check'
 +unit.write_text(text + main)
 +subprocess.run(['cc','-std=c11','-D_GNU_SOURCE','-O2','-g','-Wall','-Wextra','-Werror',
@@ -627,6 +889,25 @@ index 4edef078..9180a2bc 100644
      reset(); NxkMmSetPersistentPages(0x30000, PAGE_SIZE, TRUE);
      CHECK(!PmBit(PmSelected, 0x30));
      printf("persistence host checks: %u/%u passed\n", tests - failed, tests);
+diff --git a/tests/host/quick-launch-ui/check.py b/tests/host/quick-launch-ui/check.py
+index 8aee8569..a6b7f1c1 100644
+--- a/tests/host/quick-launch-ui/check.py
++++ b/tests/host/quick-launch-ui/check.py
+@@ -75,9 +75,12 @@ subprocess.run([str(binary)], check=True)
+ 
+ phase = function(init, "Phase1InitializationDiscard")
+ peek = phase.index("QuickLaunch = NxkQuickLaunchPending()")
+-video = phase.index("NxkInitializeVideo()")
++mmio = phase.index("NxkMmEnsureMmioWindow()")
++pci = phase.index("NxConfigurePciDevicesLate()")
++video = phase.index("NxkInitializeBootVideo(QuickLaunch)")
+ bootvid = phase.index("InbvDriverInitialize")
+-assert peek < video < bootvid
++assert peek < mmio < pci < video < bootvid
++assert "NxkInitializeVideo()" not in phase
+ 
+ cold = block_after(phase, "if (!QuickLaunch)")
+ assert "InbvDriverInitialize" in cold
 diff --git a/tests/xbe/saved-image/Makefile b/tests/xbe/saved-image/Makefile
 new file mode 100644
 index 00000000..99bce320
@@ -640,10 +921,10 @@ index 00000000..99bce320
 +include $(NXDK_DIR)/Makefile
 diff --git a/tests/xbe/saved-image/main.c b/tests/xbe/saved-image/main.c
 new file mode 100644
-index 00000000..6b5411cf
+index 00000000..54759adf
 --- /dev/null
 +++ b/tests/xbe/saved-image/main.c
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,196 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + * Independent public-API characterization. No reference implementation input.
 + * Reproduces the observed Morrowind public AV/persistence/quick-launch chain.
@@ -666,6 +947,32 @@ index 00000000..6b5411cf
 +{
 +    *(volatile UCHAR *)0xfd6013d4 = index;
 +    return *(volatile UCHAR *)0xfd6013d5;
++}
++static UCHAR vga_read(ULONG offset, UCHAR index)
++{
++    volatile UCHAR *selector = (volatile UCHAR *)(0xfd000000UL + offset);
++    UCHAR previous = *selector;
++    *selector = index;
++    UCHAR value = selector[1];
++    *selector = previous;
++    return value;
++}
++static BOOLEAN linear_scanout_ready(ULONG height)
++{
++    UCHAR seq0 = vga_read(0x0c03c4, 0), seq1 = vga_read(0x0c03c4, 1);
++    UCHAR gr5 = vga_read(0x0c03ce, 5), gr6 = vga_read(0x0c03ce, 6);
++    (void)*(volatile UCHAR *)0xfd6013da; /* Select the attribute index phase. */
++    UCHAR attr = *(volatile UCHAR *)0xfd6013c0;
++    UCHAR mode = cr_read(0x17), maxscan = cr_read(9), overflow = cr_read(7);
++    ULONG compare = cr_read(0x18) | ((overflow & 0x10) << 4) | ((maxscan & 0x40) << 3);
++    char diagnostic[200];
++    snprintf(diagnostic, sizeof(diagnostic),
++        "# vga_after seq0=%02x seq1=%02x gr5=%02x gr6=%02x attr=%02x cr17=%02x maxscan=%02x line_compare=%lu\n",
++        seq0, seq1, gr5, gr6, attr, mode, maxscan, compare);
++    tap_puts(diagnostic);
++    return (seq0 & 3) == 3 && !(seq1 & 8) && (gr5 & 0x60) == 0x40 &&
++           (gr6 & 1) && (attr & 0x20) && (mode & 3) == 3 && !(maxscan & 0x9f) &&
++           height && compare >= height - 1;
 +}
 +static void check(ULONG n, BOOLEAN pass, const char *name)
 +{
@@ -695,6 +1002,7 @@ index 00000000..6b5411cf
 +        char dimensions[160];
 +        snprintf(dimensions, sizeof(dimensions), "# geometry_after width=%lu height=%lu depth=%u\n", width, height, cr28 & 3);
 +        tap_puts(dimensions);
++        BOOLEAN ready = linear_scanout_ready(height);
 +        PVOID saved = AvGetSavedDataAddress();
 +        PULONG record = saved ? (PULONG)saved : (PULONG)state.pointer;
 +        PULONG image = (PULONG)((PUCHAR)record + HEADER_BYTES);
@@ -743,12 +1051,13 @@ index 00000000..6b5411cf
 +        check(13, width == 640 && height == 480 && (cr28 & 3) == 3,
 +                "retained image keeps its 640x480 32-bit display geometry");
 +        check(14, state.mode_geometry, "AvSetDisplayMode programs the retained image geometry");
++        check(15, ready, "retained image keeps packed VGA renderer controls");
 +        MmPersistContiguousMemory(before, PAGE_SIZE, FALSE);
 +        MmPersistContiguousMemory(after, PAGE_SIZE, FALSE);
 +        MmFreeContiguousMemory(before); MmFreeContiguousMemory(after);
 +        stop();
 +    }
-+    tap_version(14); tap_plan(14);
++    tap_version(14); tap_plan(15);
 +    if (!XVideoSetMode(640,480,32,REFRESH_DEFAULT)) {
 +        tap_not_ok(1,"required video mode is available"); stop();
 +    }
