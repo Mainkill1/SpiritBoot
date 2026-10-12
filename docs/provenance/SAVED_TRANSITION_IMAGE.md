@@ -57,14 +57,28 @@ claim of personnel-separated clean-room certification.
 
 The maintained two-boot saved-image guest checks slot replacement/clear,
 discoverability, pixel preservation, allocation ownership, exclusive physical
-ownership, scanout, and final clear. Native Morrowind verification is required
-before claiming the visible transition is repaired. A stage-two scanout check
-alone cannot prove an uninterrupted image throughout the emulator's device reset.
+ownership, scanout, final clear, and complete reclamation. It deliberately
+persists unrelated owned pages directly before and after the image and verifies
+that freeing the image leaves both neighbors intact and exclusively owned.
+Review exposed that admitted bitmap runs alone did not preserve this separate
+allocation boundary; the saved extent is now adopted after staged memory copies
+finish, before launch-page adoption or title entry.
 
-The candidate 64 MiB release BIOS `cc3e075bf995075b8a28cc13f0b931c726584f4b2a9c68f66191cef0fc0194cf`
-passes all nine checks with the exact same guest used for the failing baseline.
-Its reconstructed source tree is `c5cef281b35d546d43e36912cd52d3ac3b7b451b`.
+The final 64 MiB release BIOS `f9259cab0293ef1ffc63a55c3108b5b36cb25d9c32bf1e43af9b56a0aac2181e`
+and Complex pass all twelve checks. Its reconstructed source tree is
+`94879d4bc39cd314f2d0fb7ed813dcf38df5d666`.
 The production AV host fixture passes admission, adjacent selected allocations,
-missing/short persistence, invalid ranges, scanout bounds, and clear cases under
-UBSan. The existing warm staging and AV encoder fixtures pass; the product host
-suite passes 129 tests, with three optional environment checks skipped.
+missing/short persistence, invalid ranges, scanout bounds, late adoption/failure,
+and clear cases under UBSan. The existing warm staging and AV encoder fixtures
+pass; the product host suite passes 129 tests, with three optional environment
+checks skipped.
+
+The first corrected-display candidate (`cc3e075b...`) was also checked on native
+Windows Morrowind. The trace captured the saved address returning after reset,
+normal unpersist/free/clear calls, and scanout still pointing at the image when
+the incoming title first programmed its next mode. The debugger detached with
+no outstanding calls or owned breakpoints. The operator confirmed the correct
+image stayed visible, while noting a screen-ratio adjustment. Exact geometry
+throughout reset remains outside the demonstrated correction. A stage-two
+scanout check alone cannot prove an uninterrupted image throughout device reset.
+Final-candidate native verification and the full CI matrix remain pending.

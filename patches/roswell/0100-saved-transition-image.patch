@@ -33,7 +33,7 @@ index 61485f9e..4024c2c8 100644
  
  typedef struct _PM_HANDOFF {
 diff --git a/hal/halx86/xbox/av.c b/hal/halx86/xbox/av.c
-index 995a5dd6..75cf5f14 100644
+index 995a5dd6..5c95c27b 100644
 --- a/hal/halx86/xbox/av.c
 +++ b/hal/halx86/xbox/av.c
 @@ -28,6 +28,7 @@
@@ -55,7 +55,7 @@ index 995a5dd6..75cf5f14 100644
  
  PVOID NTAPI
  AvGetSavedDataAddress(VOID)
-@@ -113,6 +118,55 @@ AvSetSavedDataAddress(_In_opt_ PVOID Address)
+@@ -113,6 +118,77 @@ AvSetSavedDataAddress(_In_opt_ PVOID Address)
      NxkAvSavedDataAddress = Address;
  }
  
@@ -108,10 +108,32 @@ index 995a5dd6..75cf5f14 100644
 +                     State->SourceFormat, State->Pitch, State->FrameBuffer);
 +}
 +
++/* Run after INIT/workspace bytes have been restored, before the next title.
++ * Earlier adoption would detach admission bits still needed by staged copies.
++ * Split this known extent out of a maximal restored run so neighbors retain
++ * their ownership when the title unpersists and frees the saved image. */
++VOID NTAPI
++NxkAvAdoptSavedAllocation(const NX_AV_HANDOFF *State)
++{
++    extern BOOLEAN NxkMmAdoptRestored(PVOID Alias, SIZE_T Size);
++    ULONG_PTR address = (ULONG_PTR)AvGetSavedDataAddress();
++    SIZE_T size = State->AllocationBytes;
++    if (!address) return;
++    if (address != State->SavedAddress || address < 0x80000000UL ||
++        address >= 0x84000000UL || (address & (PAGE_SIZE - 1)) ||
++        !size || size > 0x84000000UL - address) {
++        AvSetSavedDataAddress(NULL);
++        return;
++    }
++    size = (size + PAGE_SIZE - 1) & ~(SIZE_T)(PAGE_SIZE - 1);
++    if (!NxkMmAdoptRestored((PVOID)address, size))
++        AvSetSavedDataAddress(NULL);
++}
++
  /* Probe the SMBus for the TV encoder; 0 if neither known encoder answers
   * (an Xcalibur box, not handled here). */
  static UCHAR
-@@ -275,8 +329,9 @@ AvSetDisplayMode(
+@@ -275,8 +351,9 @@ AvSetDisplayMode(
      UCHAR cr19, cr25;
  
      UNREFERENCED_PARAMETER(Step);
@@ -159,7 +181,7 @@ index c69855d1..3bbadf50 100644
      slot->Version = PM_VERSION; slot->BitmapBytes = PM_BYTES;
      slot->ImageBase = (ULONG)__ImageBase; slot->LaunchHash = PmLaunchHash();
 diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
-index d3ae28e4..92909e7c 100644
+index d3ae28e4..a8937c8b 100644
 --- a/ntoskrnl/xb/xbe.c
 +++ b/ntoskrnl/xb/xbe.c
 @@ -29,6 +29,8 @@
@@ -201,12 +223,25 @@ index d3ae28e4..92909e7c 100644
  /* Read-only early-boot peek. XeConsumeChainloadSlot remains the only
   * destructive consumer of the one-shot quick-launch marker. */
  CODE_SEG("INIT")
+@@ -3734,6 +3757,12 @@ XeConsumeChainloadSlot(VOID)
+     if (slot->Magic != XB_PERSIST_MAGIC)
+         return NULL;          /* cold boot -- caller falls back to search */
+ 
++    /* Staged copies are complete now. Establish the saved image's separate
++     * allocation before adopting the launch page or entering title code. */
++    {
++        extern VOID NTAPI NxkAvAdoptSavedAllocation(const NX_AV_HANDOFF *State);
++        NxkAvAdoptSavedAllocation((const NX_AV_HANDOFF *)&slot->Av);
++    }
+     type = slot->Header.dwLaunchDataType;
+     slot->Magic = 0;
+ 
 diff --git a/tests/host/av-saved-image/check.py b/tests/host/av-saved-image/check.py
 new file mode 100644
-index 00000000..1e4359a3
+index 00000000..111cae00
 --- /dev/null
 +++ b/tests/host/av-saved-image/check.py
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,132 @@
 +#!/usr/bin/env python3
 +"""Execute the production saved-image capture/restore on controlled MMIO/RAM admission."""
 +from pathlib import Path
@@ -257,6 +292,8 @@ index 00000000..1e4359a3
 +static ULONG NxkAvDisplayMode, NxkAvSourceFormat, NxkAvPitch;
 +static SIZE_T live, restored;
 +static int adjacent;
++static int adopt_available = 1, adopt_calls;
++static SIZE_T adopted;
 +SIZE_T NxMmQueryAllocationSize(PVOID address)
 +{ return address == (PVOID)0x82000000UL ? live : 0; }
 +SIZE_T NxkMmQueryRestored(PVOID address)
@@ -264,6 +301,14 @@ index 00000000..1e4359a3
 +BOOLEAN NxkMmPersistentPage(ULONG_PTR page)
 +{ return (adjacent && page == 0x1fff) ||
 +         (page >= 0x2000 && page - 0x2000 < restored / PAGE_SIZE); }
++BOOLEAN NxkMmAdoptRestored(PVOID address, SIZE_T size)
++{
++    ++adopt_calls;
++    assert(address == (PVOID)0x82000000UL);
++    if (!adopt_available) return 0;
++    adopted = size;
++    return 1;
++}
 +ULONG AvSetDisplayMode(PVOID, ULONG, ULONG, ULONG, ULONG, ULONG);
 +'''
 +
@@ -287,6 +332,14 @@ index 00000000..1e4359a3
 +    boot(); adjacent = 1; NxkAvRestoreState(&state);
 +    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL && SCANOUT == 0x02000040);
 +    adjacent = 0;
++    assert(adopt_calls == 0); /* Staged copies still need their admission bits. */
++    NxkAvAdoptSavedAllocation(&state);
++    assert(adopt_calls == 1 && adopted == 1232896);
++    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL);
++    adopt_available = 0; NxkAvAdoptSavedAllocation(&state);
++    assert(AvGetSavedDataAddress() == NULL);
++    NxkAvAdoptSavedAllocation(&state); assert(adopt_calls == 2);
++    adopt_available = 1;
 +
 +    boot(); restored = 0; NxkAvRestoreState(&state);
 +    assert(AvGetSavedDataAddress() == NULL && SCANOUT == 0x03c00000);
@@ -312,7 +365,7 @@ index 00000000..1e4359a3
 +'''
 +text = shim + (root/'boot/nxldr/av-handoff.h').read_text()
 +for name in ('AvGetSavedDataAddress', 'AvSetSavedDataAddress', 'AvSetDisplayMode',
-+             'NxkAvCaptureState', 'NxkAvRestoreState'):
++             'NxkAvCaptureState', 'NxkAvRestoreState', 'NxkAvAdoptSavedAllocation'):
 +    text += '\n' + body(name)
 +unit = out/'check.c'; binary = out/'check'
 +unit.write_text(text + main)
@@ -371,10 +424,10 @@ index 00000000..99bce320
 +include $(NXDK_DIR)/Makefile
 diff --git a/tests/xbe/saved-image/main.c b/tests/xbe/saved-image/main.c
 new file mode 100644
-index 00000000..4721cf2b
+index 00000000..bed26d29
 --- /dev/null
 +++ b/tests/xbe/saved-image/main.c
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,147 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + * Independent public-API characterization. No reference implementation input.
 + * This tests a candidate chain; a title trace must establish its relevance.
@@ -391,7 +444,7 @@ index 00000000..4721cf2b
 +#define HEADER_BYTES 64
 +#define SCANOUT (*(volatile ULONG *)0xFD600800UL)
 +typedef struct {
-+    ULONG magic, pointer, physical, allocation, scanout;
++    ULONG magic, pointer, physical, allocation, scanout, before, after;
 +} State;
 +static void check(ULONG n, BOOLEAN pass, const char *name)
 +{
@@ -439,18 +492,53 @@ index 00000000..4721cf2b
 +        check(9, AvGetSavedDataAddress() == NULL, "next owner clears the saved address");
 +        MmPersistContiguousMemory(record, MmQueryAllocationSize(record), FALSE);
 +        MmFreeContiguousMemory(record);
++        PULONG before = (PULONG)state.before, after = (PULONG)state.after;
++        BOOLEAN neighbors = MmQueryAllocationSize(before) == PAGE_SIZE &&
++                MmQueryAllocationSize(after) == PAGE_SIZE;
++        for (ULONG i = 0; i < PAGE_SIZE / 4; ++i)
++            if (before[i] != (0x53555050 ^ i) || after[i] != (0x53555050 ^ i)) neighbors = FALSE;
++        check(10, neighbors, "freeing saved image preserves neighboring persistent owners");
++        PVOID competingBefore = MmAllocateContiguousMemoryEx(PAGE_SIZE,
++                MmGetPhysicalAddress(before), MmGetPhysicalAddress(before) + PAGE_SIZE - 1,
++                PAGE_SIZE, PAGE_READWRITE);
++        PVOID competingAfter = MmAllocateContiguousMemoryEx(PAGE_SIZE,
++                MmGetPhysicalAddress(after), MmGetPhysicalAddress(after) + PAGE_SIZE - 1,
++                PAGE_SIZE, PAGE_READWRITE);
++        check(11, competingBefore == NULL && competingAfter == NULL,
++                "freeing saved image keeps neighboring pages exclusive");
++        if (competingBefore) MmFreeContiguousMemory(competingBefore);
++        if (competingAfter) MmFreeContiguousMemory(competingAfter);
++        ULONG reclaimedBytes = (state.allocation + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
++        PVOID reclaimed = MmAllocateContiguousMemoryEx(reclaimedBytes, physical,
++                physical + reclaimedBytes - 1, PAGE_SIZE, PAGE_READWRITE);
++        check(12, reclaimed != NULL, "next owner can reclaim the entire saved allocation");
++        if (reclaimed) MmFreeContiguousMemory(reclaimed);
++        MmPersistContiguousMemory(before, PAGE_SIZE, FALSE);
++        MmPersistContiguousMemory(after, PAGE_SIZE, FALSE);
++        MmFreeContiguousMemory(before); MmFreeContiguousMemory(after);
 +        stop();
 +    }
-+    tap_version(14); tap_plan(9);
++    tap_version(14); tap_plan(12);
 +    if (!XVideoSetMode(640,480,32,REFRESH_DEFAULT)) {
 +        tap_not_ok(1,"required video mode is available"); stop();
 +    }
-+    PULONG record = MmAllocateContiguousMemoryEx(BYTES + HEADER_BYTES, 0, 0x7fffffff,
++    PULONG record = MmAllocateContiguousMemoryEx(BYTES + HEADER_BYTES, 0x02000000,
++                0x02000000 + ((BYTES + HEADER_BYTES + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)) - 1,
 +                                                PAGE_SIZE, PAGE_READWRITE | PAGE_WRITECOMBINE);
 +    if (!record) { tap_not_ok(1,"owned saved image is available"); stop(); }
 +    state.pointer = (ULONG)record;
 +    state.physical = MmGetPhysicalAddress(record);
 +    state.allocation = MmQueryAllocationSize(record);
++    ULONG rounded = (state.allocation + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
++    PULONG before = MmAllocateContiguousMemoryEx(PAGE_SIZE, state.physical - PAGE_SIZE,
++            state.physical - 1, PAGE_SIZE, PAGE_READWRITE);
++    PULONG after = MmAllocateContiguousMemoryEx(PAGE_SIZE, state.physical + rounded,
++            state.physical + rounded + PAGE_SIZE - 1, PAGE_SIZE, PAGE_READWRITE);
++    if (!before || !after) { tap_puts("Bail out! exact neighboring pages unavailable\n"); stop(); }
++    state.before = (ULONG)before; state.after = (ULONG)after;
++    for (ULONG i = 0; i < PAGE_SIZE / 4; ++i) before[i] = after[i] = 0x53555050 ^ i;
++    MmPersistContiguousMemory(before, PAGE_SIZE, TRUE);
++    MmPersistContiguousMemory(after, PAGE_SIZE, TRUE);
 +    memset(record, 0, HEADER_BYTES);
 +    /* Public data observed at the saved-buffer boundary: resource kind,
 +     * pixel address, unlocked state, linear format, 640x480 / 2560-byte pitch.
