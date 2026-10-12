@@ -54,7 +54,7 @@ The reader briefly stops the guest, verifies that the census update sequence is 
 - **Bins** count requested bytes in 16-byte ranges, with live and peak live counts. Requests over 65,536 bytes share the overflow bin; the small-object layout decision uses the exact bins below that limit.
 - **Tags** provide allocation, free, live, peak-live, and sampled lifetime totals by request bin and kernel/title domain.
 - **Pages** report fresh refills, empty-page reuse, detached pages, active pages, and retained empty pages by class/domain. The class size includes the allocator's 8-byte block header.
-- **Bucket page totals** report the current and global peak number of pages attached to small-object bucket classes. The reader also compares the current total with the sum of per-class/domain active and retained-empty rows; any mismatch makes the capture incomplete.
+- **Bucket page totals** report the current and global peak number of physical pages backing small-object buckets. Reclassifying an empty page does not change the physical total; a page leaves the total only after the page allocator returns it. During detach/reuse or detach/free, the global count can briefly differ from the per-class/domain rows, so the reader marks that capture incomplete. Use only complete captures at settled checkpoints.
 - **Lifetimes** are sampled at one allocation in 64 and placed in `<1 s`, `1–30 s`, and `>=30 s` buckets. Live samples are right-censored and counted separately.
 - **Integrity counters** identify table overflow, missed frees, counter saturation, and page-accounting underflow. Any nonzero integrity counter sets `incomplete: true`; do not use that capture to choose classes.
 

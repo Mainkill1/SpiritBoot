@@ -1,0 +1,93 @@
+diff --git a/ntoskrnl/xb/mm/pool-census.h b/ntoskrnl/xb/mm/pool-census.h
+index 92ad81a3..b02faf3f 100644
+--- a/ntoskrnl/xb/mm/pool-census.h
++++ b/ntoskrnl/xb/mm/pool-census.h
+@@ -133,6 +133,7 @@ VOID NxPoolCensusPageAttach(ULONG ClassIndex,
+ VOID NxPoolCensusPageBecameActive(ULONG ClassIndex, UCHAR Domain);
+ VOID NxPoolCensusPageBecameEmpty(ULONG ClassIndex, UCHAR Domain);
+ VOID NxPoolCensusPageDetach(ULONG ClassIndex, UCHAR Domain);
++VOID NxPoolCensusPageRelease(VOID);
+ 
+ #define NXP_POOL_CENSUS_PACK_CLASS(Class, Bin, Domain, Sampled) \
+     ((USHORT)(((Class) & NXP_POOL_CENSUS_CLASS_MASK) | \
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index b1d9f200..245b1f37 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -666,6 +666,9 @@ NxpReclaimEmptyBucketPages(VOID)
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+ 
+         NXP_PAGES_FREE((PVOID)PageVa);
++#ifdef NXK_POOL_CENSUS
++        NxPoolCensusPageRelease();
++#endif
+         Freed++;
+     }
+     return Freed;
+diff --git a/ntoskrnl/xb/mm/poolcensus.c b/ntoskrnl/xb/mm/poolcensus.c
+index af5b5508..5dfab7ec 100644
+--- a/ntoskrnl/xb/mm/poolcensus.c
++++ b/ntoskrnl/xb/mm/poolcensus.c
+@@ -394,9 +394,14 @@ NxPoolCensusPageAttach(ULONG ClassIndex, UCHAR Domain, BOOLEAN Reused)
+     NxpPoolCensusIncrement(&Stats->CurrentActive);
+     if (Stats->CurrentActive > Stats->PeakActive)
+         Stats->PeakActive = Stats->CurrentActive;
+-    NxpPoolCensusIncrement(&NxpPoolCensusData.BucketPagesCurrent);
+-    if (NxpPoolCensusData.BucketPagesCurrent > NxpPoolCensusData.BucketPagesPeak)
+-        NxpPoolCensusData.BucketPagesPeak = NxpPoolCensusData.BucketPagesCurrent;
++    if (!Reused)
++    {
++        NxpPoolCensusIncrement(&NxpPoolCensusData.BucketPagesCurrent);
++        if (NxpPoolCensusData.BucketPagesCurrent >
++            NxpPoolCensusData.BucketPagesPeak)
++            NxpPoolCensusData.BucketPagesPeak =
++                NxpPoolCensusData.BucketPagesCurrent;
++    }
+     NxpPoolCensusRelease(OldIrql);
+ }
+ 
+@@ -443,6 +448,14 @@ NxPoolCensusPageDetach(ULONG ClassIndex, UCHAR Domain)
+     else
+         Stats->CurrentEmpty--;
+     NxpPoolCensusIncrement(&Stats->Detaches);
++    NxpPoolCensusRelease(OldIrql);
++}
++
++VOID
++NxPoolCensusPageRelease(VOID)
++{
++    KIRQL OldIrql;
++    NxpPoolCensusAcquire(&OldIrql);
+     if (NxpPoolCensusData.BucketPagesCurrent == 0)
+         NxpPoolCensusIncrement(&NxpPoolCensusData.PageUnderflows);
+     else
+diff --git a/tests/host/pool-census/check.py b/tests/host/pool-census/check.py
+index d723f18b..596aecf5 100644
+--- a/tests/host/pool-census/check.py
++++ b/tests/host/pool-census/check.py
+@@ -19,6 +19,7 @@ pool = pool_path.read_text()
+ cmake = cmake_path.read_text()
+ for hook in ("NxPoolCensusAllocate(", "NxPoolCensusFree(", "NxPoolCensusFreeLarge(",
+              "NxPoolCensusPageAttach(", "NxPoolCensusPageBecameEmpty(",
++             "NxPoolCensusPageRelease(",
+              "NXP_POOL_CENSUS_PACK_CLASS", "NXP_POOL_CENSUS_GET_CLASS"):
+     assert hook in pool, f"production pool hook missing: {hook}"
+ assert "option(NXK_POOL_CENSUS" in cmake
+@@ -167,6 +168,8 @@ int main(void) {
+     NxPoolCensusPageBecameActive(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
+     NxPoolCensusPageBecameEmpty(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
+     NxPoolCensusPageDetach(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
++    assert(NxpPoolCensusData.BucketPagesCurrent == 1);
++    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].CurrentEmpty == 0);
+     NxPoolCensusPageAttach(2, NXP_POOL_CENSUS_DOMAIN_SHARED, TRUE);
+     assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].FreshRefills == 1);
+     assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].EmptyReuses == 1);
+@@ -178,6 +181,8 @@ int main(void) {
+     assert(NxpPoolCensusData.BucketPagesPeak == 1);
+     NxPoolCensusPageBecameEmpty(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
+     NxPoolCensusPageDetach(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
++    assert(NxpPoolCensusData.BucketPagesCurrent == 1);
++    NxPoolCensusPageRelease();
+     assert(NxpPoolCensusData.BucketPagesCurrent == 0);
+     assert(NxpPoolCensusData.BucketPagesPeak == 1);
+     assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].Detaches == 2);
