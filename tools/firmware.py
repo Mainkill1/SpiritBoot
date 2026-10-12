@@ -98,7 +98,7 @@ def patch_inputs(patches):
 
 def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                    media_policy="emulator-file-media", metadata_counters=False,
-                   memory_mib=128, reserve_upper_ram=False):
+                   memory_mib=128, reserve_upper_ram=False, pool_census=False):
     source, output = Path(source).resolve(), Path(output).resolve()
     if variant not in ("release", "debug"):
         raise ValueError("variant must be release or debug")
@@ -106,6 +106,8 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
         raise ValueError("invalid media policy")
     if not isinstance(metadata_counters, bool):
         raise ValueError("metadata counters must be a boolean")
+    if not isinstance(pool_census, bool):
+        raise ValueError("pool census must be a boolean")
     if memory_mib not in (64, 128):
         raise ValueError("memory capacity must be 64 or 128 MiB")
     if not isinstance(reserve_upper_ram, bool):
@@ -123,6 +125,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                 "reserve_upper_ram": reserve_upper_ram,
                 "rom_kernel": profile["rom_kernel"],
                 "metadata_counters": metadata_counters,
+                "pool_census": pool_census,
                 "source": str(source), "source_directory": str(source), "output_directory": str(output),
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "commands": []}
@@ -194,7 +197,9 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                  "-DXBOX_EMULATOR_FILE_MEDIA=" +
                  ("ON" if media_policy == "emulator-file-media" else "OFF"),
                  "-DNXK_METADATA_COUNTERS=" +
-                 ("ON" if metadata_counters else "OFF")])
+                 ("ON" if metadata_counters else "OFF"),
+                 "-DNXK_POOL_CENSUS=" +
+                 ("ON" if pool_census else "OFF")])
             run(["cmake", "--build", str(build), "--clean-first", "--target", "flash", "--parallel", "4"])
             boot_setup = actual_source / "ntoskrnl/xb/bootsetup_native.c"
             if boot_setup.exists():
@@ -265,12 +270,16 @@ def grade_tap(text):
 
 
 def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve_hdd=False,
-                 tb_plugin=None, memory_mib=128):
+                 tb_plugin=None, memory_mib=128, gdb_port=None):
     """Capture an open-firmware run. A deadline never becomes a passing test."""
     if not isinstance(timeout, (int, float)) or not 0 < timeout <= 86400:
         raise ValueError("timeout must be between 0 and 86400 seconds")
     if memory_mib not in (64, 128):
         raise ValueError("memory capacity must be 64 or 128 MiB")
+    if gdb_port is not None and (not isinstance(gdb_port, int) or
+                                 isinstance(gdb_port, bool) or
+                                 not 1 <= gdb_port <= 65535):
+        raise ValueError("gdb port must be an integer from 1 to 65535")
     paths = {"xemu": Path(xemu).resolve(), "flash": Path(flash).resolve(),
              "hdd": Path(hdd).resolve()}
     if dvd is not None:
@@ -310,6 +319,8 @@ def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve
     serial = output / "serial.log"
     serial.touch()
     command = [str(paths["xemu"]), "-config_path", str(config)]
+    if gdb_port is not None:
+        command.extend(["-gdb", f"tcp:127.0.0.1:{gdb_port}"])
     if not preserve_hdd:
         command.append("-snapshot")
     command.extend(["-device", "lpc47m157", "-serial", f"file:{serial}"])
@@ -321,6 +332,7 @@ def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve
     manifest = {"schema": 1, "status": "launch_failed", "command": command,
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "timeout_seconds": timeout, "memory_mib": memory_mib,
+                "gdb_port": gdb_port,
                 "boot_mode": "open-direct", "snapshot": not preserve_hdd, "expect_tap": tap,
                 "assets": {name: {"path": str(path), "sha256": sha256(path),
                                   "size": path.stat().st_size} for name, path in paths.items()}}
