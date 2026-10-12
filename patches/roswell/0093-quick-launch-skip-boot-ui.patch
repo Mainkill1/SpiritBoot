@@ -1,0 +1,229 @@
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -554,6 +554,18 @@
+     UCHAR              LaunchData[3072]; /* the payload titles hand across */
+     ULONG              LaunchPagePa; /* independently added original page PA */
+ } XB_PERSIST_SLOT, *PXB_PERSIST_SLOT;
++
++/* Read-only early-boot peek. XeConsumeChainloadSlot remains the only
++ * destructive consumer of the one-shot quick-launch marker. */
++CODE_SEG("INIT")
++BOOLEAN NTAPI
++NxkQuickLaunchPending(VOID)
++{
++    volatile XB_PERSIST_SLOT *slot =
++        (volatile XB_PERSIST_SLOT *)XB_PERSIST_VA;
++
++    return slot->Magic == XB_PERSIST_MAGIC;
++}
+ 
+ /* The disc/HDD path of the XBE currently running, recorded at launch so a
+  * warm reset with LDT_TITLE and an EMPTY szLaunchPath -- the retail
+--- a/ntoskrnl/ex/init.c
++++ b/ntoskrnl/ex/init.c
+@@ -1373,6 +1373,7 @@
+ 
+ /* XBE loader (ntoskrnl/xb/xbe.c), linked into the kernel. */
+ VOID XeRunInitialTitle(VOID);
++BOOLEAN NTAPI NxkQuickLaunchPending(VOID);
+ 
+ CODE_SEG("INIT")
+ VOID
+@@ -1383,7 +1384,8 @@
+     NTSTATUS Status, MsgStatus;
+     TIME_FIELDS TimeFields;
+     LARGE_INTEGER SystemBootTime, UniversalBootTime, OldTime, Timeout;
+-    BOOLEAN NoGuiBoot, ResetBias = FALSE, AlternateShell = FALSE;
++    BOOLEAN NoGuiBoot, QuickLaunch;
++    BOOLEAN ResetBias = FALSE, AlternateShell = FALSE;
+     PLDR_DATA_TABLE_ENTRY NtosEntry;
+     PMESSAGE_RESOURCE_ENTRY MsgEntry;
+     PCHAR CommandLine, Y2KHackRequired, SafeBoot, Environment;
+@@ -1419,6 +1421,10 @@
+     /* Do Phase 1 HAL Initialization */
+     if (!HalInitSystem(1, LoaderBlock)) KeBugCheck(HAL1_INITIALIZATION_FAILED);
+ 
++    /* Peek without consuming the launch handoff. The title loader remains
++     * responsible for consuming it after Phase 1 finishes. */
++    QuickLaunch = NxkQuickLaunchPending();
++
+     /* Get the command line and upcase it */
+     CommandLine = (LoaderBlock->LoadOptions ? _strupr(LoaderBlock->LoadOptions) : NULL);
+ 
+@@ -1451,31 +1457,41 @@
+         NxkInitializeVideo();
+     }
+ 
+-    /* Setup the boot video driver */
+-    InbvEnableBootDriver(!NoGuiBoot);
+-    InbvDriverInitialize(LoaderBlock, IDB_MAX_RESOURCES);
+-
+-    /* Check if GUI boot is enabled */
+-    if (!NoGuiBoot)
+-    {
+-        /* Hold the actual SpiritBoot splash at the controller gate before
+-         * later initialization can replace it. Setup owns and retires its
+-         * temporary OHCI/DMA state before normal boot resumes. */
+-        InbvEnableDisplayString(TRUE);
++    if (!QuickLaunch)
++    {
++        /* Setup the boot video driver only for an ordinary cold boot. */
++        InbvEnableBootDriver(!NoGuiBoot);
++        InbvDriverInitialize(LoaderBlock, IDB_MAX_RESOURCES);
++
++        /* Check if GUI boot is enabled */
++        if (!NoGuiBoot)
++        {
++            /* Hold the actual SpiritBoot splash at the controller gate before
++             * later initialization can replace it. Setup owns and retires its
++             * temporary OHCI/DMA state before normal boot resumes. */
++            InbvEnableDisplayString(TRUE);
+ #ifdef SARCH_XBOX
+-        {
+-            extern VOID NTAPI NxkBootSetupRun(VOID);
+-            NxkBootSetupRun();
+-        }
+-#endif
+-        InbvEnableDisplayString(SosEnabled);
++            {
++                extern VOID NTAPI NxkBootSetupRun(VOID);
++                NxkBootSetupRun();
++            }
++#endif
++            InbvEnableDisplayString(SosEnabled);
++        }
++        else
++        {
++            /* Release display ownership if not using GUI boot */
++            InbvNotifyDisplayOwnershipLost(NULL);
++
++            /* Don't allow boot-time strings */
++            InbvEnableDisplayString(FALSE);
++        }
+     }
+     else
+     {
+-        /* Release display ownership if not using GUI boot */
+-        InbvNotifyDisplayOwnershipLost(NULL);
+-
+-        /* Don't allow boot-time strings */
++        /* A quick title relaunch must not repaint the cold-boot splash or
++         * wait in its controller gate. No bootvid owner exists in this
++         * kernel instance, so keep drawing disabled until the title starts. */
+         InbvEnableDisplayString(FALSE);
+     }
+ 
+@@ -2100,12 +2116,13 @@
+     InbvUpdateProgressBar(100);
+ 
+     /* Clear the screen */
+-    if (InbvBootDriverInstalled) FinalizeBootLogo();
++    if (!QuickLaunch && InbvBootDriverInstalled) FinalizeBootLogo();
+ #ifdef SARCH_XBOX
+     /* Retire the cached boot framebuffer before its reservation rejoins RAM. */
+     {
+         extern VOID NTAPI NxkMmReleaseBootFramebuffer(VOID);
+-        InbvRetireBootDriver();
++        if (!QuickLaunch)
++            InbvRetireBootDriver();
+         NxkMmReleaseBootFramebuffer();
+     }
+ #endif
+--- /dev/null
++++ b/tests/host/quick-launch-ui/check.py
+@@ -0,0 +1,95 @@
++#!/usr/bin/env python3
++"""Exercise the production quick-launch marker and audit the boot UI branch."""
++import re
++import subprocess
++import sys
++from pathlib import Path
++
++
++def function(text: str, name: str) -> str:
++    match = re.search(r"\n" + re.escape(name) + r"\s*\([^;]*?\)\s*\n\{", text,
++                      re.S)
++    if match is None:
++        raise AssertionError(f"missing production function {name}")
++    start = text.index("{", match.start())
++    end = start + 1
++    depth = 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[start:end]
++
++
++def block_after(text: str, marker: str) -> str:
++    start = text.index(marker)
++    start = text.index("{", start)
++    end = start + 1
++    depth = 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[start:end]
++
++
++root = Path(sys.argv[1]).resolve()
++out = Path(sys.argv[2]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++xbe = (root / "ntoskrnl/xb/xbe.c").read_text()
++init = (root / "ntoskrnl/ex/init.c").read_text()
++
++query = function(xbe, "NxkQuickLaunchPending")
++source = out / "quick-launch-query.c"
++source.write_text(
++    """
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++typedef bool BOOLEAN;
++typedef void VOID;
++typedef uint32_t ULONG;
++typedef struct _XB_PERSIST_SLOT { ULONG Magic; ULONG Payload; } XB_PERSIST_SLOT;
++typedef XB_PERSIST_SLOT *PXB_PERSIST_SLOT;
++static XB_PERSIST_SLOT TestSlot;
++#define XB_PERSIST_MAGIC 0x6E78436CUL
++#define XB_PERSIST_VA ((uintptr_t)&TestSlot)
++static BOOLEAN NxkQuickLaunchPending(VOID)
++""" + query + """
++int main(void)
++{
++    TestSlot = (XB_PERSIST_SLOT){0};
++    assert(!NxkQuickLaunchPending());
++    assert(TestSlot.Magic == 0);
++    TestSlot.Magic = 0x12345678;
++    assert(!NxkQuickLaunchPending());
++    assert(TestSlot.Magic == 0x12345678);
++    TestSlot.Magic = XB_PERSIST_MAGIC;
++    assert(NxkQuickLaunchPending());
++    assert(TestSlot.Magic == XB_PERSIST_MAGIC);
++    return 0;
++}
++""")
++binary = out / "quick-launch-query"
++subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
++                str(source), "-o", str(binary)], check=True)
++subprocess.run([str(binary)], check=True)
++
++phase = function(init, "Phase1InitializationDiscard")
++peek = phase.index("QuickLaunch = NxkQuickLaunchPending()")
++video = phase.index("NxkInitializeVideo()")
++bootvid = phase.index("InbvDriverInitialize")
++assert peek < video < bootvid
++
++cold = block_after(phase, "if (!QuickLaunch)")
++assert "InbvDriverInitialize" in cold
++assert "NxkBootSetupRun" in cold
++assert "SB_WINDOW_MS" not in phase
++assert phase.count("InbvDriverInitialize") == 1
++assert "NxkBootSetupRun" not in phase.replace(cold, "")
++assert "if (!QuickLaunch && InbvBootDriverInstalled) FinalizeBootLogo();" in phase
++assert "if (!QuickLaunch)\n            InbvRetireBootDriver();" in phase
++assert "NxkMmReleaseBootFramebuffer();" in phase
++
++tail = phase[phase.index("else", phase.index("if (!QuickLaunch)")):]
++assert "InbvEnableBootDriver(FALSE);" not in tail
++assert "InbvEnableDisplayString(FALSE);" in tail
++print("PASS: quick-launch marker is read-only and boot UI is cold-boot only")

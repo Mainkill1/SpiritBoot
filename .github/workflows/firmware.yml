@@ -54,13 +54,14 @@ jobs:
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = c2efb329b6a54eb13b112e47a8de5fef016ed3d4
+            test "$actual_tree" = 5d4415b1a5b9b223b98619ec34f126d028121cf1
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check.py" "$output/upper-ram-reservation" >"$output/upper-ram-reservation.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" >"$output/upper-ram-config.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/warm-stage/check.py" >"$output/warm-stage.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/quick-launch-ui/check.py" "$GUEST_SOURCE" "$output/quick-launch-ui" >"$output/quick-launch-ui.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/reset-frame/check.py" "$output/reset-frame" >"$output/reset-frame.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fault-information/check.py" "$output/fault-information" >"$output/fault-information.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/mdl-pins/check.py" "$output/mdl-pins" >"$output/mdl-pins.log" 2>&1
@@ -134,7 +135,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'c2efb329b6a54eb13b112e47a8de5fef016ed3d4', result
+          assert result['source_tree'] == '5d4415b1a5b9b223b98619ec34f126d028121cf1', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
