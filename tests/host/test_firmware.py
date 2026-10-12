@@ -97,6 +97,23 @@ elif '--build' in sys.argv:
         configure = next(c for c in manifest["commands"] if "-G" in c)
         self.assertIn("-DNXK_METADATA_COUNTERS=ON", configure)
 
+    def test_pool_census_is_explicit_and_recorded(self):
+        default = self.build()
+        self.assertEqual(default.returncode, 0, default.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertFalse(manifest["pool_census"])
+
+        enabled = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/build-firmware.py"),
+             "--source", str(self.source), "--output", str(self.output),
+             "--lock", str(self.lock), "--pool-census"],
+            env=self.env, capture_output=True, text=True)
+        self.assertEqual(enabled.returncode, 0, enabled.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertTrue(manifest["pool_census"])
+        configure = next(c for c in manifest["commands"] if "-G" in c)
+        self.assertIn("-DNXK_POOL_CENSUS=ON", configure)
+
     def test_default_build_records_file_media_policy(self):
         result = self.build()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -466,7 +483,7 @@ shutil.copyfile(sys.argv[-2], sys.argv[-1])
         self.converter.chmod(0o755)
 
     def launch(self, tap=False, preserve_hdd=False, tb_plugin=None,
-               memory_mib=128, timeout_seconds=2, **env):
+               memory_mib=128, timeout_seconds=2, gdb_port=None, **env):
         args = [sys.executable, str(ROOT / "scripts/run-firmware.py"),
                 "--xemu", str(self.xemu), "--flash", str(self.flash),
                 "--hdd", str(self.hdd), "--dvd", str(self.dvd),
@@ -477,6 +494,8 @@ shutil.copyfile(sys.argv[-2], sys.argv[-1])
             args.append("--preserve-hdd")
         if tb_plugin is not None:
             args.extend(["--tb-plugin", str(tb_plugin)])
+        if gdb_port is not None:
+            args.extend(["--gdb-port", str(gdb_port)])
         if memory_mib != 128:
             args.extend(["--memory-mib", str(memory_mib)])
         return subprocess.run(args, capture_output=True, text=True,
@@ -546,6 +565,22 @@ shutil.copyfile(sys.argv[-2], sys.argv[-1])
         manifest = json.loads((self.output / "run.json").read_text())
         self.assertEqual(manifest["assets"]["tb_plugin"]["sha256"],
                          hashlib.sha256(b"plugin fixture").hexdigest())
+
+    def test_gdb_stub_is_opt_in_and_recorded(self):
+        result = self.launch(gdb_port=12345)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = json.loads(self.args_file.read_text())
+        self.assertEqual(args[args.index("-gdb") + 1], "tcp:127.0.0.1:12345")
+        manifest = json.loads((self.output / "run.json").read_text())
+        self.assertEqual(manifest["gdb_port"], 12345)
+
+    def test_invalid_gdb_port_never_creates_capture(self):
+        from tools.firmware import run_firmware
+        with self.assertRaisesRegex(ValueError, "gdb"):
+            run_firmware(self.xemu, self.flash, self.hdd, self.dvd,
+                         self.output, gdb_port=70000)
+        self.assertFalse(self.output.exists())
+        self.assertFalse(self.args_file.exists())
 
     def test_missing_plugin_never_launches(self):
         result = self.launch(tb_plugin=self.root / "missing.so")
