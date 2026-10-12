@@ -53,8 +53,9 @@ jobs:
             spiritboot-toolchain sh -ec '
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
+            i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = aa232ca8f8717cdd0802b32c05a4776edd33b277
+            test "$actual_tree" = 356889f1713d473ed435a89512275af28ad8fb69
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -65,6 +66,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/cache/check-writeback-context.py" "$output/cache-writeback-context" >"$output/cache-writeback-context.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-completion-waits.py" "$output/cache-completion-waits" >"$output/cache-completion-waits.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-full-overwrite.py" "$output/cache-full-overwrite" >"$output/cache-full-overwrite.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/cache/check-lookup-hints.py" "$output/cache-lookup-hints" >"$output/cache-lookup-hints.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/quick-launch-ui/check.py" "$GUEST_SOURCE" "$output/quick-launch-ui" >"$output/quick-launch-ui.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/boot-menu-render/check.py" "$GUEST_SOURCE" "$output/boot-menu-render" >"$output/boot-menu-render.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/reset-frame/check.py" "$output/reset-frame" >"$output/reset-frame.log" 2>&1
@@ -140,7 +142,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'aa232ca8f8717cdd0802b32c05a4776edd33b277', result
+          assert result['source_tree'] == '356889f1713d473ed435a89512275af28ad8fb69', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'

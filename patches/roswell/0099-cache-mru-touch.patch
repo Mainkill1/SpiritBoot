@@ -1,0 +1,530 @@
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index 27dd5e75..0cb67bdf 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -231,6 +231,8 @@ option(NXK_CACHE_WAIT_COUNTERS
+     "Diagnostic aggregate nxcache completion-wait counters" OFF)
+ option(NXK_CACHE_OVERWRITE_COUNTERS
+     "Diagnostic aggregate nxcache full-overwrite counters" OFF)
++option(NXK_CACHE_LOOKUP_COUNTERS
++    "Diagnostic aggregate nxcache lookup and MRU counters" ${NXK_METADATA_COUNTERS})
+ if(NXK_MM_CACHE)
+     list(REMOVE_ITEM NTOSKRNL_SOURCE
+         ${REACTOS_SOURCE_DIR}/ntoskrnl/cc/cacheman.c
+@@ -257,6 +259,9 @@ if(NXK_MM_CACHE)
+     if(NXK_CACHE_OVERWRITE_COUNTERS)
+         add_definitions(-DNXK_CACHE_OVERWRITE_COUNTERS=1)
+     endif()
++    if(NXK_CACHE_LOOKUP_COUNTERS)
++        add_definitions(-DNXK_CACHE_LOOKUP_COUNTERS=1)
++    endif()
+ endif()
+ 
+ add_executable(ntoskrnl
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index 998471db..e2715ef5 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -205,6 +205,24 @@ static FAST_MUTEX NxcMutex;
+  * descriptor under NxcMutex, so eviction and map reuse cannot make a stale
+  * hint authoritative. */
+ static NXC_BLOCK *NxcLookupHint;
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++typedef struct _NXC_CACHE_LOOKUP_COUNTERS
++{
++    ULONGLONG LookupCalls;
++    ULONGLONG SameBlockHits;
++    ULONGLONG PreviousBlockHits;
++    ULONGLONG FullScanEntries;
++    ULONGLONG LookupMisses;
++    ULONGLONG MruTouchCalls;
++    ULONGLONG MruTouchSkips;
++    ULONGLONG MruPointerWrites;
++} NXC_CACHE_LOOKUP_COUNTERS;
++
++/* Optional shadow hint measures potential two-entry reuse; it never resolves
++ * a lookup.  Its storage and observation code require the diagnostic option. */
++NXC_CACHE_LOOKUP_COUNTERS NxcCacheLookupCounters;
++static NXC_BLOCK *NxcPreviousLookupHint;
++#endif
+ /* Retain only idle handles; active BCBs remain independently allocated. */
+ #define NXC_FREE_BCB_LIMIT 8
+ static NXC_BCB *NxcFreeBcbs;
+@@ -501,28 +519,76 @@ NxcLookupBlock(
+     IN NXC_MAP *Map,
+     IN LONGLONG Offset)
+ {
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++    NxcCacheLookupCounters.LookupCalls++;
++#endif
+     if (NxcLookupHint != NULL)
+     {
+         if (NxcLookupHint->Map == Map &&
+             NxcLookupHint->Offset == Offset &&
+             NxcLookupHint->Data != NULL)
+         {
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++            NxcCacheLookupCounters.SameBlockHits++;
++#endif
+             return NxcLookupHint;
+         }
+     }
+ 
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++    if (NxcPreviousLookupHint != NULL &&
++        NxcPreviousLookupHint->Map == Map &&
++        NxcPreviousLookupHint->Offset == Offset &&
++        NxcPreviousLookupHint->Data != NULL)
++    {
++        NxcCacheLookupCounters.PreviousBlockHits++;
++    }
++#endif
++
+     for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
+     {
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++        NxcCacheLookupCounters.FullScanEntries++;
++#endif
+         if (NxcBlocks[i].Map == Map && NxcBlocks[i].Offset == Offset &&
+             NxcBlocks[i].Data != NULL)
+         {
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++            NxcPreviousLookupHint = NxcLookupHint;
++#endif
+             NxcLookupHint = &NxcBlocks[i];
+             return &NxcBlocks[i];
+         }
+     }
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++    NxcCacheLookupCounters.LookupMisses++;
++#endif
+     return NULL;
+ }
+ 
++/* The block is already on NxcLruList and NxcMutex is held. */
++static inline VOID
++NxcTouchBlockLocked(
++    IN NXC_BLOCK *Block)
++{
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++    NxcCacheLookupCounters.MruTouchCalls++;
++#endif
++    if (Block->LruLink.Flink == &NxcLruList)
++    {
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++        NxcCacheLookupCounters.MruTouchSkips++;
++#endif
++        return;
++    }
++
++    RemoveEntryList(&Block->LruLink);
++    InsertTailList(&NxcLruList, &Block->LruLink);
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++    NxcCacheLookupCounters.MruPointerWrites += 6;
++#endif
++}
++
+ /* Claim a write-back reserve slot (a free one, else a clean unreferenced
+  * reserve block).  Returns NULL if none is available.  Reserve blocks are
+  * handed out only here, and only to the re-entrant metadata read of a
+@@ -688,9 +754,7 @@ NxcGetBlock(
+             Block->RefCount++;
+             if (Block->Valid)
+             {
+-                /* Touch in LRU. */
+-                RemoveEntryList(&Block->LruLink);
+-                InsertTailList(&NxcLruList, &Block->LruLink);
++                NxcTouchBlockLocked(Block);
+                 return Block;
+             }
+             /* Invalid non-busy block (failed earlier read): retry it. */
+@@ -763,8 +827,7 @@ NxcAcquireFullOverwriteLocked(
+             }
+ 
+             Block->RefCount++;
+-            RemoveEntryList(&Block->LruLink);
+-            InsertTailList(&NxcLruList, &Block->LruLink);
++            NxcTouchBlockLocked(Block);
+             Claim->Block = Block;
+             Claim->NewClaim = !Block->Valid;
+             if (Claim->NewClaim)
+diff --git a/tests/host/cache/check-completion-waits.py b/tests/host/cache/check-completion-waits.py
+index d160deb1..ef566eda 100644
+--- a/tests/host/cache/check-completion-waits.py
++++ b/tests/host/cache/check-completion-waits.py
+@@ -29,6 +29,7 @@ for name in (
+     "NxcWakeWaitersLocked",
+     "NxcPublishBlockIdleLocked",
+     "NxcLookupBlock",
++    "NxcTouchBlockLocked",
+     "NxcPutBlock",
+     "NxcGetBlock",
+ ):
+@@ -49,6 +50,7 @@ typedef int BOOLEAN;
+ typedef void VOID;
+ #define IN
+ #define OUT
++#define FORCEINLINE extern inline __attribute__((always_inline, gnu_inline))
+ #define TRUE 1
+ #define FALSE 0
+ #define STATUS_SUCCESS ((NTSTATUS)0)
+diff --git a/tests/host/cache/check-full-overwrite.py b/tests/host/cache/check-full-overwrite.py
+index 5d141c50..ba6caa4a 100755
+--- a/tests/host/cache/check-full-overwrite.py
++++ b/tests/host/cache/check-full-overwrite.py
+@@ -19,6 +19,7 @@ spec.loader.exec_module(extract)
+ 
+ bodies = ""
+ for name in (
++    "NxcTouchBlockLocked",
+     "NxcAcquireFullOverwriteLocked",
+     "NxcPublishFullOverwriteLocked",
+     "NxcRollbackFullOverwriteLocked",
+@@ -49,6 +50,7 @@ typedef uint64_t ULONGLONG;
+ typedef void VOID;
+ #define IN
+ #define OUT
++#define FORCEINLINE extern inline __attribute__((always_inline, gnu_inline))
+ #define TRUE 1
+ #define FALSE 0
+ #define ASSERT assert
+diff --git a/tests/host/cache/check-lookup-hints.py b/tests/host/cache/check-lookup-hints.py
+new file mode 100644
+index 00000000..619ad7aa
+--- /dev/null
++++ b/tests/host/cache/check-lookup-hints.py
+@@ -0,0 +1,334 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Check production cache hits, LRU ordering and work; optionally compare timing."""
++
++import argparse
++import importlib.util
++import json
++import os
++from pathlib import Path
++import statistics
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++parser = argparse.ArgumentParser(description=__doc__)
++parser.add_argument("output", type=Path)
++parser.add_argument("--reference", type=Path)
++args = parser.parse_args()
++out = args.output.resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++
++shim = r'''
++#define _POSIX_C_SOURCE 200809L
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++
++typedef void VOID;
++typedef int BOOLEAN;
++typedef uint32_t ULONG;
++typedef int64_t LONGLONG;
++typedef int32_t NTSTATUS;
++typedef size_t SIZE_T;
++#define IN
++#define OUT
++#define TRUE 1
++#define FALSE 0
++#define ASSERT assert
++#define FORCEINLINE extern inline __attribute__((always_inline, gnu_inline))
++#define NT_SUCCESS(s) ((s) >= 0)
++#define NXC_BLOCK_SIZE 16384
++#define NXC_MAX_BLOCKS 32
++#define NXC_TOTAL_BLOCKS 34
++#define DPRINT1(...) ((void)0)
++#define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p) - offsetof(t,f)))
++
++typedef struct _LIST_ENTRY {
++    struct _LIST_ENTRY *Flink, *Blink;
++} LIST_ENTRY, *PLIST_ENTRY;
++typedef struct { unsigned Id; } NXC_MAP;
++typedef struct {
++    NXC_MAP *Map;
++    LONGLONG Offset;
++    unsigned char *Data;
++    LIST_ENTRY LruLink, BusyWaiters;
++    ULONG RefCount;
++    BOOLEAN Valid, Dirty, Busy, Reserved;
++} NXC_BLOCK;
++typedef struct {
++    NXC_BLOCK *Block;
++    BOOLEAN NewClaim;
++} NXC_OVERWRITE_CLAIM;
++static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
++static unsigned char bytes[NXC_TOTAL_BLOCKS][NXC_BLOCK_SIZE];
++static NXC_BLOCK *NxcLookupHint;
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++typedef struct {
++    uint64_t LookupCalls, SameBlockHits, PreviousBlockHits, FullScanEntries;
++    uint64_t LookupMisses, MruTouchCalls, MruTouchSkips, MruPointerWrites;
++} NXC_CACHE_LOOKUP_COUNTERS;
++NXC_CACHE_LOOKUP_COUNTERS NxcCacheLookupCounters;
++static NXC_BLOCK *NxcPreviousLookupHint;
++#endif
++static LIST_ENTRY NxcLruList, NxcCapacityWaiters;
++static NXC_MAP map_a = {1}, map_b = {2};
++static int NxcMutex;
++static unsigned reads, flushes, waits;
++static uint64_t pointer_writes;
++static void (*wait_hook)(void);
++
++static void InitializeListHead(LIST_ENTRY *head) {
++    head->Flink = head->Blink = head;
++}
++static void InsertTailList(LIST_ENTRY *head, LIST_ENTRY *entry) {
++    entry->Blink = head->Blink; entry->Flink = head;
++    head->Blink->Flink = entry; head->Blink = entry;
++#ifdef TRACK_WRITES
++    pointer_writes += 4;
++#endif
++}
++static void RemoveEntryList(LIST_ENTRY *entry) {
++    entry->Blink->Flink = entry->Flink;
++    entry->Flink->Blink = entry->Blink;
++#ifdef TRACK_WRITES
++    pointer_writes += 2;
++#endif
++}
++static void NxcWakeWaitersLocked(LIST_ENTRY *head) { (void)head; }
++static void ExReleaseFastMutex(int *mutex) { (void)mutex; }
++static void ExRaiseStatus(NTSTATUS status) {
++    (void)status; assert(!"unexpected paging error"); abort();
++}
++static BOOLEAN NxcOwnsWritebackContext(void) { return FALSE; }
++static void NxcWaitOnListLocked(LIST_ENTRY *head) {
++    (void)head; ++waits; assert(wait_hook); wait_hook();
++}
++static NTSTATUS NxcReadBlock(NXC_BLOCK *block) {
++    assert(block->Busy && block->RefCount > 0);
++    ++reads; memset(block->Data, (unsigned char)block->Offset, NXC_BLOCK_SIZE);
++    block->Valid = TRUE; block->Busy = FALSE; return 0;
++}
++static NTSTATUS NxcFlushBlock(NXC_BLOCK *block, SIZE_T *written) {
++    assert(block->Busy && block->Dirty && block->RefCount > 0);
++    ++flushes; block->Dirty = FALSE; block->Busy = FALSE;
++    *written = NXC_BLOCK_SIZE; return 0;
++}
++'''
++
++cases = r'''
++static void seed(unsigned count) {
++    memset(NxcBlocks, 0, sizeof(NxcBlocks));
++    InitializeListHead(&NxcLruList); InitializeListHead(&NxcCapacityWaiters);
++    NxcLookupHint = NULL; reads = flushes = waits = 0; wait_hook = NULL;
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++    NxcPreviousLookupHint = NULL;
++    memset(&NxcCacheLookupCounters,0,sizeof(NxcCacheLookupCounters));
++#endif
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i) {
++        NXC_BLOCK *block = &NxcBlocks[i];
++        InitializeListHead(&block->LruLink);
++        InitializeListHead(&block->BusyWaiters);
++        block->Reserved = i >= NXC_MAX_BLOCKS;
++        if (i >= count) continue;
++        block->Data = bytes[i]; block->Map = &map_a;
++        block->Offset = (LONGLONG)i * NXC_BLOCK_SIZE; block->Valid = TRUE;
++        InsertTailList(&NxcLruList, &block->LruLink);
++    }
++    pointer_writes = 0;
++}
++static void order(const unsigned *want, unsigned count) {
++    LIST_ENTRY *entry = NxcLruList.Flink, *previous = &NxcLruList;
++    for (unsigned i = 0; i < count; ++i) {
++        assert(entry != &NxcLruList && entry->Blink == previous);
++        NXC_BLOCK *block = CONTAINING_RECORD(entry, NXC_BLOCK, LruLink);
++        assert(block == &NxcBlocks[want[i]]);
++        previous = entry; entry = entry->Flink;
++    }
++    assert(entry == &NxcLruList && NxcLruList.Blink == previous);
++}
++static void get(unsigned id, BOOLEAN wait) {
++    NXC_BLOCK *block = NxcGetBlock(&map_a, (LONGLONG)id*NXC_BLOCK_SIZE, wait);
++    assert(block == &NxcBlocks[id] && block->RefCount == 1 && block->Valid);
++    NxcPutBlock(block);
++}
++static void test_mru_reads(void) {
++    const unsigned want[] = {0,1,2,3};
++    const unsigned repetitions[] = {1,10,10000};
++    for (unsigned t = 0; t < 3; ++t) {
++        seed(4);
++        for (unsigned i = 0; i < repetitions[t]; ++i) get(3, FALSE);
++        order(want,4); assert(pointer_writes == 0);
++        assert(reads == 0 && flushes == 0 && NxcBlocks[3].RefCount == 0);
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++        assert(NxcCacheLookupCounters.LookupCalls == repetitions[t]);
++        assert(NxcCacheLookupCounters.SameBlockHits == repetitions[t]-1);
++        assert(NxcCacheLookupCounters.FullScanEntries == 4);
++        assert(NxcCacheLookupCounters.MruTouchCalls == repetitions[t]);
++        assert(NxcCacheLookupCounters.MruTouchSkips == repetitions[t]);
++        assert(NxcCacheLookupCounters.MruPointerWrites == 0);
++#endif
++    }
++}
++static void test_non_mru_and_round_robin(void) {
++    const unsigned want[] = {1,2,3,0}; seed(4); get(0,FALSE);
++    order(want,4); assert(pointer_writes == 6);
++    const unsigned counts[] = {2,3,4,16,34};
++    for (unsigned c = 0; c < 5; ++c) {
++        unsigned n = counts[c], want_ids[NXC_TOTAL_BLOCKS]; seed(n);
++        for (unsigned i = 0; i < n; ++i) want_ids[i] = i;
++        for (unsigned pass = 0; pass < 3; ++pass)
++            for (unsigned i = 0; i < n; ++i) get(i,FALSE);
++        order(want_ids,n); assert(pointer_writes == (uint64_t)18*n);
++    }
++}
++static void test_overwrite_touch(void) {
++    const unsigned unchanged[] = {0,1,2,3}, moved[] = {1,2,3,0};
++    NXC_OVERWRITE_CLAIM claim; seed(4);
++    for (unsigned i = 0; i < 10000; ++i) {
++        NxcAcquireFullOverwriteLocked(&map_a,3*NXC_BLOCK_SIZE,&claim);
++        assert(claim.Block == &NxcBlocks[3] && !claim.NewClaim);
++        NxcPutBlock(claim.Block);
++    }
++    order(unchanged,4); assert(pointer_writes == 0);
++    NxcBlocks[0].Valid = FALSE;
++    NxcAcquireFullOverwriteLocked(&map_a,0,&claim);
++    assert(claim.NewClaim && claim.Block->Busy && !claim.Block->Valid);
++    order(moved,4); assert(pointer_writes == 6 && reads == 0);
++}
++static void test_previous_hint_observation(void) {
++    seed(2);
++    for (unsigned i = 0; i < 30; ++i) get(i%2,FALSE);
++#ifdef NXK_CACHE_LOOKUP_COUNTERS
++    assert(NxcCacheLookupCounters.LookupCalls == 30);
++    assert(NxcCacheLookupCounters.SameBlockHits == 0);
++    assert(NxcCacheLookupCounters.PreviousBlockHits == 28);
++    assert(NxcCacheLookupCounters.FullScanEntries == 45);
++    assert(NxcCacheLookupCounters.MruTouchCalls == 30);
++    assert(NxcCacheLookupCounters.MruTouchSkips == 0);
++    assert(NxcCacheLookupCounters.MruPointerWrites == 180);
++#endif
++}
++static void finish_busy(void) { NxcBlocks[1].Busy = FALSE; }
++static void reuse_busy(void) {
++    NxcBlocks[1].Busy = FALSE; NxcBlocks[1].Map = &map_b;
++}
++static void test_busy_invalid_and_reuse(void) {
++    const unsigned unchanged[] = {0,1}, reused[] = {1,0}; seed(2);
++    NxcBlocks[1].Busy = TRUE;
++    assert(NxcGetBlock(&map_a,NXC_BLOCK_SIZE,FALSE) == NULL);
++    order(unchanged,2); assert(pointer_writes == 0 && waits == 0);
++    wait_hook = finish_busy; get(1,TRUE);
++    assert(waits == 1 && pointer_writes == 0);
++    NxcBlocks[0].Valid = FALSE;
++    assert(NxcGetBlock(&map_a,0,FALSE) == NULL);
++    assert(NxcBlocks[0].RefCount == 0 && pointer_writes == 0);
++    get(0,TRUE); order(unchanged,2); assert(reads == 1);
++    seed(2); NxcBlocks[1].Busy = TRUE; wait_hook = reuse_busy;
++    NXC_BLOCK *block = NxcGetBlock(&map_a,NXC_BLOCK_SIZE,TRUE);
++    assert(block == &NxcBlocks[0] && NxcBlocks[1].Map == &map_b);
++    order(reused,2); assert(waits == 1 && reads == 1);
++    NxcPutBlock(block);
++    seed(2); assert(NxcLookupBlock(&map_a,0) == &NxcBlocks[0]);
++    NxcBlocks[0].Map = &map_b;
++    assert(NxcLookupBlock(&map_a,0) == NULL);
++    assert(NxcLookupBlock(&map_b,0) == &NxcBlocks[0]);
++    NxcBlocks[0].Data = NULL;
++    assert(NxcLookupBlock(&map_b,0) == NULL);
++}
++static void test_eviction_and_reserve(void) {
++    const unsigned want[] = {0,2,3,1}; seed(4);
++    NxcBlocks[0].Dirty = TRUE; NxcBlocks[2].Busy = TRUE;
++    NxcBlocks[3].RefCount = 1;
++    NXC_BLOCK *block = NxcGetBlock(&map_a,4*NXC_BLOCK_SIZE,TRUE);
++    assert(block == &NxcBlocks[1]); order(want,4);
++    assert(reads == 1 && flushes == 0 && NxcBlocks[0].Dirty);
++    NxcPutBlock(block);
++    seed(NXC_TOTAL_BLOCKS); get(33,FALSE); assert(pointer_writes == 0);
++    NXC_BLOCK *victim = NxcClaimSlot(FALSE);
++    assert(victim == &NxcBlocks[0] && !victim->Reserved);
++}
++static uint64_t nanos(void) {
++    struct timespec value; assert(clock_gettime(CLOCK_MONOTONIC,&value) == 0);
++    return (uint64_t)value.tv_sec*1000000000 + value.tv_nsec;
++}
++int main(int argc, char **argv) {
++    if (argc > 1) {
++        unsigned n = (unsigned)strtoul(argv[1],NULL,10);
++        const unsigned iterations = 10000000; uint64_t checksum = 0;
++        assert(n > 0 && n <= NXC_TOTAL_BLOCKS); seed(n);
++        uint64_t start = nanos();
++        for (unsigned i = 0; i < iterations; ++i) {
++            unsigned id = n == 1 ? 0 : i%n;
++            NXC_BLOCK *block = NxcGetBlock(&map_a,(LONGLONG)id*NXC_BLOCK_SIZE,FALSE);
++            checksum += (unsigned)(block-NxcBlocks); NxcPutBlock(block);
++        }
++        printf("%llu %llu\n",(unsigned long long)(nanos()-start),
++               (unsigned long long)checksum); return 0;
++    }
++    test_mru_reads(); test_non_mru_and_round_robin(); test_overwrite_touch();
++    test_previous_hint_observation(); test_busy_invalid_and_reuse();
++    test_eviction_and_reserve();
++    puts("cache hits: MRU reads/overwrites, LRU order, reuse and eviction PASS");
++    return 0;
++}
++'''
++
++
++def bodies(source_root):
++    text = (source_root / "ntoskrnl/xb/mm/cache.c").read_text()
++    names = ["NxcPutBlock", "NxcLookupBlock"]
++    if "NxcTouchBlockLocked(" in text:
++        names.append("NxcTouchBlockLocked")
++    names += ["NxcClaimReserve", "NxcClaimSlot", "NxcGetBlock",
++              "NxcAcquireFullOverwriteLocked"]
++    return "\n".join(extract.function(text, name) for name in names)
++
++
++fixture = out / "lookup-hints.c"
++fixture.write_text(shim + bodies(root) + cases)
++for enabled in (False, True):
++    binary = out / ("lookup-hints-counters" if enabled else "lookup-hints")
++    command = ["cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
++               "-DTRACK_WRITES", "-fsanitize=address,undefined"]
++    if enabled:
++        command.append("-DNXK_CACHE_LOOKUP_COUNTERS=1")
++    subprocess.run(command + [str(fixture), "-o", str(binary)], check=True)
++    subprocess.run([str(binary)], check=True,
++                   env=dict(os.environ, ASAN_OPTIONS="detect_leaks=0"))
++    symbols = subprocess.check_output(["nm",str(binary)],text=True)
++    assert ("NxcCacheLookupCounters" in symbols) == enabled
++
++if args.reference:
++    binaries = {}
++    for arm, source in (("A", args.reference.resolve()), ("B", root)):
++        fixture = out / f"timing-{arm}.c"
++        fixture.write_text(shim + bodies(source) + cases)
++        binary = out / f"timing-{arm}"
++        subprocess.run(["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
++                        str(fixture), "-o", str(binary)], check=True)
++        binaries[arm] = binary
++    results = []
++    for n in (1,2,3,4,16,34):
++        rows = {"A": [], "B": []}
++        for arm in "ABBABAAB":
++            elapsed, checksum = map(int, subprocess.check_output(
++                [str(binaries[arm]), str(n)], text=True).split())
++            assert checksum == (10000000//n)*sum(range(n)) + sum(range(10000000%n))
++            rows[arm].append(elapsed/10000000)
++        a, b = (statistics.median(rows[arm]) for arm in ("A","B"))
++        results.append({"active_blocks": n, "parent_ns_per_hit": a,
++                        "candidate_ns_per_hit": b, "change_pct": (b/a-1)*100,
++                        "runs_ns_per_hit": rows})
++    (out / "timing.json").write_text(json.dumps(results, indent=2) + "\n")
++    print(json.dumps([{k: v for k, v in row.items() if k != "runs_ns_per_hit"}
++                      for row in results], indent=2))
