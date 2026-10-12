@@ -1,0 +1,1121 @@
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index 8bec7c123d9853e1243d798a50cd1905d58ade89..7377a5662a8eb778871a76ed02fda0c30577e3c6 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -227,6 +227,8 @@ endif()
+ # fixed-pool buffer cache in xb/mm/cache.c.
+ # Revert = -DNXK_MM_CACHE=OFF + reconfigure.
+ option(NXK_MM_CACHE "Use the nxmm file cache instead of the ROS Cc" ON)
++option(NXK_CACHE_WAIT_COUNTERS
++    "Diagnostic aggregate nxcache completion-wait counters" OFF)
+ if(NXK_MM_CACHE)
+     list(REMOVE_ITEM NTOSKRNL_SOURCE
+         ${REACTOS_SOURCE_DIR}/ntoskrnl/cc/cacheman.c
+@@ -247,6 +249,9 @@ if(NXK_MM_CACHE)
+         ${REACTOS_SOURCE_DIR}/ntoskrnl/mm/balance.c)
+     list(APPEND PCH_SKIP_SOURCE xb/mm/cache.c)
+     add_definitions(-DNXK_MM_CACHE)
++    if(NXK_CACHE_WAIT_COUNTERS)
++        add_definitions(-DNXK_CACHE_WAIT_COUNTERS=1)
++    endif()
+ endif()
+ 
+ add_executable(ntoskrnl
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index 956d013c34c932a8ca063ba9d31ff7032dd47e7e..47bc77a6815e1dd74193577cb5e840087bd055bf 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -112,6 +112,7 @@ typedef struct _NXC_BLOCK
+     LONGLONG Offset;                /* block-aligned file offset */
+     PUCHAR Data;
+     LIST_ENTRY LruLink;
++    LIST_ENTRY BusyWaiters;         /* stack-owned waits for this generation */
+     ULONG RefCount;                 /* pins + transient users */
+     BOOLEAN Valid;                  /* contents populated */
+     BOOLEAN Dirty;
+@@ -119,6 +120,31 @@ typedef struct _NXC_BLOCK
+     BOOLEAN Reserved;               /* write-back-only slot (never a data fill) */
+ } NXC_BLOCK;
+ 
++typedef struct _NXC_WAIT_ENTRY
++{
++    LIST_ENTRY Link;
++    KEVENT Event;
++#ifdef NXK_CACHE_WAIT_COUNTERS
++    LARGE_INTEGER WokenAt;
++#endif
++} NXC_WAIT_ENTRY;
++
++#ifdef NXK_CACHE_WAIT_COUNTERS
++typedef struct _NXC_CACHE_WAIT_COUNTERS
++{
++    ULONGLONG BusyWaitCount;
++    ULONGLONG CapacityWaitCount;
++    ULONGLONG WakeCount;
++    ULONGLONG SpuriousRetryCount;
++    ULONGLONG CompletionToResumeTicks;
++    ULONGLONG MutexReacquireCount;
++} NXC_CACHE_WAIT_COUNTERS;
++
++/* Diagnostic builds read this symbol from xboxkrnl.unstripped.exe.  Ordinary
++ * release images define neither the storage nor the counter instructions. */
++NXC_CACHE_WAIT_COUNTERS NxcCacheWaitCounters;
++#endif
++
+ typedef struct _NXC_BCB
+ {
+     PUBLIC_BCB PFCB;                /* must be first: callers hand &PFCB back */
+@@ -148,6 +174,7 @@ static ULONG NxcActiveBlocks;                   /* title-visible; excludes reser
+ static NXC_WB_CONTEXT *NxcWbContexts;           /* protected by NxcMutex */
+ static LIST_ENTRY NxcLruList;       /* head = oldest */
+ static LIST_ENTRY NxcMapList;
++static LIST_ENTRY NxcCapacityWaiters;
+ static FAST_MUTEX NxcMutex;
+ /* Points only into the fixed NxcBlocks array.  Every use revalidates the
+  * descriptor under NxcMutex, so eviction and map reuse cannot make a stale
+@@ -163,6 +190,8 @@ static PFN_NUMBER NxcZeroPagePfn;   /* backs no-map CcZeroData writes */
+ #define NXC_NODE_PRIVATE_MAP 0x02FE
+ #define NXC_NODE_BCB         0x02FD
+ 
++static VOID NxcPublishBlockIdleLocked(IN NXC_BLOCK *Block);
++
+ /* WRITE-BACK CONTEXT (cache lock held) *************************************/
+ 
+ DECLSPEC_NOINLINE
+@@ -297,7 +326,7 @@ NxcReadBlock(
+         CcDataPages += NXC_BLOCK_SIZE / PAGE_SIZE;
+     }
+ 
+-    Block->Busy = FALSE;
++    NxcPublishBlockIdleLocked(Block);
+     return Status;
+ }
+ 
+@@ -355,7 +384,7 @@ NxcFlushBlock(
+         }
+     }
+ 
+-    Block->Busy = FALSE;
++    NxcPublishBlockIdleLocked(Block);
+     *Written = Got;
+     return Status;
+ }
+@@ -363,12 +392,81 @@ NxcFlushBlock(
+ /* WAIT/RETRY ***************************************************************/
+ 
+ static VOID
+-NxcShortWait(VOID)
++NxcWaitOnListLocked(
++    IN PLIST_ENTRY WaitList)
+ {
+-    LARGE_INTEGER Interval = { .QuadPart = -10000 };    /* 1 ms */
++    NXC_WAIT_ENTRY Waiter;
++
++    InitializeListHead(&Waiter.Link);
++    KeInitializeEvent(&Waiter.Event, NotificationEvent, FALSE);
++#ifdef NXK_CACHE_WAIT_COUNTERS
++    Waiter.WokenAt.QuadPart = 0;
++    if (WaitList == &NxcCapacityWaiters)
++        NxcCacheWaitCounters.CapacityWaitCount++;
++    else
++        NxcCacheWaitCounters.BusyWaitCount++;
++#endif
++    InsertTailList(WaitList, &Waiter.Link);
++
+     ExReleaseFastMutex(&NxcMutex);
+-    KeDelayExecutionThread(KernelMode, FALSE, &Interval);
++    KeWaitForSingleObject(&Waiter.Event, Executive, KernelMode, FALSE, NULL);
+     ExAcquireFastMutex(&NxcMutex);
++
++    /* The producer removes the exact waiter before signaling.  Descriptor
++     * reuse therefore cannot clear or consume an earlier generation's wake. */
++    ASSERT(IsListEmpty(&Waiter.Link));
++#ifdef NXK_CACHE_WAIT_COUNTERS
++    NxcCacheWaitCounters.MutexReacquireCount++;
++    if (Waiter.WokenAt.QuadPart != 0)
++    {
++        LARGE_INTEGER Now = KeQueryPerformanceCounter(NULL);
++        NxcCacheWaitCounters.CompletionToResumeTicks +=
++            Now.QuadPart - Waiter.WokenAt.QuadPart;
++    }
++#endif
++}
++
++static VOID
++NxcWakeWaitersLocked(
++    IN PLIST_ENTRY WaitList)
++{
++#ifdef NXK_CACHE_WAIT_COUNTERS
++    LARGE_INTEGER WokenAt = KeQueryPerformanceCounter(NULL);
++#endif
++
++    while (!IsListEmpty(WaitList))
++    {
++        PLIST_ENTRY Link = RemoveHeadList(WaitList);
++        NXC_WAIT_ENTRY *Waiter =
++            CONTAINING_RECORD(Link, NXC_WAIT_ENTRY, Link);
++
++        InitializeListHead(&Waiter->Link);
++#ifdef NXK_CACHE_WAIT_COUNTERS
++        Waiter->WokenAt = WokenAt;
++        NxcCacheWaitCounters.WakeCount++;
++#endif
++        KeSetEvent(&Waiter->Event, IO_NO_INCREMENT, FALSE);
++    }
++}
++
++static VOID
++NxcPublishBlockIdleLocked(
++    IN NXC_BLOCK *Block)
++{
++    ASSERT(Block->Busy);
++    Block->Busy = FALSE;
++    NxcWakeWaitersLocked(&Block->BusyWaiters);
++    NxcWakeWaitersLocked(&NxcCapacityWaiters);
++}
++
++static VOID
++NxcPutBlock(
++    IN NXC_BLOCK *Block)
++{
++    ASSERT(Block->RefCount > 0);
++    Block->RefCount--;
++    if (Block->RefCount == 0)
++        NxcWakeWaitersLocked(&NxcCapacityWaiters);
+ }
+ 
+ /* BLOCK LOOKUP / EVICTION **************************************************/
+@@ -451,6 +549,9 @@ NxcClaimSlot(
+     IN BOOLEAN Wait)
+ {
+     ULONG Spins = 0;
++#ifdef NXK_CACHE_WAIT_COUNTERS
++    BOOLEAN RetriedCapacityWait = FALSE;
++#endif
+ 
+     for (;;)
+     {
+@@ -489,7 +590,7 @@ NxcClaimSlot(
+                 Victim->RefCount++;
+                 Victim->Busy = TRUE;
+                 Status = NxcFlushBlock(Victim, &Written); /* drops/retakes mutex */
+-                Victim->RefCount--;
++                NxcPutBlock(Victim);
+                 if (!NT_SUCCESS(Status))
+                 {
+                     /* Retain dirty contents, but do not retry a permanent
+@@ -518,10 +619,15 @@ NxcClaimSlot(
+         }
+ 
+         if (!Wait) return NULL;
++#ifdef NXK_CACHE_WAIT_COUNTERS
++        if (RetriedCapacityWait)
++            NxcCacheWaitCounters.SpuriousRetryCount++;
++        RetriedCapacityWait = TRUE;
++#endif
+         if ((++Spins % 1024) == 0)
+             DPRINT1("all %lu blocks pinned, still waiting\n",
+                     NxcActiveBlocks);
+-        NxcShortWait();
++        NxcWaitOnListLocked(&NxcCapacityWaiters);
+     }
+ }
+ 
+@@ -546,7 +652,12 @@ NxcGetBlock(
+             if (Block->Busy)
+             {
+                 if (!Wait) return NULL;
+-                NxcShortWait();
++                NxcWaitOnListLocked(&Block->BusyWaiters);
++#ifdef NXK_CACHE_WAIT_COUNTERS
++                Block = NxcLookupBlock(Map, Offset);
++                if (Block != NULL && Block->Busy)
++                    NxcCacheWaitCounters.SpuriousRetryCount++;
++#endif
+                 continue;
+             }
+             Block->RefCount++;
+@@ -568,7 +679,7 @@ NxcGetBlock(
+             if (NxcLookupBlock(Map, Offset) != NULL)
+             {
+                 Block->Map = NULL;
+-                Block->RefCount = 0;
++                NxcPutBlock(Block);
+                 continue;
+             }
+             Block->Map = Map;
+@@ -580,7 +691,7 @@ NxcGetBlock(
+ 
+         if (!Wait)
+         {
+-            Block->RefCount--;
++            NxcPutBlock(Block);
+             return NULL;
+         }
+ 
+@@ -588,7 +699,7 @@ NxcGetBlock(
+         Status = NxcReadBlock(Block);           /* drops/retakes mutex */
+         if (!NT_SUCCESS(Status))
+         {
+-            Block->RefCount--;
++            NxcPutBlock(Block);
+             ExReleaseFastMutex(&NxcMutex);
+             ExRaiseStatus(Status);
+         }
+@@ -596,14 +707,6 @@ NxcGetBlock(
+     }
+ }
+ 
+-static VOID
+-NxcPutBlock(
+-    IN NXC_BLOCK *Block)
+-{
+-    ASSERT(Block->RefCount > 0);
+-    Block->RefCount--;
+-}
+-
+ /* MAP LIFETIME *************************************************************/
+ 
+ VOID
+@@ -703,7 +806,15 @@ restart:
+ 
+         if (Block->Busy)
+         {
+-            NxcShortWait();
++#ifdef NXK_CACHE_WAIT_COUNTERS
++            LONGLONG WaitOffset = Block->Offset;
++#endif
++            NxcWaitOnListLocked(&Block->BusyWaiters);
++#ifdef NXK_CACHE_WAIT_COUNTERS
++            Block = NxcLookupBlock(Map, WaitOffset);
++            if (Block != NULL && Block->Busy)
++                NxcCacheWaitCounters.SpuriousRetryCount++;
++#endif
+             goto restart;
+         }
+ 
+@@ -713,7 +824,7 @@ restart:
+             Block->RefCount++;
+             Block->Busy = TRUE;
+             BlockStatus = NxcFlushBlock(Block, &Written);   /* unlocks */
+-            Block->RefCount--;
++            NxcPutBlock(Block);
+             Total += Written;
+             if (!NT_SUCCESS(BlockStatus))
+             {
+@@ -729,6 +840,7 @@ restart:
+             Block->Map = NULL;
+             Block->Valid = FALSE;
+             Block->Dirty = FALSE;
++            NxcWakeWaitersLocked(&NxcCapacityWaiters);
+         }
+     }
+ 
+@@ -772,6 +884,7 @@ NxcTryFinalizeMapLocked(
+         Block->Map = NULL;
+         Block->Valid = FALSE;
+         Block->Dirty = FALSE;
++        NxcWakeWaitersLocked(&NxcCapacityWaiters);
+     }
+ 
+     FileObject = Map->FileObject;
+@@ -1951,6 +2064,7 @@ FscSetCacheSize(
+             break;
+         }
+         NxcActiveBlocks++;
++        NxcWakeWaitersLocked(&NxcCapacityWaiters);
+     }
+ 
+     /* Shrink: retire unreferenced blocks, flushing dirty ones.  Blocks
+@@ -1972,7 +2086,7 @@ shrink_restart:
+                 Block->RefCount++;
+                 Block->Busy = TRUE;
+                 Status = NxcFlushBlock(Block, &Written);   /* unlocks */
+-                Block->RefCount--;
++                NxcPutBlock(Block);
+                 if (!NT_SUCCESS(Status))
+                 {
+                     /* Keep dirty bytes and report the failed resize. Clean
+@@ -2011,6 +2125,7 @@ FscInvalidateIdleBlocks(VOID)
+         RemoveEntryList(&Block->LruLink);
+         Block->Map = NULL;
+         Block->Valid = FALSE;
++        NxcWakeWaitersLocked(&NxcCapacityWaiters);
+     }
+     ExReleaseFastMutex(&NxcMutex);
+ }
+@@ -2025,6 +2140,10 @@ CcInitializeCacheManager(VOID)
+     ExInitializeFastMutex(&NxcMutex);
+     InitializeListHead(&NxcLruList);
+     InitializeListHead(&NxcMapList);
++    InitializeListHead(&NxcCapacityWaiters);
++
++    for (ULONG i = 0; i < NXC_TOTAL_BLOCKS; i++)
++        InitializeListHead(&NxcBlocks[i].BusyWaiters);
+ 
+     for (ULONG i = 0; i < NXC_DEFAULT_BLOCKS; i++)
+     {
+diff --git a/tests/host/cache/check-completion-waits.py b/tests/host/cache/check-completion-waits.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d160deb18c001ec8a0866bed66641ac3cc9b8eed
+--- /dev/null
++++ b/tests/host/cache/check-completion-waits.py
+@@ -0,0 +1,388 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise cache completion waits through the production cache bodies."""
++
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++source = (root / "ntoskrnl/xb/mm/cache.c").read_text()
++assert "NxcShortWait" not in source
++assert "KeDelayExecutionThread" not in source
++assert source.count("Block->Busy = FALSE;") == 1
++
++# These helpers form the synchronization contract.  Keeping this test linked
++# to their production bodies catches descriptor-owned events, wake-one
++# implementations, and callers that stop re-looking up the cache key.
++bodies = ""
++for name in (
++    "NxcWaitOnListLocked",
++    "NxcWakeWaitersLocked",
++    "NxcPublishBlockIdleLocked",
++    "NxcLookupBlock",
++    "NxcPutBlock",
++    "NxcGetBlock",
++):
++    bodies += extract.function(source, name) + "\n"
++
++shim = r'''
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef int32_t NTSTATUS;
++typedef unsigned ULONG;
++typedef int64_t LONGLONG;
++typedef size_t SIZE_T;
++typedef int BOOLEAN;
++typedef void VOID;
++#define IN
++#define OUT
++#define TRUE 1
++#define FALSE 0
++#define STATUS_SUCCESS ((NTSTATUS)0)
++#define NT_SUCCESS(status) ((status) >= 0)
++#define NXC_BLOCK_SIZE 16
++#define NXC_TOTAL_BLOCKS 2
++#define ASSERT assert
++#define NotificationEvent 0
++#define Executive 0
++#define KernelMode 0
++#define IO_NO_INCREMENT 0
++#define CONTAINING_RECORD(p, t, f) ((t *)((char *)(p) - offsetof(t, f)))
++
++typedef struct _LIST_ENTRY {
++    struct _LIST_ENTRY *Flink;
++    struct _LIST_ENTRY *Blink;
++} LIST_ENTRY, *PLIST_ENTRY;
++typedef struct { int Signaled; } KEVENT;
++typedef struct { LONGLONG QuadPart; } LARGE_INTEGER;
++typedef struct {
++    void *FileObject;
++    LARGE_INTEGER FileSize;
++    LARGE_INTEGER ValidDataLength;
++} NXC_MAP;
++typedef struct {
++    NXC_MAP *Map;
++    LONGLONG Offset;
++    unsigned char *Data;
++    LIST_ENTRY LruLink;
++    LIST_ENTRY BusyWaiters;
++    ULONG RefCount;
++    BOOLEAN Valid;
++    BOOLEAN Dirty;
++    BOOLEAN Busy;
++    BOOLEAN Reserved;
++} NXC_BLOCK;
++typedef struct {
++    LIST_ENTRY Link;
++    KEVENT Event;
++#ifdef NXK_CACHE_WAIT_COUNTERS
++    LARGE_INTEGER WokenAt;
++#endif
++} NXC_WAIT_ENTRY;
++#ifdef NXK_CACHE_WAIT_COUNTERS
++typedef struct {
++    uint64_t BusyWaitCount;
++    uint64_t CapacityWaitCount;
++    uint64_t WakeCount;
++    uint64_t SpuriousRetryCount;
++    uint64_t CompletionToResumeTicks;
++    uint64_t MutexReacquireCount;
++} NXC_CACHE_WAIT_COUNTERS;
++static NXC_CACHE_WAIT_COUNTERS NxcCacheWaitCounters;
++#endif
++
++static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
++static LIST_ENTRY NxcLruList;
++static LIST_ENTRY NxcCapacityWaiters;
++static NXC_BLOCK *NxcLookupHint;
++static int NxcMutex;
++static int held;
++static unsigned signals;
++static unsigned waits;
++#ifdef NXK_CACHE_WAIT_COUNTERS
++static int64_t ticks;
++#endif
++static void (*wait_hook)(KEVENT *);
++static unsigned char bytes[NXC_TOTAL_BLOCKS][NXC_BLOCK_SIZE];
++
++static void InitializeListHead(LIST_ENTRY *head)
++{
++    head->Flink = head->Blink = head;
++}
++static int IsListEmpty(const LIST_ENTRY *head)
++{
++    return head->Flink == head;
++}
++static void InsertTailList(LIST_ENTRY *head, LIST_ENTRY *entry)
++{
++    entry->Blink = head->Blink;
++    entry->Flink = head;
++    head->Blink->Flink = entry;
++    head->Blink = entry;
++}
++static LIST_ENTRY *RemoveHeadList(LIST_ENTRY *head)
++{
++    LIST_ENTRY *entry = head->Flink;
++    entry->Flink->Blink = head;
++    head->Flink = entry->Flink;
++    return entry;
++}
++static void RemoveEntryList(LIST_ENTRY *entry)
++{
++    entry->Blink->Flink = entry->Flink;
++    entry->Flink->Blink = entry->Blink;
++    entry->Flink = entry->Blink = entry;
++}
++static void ExReleaseFastMutex(int *mutex)
++{
++    (void)mutex;
++    assert(held);
++    held = 0;
++}
++static void ExAcquireFastMutex(int *mutex)
++{
++    (void)mutex;
++    assert(!held);
++    held = 1;
++}
++static void KeInitializeEvent(KEVENT *event, int type, BOOLEAN state)
++{
++    (void)type;
++    event->Signaled = state;
++}
++static void KeSetEvent(KEVENT *event, int increment, BOOLEAN wait)
++{
++    (void)increment;
++    (void)wait;
++    assert(held);
++    event->Signaled = 1;
++    ++signals;
++}
++#ifdef NXK_CACHE_WAIT_COUNTERS
++static LARGE_INTEGER KeQueryPerformanceCounter(void *frequency)
++{
++    LARGE_INTEGER value;
++    (void)frequency;
++    value.QuadPart = (ticks += 10);
++    return value;
++}
++#endif
++static void KeWaitForSingleObject(KEVENT *event, int reason, int mode,
++                                  BOOLEAN alertable, void *timeout)
++{
++    (void)reason;
++    (void)mode;
++    (void)alertable;
++    (void)timeout;
++    assert(!held);
++    ++waits;
++    assert(wait_hook != NULL);
++    wait_hook(event);
++    assert(event->Signaled);
++}
++static void ExRaiseStatus(NTSTATUS status)
++{
++    (void)status;
++    assert(!"unexpected status raise");
++}
++
++static NXC_BLOCK *NxcClaimSlot(BOOLEAN wait);
++static NTSTATUS NxcReadBlock(NXC_BLOCK *block);
++'''
++
++support = r'''
++static NXC_BLOCK *NxcClaimSlot(BOOLEAN wait)
++{
++    assert(wait && held);
++    assert(NxcBlocks[1].Data != NULL && NxcBlocks[1].Map == NULL);
++    NxcBlocks[1].RefCount = 1;
++    return &NxcBlocks[1];
++}
++
++static NTSTATUS NxcReadBlock(NXC_BLOCK *block)
++{
++    assert(held && block->Busy && block->RefCount == 1);
++    block->Valid = TRUE;
++    NxcPublishBlockIdleLocked(block);
++    return STATUS_SUCCESS;
++}
++'''
++
++cases = r'''
++static NXC_MAP map_a, map_b;
++
++static void initialize_block(NXC_BLOCK *block)
++{
++    memset(block, 0, sizeof(*block));
++    InitializeListHead(&block->LruLink);
++    InitializeListHead(&block->BusyWaiters);
++}
++
++static void reset_state(void)
++{
++    memset(&map_a, 0, sizeof(map_a));
++    memset(&map_b, 0, sizeof(map_b));
++    InitializeListHead(&NxcLruList);
++    InitializeListHead(&NxcCapacityWaiters);
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i) {
++        initialize_block(&NxcBlocks[i]);
++        NxcBlocks[i].Data = bytes[i];
++    }
++    NxcLookupHint = NULL;
++    signals = waits = 0;
++#ifdef NXK_CACHE_WAIT_COUNTERS
++    ticks = 0;
++#endif
++    wait_hook = NULL;
++    held = 1;
++}
++
++static void enqueue_waiter(LIST_ENTRY *head, NXC_WAIT_ENTRY *waiter)
++{
++    InitializeListHead(&waiter->Link);
++    KeInitializeEvent(&waiter->Event, NotificationEvent, FALSE);
++    InsertTailList(head, &waiter->Link);
++}
++
++static void wake_current_list(KEVENT *event)
++{
++    (void)event;
++    held = 1;
++    NxcPublishBlockIdleLocked(&NxcBlocks[0]);
++    held = 0;
++}
++
++static void test_registration_precedes_unlock(void)
++{
++    reset_state();
++    NxcBlocks[0].Busy = TRUE;
++    wait_hook = wake_current_list;
++    NxcWaitOnListLocked(&NxcBlocks[0].BusyWaiters);
++    assert(held && waits == 1 && signals == 1);
++    assert(IsListEmpty(&NxcBlocks[0].BusyWaiters));
++}
++
++static void test_publish_wakes_every_waiter(void)
++{
++    NXC_WAIT_ENTRY first, second, capacity;
++
++    reset_state();
++    NxcBlocks[0].Busy = TRUE;
++    enqueue_waiter(&NxcBlocks[0].BusyWaiters, &first);
++    enqueue_waiter(&NxcBlocks[0].BusyWaiters, &second);
++    enqueue_waiter(&NxcCapacityWaiters, &capacity);
++    NxcPublishBlockIdleLocked(&NxcBlocks[0]);
++    assert(!NxcBlocks[0].Busy && signals == 3);
++    assert(IsListEmpty(&NxcBlocks[0].BusyWaiters));
++    assert(IsListEmpty(&NxcCapacityWaiters));
++    assert(IsListEmpty(&first.Link) && IsListEmpty(&second.Link));
++    assert(first.Event.Signaled && second.Event.Signaled &&
++           capacity.Event.Signaled);
++}
++
++static void reuse_generation_during_wait(KEVENT *event)
++{
++    held = 1;
++    NxcPublishBlockIdleLocked(&NxcBlocks[0]);
++    assert(event->Signaled);
++
++    /* Reuse the descriptor before generation A's waiter resumes.  The event
++     * belongs to that waiter, so generation B cannot clear or steal it. */
++    RemoveEntryList(&NxcBlocks[0].LruLink);
++    NxcBlocks[0].Map = &map_b;
++    NxcBlocks[0].Valid = FALSE;
++    NxcBlocks[0].Busy = TRUE;
++    InsertTailList(&NxcLruList, &NxcBlocks[0].LruLink);
++    held = 0;
++}
++
++static void test_generation_reuse_relooks_up_key(void)
++{
++    NXC_BLOCK *result;
++
++    reset_state();
++    NxcBlocks[0].Map = &map_a;
++    NxcBlocks[0].Busy = TRUE;
++    InsertTailList(&NxcLruList, &NxcBlocks[0].LruLink);
++    wait_hook = reuse_generation_during_wait;
++
++    result = NxcGetBlock(&map_a, 0, TRUE);
++    assert(result == &NxcBlocks[1]);
++    assert(result->Map == &map_a && result->Valid && !result->Busy);
++    assert(NxcBlocks[0].Map == &map_b && NxcBlocks[0].Busy);
++    assert(waits == 1);
++}
++
++static void test_nowait_never_registers(void)
++{
++    reset_state();
++    NxcBlocks[0].Map = &map_a;
++    NxcBlocks[0].Busy = TRUE;
++    InsertTailList(&NxcLruList, &NxcBlocks[0].LruLink);
++    assert(NxcGetBlock(&map_a, 0, FALSE) == NULL);
++    assert(waits == 0 && signals == 0);
++    assert(IsListEmpty(&NxcBlocks[0].BusyWaiters));
++}
++
++static void test_last_put_wakes_capacity_waiters(void)
++{
++    NXC_WAIT_ENTRY first, second;
++
++    reset_state();
++    NxcBlocks[0].RefCount = 2;
++    enqueue_waiter(&NxcCapacityWaiters, &first);
++    enqueue_waiter(&NxcCapacityWaiters, &second);
++    NxcPutBlock(&NxcBlocks[0]);
++    assert(NxcBlocks[0].RefCount == 1 && signals == 0);
++    NxcPutBlock(&NxcBlocks[0]);
++    assert(NxcBlocks[0].RefCount == 0 && signals == 2);
++    assert(IsListEmpty(&NxcCapacityWaiters));
++}
++
++int main(void)
++{
++    test_registration_precedes_unlock();
++    test_publish_wakes_every_waiter();
++    test_generation_reuse_relooks_up_key();
++    test_nowait_never_registers();
++    test_last_put_wakes_capacity_waiters();
++#ifdef NXK_CACHE_WAIT_COUNTERS
++    assert(NxcCacheWaitCounters.BusyWaitCount > 0);
++    assert(NxcCacheWaitCounters.WakeCount > 0);
++    assert(NxcCacheWaitCounters.MutexReacquireCount > 0);
++    assert(NxcCacheWaitCounters.CompletionToResumeTicks > 0);
++#endif
++    puts("cache completion waits: stack ownership and generation reuse PASS");
++    return 0;
++}
++'''
++
++fixture = out / "completion-waits.c"
++fixture.write_text(shim + bodies + support + cases)
++for enabled in (False, True):
++    binary = out / ("completion-waits-counters" if enabled
++                    else "completion-waits")
++    command = [
++        "cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
++        "-fsanitize=address,undefined",
++    ]
++    if enabled:
++        command.append("-DNXK_CACHE_WAIT_COUNTERS=1")
++    subprocess.run(command + [str(fixture), "-o", str(binary)], check=True)
++    subprocess.run([str(binary)], check=True,
++                   env={"ASAN_OPTIONS": "detect_leaks=0"})
++    symbols = subprocess.check_output(["nm", str(binary)], text=True)
++    assert ("NxcCacheWaitCounters" in symbols) == enabled
+diff --git a/tests/host/cache/check-flush-lifetime.py b/tests/host/cache/check-flush-lifetime.py
+index 0a9c08ffe3c6d5d9dc1400dfd74bd8e6378ed19c..5dc694d2325fa0577bb7a26091d239320d59ae01 100644
+--- a/tests/host/cache/check-flush-lifetime.py
++++ b/tests/host/cache/check-flush-lifetime.py
+@@ -77,6 +77,7 @@ typedef struct {
+     BOOLEAN Dirty;
+     BOOLEAN Busy;
+     LIST_ENTRY LruLink;
++    LIST_ENTRY BusyWaiters;
+ } NXC_BLOCK;
+ typedef struct _NXC_WB_CONTEXT {
+     PKTHREAD Thread;
+@@ -84,6 +85,7 @@ typedef struct _NXC_WB_CONTEXT {
+ } NXC_WB_CONTEXT;
+ 
+ static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
++static LIST_ENTRY NxcCapacityWaiters;
+ static int NxcMutex, held;
+ static ULONG CcDataFlushes, CcLazyWriteIos, CcLazyWritePages;
+ static NXC_WB_CONTEXT *NxcWbContexts;
+@@ -121,11 +123,29 @@ static NTSTATUS NxcPagingIo(void *file, void *buffer, LONGLONG offset,
+     return io_status;
+ }
+ 
+-static void NxcShortWait(void)
++static void NxcWaitOnListLocked(LIST_ENTRY *waiters)
+ {
++    (void)waiters;
+     assert(!"unexpected busy wait");
+ }
+ 
++static void NxcWakeWaitersLocked(LIST_ENTRY *waiters)
++{
++    (void)waiters;
++}
++
++static void NxcPublishBlockIdleLocked(NXC_BLOCK *block)
++{
++    assert(block->Busy);
++    block->Busy = FALSE;
++}
++
++static void NxcPutBlock(NXC_BLOCK *block)
++{
++    assert(block->RefCount > 0);
++    --block->RefCount;
++}
++
+ static void RemoveEntryList(LIST_ENTRY *entry)
+ {
+     entry->Blink->Flink = entry->Flink;
+diff --git a/tests/host/cache/check-map-lifetime.py b/tests/host/cache/check-map-lifetime.py
+index 68368dd86bc2df258cdfe756db742cc5cdc80b34..5a1297b0d1d547ab35e84c09147b77b5d3d20bac 100644
+--- a/tests/host/cache/check-map-lifetime.py
++++ b/tests/host/cache/check-map-lifetime.py
+@@ -72,8 +72,14 @@ typedef struct _NXC_BLOCK {
+ } NXC_BLOCK;
+ 
+ static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
++static LIST_ENTRY NxcCapacityWaiters;
+ static int NxcMutex, held, freed, dereferenced;
+ 
++static void NxcWakeWaitersLocked(LIST_ENTRY *waiters)
++{
++    (void)waiters;
++}
++
+ static int IsListEmpty(const LIST_ENTRY *head)
+ {
+     return head->Flink == head;
+diff --git a/tests/host/cache/check-shrink.py b/tests/host/cache/check-shrink.py
+index 1d06dc5ffc55df30eb2abb4b3be9c55a3eca910d..2c9cb812e311b73909827ee6011a535892059de9 100644
+--- a/tests/host/cache/check-shrink.py
++++ b/tests/host/cache/check-shrink.py
+@@ -54,6 +54,7 @@ typedef struct {
+     LIST_ENTRY LruLink;
+ } NXC_BLOCK;
+ static NXC_BLOCK NxcBlocks[NXC_MAX_BLOCKS];
++static LIST_ENTRY NxcCapacityWaiters;
+ static unsigned NxcActiveBlocks, calls, freed, allocations, checks;
+ static unsigned attempts[NXC_MAX_BLOCKS];
+ static int NxcMutex, held, failed_slot, allocation_limit;
+@@ -81,6 +82,11 @@ static void *ExAllocatePoolWithTag(int pool, size_t bytes, int tag) {
+ static void ExFreePoolWithTag(void *data, int tag) {
+     (void)tag; assert(held); ++freed; free(data);
+ }
++static void NxcWakeWaitersLocked(LIST_ENTRY *waiters) { (void)waiters; }
++static void NxcPutBlock(NXC_BLOCK *block) {
++    assert(block->RefCount > 0); --block->RefCount;
++    (void)NxcCapacityWaiters;
++}
+ static NTSTATUS NxcFlushBlock(NXC_BLOCK *block, SIZE_T *written) {
+     unsigned slot = block - NxcBlocks;
+     assert(held && block->Busy && block->RefCount == 1);
+diff --git a/tests/host/cache/check-writeback-context.py b/tests/host/cache/check-writeback-context.py
+index 750298bf03e15963ab47244efb1b9c5e5e1ce53f..99777639c876610e69c70a8e4a3323a888e58f83 100644
+--- a/tests/host/cache/check-writeback-context.py
++++ b/tests/host/cache/check-writeback-context.py
+@@ -81,6 +81,7 @@ typedef struct {
+     BOOLEAN Dirty;
+     BOOLEAN Busy;
+     BOOLEAN Reserved;
++    LIST_ENTRY BusyWaiters;
+ } NXC_BLOCK;
+ typedef struct _NXC_WB_CONTEXT {
+     PKTHREAD Thread;
+@@ -89,6 +90,7 @@ typedef struct _NXC_WB_CONTEXT {
+ 
+ static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
+ static LIST_ENTRY NxcLruList;
++static LIST_ENTRY NxcCapacityWaiters;
+ static int NxcMutex, held;
+ static __attribute__((unused)) ULONG NxcActiveBlocks = NXC_MAX_BLOCKS;
+ static ULONG CcDataFlushes, CcLazyWriteIos, CcLazyWritePages;
+@@ -133,7 +135,21 @@ static NXC_BLOCK *NxcClaimReserve(void)
+     }
+     return NULL;
+ }
+-static void NxcShortWait(void) { assert(!"unexpected wait"); }
++static void NxcWaitOnListLocked(LIST_ENTRY *waiters)
++{
++    (void)waiters;
++    assert(!"unexpected wait");
++}
++static void NxcPublishBlockIdleLocked(NXC_BLOCK *block)
++{
++    assert(block->Busy);
++    block->Busy = FALSE;
++}
++static void NxcPutBlock(NXC_BLOCK *block)
++{
++    assert(block->RefCount > 0);
++    --block->RefCount;
++}
+ static void ExRaiseStatus(NTSTATUS status)
+ {
+     (void)status;
+diff --git a/tests/host/cache/check-writeback.py b/tests/host/cache/check-writeback.py
+index 633f709515cc21ee849f90675fb2fa8c9f3de54d..c66c8b74379cdc64cc70b1cedb738da09d05dbbc 100644
+--- a/tests/host/cache/check-writeback.py
++++ b/tests/host/cache/check-writeback.py
+@@ -26,8 +26,8 @@ typedef unsigned ULONG;typedef size_t SIZE_T;typedef int BOOLEAN;typedef int32_t
+ #define NXC_MAX_BLOCKS 2
+ #define CONTAINING_RECORD(p,t,f) ((t*)((char*)(p)-offsetof(t,f)))
+ typedef struct LIST_ENTRY {struct LIST_ENTRY *Flink,*Blink;} LIST_ENTRY,*PLIST_ENTRY;
+-typedef struct {void *Data,*Map;unsigned RefCount;int Busy,Dirty,Valid,Reserved;LIST_ENTRY LruLink;} NXC_BLOCK;
+-static NXC_BLOCK NxcBlocks[2];static LIST_ENTRY NxcLruList;
++typedef struct {void *Data,*Map;unsigned RefCount;int Busy,Dirty,Valid,Reserved;LIST_ENTRY LruLink,BusyWaiters;} NXC_BLOCK;
++static NXC_BLOCK NxcBlocks[2];static LIST_ENTRY NxcLruList,NxcCapacityWaiters;
+ static unsigned calls;static int NxcMutex, held, status;
+ static unsigned char data[16];static jmp_buf failure;
+ static void RemoveEntryList(LIST_ENTRY *l){l->Blink->Flink=l->Flink;l->Flink->Blink=l->Blink;}
+@@ -36,7 +36,8 @@ static void ExAcquireFastMutex(int *m){(void)m;assert(!held);held=1;}
+ static __attribute__((unused,noreturn)) void ExRaiseStatus(NTSTATUS s){assert(s==status);longjmp(failure,1);}
+ static NXC_BLOCK *NxcClaimReserve(void){return NULL;}
+ static int NxcOwnsWritebackContext(void){return 0;}
+-static void NxcShortWait(void){abort();}
++static void NxcWaitOnListLocked(LIST_ENTRY *waiters){(void)waiters;abort();}
++static void NxcPutBlock(NXC_BLOCK *b){assert(b->RefCount);--b->RefCount;(void)NxcCapacityWaiters;}
+ static NTSTATUS NxcFlushBlock(NXC_BLOCK *b,SIZE_T *n){
+  assert(held&&b->Busy&&b->RefCount==1&&b->Dirty&&b->Valid);
+  if(++calls>1)longjmp(failure,2); /* Stop an unbounded retry deterministically. */
+diff --git a/tests/host/metadata/check.py b/tests/host/metadata/check.py
+index daf19729359e8594f62228f7a95b8181433011e1..cb92d39dbb18b7a447ba4a9ba320627d68cffbac 100644
+--- a/tests/host/metadata/check.py
++++ b/tests/host/metadata/check.py
+@@ -128,6 +128,9 @@ static NTSTATUS NxcPagingIo(VOID *file, VOID *data, LONGLONG offset, ULONG lengt
+     }
+     *got = length; return STATUS_SUCCESS;
+ }
++static void NxcPublishBlockIdleLocked(NXC_BLOCK *block) {
++    assert(block->Busy); block->Busy=0;
++}
+ static int vfatVolumeIsFatX(PDEVICE_EXTENSION d) { (void)d; return fatx_mode; }
+ static int vfatFCBIsRoot(PVFATFCB f) { return f->root; }
+ static NTSTATUS vfatFCBInitializeCacheFromVolume(PDEVICE_EXTENSION d, PVFATFCB f) {
+diff --git a/tests/xbe/api-regression/mm/cache.c b/tests/xbe/api-regression/mm/cache.c
+index 565bad0fdf56a7c20650e4840ad50781164e9b44..c392fa175e4b9e57eb2e49602f29b537f906748f 100644
+--- a/tests/xbe/api-regression/mm/cache.c
++++ b/tests/xbe/api-regression/mm/cache.c
+@@ -384,12 +384,189 @@ static bool t_fsc_cache_size(void)
+     return true;
+ }
+ 
++/* Two callers enter the same cold cache block together.  The first request
++ * owns the fill; the second must wait for that exact busy generation, then
++ * relookup and receive identical bytes.  This is also a native no-hang check
++ * for the completion-driven cache waiter. */
++#define PARALLEL_READ_BYTES 0x4000u
++
++typedef struct _CACHE_READ_WORKER {
++    HANDLE File;
++    KEVENT Ready;
++    KEVENT Done;
++    NTSTATUS Status;
++    ULONG Information;
++    unsigned char Buffer[PARALLEL_READ_BYTES];
++} CACHE_READ_WORKER;
++
++static KEVENT g_parallel_start;
++static CACHE_READ_WORKER g_parallel_workers[2];
++
++static NTSTATUS open_parallel_read_handle(HANDLE *file,
++                                          PIO_STATUS_BLOCK iosb)
++{
++    ANSI_STRING name;
++    OBJECT_ATTRIBUTES oa;
++
++    name.Length = (USHORT)strlen(CACHE_A);
++    name.MaximumLength = name.Length + 1;
++    name.Buffer = (PCHAR)CACHE_A;
++    oa.RootDirectory = NULL;
++    oa.ObjectName = &name;
++    oa.Attributes = OBJ_CASE_INSENSITIVE;
++
++    return NtCreateFile(file, GENERIC_READ | SYNCHRONIZE, &oa, iosb, NULL,
++                        FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_OPEN,
++                        FILE_SYNCHRONOUS_IO_NONALERT |
++                        FILE_NON_DIRECTORY_FILE);
++}
++
++static NTSTATUS wait_for_cache_test_event(PKEVENT event)
++{
++    LARGE_INTEGER timeout = {
++        .QuadPart = -((LONGLONG)10 * 1000 * 10000),
++    };
++
++    return KeWaitForSingleObject(event, Executive, KernelMode, FALSE,
++                                 &timeout);
++}
++
++static void NTAPI cache_test_system_routine(PKSTART_ROUTINE StartRoutine,
++                                             PVOID StartContext)
++{
++    if (StartRoutine != NULL)
++        StartRoutine(StartContext);
++    PsTerminateSystemThread(STATUS_SUCCESS);
++}
++
++static void NTAPI parallel_cache_reader(PVOID argument)
++{
++    CACHE_READ_WORKER *worker = argument;
++    IO_STATUS_BLOCK iosb;
++    LARGE_INTEGER offset = { .QuadPart = 0 };
++
++    KeSetEvent(&worker->Ready, 0, FALSE);
++    KeWaitForSingleObject(&g_parallel_start, Executive, KernelMode, FALSE,
++                          NULL);
++    worker->Status = NtReadFile(worker->File, NULL, NULL, NULL, &iosb,
++                                worker->Buffer, sizeof(worker->Buffer),
++                                &offset);
++    worker->Information = (ULONG)iosb.Information;
++    KeSetEvent(&worker->Done, 0, FALSE);
++}
++
++static bool t_parallel_cold_read(void)
++{
++    HANDLE file = NULL;
++    HANDLE worker_files[2] = { NULL, NULL };
++    HANDLE threads[2] = { NULL, NULL };
++    IO_STATUS_BLOCK iosb;
++    NTSTATUS s;
++    bool ok = true;
++    unsigned started = 0;
++
++    unlink_path(CACHE_A);
++    s = open_path(CACHE_A, &file, GENERIC_READ | GENERIC_WRITE,
++                  FILE_OVERWRITE_IF, 0, &iosb);
++    ASSERT_NTSTATUS(s, STATUS_SUCCESS);
++    ok = write_at(file, 0, CHUNK, 0x6D);
++    if (ok)
++        ok = NtFlushBuffersFile(file, &iosb) == STATUS_SUCCESS;
++    NtClose(file);
++    if (!ok) {
++        unlink_path(CACHE_A);
++        FAIL_AND_RETURN("prepare parallel-read file");
++    }
++
++    /* Make the first worker perform a fill rather than inherit the writer's
++     * resident block. */
++    FscInvalidateIdleBlocks();
++    for (unsigned i = 0; i < 2; ++i) {
++        s = open_parallel_read_handle(&worker_files[i], &iosb);
++        if (!NT_SUCCESS(s)) {
++            test_record_failure(__FILE__, __LINE__,
++                                "open parallel worker %u -> 0x%08x",
++                                i, (unsigned)s);
++            ok = false;
++            break;
++        }
++        memset(&g_parallel_workers[i], 0, sizeof(g_parallel_workers[i]));
++        g_parallel_workers[i].File = worker_files[i];
++        g_parallel_workers[i].Status = STATUS_UNSUCCESSFUL;
++        KeInitializeEvent(&g_parallel_workers[i].Ready, NotificationEvent,
++                          FALSE);
++        KeInitializeEvent(&g_parallel_workers[i].Done, NotificationEvent,
++                          FALSE);
++    }
++    KeInitializeEvent(&g_parallel_start, NotificationEvent, FALSE);
++
++    for (unsigned i = 0; ok && i < 2; ++i) {
++        s = PsCreateSystemThreadEx(&threads[i], 0, 0, 0, NULL,
++                                   parallel_cache_reader,
++                                   &g_parallel_workers[i], FALSE, FALSE,
++                                   cache_test_system_routine);
++        if (!NT_SUCCESS(s))
++        {
++            test_record_failure(__FILE__, __LINE__,
++                                "create parallel worker %u -> 0x%08x",
++                                i, (unsigned)s);
++            ok = false;
++        }
++        else
++            started++;
++    }
++
++    for (unsigned i = 0; ok && i < started; ++i) {
++        s = wait_for_cache_test_event(&g_parallel_workers[i].Ready);
++        if (s != STATUS_SUCCESS) {
++            test_record_failure(__FILE__, __LINE__,
++                                "parallel worker %u readiness wait -> 0x%08x",
++                                i, (unsigned)s);
++            ok = false;
++        }
++    }
++    KeSetEvent(&g_parallel_start, 0, FALSE);
++    for (unsigned i = 0; i < started; ++i) {
++        s = wait_for_cache_test_event(&g_parallel_workers[i].Done);
++        if (s != STATUS_SUCCESS) {
++            test_record_failure(__FILE__, __LINE__,
++                                "parallel worker %u completion wait -> 0x%08x",
++                                i, (unsigned)s);
++            ok = false;
++        }
++        NtClose(threads[i]);
++    }
++
++    for (unsigned i = 0; i < 2; ++i) {
++        if (worker_files[i] != NULL)
++            NtClose(worker_files[i]);
++        if (!ok)
++            continue;
++        if (g_parallel_workers[i].Status != STATUS_SUCCESS ||
++            g_parallel_workers[i].Information != PARALLEL_READ_BYTES) {
++            test_record_failure(__FILE__, __LINE__,
++                                "parallel worker %u read -> 0x%08x len=%lu",
++                                i, (unsigned)g_parallel_workers[i].Status,
++                                (unsigned long)g_parallel_workers[i].Information);
++            ok = false;
++        } else if (!check_pattern(g_parallel_workers[i].Buffer,
++                                  PARALLEL_READ_BYTES, 0, 0x6D,
++                                  "parallel cold read")) {
++            ok = false;
++        }
++    }
++
++    unlink_path(CACHE_A);
++    return ok;
++}
++
+ static const test_entry_t mm_cache_entries[] = {
+     {"eviction_two_files",    t_eviction_two_files},
+     {"read_churn",            t_read_churn},
+     {"truncate_shrinks",      t_truncate_shrinks},
+     {"truncate_purges_dirty", t_truncate_purges_dirty},
+     {"fsc_cache_size",        t_fsc_cache_size},
++    {"parallel_cold_read",    t_parallel_cold_read},
+ };
+ 
+ DEFINE_GROUP(mm_cache, "mm/cache");
