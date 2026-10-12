@@ -1,12 +1,15 @@
 # SpiritBoot
 
 
-**SpiritBoot** is an experimental, clean-room, open-source boot firmware and Xbox-compatible runtime project for the **original Xbox**.
+**SpiritBoot** is a capable and open-sourced boot firmware and Xbox-compatible runtime project for the **original Xbox**.
 
-The long-term goal is not merely to display a boot screen. The goal is to replace enough of the proprietary boot and kernel stack that an original Xbox title can be initialized, loaded, and run without requiring a Microsoft BIOS image in the SpiritBoot source tree.
+Goal is full open source replacement of the BIOS images floating around that are copyright material.
+This BIOS can be shared, bundled, and used more freely without concerns.
 
-> **Status:** open-firmware build and emulator integration. Retail game compatibility is not yet verified.
-> 
+Just remember that it was built with love for an open internet
+
+## Save files are NOT compatible with real XBOX bios due to removal of encryption keys. 
+
 <img width="1262" height="911" alt="image" src="https://github.com/user-attachments/assets/fe11b49b-d559-4ce6-a7b0-a92f4248c47f" />
 
 ## Build and run
@@ -353,21 +356,13 @@ SpiritBoot/
 
 The exact binary/linker layout is intentionally not frozen until reset-vector and image-format requirements are verified.
 
-## Immediate research queue
+Known running games (not fully tested)
+- Forza
+- Conkers Bad Fur Day
+- Halo
+- Def Jam
+- Doom
+- Batman
+- The Simpsons, Road Rage
+- Grabbed by the Ghoulies
 
-1. Determine the minimal execution contract at the BIOS handoff on each Xbox revision.
-2. Trace Cromwell initialization and separate generally useful hardware bring-up from Linux-specific behavior.
-3. Define an xemu SpiritBoot development mode with deterministic reset and trace capture.
-4. Inventory Xbox kernel exports required by a minimal nxdk XBE and then a deliberately chosen first retail title.
-5. Separate guest-visible behavior in Cxbx-Reloaded from Windows-host implementation details.
-6. Identify nxdk startup/driver code useful as black-box tests versus candidates for licensed reuse.
-7. Define the smallest useful open MCPX/emulator handoff contract.
-8. Verify image layout, reset vector, linker layout, checksum/encryption expectations, and flash-size requirements.
-9. Inventory Xbox revision differences that should be abstracted from day one.
-10. Define trace points that turn a black screen into an actionable failure.
-
-## First target
-
-> **Build SpiritBoot, enter it in xemu without a Microsoft BIOS image, initialize enough hardware to emit deterministic trace output, and launch a tiny nxdk-built XBE through our own loader/runtime path.**
-
-That milestone validates the architecture without pretending the kernel compatibility problem is already solved.
