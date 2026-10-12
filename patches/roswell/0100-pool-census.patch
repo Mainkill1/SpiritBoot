@@ -1,0 +1,1074 @@
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index 0cb67bdf..ba127b79 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -176,6 +176,17 @@ if(NXK_MM_POOL)
+     add_definitions(-DNXK_MM_POOL)
+ endif()
+ 
++# Diagnostic-only request/tag/lifetime census for evidence-based pool-class
++# selection.  This adds fixed BSS storage and counters to opt-in builds only.
++option(NXK_POOL_CENSUS "Enable diagnostic pool allocation census" OFF)
++if(NXK_POOL_CENSUS)
++    if(NOT NXK_MM_POOL)
++        message(FATAL_ERROR "NXK_POOL_CENSUS requires NXK_MM_POOL")
++    endif()
++    list(APPEND NTOSKRNL_SOURCE xb/mm/poolcensus.c)
++    list(APPEND PCH_SKIP_SOURCE xb/mm/poolcensus.c)
++endif()
++
+ # nxpoolpages: whole pages for nxpool come from a PTE-mapped VA window
+ # backed by the nxmm supply (xb/mm/poolpages.c) instead of the
+ # ARM3 pool page layer.  Revert = -DNXK_MM_POOLPAGES=OFF.
+@@ -270,6 +281,9 @@ add_executable(ntoskrnl
+     ${PCH_SKIP_SOURCE}
+     ntoskrnl.rc
+     ${NXK_EXPORT_ROOTS_SOURCE})
++if(NXK_POOL_CENSUS)
++    target_compile_definitions(ntoskrnl PRIVATE NXK_POOL_CENSUS=1)
++endif()
+ target_link_options(ntoskrnl PRIVATE
+     -Wl,-u,_NxkExportRoots -Wl,-u,_NxkExportDirectory)
+ 
+diff --git a/ntoskrnl/xb/mm/pool-census.h b/ntoskrnl/xb/mm/pool-census.h
+new file mode 100644
+index 00000000..0cdaca81
+--- /dev/null
++++ b/ntoskrnl/xb/mm/pool-census.h
+@@ -0,0 +1,148 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++
++#define NXP_POOL_CENSUS_MAGIC 0x4E435031UL /* NCP1 */
++#define NXP_POOL_CENSUS_SCHEMA 1UL
++#define NXP_POOL_CENSUS_BIN_OVERFLOW 4097U
++#define NXP_POOL_CENSUS_BIN_SLOTS (NXP_POOL_CENSUS_BIN_OVERFLOW + 1U)
++#define NXP_POOL_CENSUS_KEY_SLOTS 1024U
++#define NXP_POOL_CENSUS_LARGE_SLOTS 1024U
++#define NXP_POOL_CENSUS_SAMPLE_SLOTS 256U
++#define NXP_POOL_CENSUS_SAMPLE_BUCKETS 256U
++#define NXP_POOL_CENSUS_NO_SLOT 0xFFFFU
++#define NXP_POOL_CENSUS_DOMAIN_KERNEL 0U
++#define NXP_POOL_CENSUS_DOMAIN_TITLE 1U
++#define NXP_POOL_CENSUS_DOMAIN_SHARED 2U
++#define NXP_POOL_CENSUS_DOMAIN_COUNT 3U
++#define NXP_POOL_CENSUS_CLASS_COUNT 7U
++
++#define NXP_POOL_CENSUS_CLASS_MASK 0x000FU
++#define NXP_POOL_CENSUS_BIN_SHIFT 4U
++#define NXP_POOL_CENSUS_BIN_MASK 0x0FF0U
++#define NXP_POOL_CENSUS_DOMAIN_MASK 0x1000U
++#define NXP_POOL_CENSUS_SAMPLED_MASK 0x2000U
++
++#ifdef NXK_POOL_CENSUS
++typedef struct _NXP_POOL_CENSUS_ENTRY
++{
++    ULONG Tag;
++    USHORT Bin;
++    UCHAR Domain;
++    UCHAR Used;
++    ULONG Allocations;
++    ULONG Frees;
++    ULONG Live;
++    ULONG Peak;
++    ULONG LifeShort;
++    ULONG LifeMedium;
++    ULONG LifeRetained;
++} NXP_POOL_CENSUS_ENTRY;
++
++typedef struct _NXP_POOL_CENSUS_PAGE_STATS
++{
++    ULONG FreshRefills;
++    ULONG EmptyReuses;
++    ULONG Detaches;
++    ULONG CurrentActive;
++    ULONG PeakActive;
++    ULONG CurrentEmpty;
++    ULONG PeakEmpty;
++} NXP_POOL_CENSUS_PAGE_STATS;
++
++typedef struct _NXP_POOL_CENSUS_LARGE
++{
++    PVOID Address;
++    USHORT KeyIndex;
++    USHORT Bin;
++    UCHAR Used;
++    UCHAR Sampled;
++} NXP_POOL_CENSUS_LARGE;
++
++typedef struct _NXP_POOL_CENSUS_SAMPLE
++{
++    PVOID Address;
++    ULONGLONG StartedAt;
++    USHORT KeyIndex;
++    USHORT Next;
++} NXP_POOL_CENSUS_SAMPLE;
++
++typedef struct _NXP_POOL_CENSUS_DATA
++{
++    ULONG Magic;
++    ULONG Schema;
++    ULONG Bytes;
++    volatile ULONG Sequence;
++    ULONG Allocations;
++    ULONG Frees;
++    ULONG AllocationSequence;
++    ULONG KeyOverflows;
++    ULONG LargeOverflows;
++    ULONG LargeFreeMisses;
++    ULONG LifetimeOverflows;
++    ULONG LifetimeMisses;
++    ULONG UntrackedFrees;
++    ULONG Saturations;
++    ULONG PageUnderflows;
++    ULONG LifetimeActive;
++    ULONG LifetimeActivePeak;
++    ULONG BinSlots;
++    ULONG PageDomainCount;
++    ULONG PageClassCount;
++    ULONG PageStatsBytes;
++    ULONG EntryCount;
++    ULONG EntryBytes;
++    ULONG BinAllocationsOffset;
++    ULONG BinLiveOffset;
++    ULONG BinPeakOffset;
++    ULONG PagesOffset;
++    ULONG EntriesOffset;
++    ULONG BinAllocations[NXP_POOL_CENSUS_BIN_SLOTS];
++    ULONG BinLive[NXP_POOL_CENSUS_BIN_SLOTS];
++    ULONG BinPeak[NXP_POOL_CENSUS_BIN_SLOTS];
++    NXP_POOL_CENSUS_PAGE_STATS Pages[NXP_POOL_CENSUS_DOMAIN_COUNT]
++                                             [NXP_POOL_CENSUS_CLASS_COUNT];
++    NXP_POOL_CENSUS_ENTRY Entries[NXP_POOL_CENSUS_KEY_SLOTS];
++    NXP_POOL_CENSUS_LARGE Large[NXP_POOL_CENSUS_LARGE_SLOTS];
++    NXP_POOL_CENSUS_SAMPLE Samples[NXP_POOL_CENSUS_SAMPLE_SLOTS];
++    USHORT SampleHash[NXP_POOL_CENSUS_SAMPLE_BUCKETS];
++} NXP_POOL_CENSUS_DATA;
++
++/* Read this symbol only with the guest stopped.  The record is diagnostic
++ * state, not a synchronized public ABI.  Current samples are right-censored
++ * live allocations; completed lifetime buckets use <1 s, 1-30 s, and >=30 s. */
++extern NXP_POOL_CENSUS_DATA NxpPoolCensusData;
++
++VOID NxPoolCensusInitialize(VOID);
++USHORT NxPoolCensusBinForSize(SIZE_T NumberOfBytes);
++BOOLEAN NxPoolCensusAllocate(PVOID Address,
++                             ULONG Tag,
++                             SIZE_T NumberOfBytes,
++                             UCHAR Domain,
++                             BOOLEAN LargeAllocation);
++VOID NxPoolCensusFree(PVOID Address,
++                      ULONG Tag,
++                      USHORT Bin,
++                      UCHAR Domain,
++                      BOOLEAN Sampled);
++VOID NxPoolCensusFreeLarge(PVOID Address);
++VOID NxPoolCensusPageAttach(ULONG ClassIndex,
++                            UCHAR Domain,
++                            BOOLEAN Reused);
++VOID NxPoolCensusPageBecameActive(ULONG ClassIndex, UCHAR Domain);
++VOID NxPoolCensusPageBecameEmpty(ULONG ClassIndex, UCHAR Domain);
++VOID NxPoolCensusPageDetach(ULONG ClassIndex, UCHAR Domain);
++
++#define NXP_POOL_CENSUS_PACK_CLASS(Class, Bin, Domain, Sampled) \
++    ((USHORT)(((Class) & NXP_POOL_CENSUS_CLASS_MASK) | \
++              (((Bin) << NXP_POOL_CENSUS_BIN_SHIFT) & NXP_POOL_CENSUS_BIN_MASK) | \
++              (((Domain) & 1U) ? NXP_POOL_CENSUS_DOMAIN_MASK : 0U) | \
++              ((Sampled) ? NXP_POOL_CENSUS_SAMPLED_MASK : 0U)))
++#define NXP_POOL_CENSUS_GET_CLASS(Value) \
++    ((USHORT)((Value) & NXP_POOL_CENSUS_CLASS_MASK))
++#define NXP_POOL_CENSUS_GET_BIN(Value) \
++    ((USHORT)(((Value) & NXP_POOL_CENSUS_BIN_MASK) >> NXP_POOL_CENSUS_BIN_SHIFT))
++#define NXP_POOL_CENSUS_GET_DOMAIN(Value) \
++    ((UCHAR)(((Value) & NXP_POOL_CENSUS_DOMAIN_MASK) != 0))
++#define NXP_POOL_CENSUS_GET_SAMPLED(Value) \
++    ((BOOLEAN)(((Value) & NXP_POOL_CENSUS_SAMPLED_MASK) != 0))
++#endif
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index 8f306036..b1d9f200 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -35,6 +35,16 @@
+ #include <mm/ARM3/miarm.h>
+ 
+ #include "mm.h"
++#ifdef NXK_POOL_CENSUS
++#include "pool-census.h"
++#if XBOX_RESERVE_UPPER_RAM
++#define NXP_POOL_CENSUS_PAGE_DOMAIN(Class) \
++    (((Class) >= NXP_CLASSES) ? NXP_POOL_CENSUS_DOMAIN_TITLE : \
++                               NXP_POOL_CENSUS_DOMAIN_KERNEL)
++#else
++#define NXP_POOL_CENSUS_PAGE_DOMAIN(Class) NXP_POOL_CENSUS_DOMAIN_SHARED
++#endif
++#endif
+ 
+ /* Whole-page source: the nxmm window allocator when enabled, else the
+  * ARM3 pool page layer. */
+@@ -69,6 +79,10 @@ static const USHORT NxpClassSize[] = {
+ #define NXP_SIZE_CLASS(Index) (Index)
+ #endif
+ #define NXP_SMALL_MAX     2040    /* user bytes; above = whole pages */
++#ifdef NXK_POOL_CENSUS
++C_ASSERT(((NXP_SMALL_MAX + 15) / 16) <=
++         (NXP_POOL_CENSUS_BIN_MASK >> NXP_POOL_CENSUS_BIN_SHIFT));
++#endif
+ 
+ typedef struct _NXP_HEADER
+ {
+@@ -150,6 +164,9 @@ InitializePool(IN POOL_TYPE PoolType,
+     if ((PoolType & BASE_POOL_TYPE_MASK) != NonPagedPool) return;
+ 
+     KeInitializeSpinLock(&NxpLock);
++#ifdef NXK_POOL_CENSUS
++    NxPoolCensusInitialize();
++#endif
+ 
+     /* No page is a bucket page yet (0 would read as an empty bucket). */
+     RtlFillMemory(NxpPageState, sizeof(NxpPageState), NXP_NOT_BUCKET);
+@@ -238,6 +255,9 @@ NxpDetachEmptyBucketPage(ULONG Index)
+     ULONG Size, Count, i;
+ 
+     ASSERT(NxpPageState[Index] == 0 && Class < NXP_BUCKET_LISTS);
++#ifdef NXK_POOL_CENSUS
++    NxPoolCensusPageDetach(Class, NXP_POOL_CENSUS_PAGE_DOMAIN(Class));
++#endif
+     Size = NxpClassSize[NXP_SIZE_CLASS(Class)];
+     Count = PAGE_SIZE / Size;
+     /* Batch frees commonly leave the whole page at the list head. Verify
+@@ -347,6 +367,11 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+     KIRQL OldIrql;
+     NXP_HEADER *Hdr;
+     NXP_FREE *Blk;
++#ifdef NXK_POOL_CENSUS
++    USHORT CensusBin;
++    BOOLEAN CensusSampled;
++    BOOLEAN ReusedPage;
++#endif
+ #if !XBOX_RESERVE_UPPER_RAM
+     UNREFERENCED_PARAMETER(TitleData);
+ #endif
+@@ -363,6 +388,12 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+             return NULL;
+         }
+         ASSERT(PAGE_ALIGN(Va) == Va);
++#ifdef NXK_POOL_CENSUS
++        (void)NxPoolCensusAllocate(Va, Tag, NumberOfBytes,
++                                   TitleData ? NXP_POOL_CENSUS_DOMAIN_TITLE :
++                                               NXP_POOL_CENSUS_DOMAIN_KERNEL,
++                                   TRUE);
++#endif
+ 
+ #ifndef NXK_MM_POOLPAGES
+         KeAcquireSpinLock(&NxpLock, &OldIrql);
+@@ -394,6 +425,11 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+         NxpFreeLists[Class] = Blk->Next;
+         /* The head has no predecessor; its Prev is never consulted.
+          * Leave it untouched here and use head identity when detaching. */
++#ifdef NXK_POOL_CENSUS
++        if (NxpPageState[NXP_PAGE_INDEX(Blk)] == 0)
++            NxPoolCensusPageBecameActive(Class,
++                                         NXP_POOL_CENSUS_PAGE_DOMAIN(Class));
++#endif
+         NxpPageState[NXP_PAGE_INDEX(Blk)]++;
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+         ASSERT((((NXP_HEADER *)Blk) - 1)->Magic == NXP_MAGIC_FREE);
+@@ -407,6 +443,9 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+         PUCHAR Page;
+ 
+         Page = NxpReuseEmptyBucketPage(Class);
++#ifdef NXK_POOL_CENSUS
++        ReusedPage = Page != NULL;
++#endif
+         if (Page == NULL)
+         {
+             KeReleaseSpinLock(&NxpLock, OldIrql);
+@@ -424,6 +463,11 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+         /* Block 0 satisfies this request; chain the rest. */
+         /* Mark as a bucket page with one live block in a single write. */
+         NxpPageState[NXP_PAGE_INDEX(Page)] = 1;
++#ifdef NXK_POOL_CENSUS
++        NxPoolCensusPageAttach(Class,
++                               NXP_POOL_CENSUS_PAGE_DOMAIN(Class),
++                               ReusedPage);
++#endif
+         NXP_FREE *Head = NxpFreeLists[Class];
+         if (Head)
+             Head->Prev = (NXP_FREE *)(Page + Size + sizeof(NXP_HEADER));
+@@ -450,6 +494,19 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+     Hdr->Tag = Tag;
+     Hdr->ClassIndex = (USHORT)Class;
+     Hdr->Magic = NXP_MAGIC_ALLOC;
++#ifdef NXK_POOL_CENSUS
++    CensusBin = NxPoolCensusBinForSize(NumberOfBytes);
++    CensusSampled = NxPoolCensusAllocate(
++        Blk, Tag, NumberOfBytes,
++        TitleData ? NXP_POOL_CENSUS_DOMAIN_TITLE :
++                    NXP_POOL_CENSUS_DOMAIN_KERNEL,
++        FALSE);
++    Hdr->ClassIndex = NXP_POOL_CENSUS_PACK_CLASS(
++        Class, CensusBin,
++        TitleData ? NXP_POOL_CENSUS_DOMAIN_TITLE :
++                    NXP_POOL_CENSUS_DOMAIN_KERNEL,
++        CensusSampled);
++#endif
+     return Blk;
+ }
+ 
+@@ -492,6 +549,12 @@ ExFreePoolWithTag(IN PVOID P,
+     NXP_HEADER *Hdr;
+     NXP_FREE *Blk;
+     KIRQL OldIrql;
++    ULONG ClassIndex;
++#ifdef NXK_POOL_CENSUS
++    USHORT CensusBin;
++    UCHAR CensusDomain;
++    BOOLEAN CensusSampled;
++#endif
+ 
+     if (P == NULL)
+     {
+@@ -501,6 +564,9 @@ ExFreePoolWithTag(IN PVOID P,
+     /* Whole-page path. */
+     if (PAGE_ALIGN(P) == P)
+     {
++#ifdef NXK_POOL_CENSUS
++        NxPoolCensusFreeLarge(P);
++#endif
+ #if DBG && defined(NXK_MM_POOLPAGES)
+         {
+             VOID NxPoolPagesNoteFreer(PVOID);
+@@ -537,17 +603,36 @@ ExFreePoolWithTag(IN PVOID P,
+         KeBugCheckEx(BAD_POOL_CALLER, 0x0A,
+                      (ULONG_PTR)P, Hdr->Tag, TagToFree);
+     }
+-    ASSERT(Hdr->ClassIndex < NXP_BUCKET_LISTS);
++#ifdef NXK_POOL_CENSUS
++    ClassIndex = NXP_POOL_CENSUS_GET_CLASS(Hdr->ClassIndex);
++    CensusBin = NXP_POOL_CENSUS_GET_BIN(Hdr->ClassIndex);
++    CensusDomain = NXP_POOL_CENSUS_GET_DOMAIN(Hdr->ClassIndex) ?
++                   NXP_POOL_CENSUS_DOMAIN_TITLE :
++                   NXP_POOL_CENSUS_DOMAIN_KERNEL;
++    CensusSampled = NXP_POOL_CENSUS_GET_SAMPLED(Hdr->ClassIndex);
++#else
++    ClassIndex = Hdr->ClassIndex;
++#endif
++    ASSERT(ClassIndex < NXP_BUCKET_LISTS);
+ 
+     Hdr->Magic = NXP_MAGIC_FREE;
++    Hdr->ClassIndex = (USHORT)ClassIndex;
+     Blk = (NXP_FREE *)P;
+ 
+     KeAcquireSpinLock(&NxpLock, &OldIrql);
+-    Blk->Next = NxpFreeLists[Hdr->ClassIndex];
++#ifdef NXK_POOL_CENSUS
++    NxPoolCensusFree(P, Hdr->Tag, CensusBin, CensusDomain, CensusSampled);
++#endif
++    Blk->Next = NxpFreeLists[ClassIndex];
+     Blk->Prev = NULL;
+     if (Blk->Next) Blk->Next->Prev = Blk;
+-    NxpFreeLists[Hdr->ClassIndex] = Blk;
++    NxpFreeLists[ClassIndex] = Blk;
+ 
++#ifdef NXK_POOL_CENSUS
++    if (NxpPageState[NXP_PAGE_INDEX(P)] == 1)
++        NxPoolCensusPageBecameEmpty(
++            ClassIndex, NXP_POOL_CENSUS_PAGE_DOMAIN(ClassIndex));
++#endif
+     NxpPageState[NXP_PAGE_INDEX(P)]--;
+     KeReleaseSpinLock(&NxpLock, OldIrql);
+ }
+@@ -603,6 +688,7 @@ ExQueryPoolBlockSize(IN PVOID PoolBlock,
+     SIZE_T Size = 0;
+     KIRQL OldIrql;
+     NXP_HEADER *Hdr;
++    USHORT ClassIndex;
+ 
+     if (QuotaCharged != NULL) *QuotaCharged = FALSE;
+ 
+@@ -634,12 +720,16 @@ ExQueryPoolBlockSize(IN PVOID PoolBlock,
+ 
+     Hdr = ((NXP_HEADER *)PoolBlock) - 1;
+     ASSERT(Hdr->Magic == NXP_MAGIC_ALLOC);
++    ClassIndex = Hdr->ClassIndex;
++#ifdef NXK_POOL_CENSUS
++    ClassIndex = NXP_POOL_CENSUS_GET_CLASS(ClassIndex);
++#endif
+ #if XBOX_RESERVE_UPPER_RAM
+-    ASSERT(Hdr->ClassIndex < NXP_BUCKET_LISTS);
+-    return (SIZE_T)NxpClassSize[Hdr->ClassIndex % NXP_CLASSES] - sizeof(NXP_HEADER);
++    ASSERT(ClassIndex < NXP_BUCKET_LISTS);
++    return (SIZE_T)NxpClassSize[ClassIndex % NXP_CLASSES] - sizeof(NXP_HEADER);
+ #else
+-    ASSERT(Hdr->ClassIndex < NXP_CLASSES);
+-    return (SIZE_T)NxpClassSize[Hdr->ClassIndex] - sizeof(NXP_HEADER);
++    ASSERT(ClassIndex < NXP_CLASSES);
++    return (SIZE_T)NxpClassSize[ClassIndex] - sizeof(NXP_HEADER);
+ #endif
+ }
+ 
+diff --git a/ntoskrnl/xb/mm/poolcensus.c b/ntoskrnl/xb/mm/poolcensus.c
+new file mode 100644
+index 00000000..955db6bd
+--- /dev/null
++++ b/ntoskrnl/xb/mm/poolcensus.c
+@@ -0,0 +1,446 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++
++#include <ntoskrnl.h>
++#include "pool-census.h"
++
++#ifdef NXK_POOL_CENSUS
++
++C_ASSERT(NXP_POOL_CENSUS_KEY_SLOTS == 1024);
++C_ASSERT(NXP_POOL_CENSUS_LARGE_SLOTS == 1024);
++C_ASSERT(NXP_POOL_CENSUS_SAMPLE_SLOTS == NXP_POOL_CENSUS_SAMPLE_BUCKETS);
++C_ASSERT(NXP_POOL_CENSUS_SAMPLE_SLOTS < NXP_POOL_CENSUS_NO_SLOT);
++C_ASSERT(sizeof(NXP_POOL_CENSUS_ENTRY) == 36);
++C_ASSERT(sizeof(NXP_POOL_CENSUS_PAGE_STATS) == 28);
++
++/* All state is diagnostic-only and preallocated.  The 16-byte size histogram
++ * covers requests through 64 KiB; larger requests use its overflow bin. */
++NXP_POOL_CENSUS_DATA NxpPoolCensusData;
++static KSPIN_LOCK NxpPoolCensusLock;
++
++static VOID
++NxpPoolCensusIncrement(ULONG *Value)
++{
++    if (*Value == MAXULONG)
++        NxpPoolCensusData.Saturations++;
++    else
++        (*Value)++;
++}
++
++/* Readers stop the guest, then require an even sequence value around their
++ * copy.  Odd means the stop landed during an update and the reader should
++ * resume briefly before trying again. */
++static VOID
++NxpPoolCensusAcquire(KIRQL *OldIrql)
++{
++    KeAcquireSpinLock(&NxpPoolCensusLock, OldIrql);
++    NxpPoolCensusData.Sequence++;
++    KeMemoryBarrier();
++}
++
++static VOID
++NxpPoolCensusRelease(KIRQL OldIrql)
++{
++    KeMemoryBarrier();
++    NxpPoolCensusData.Sequence++;
++    KeReleaseSpinLock(&NxpPoolCensusLock, OldIrql);
++}
++
++static USHORT
++NxpPoolCensusFindEntry(ULONG Tag, USHORT Bin, UCHAR Domain, BOOLEAN Create)
++{
++    ULONG Hash = Tag ^ ((ULONG)Bin * 0x9E3779B9UL) ^ ((ULONG)Domain * 0x85EBCA6BUL);
++    ULONG Index = Hash & (NXP_POOL_CENSUS_KEY_SLOTS - 1);
++
++    for (ULONG Probe = 0; Probe < NXP_POOL_CENSUS_KEY_SLOTS; ++Probe)
++    {
++        NXP_POOL_CENSUS_ENTRY *Entry = &NxpPoolCensusData.Entries[Index];
++
++        if (!Entry->Used)
++        {
++            if (!Create) return NXP_POOL_CENSUS_NO_SLOT;
++            Entry->Tag = Tag;
++            Entry->Bin = Bin;
++            Entry->Domain = Domain;
++            Entry->Used = TRUE;
++            return (USHORT)Index;
++        }
++        if (Entry->Tag == Tag && Entry->Bin == Bin && Entry->Domain == Domain)
++            return (USHORT)Index;
++        Index = (Index + 1) & (NXP_POOL_CENSUS_KEY_SLOTS - 1);
++    }
++    return NXP_POOL_CENSUS_NO_SLOT;
++}
++
++static USHORT
++NxpPoolCensusFindLarge(PVOID Address, BOOLEAN Create)
++{
++    ULONG Start = ((ULONG)(ULONG_PTR)Address >> 4) &
++                  (NXP_POOL_CENSUS_LARGE_SLOTS - 1);
++    USHORT FreeSlot = NXP_POOL_CENSUS_NO_SLOT;
++
++    for (ULONG Probe = 0; Probe < NXP_POOL_CENSUS_LARGE_SLOTS; ++Probe)
++    {
++        ULONG Index = (Start + Probe) & (NXP_POOL_CENSUS_LARGE_SLOTS - 1);
++        NXP_POOL_CENSUS_LARGE *Entry = &NxpPoolCensusData.Large[Index];
++
++        if (!Entry->Used)
++        {
++            if (FreeSlot == NXP_POOL_CENSUS_NO_SLOT) FreeSlot = (USHORT)Index;
++            continue;
++        }
++        if (Entry->Address == Address) return (USHORT)Index;
++    }
++    return Create ? FreeSlot : NXP_POOL_CENSUS_NO_SLOT;
++}
++
++static USHORT
++NxpPoolCensusFindSample(PVOID Address, BOOLEAN Create)
++{
++    ULONG Bucket = ((ULONG)(ULONG_PTR)Address >> 4) &
++                   (NXP_POOL_CENSUS_SAMPLE_BUCKETS - 1);
++    USHORT Slot = NxpPoolCensusData.SampleHash[Bucket];
++
++    while (Slot != NXP_POOL_CENSUS_NO_SLOT)
++    {
++        NXP_POOL_CENSUS_SAMPLE *Sample = &NxpPoolCensusData.Samples[Slot];
++        if (Sample->Address == Address) return Slot;
++        Slot = Sample->Next;
++    }
++    if (!Create) return NXP_POOL_CENSUS_NO_SLOT;
++
++    for (Slot = 0; Slot < NXP_POOL_CENSUS_SAMPLE_SLOTS; ++Slot)
++    {
++        NXP_POOL_CENSUS_SAMPLE *Sample = &NxpPoolCensusData.Samples[Slot];
++        if (Sample->Address != NULL) continue;
++        Sample->Address = Address;
++        Sample->Next = NxpPoolCensusData.SampleHash[Bucket];
++        NxpPoolCensusData.SampleHash[Bucket] = Slot;
++        return Slot;
++    }
++    return NXP_POOL_CENSUS_NO_SLOT;
++}
++
++static VOID
++NxpPoolCensusRemoveSample(USHORT Slot)
++{
++    PVOID Address = NxpPoolCensusData.Samples[Slot].Address;
++    ULONG Bucket = ((ULONG)(ULONG_PTR)Address >> 4) &
++                   (NXP_POOL_CENSUS_SAMPLE_BUCKETS - 1);
++    USHORT Previous = NXP_POOL_CENSUS_NO_SLOT;
++    USHORT Current = NxpPoolCensusData.SampleHash[Bucket];
++
++    while (Current != NXP_POOL_CENSUS_NO_SLOT)
++    {
++        NXP_POOL_CENSUS_SAMPLE *Sample = &NxpPoolCensusData.Samples[Current];
++        if (Current == Slot)
++        {
++            if (Previous == NXP_POOL_CENSUS_NO_SLOT)
++                NxpPoolCensusData.SampleHash[Bucket] = Sample->Next;
++            else
++                NxpPoolCensusData.Samples[Previous].Next = Sample->Next;
++            Sample->Address = NULL;
++            Sample->KeyIndex = NXP_POOL_CENSUS_NO_SLOT;
++            Sample->Next = NXP_POOL_CENSUS_NO_SLOT;
++            return;
++        }
++        Previous = Current;
++        Current = Sample->Next;
++    }
++    NxpPoolCensusIncrement(&NxpPoolCensusData.LifetimeMisses);
++}
++
++static VOID
++NxpPoolCensusRecordFree(USHORT KeyIndex,
++                        USHORT Bin,
++                        PVOID Address,
++                        BOOLEAN Sampled)
++{
++    NXP_POOL_CENSUS_ENTRY *Entry = NULL;
++    BOOLEAN Untracked = FALSE;
++
++    if (Bin >= NXP_POOL_CENSUS_BIN_SLOTS)
++    {
++        Bin = NXP_POOL_CENSUS_BIN_OVERFLOW;
++        Untracked = TRUE;
++    }
++    if (NxpPoolCensusData.BinLive[Bin] == 0)
++        Untracked = TRUE;
++    else
++        NxpPoolCensusData.BinLive[Bin]--;
++
++    if (KeyIndex != NXP_POOL_CENSUS_NO_SLOT &&
++        KeyIndex < NXP_POOL_CENSUS_KEY_SLOTS)
++    {
++        Entry = &NxpPoolCensusData.Entries[KeyIndex];
++        NxpPoolCensusIncrement(&Entry->Frees);
++        if (Entry->Live == 0)
++            Untracked = TRUE;
++        else
++            Entry->Live--;
++    }
++    else
++    {
++        Untracked = TRUE;
++    }
++    if (Untracked)
++        NxpPoolCensusIncrement(&NxpPoolCensusData.UntrackedFrees);
++    NxpPoolCensusIncrement(&NxpPoolCensusData.Frees);
++
++    if (Sampled)
++    {
++        USHORT Slot = NxpPoolCensusFindSample(Address, FALSE);
++        if (Slot == NXP_POOL_CENSUS_NO_SLOT)
++        {
++            NxpPoolCensusIncrement(&NxpPoolCensusData.LifetimeMisses);
++            return;
++        }
++        NXP_POOL_CENSUS_SAMPLE *Sample = &NxpPoolCensusData.Samples[Slot];
++        ULONGLONG Lifetime = KeQueryInterruptTime() - Sample->StartedAt;
++        if (NxpPoolCensusData.LifetimeActive == 0)
++            NxpPoolCensusIncrement(&NxpPoolCensusData.LifetimeMisses);
++        else
++            NxpPoolCensusData.LifetimeActive--;
++        if (Entry != NULL)
++        {
++            if (Lifetime < 10000000ULL)
++                NxpPoolCensusIncrement(&Entry->LifeShort);
++            else if (Lifetime < 300000000ULL)
++                NxpPoolCensusIncrement(&Entry->LifeMedium);
++            else
++                NxpPoolCensusIncrement(&Entry->LifeRetained);
++        }
++        NxpPoolCensusRemoveSample(Slot);
++    }
++}
++
++VOID
++NxPoolCensusInitialize(VOID)
++{
++    RtlZeroMemory(&NxpPoolCensusData, sizeof(NxpPoolCensusData));
++    for (ULONG i = 0; i < NXP_POOL_CENSUS_SAMPLE_BUCKETS; ++i)
++        NxpPoolCensusData.SampleHash[i] = NXP_POOL_CENSUS_NO_SLOT;
++    for (ULONG i = 0; i < NXP_POOL_CENSUS_SAMPLE_SLOTS; ++i)
++    {
++        NxpPoolCensusData.Samples[i].KeyIndex = NXP_POOL_CENSUS_NO_SLOT;
++        NxpPoolCensusData.Samples[i].Next = NXP_POOL_CENSUS_NO_SLOT;
++    }
++    NxpPoolCensusData.Magic = NXP_POOL_CENSUS_MAGIC;
++    NxpPoolCensusData.Schema = NXP_POOL_CENSUS_SCHEMA;
++    NxpPoolCensusData.Bytes = sizeof(NxpPoolCensusData);
++    NxpPoolCensusData.BinSlots = NXP_POOL_CENSUS_BIN_SLOTS;
++    NxpPoolCensusData.PageDomainCount = NXP_POOL_CENSUS_DOMAIN_COUNT;
++    NxpPoolCensusData.PageClassCount = NXP_POOL_CENSUS_CLASS_COUNT;
++    NxpPoolCensusData.PageStatsBytes = sizeof(NXP_POOL_CENSUS_PAGE_STATS);
++    NxpPoolCensusData.EntryCount = NXP_POOL_CENSUS_KEY_SLOTS;
++    NxpPoolCensusData.EntryBytes = sizeof(NXP_POOL_CENSUS_ENTRY);
++    NxpPoolCensusData.BinAllocationsOffset =
++        FIELD_OFFSET(NXP_POOL_CENSUS_DATA, BinAllocations);
++    NxpPoolCensusData.BinLiveOffset =
++        FIELD_OFFSET(NXP_POOL_CENSUS_DATA, BinLive);
++    NxpPoolCensusData.BinPeakOffset =
++        FIELD_OFFSET(NXP_POOL_CENSUS_DATA, BinPeak);
++    NxpPoolCensusData.PagesOffset = FIELD_OFFSET(NXP_POOL_CENSUS_DATA, Pages);
++    NxpPoolCensusData.EntriesOffset = FIELD_OFFSET(NXP_POOL_CENSUS_DATA, Entries);
++    KeInitializeSpinLock(&NxpPoolCensusLock);
++}
++
++USHORT
++NxPoolCensusBinForSize(SIZE_T NumberOfBytes)
++{
++    SIZE_T Bin = NumberOfBytes / 16;
++    if ((NumberOfBytes & 15) != 0) Bin++;
++    if (Bin > NXP_POOL_CENSUS_BIN_OVERFLOW)
++        Bin = NXP_POOL_CENSUS_BIN_OVERFLOW;
++    return (USHORT)Bin;
++}
++
++BOOLEAN
++NxPoolCensusAllocate(PVOID Address,
++                     ULONG Tag,
++                     SIZE_T NumberOfBytes,
++                     UCHAR Domain,
++                     BOOLEAN LargeAllocation)
++{
++    KIRQL OldIrql;
++    USHORT Bin = NxPoolCensusBinForSize(NumberOfBytes);
++    USHORT KeyIndex, LargeIndex = NXP_POOL_CENSUS_NO_SLOT;
++    BOOLEAN Sampled = FALSE;
++
++    if (Domain >= NXP_POOL_CENSUS_DOMAIN_COUNT)
++        Domain = NXP_POOL_CENSUS_DOMAIN_SHARED;
++    NxpPoolCensusAcquire(&OldIrql);
++    NxpPoolCensusIncrement(&NxpPoolCensusData.Allocations);
++    NxpPoolCensusIncrement(&NxpPoolCensusData.BinAllocations[Bin]);
++    NxpPoolCensusIncrement(&NxpPoolCensusData.BinLive[Bin]);
++    if (NxpPoolCensusData.BinLive[Bin] > NxpPoolCensusData.BinPeak[Bin])
++        NxpPoolCensusData.BinPeak[Bin] = NxpPoolCensusData.BinLive[Bin];
++    KeyIndex = NxpPoolCensusFindEntry(Tag, Bin, Domain, TRUE);
++    if (KeyIndex == NXP_POOL_CENSUS_NO_SLOT)
++        NxpPoolCensusIncrement(&NxpPoolCensusData.KeyOverflows);
++    else
++    {
++        NXP_POOL_CENSUS_ENTRY *Entry = &NxpPoolCensusData.Entries[KeyIndex];
++        NxpPoolCensusIncrement(&Entry->Allocations);
++        NxpPoolCensusIncrement(&Entry->Live);
++        if (Entry->Live > Entry->Peak) Entry->Peak = Entry->Live;
++    }
++
++    if (LargeAllocation)
++    {
++        LargeIndex = NxpPoolCensusFindLarge(Address, TRUE);
++        if (LargeIndex == NXP_POOL_CENSUS_NO_SLOT)
++            NxpPoolCensusIncrement(&NxpPoolCensusData.LargeOverflows);
++        else
++        {
++            NXP_POOL_CENSUS_LARGE *Entry = &NxpPoolCensusData.Large[LargeIndex];
++            Entry->Address = Address;
++            Entry->KeyIndex = KeyIndex;
++            Entry->Bin = Bin;
++            Entry->Used = TRUE;
++            Entry->Sampled = FALSE;
++        }
++    }
++
++    /* This is a sampling phase, not a reported metric.  Let it wrap so a
++     * long diagnostic session keeps the same one-in-64 sampling cadence. */
++    NxpPoolCensusData.AllocationSequence++;
++    if ((NxpPoolCensusData.AllocationSequence & 63) == 0 &&
++        KeyIndex != NXP_POOL_CENSUS_NO_SLOT &&
++        (!LargeAllocation || LargeIndex != NXP_POOL_CENSUS_NO_SLOT))
++    {
++        USHORT Slot = NxpPoolCensusFindSample(Address, TRUE);
++        if (Slot == NXP_POOL_CENSUS_NO_SLOT)
++            NxpPoolCensusIncrement(&NxpPoolCensusData.LifetimeOverflows);
++        else
++        {
++            NXP_POOL_CENSUS_SAMPLE *Sample = &NxpPoolCensusData.Samples[Slot];
++            Sample->StartedAt = KeQueryInterruptTime();
++            Sample->KeyIndex = KeyIndex;
++            Sampled = TRUE;
++            NxpPoolCensusIncrement(&NxpPoolCensusData.LifetimeActive);
++            if (NxpPoolCensusData.LifetimeActive >
++                NxpPoolCensusData.LifetimeActivePeak)
++                NxpPoolCensusData.LifetimeActivePeak =
++                    NxpPoolCensusData.LifetimeActive;
++            if (LargeAllocation)
++                NxpPoolCensusData.Large[LargeIndex].Sampled = TRUE;
++        }
++    }
++    NxpPoolCensusRelease(OldIrql);
++    return Sampled;
++}
++
++VOID
++NxPoolCensusFree(PVOID Address,
++                 ULONG Tag,
++                 USHORT Bin,
++                 UCHAR Domain,
++                 BOOLEAN Sampled)
++{
++    KIRQL OldIrql;
++    USHORT KeyIndex;
++
++    if (Domain >= NXP_POOL_CENSUS_DOMAIN_COUNT)
++        Domain = NXP_POOL_CENSUS_DOMAIN_SHARED;
++    NxpPoolCensusAcquire(&OldIrql);
++    KeyIndex = NxpPoolCensusFindEntry(Tag, Bin, Domain, FALSE);
++    NxpPoolCensusRecordFree(KeyIndex, Bin, Address, Sampled);
++    NxpPoolCensusRelease(OldIrql);
++}
++
++VOID
++NxPoolCensusFreeLarge(PVOID Address)
++{
++    KIRQL OldIrql;
++    USHORT LargeIndex;
++
++    NxpPoolCensusAcquire(&OldIrql);
++    LargeIndex = NxpPoolCensusFindLarge(Address, FALSE);
++    if (LargeIndex == NXP_POOL_CENSUS_NO_SLOT)
++    {
++        NxpPoolCensusIncrement(&NxpPoolCensusData.LargeFreeMisses);
++        NxpPoolCensusIncrement(&NxpPoolCensusData.Frees);
++    }
++    else
++    {
++        NXP_POOL_CENSUS_LARGE *Large = &NxpPoolCensusData.Large[LargeIndex];
++        NxpPoolCensusRecordFree(Large->KeyIndex, Large->Bin,
++                                Address, Large->Sampled);
++        Large->Address = NULL;
++        Large->KeyIndex = NXP_POOL_CENSUS_NO_SLOT;
++        Large->Bin = NXP_POOL_CENSUS_NO_SLOT;
++        Large->Used = FALSE;
++        Large->Sampled = FALSE;
++    }
++    NxpPoolCensusRelease(OldIrql);
++}
++
++static NXP_POOL_CENSUS_PAGE_STATS *
++NxpPoolCensusPageStats(ULONG ClassIndex, UCHAR Domain)
++{
++    ULONG Class = ClassIndex % NXP_POOL_CENSUS_CLASS_COUNT;
++    if (Domain >= NXP_POOL_CENSUS_DOMAIN_COUNT)
++        Domain = NXP_POOL_CENSUS_DOMAIN_SHARED;
++    return &NxpPoolCensusData.Pages[Domain][Class];
++}
++
++VOID
++NxPoolCensusPageAttach(ULONG ClassIndex, UCHAR Domain, BOOLEAN Reused)
++{
++    KIRQL OldIrql;
++    NXP_POOL_CENSUS_PAGE_STATS *Stats = NxpPoolCensusPageStats(ClassIndex, Domain);
++    NxpPoolCensusAcquire(&OldIrql);
++    NxpPoolCensusIncrement(Reused ? &Stats->EmptyReuses : &Stats->FreshRefills);
++    NxpPoolCensusIncrement(&Stats->CurrentActive);
++    if (Stats->CurrentActive > Stats->PeakActive)
++        Stats->PeakActive = Stats->CurrentActive;
++    NxpPoolCensusRelease(OldIrql);
++}
++
++VOID
++NxPoolCensusPageBecameActive(ULONG ClassIndex, UCHAR Domain)
++{
++    KIRQL OldIrql;
++    NXP_POOL_CENSUS_PAGE_STATS *Stats = NxpPoolCensusPageStats(ClassIndex, Domain);
++    NxpPoolCensusAcquire(&OldIrql);
++    if (Stats->CurrentEmpty == 0)
++        NxpPoolCensusIncrement(&NxpPoolCensusData.PageUnderflows);
++    else
++        Stats->CurrentEmpty--;
++    NxpPoolCensusIncrement(&Stats->CurrentActive);
++    if (Stats->CurrentActive > Stats->PeakActive)
++        Stats->PeakActive = Stats->CurrentActive;
++    NxpPoolCensusRelease(OldIrql);
++}
++
++VOID
++NxPoolCensusPageBecameEmpty(ULONG ClassIndex, UCHAR Domain)
++{
++    KIRQL OldIrql;
++    NXP_POOL_CENSUS_PAGE_STATS *Stats = NxpPoolCensusPageStats(ClassIndex, Domain);
++    NxpPoolCensusAcquire(&OldIrql);
++    if (Stats->CurrentActive == 0)
++        NxpPoolCensusIncrement(&NxpPoolCensusData.PageUnderflows);
++    else
++        Stats->CurrentActive--;
++    NxpPoolCensusIncrement(&Stats->CurrentEmpty);
++    if (Stats->CurrentEmpty > Stats->PeakEmpty)
++        Stats->PeakEmpty = Stats->CurrentEmpty;
++    NxpPoolCensusRelease(OldIrql);
++}
++
++VOID
++NxPoolCensusPageDetach(ULONG ClassIndex, UCHAR Domain)
++{
++    KIRQL OldIrql;
++    NXP_POOL_CENSUS_PAGE_STATS *Stats = NxpPoolCensusPageStats(ClassIndex, Domain);
++    NxpPoolCensusAcquire(&OldIrql);
++    if (Stats->CurrentEmpty == 0)
++        NxpPoolCensusIncrement(&NxpPoolCensusData.PageUnderflows);
++    else
++        Stats->CurrentEmpty--;
++    NxpPoolCensusIncrement(&Stats->Detaches);
++    NxpPoolCensusRelease(OldIrql);
++}
++
++#endif /* NXK_POOL_CENSUS */
+diff --git a/tests/host/pool-census/check.py b/tests/host/pool-census/check.py
+new file mode 100644
+index 00000000..5c59d2c0
+--- /dev/null
++++ b/tests/host/pool-census/check.py
+@@ -0,0 +1,207 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Compile the production pool-census counters with kernel lock/time shims."""
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++header_path = root / "ntoskrnl/xb/mm/pool-census.h"
++source_path = root / "ntoskrnl/xb/mm/poolcensus.c"
++pool_path = root / "ntoskrnl/xb/mm/pool.c"
++cmake_path = root / "ntoskrnl/CMakeLists.txt"
++assert header_path.is_file() and source_path.is_file(), "pool census implementation missing"
++header = header_path.read_text()
++source = source_path.read_text()
++pool = pool_path.read_text()
++cmake = cmake_path.read_text()
++for hook in ("NxPoolCensusAllocate(", "NxPoolCensusFree(", "NxPoolCensusFreeLarge(",
++             "NxPoolCensusPageAttach(", "NxPoolCensusPageBecameEmpty(",
++             "NXP_POOL_CENSUS_PACK_CLASS", "NXP_POOL_CENSUS_GET_CLASS"):
++    assert hook in pool, f"production pool hook missing: {hook}"
++assert "option(NXK_POOL_CENSUS" in cmake
++assert "target_compile_definitions(ntoskrnl PRIVATE NXK_POOL_CENSUS=1)" in cmake
++source = source.replace('#include <ntoskrnl.h>', '').replace('#include "pool-census.h"', '')
++header = header.replace('#pragma once', '')
++
++shim = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <string.h>
++typedef uint8_t UCHAR, BOOLEAN;
++typedef uint16_t USHORT;
++typedef uint32_t ULONG, KSPIN_LOCK, KIRQL;
++typedef uintptr_t ULONG_PTR;
++typedef uint64_t ULONGLONG;
++typedef size_t SIZE_T;
++typedef void VOID, *PVOID;
++#define TRUE 1
++#define FALSE 0
++#define MAXULONG UINT32_MAX
++#define RTL_NUMBER_OF(a) (sizeof(a) / sizeof((a)[0]))
++#define C_ASSERT(e) _Static_assert((e), #e)
++#define FIELD_OFFSET(t, f) __builtin_offsetof(t, f)
++#define RtlZeroMemory(p,n) memset((p), 0, (n))
++#define RtlFillMemory(p,n,v) memset((p), (v), (n))
++#define KeMemoryBarrier() __asm__ __volatile__("" ::: "memory")
++static ULONGLONG FakeInterruptTime;
++static KIRQL LockHeld;
++static void KeInitializeSpinLock(KSPIN_LOCK *Lock) { *Lock = 0; }
++static void KeAcquireSpinLock(KSPIN_LOCK *Lock, KIRQL *OldIrql) {
++    assert(!LockHeld && !*Lock); LockHeld = 1; *Lock = 1; *OldIrql = 0;
++}
++static void KeReleaseSpinLock(KSPIN_LOCK *Lock, KIRQL OldIrql) {
++    (void)OldIrql; assert(LockHeld && *Lock); *Lock = 0; LockHeld = 0;
++}
++static ULONGLONG KeQueryInterruptTime(void) { return FakeInterruptTime; }
++'''
++
++main = r'''
++static NXP_POOL_CENSUS_ENTRY *entry_for(ULONG Tag, USHORT Bin, UCHAR Domain) {
++    for (ULONG i = 0; i < NXP_POOL_CENSUS_KEY_SLOTS; ++i) {
++        NXP_POOL_CENSUS_ENTRY *E = &NxpPoolCensusData.Entries[i];
++        if (E->Used && E->Tag == Tag && E->Bin == Bin && E->Domain == Domain)
++            return E;
++    }
++    return NULL;
++}
++
++int main(void) {
++    int a, b, title, large, sampled;
++    PVOID collision_a = (PVOID)(uintptr_t)0x10000;
++    PVOID collision_b = (PVOID)(uintptr_t)0x14000;
++    NXP_POOL_CENSUS_ENTRY *E;
++
++    assert(NxPoolCensusBinForSize(0) == 0);
++    assert(NxPoolCensusBinForSize(16) == 1);
++    assert(NxPoolCensusBinForSize(17) == 2);
++    assert(NxPoolCensusBinForSize(65520) == 4095);
++    assert(NxPoolCensusBinForSize(65521) == 4096);
++    assert(NxPoolCensusBinForSize(65536) == 4096);
++    assert(NxPoolCensusBinForSize(65537) == NXP_POOL_CENSUS_BIN_OVERFLOW);
++    assert(NXP_POOL_CENSUS_BIN_SLOTS == 4098);
++    USHORT Packed = NXP_POOL_CENSUS_PACK_CLASS(12, 128,
++                                                NXP_POOL_CENSUS_DOMAIN_TITLE, TRUE);
++    assert(NXP_POOL_CENSUS_GET_CLASS(Packed) == 12);
++    assert(NXP_POOL_CENSUS_GET_BIN(Packed) == 128);
++    assert(NXP_POOL_CENSUS_GET_DOMAIN(Packed));
++    assert(NXP_POOL_CENSUS_GET_SAMPLED(Packed));
++    NxPoolCensusInitialize();
++    assert(NxpPoolCensusData.Magic == NXP_POOL_CENSUS_MAGIC);
++    assert(NxpPoolCensusData.Schema == NXP_POOL_CENSUS_SCHEMA);
++    assert(NxpPoolCensusData.Bytes == sizeof(NXP_POOL_CENSUS_DATA));
++    assert((NxpPoolCensusData.Sequence & 1) == 0);
++    assert(NxpPoolCensusData.BinSlots == NXP_POOL_CENSUS_BIN_SLOTS);
++    assert(NxpPoolCensusData.EntryBytes == sizeof(NXP_POOL_CENSUS_ENTRY));
++    assert(NxpPoolCensusData.BinAllocationsOffset ==
++           FIELD_OFFSET(NXP_POOL_CENSUS_DATA, BinAllocations));
++    assert(NxpPoolCensusData.EntriesOffset ==
++           FIELD_OFFSET(NXP_POOL_CENSUS_DATA, Entries));
++
++    NxPoolCensusAllocate(&a, 0x41424344, 64, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
++    NxPoolCensusAllocate(&b, 0x41424344, 64, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
++    E = entry_for(0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    assert(E && E->Allocations == 2 && E->Live == 2 && E->Peak == 2);
++    assert(NxpPoolCensusData.BinAllocations[4] == 2);
++    assert(NxpPoolCensusData.BinLive[4] == 2 && NxpPoolCensusData.BinPeak[4] == 2);
++    NxPoolCensusFree(&a, 0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
++    assert(E->Frees == 1 && E->Live == 1);
++    assert(NxpPoolCensusData.BinLive[4] == 1);
++
++    NxPoolCensusAllocate(&title, 0x41424344, 64, NXP_POOL_CENSUS_DOMAIN_TITLE, FALSE);
++    assert(entry_for(0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_TITLE) != E);
++    assert(entry_for(0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_TITLE)->Live == 1);
++    NxPoolCensusFree(&b, 0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
++    NxPoolCensusFree(&title, 0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_TITLE, FALSE);
++    assert(E->Live == 0 && E->Peak == 2);
++    assert(NxpPoolCensusData.BinLive[4] == 0 && NxpPoolCensusData.BinPeak[4] == 2);
++
++    NxPoolCensusAllocate(&large, 0x4c415247, 8192, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
++    assert(NxpPoolCensusData.BinAllocations[512] == 1);
++    E = entry_for(0x4c415247, 512, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    assert(E && E->Live == 1);
++    NxPoolCensusFreeLarge(&large);
++    assert(E->Frees == 1 && E->Live == 0);
++
++    /* Deleting the first colliding slot must not hide later entries, and a
++     * miss must not be mistaken for the first empty slot. */
++    NxPoolCensusAllocate(collision_a, 0x434f4c41, 9000,
++                         NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
++    NxPoolCensusAllocate(collision_b, 0x434f4c42, 9000,
++                         NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
++    NxPoolCensusFreeLarge(collision_a);
++    NxPoolCensusFreeLarge(collision_b);
++    assert(NxpPoolCensusData.LargeFreeMisses == 0);
++    NxPoolCensusFreeLarge((PVOID)(uintptr_t)0x18000);
++    assert(NxpPoolCensusData.LargeFreeMisses == 1);
++
++    NxpPoolCensusData.AllocationSequence = 63;
++    assert(NxPoolCensusAllocate(&sampled, 0x53484f52, 80, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE));
++    FakeInterruptTime += 5000000;
++    NxPoolCensusFree(&sampled, 0x53484f52, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
++    E = entry_for(0x53484f52, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    assert(E && E->LifeShort == 1 && E->LifeMedium == 0 && E->LifeRetained == 0);
++    assert(NxpPoolCensusData.LifetimeActive == 0);
++
++    NxpPoolCensusData.AllocationSequence = 63;
++    assert(NxPoolCensusAllocate(&sampled, 0x4d454449, 80, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE));
++    FakeInterruptTime += 20000000;
++    NxPoolCensusFree(&sampled, 0x4d454449, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
++    E = entry_for(0x4d454449, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    assert(E && E->LifeMedium == 1);
++
++    NxpPoolCensusData.AllocationSequence = 63;
++    assert(NxPoolCensusAllocate(&sampled, 0x52455441, 80, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE));
++    FakeInterruptTime += 400000000;
++    NxPoolCensusFree(&sampled, 0x52455441, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
++    E = entry_for(0x52455441, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    assert(E && E->LifeRetained == 1);
++    assert(NxpPoolCensusData.LifetimeActive == 0);
++
++    NxPoolCensusPageAttach(2, NXP_POOL_CENSUS_DOMAIN_SHARED, FALSE);
++    NxPoolCensusPageBecameEmpty(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
++    NxPoolCensusPageDetach(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
++    NxPoolCensusPageAttach(2, NXP_POOL_CENSUS_DOMAIN_SHARED, TRUE);
++    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].FreshRefills == 1);
++    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].EmptyReuses == 1);
++    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].Detaches == 1);
++    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].CurrentActive == 1);
++    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].PeakActive == 1);
++    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].CurrentEmpty == 0);
++
++    NxPoolCensusInitialize();
++    for (ULONG i = 0; i < NXP_POOL_CENSUS_KEY_SLOTS + 1; ++i)
++        NxPoolCensusAllocate((PVOID)(uintptr_t)(0x1000u + 16u * i), i + 1,
++                             16, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
++    assert(NxpPoolCensusData.KeyOverflows == 1);
++    assert(NxpPoolCensusData.BinAllocations[1] == NXP_POOL_CENSUS_KEY_SLOTS + 1);
++    assert((NxpPoolCensusData.Sequence & 1) == 0);
++    assert(!LockHeld);
++    puts("pool census: bin/tag/domain live and peak, large frees, lifetime samples, page reuse and overflow PASS");
++    return 0;
++}
++'''
++
++unit = shim + '\n#define NXK_POOL_CENSUS 1\n' + header + '\n' + source + '\n' + main
++(out / "pool-census.c").write_text(unit)
++for reserve in (0, 1):
++    binary = out / f"pool-census-{reserve}"
++    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
++                    f"-DXBOX_RESERVE_UPPER_RAM={reserve}", str(out / "pool-census.c"),
++                    "-o", str(binary)], check=True)
++    subprocess.run([str(binary)], check=True)
++    symbols = subprocess.check_output(["nm", str(binary)], text=True)
++    assert " NxpPoolCensusData" in symbols and " NxPoolCensusAlloc" in symbols
++
++disabled = out / "pool-census-disabled.c"
++disabled.write_text(shim + '\n' + header + '\n' + source + '\nint main(void) { return 0; }\n')
++binary = out / "pool-census-disabled"
++subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
++                "-Wno-unused-function", str(disabled), "-o", str(binary)], check=True)
++symbols = subprocess.check_output(["nm", str(binary)], text=True)
++assert " NxpPoolCensusData" not in symbols and " NxPoolCensusAlloc" not in symbols
++print("pool census: release configuration contains no counter storage or helpers")
