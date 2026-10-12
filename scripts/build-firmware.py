@@ -25,11 +25,14 @@ def main():
     parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
     parser.add_argument("--metadata-counters", action="store_true",
                         help="enable aggregate directory-update diagnostics; not a performance build")
+    parser.add_argument("--pool-census", action="store_true",
+                        help="enable opt-in pool allocation census; diagnostic build only")
     args = parser.parse_args()
     try:
         result = build_firmware(args.source, args.output, args.variant, args.lock,
                                 args.media_policy,
                                 metadata_counters=args.metadata_counters,
+                                pool_census=args.pool_census,
                                 memory_mib=args.memory_mib,
                                 reserve_upper_ram=args.reserve_upper_ram)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
