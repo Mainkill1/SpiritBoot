@@ -41,6 +41,14 @@ records builds, source identity, measurements and limits.
 The build needs no Microsoft BIOS or MCPX ROM. Runtime/game progress is measured
 separately from a successful firmware build.
 
+### Current compatibility validation
+
+The firmware matrix builds and exercises release and checked images for both
+64 MiB and 128 MiB configurations. The native API suite includes the AV encoder
+field query used by Forza Motorsport: the progressive display path returns a
+deterministic field value, and calls without an output pointer remain valid.
+Window sizing and final presentation remain xemu responsibilities.
+
 ## Project goals
 
 SpiritBoot should eventually provide:
