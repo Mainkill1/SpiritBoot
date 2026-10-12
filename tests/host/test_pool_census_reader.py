@@ -28,7 +28,7 @@ def census_fixture(sequence=8):
         READER.MAGIC, READER.SCHEMA, total, sequence,
         5, 2, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         bin_slots, domains, classes, READER.PAGE_STATS.size,
-        1024, READER.ENTRY.size, allocations, live, peak, pages, entries,
+        1024, READER.ENTRY.size, allocations, live, peak, pages, entries, 4, 5,
     ]
     READER.HEADER.pack_into(data, 0, *fields)
     struct.pack_into("<I", data, allocations + 4, 11)
@@ -60,6 +60,9 @@ class PoolCensusReaderTests(unittest.TestCase):
         self.assertEqual(result["pages"][0]["block_bytes_including_header"], 128)
         self.assertEqual(result["tags"][0]["tag"], "0x12345678")
         self.assertEqual(result["tags"][0]["completed_lifetimes"]["1_to_30s"], 1)
+        self.assertEqual(result["bucket_pages"], {"current": 4, "peak": 5,
+                                                   "class_domain_current_sum": 4,
+                                                   "current_mismatch": False})
         self.assertEqual(result["bins"][1]["request_bytes"], "65521-65536")
         self.assertEqual(result["bins"][2]["request_bytes"], ">65536")
 
@@ -70,6 +73,14 @@ class PoolCensusReaderTests(unittest.TestCase):
         struct.pack_into("<I", corrupted, 23 * 4, len(corrupted) + 1)
         with self.assertRaisesRegex(READER.CensusError, "range"):
             READER.decode_census(bytes(corrupted))
+
+    def test_decode_marks_mismatched_current_page_totals_incomplete(self):
+        corrupted = bytearray(census_fixture())
+        struct.pack_into("<I", corrupted, 28 * 4, 3)
+        result = READER.decode_census(bytes(corrupted))
+        self.assertTrue(result["incomplete"])
+        self.assertTrue(result["bucket_pages"]["current_mismatch"])
+        self.assertEqual(result["error_counters"]["page_total_mismatches"], 1)
 
     def test_symbol_reader_accepts_mingw_prefix(self):
         with tempfile.TemporaryDirectory() as directory:

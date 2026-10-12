@@ -13,8 +13,8 @@ import time
 
 
 MAGIC = 0x4E435031
-SCHEMA = 1
-HEADER = struct.Struct("<28I")
+SCHEMA = 2
+HEADER = struct.Struct("<30I")
 ENTRY = struct.Struct("<IHBB7I")
 PAGE_STATS = struct.Struct("<7I")
 DOMAIN_NAMES = ("kernel", "title", "shared")
@@ -145,7 +145,8 @@ def decode_census(data, address=0):
      lifetime_misses, untracked_frees, saturations, page_underflows,
      lifetime_active, lifetime_active_peak, bin_slots, domain_count, class_count,
      page_stats_bytes, entry_count, entry_bytes, bin_allocations_offset,
-     bin_live_offset, bin_peak_offset, pages_offset, entries_offset) = HEADER.unpack_from(data)
+     bin_live_offset, bin_peak_offset, pages_offset, entries_offset,
+     bucket_pages_current, bucket_pages_peak) = HEADER.unpack_from(data)
     if magic != MAGIC or schema != SCHEMA:
         raise CensusError(f"unsupported census identity: magic={magic:#x}, schema={schema}")
     if byte_count != len(data):
@@ -153,9 +154,9 @@ def decode_census(data, address=0):
     if sequence & 1:
         raise CensusError("census update was interrupted; retry while xemu is running")
     if bin_slots != 4098 or domain_count != len(DOMAIN_NAMES) or class_count != len(CLASS_BLOCK_BYTES):
-        raise CensusError("census array dimensions do not match schema 1")
+        raise CensusError("census array dimensions do not match schema 2")
     if page_stats_bytes != PAGE_STATS.size or entry_bytes != ENTRY.size:
-        raise CensusError("census record element sizes do not match schema 1")
+        raise CensusError("census record element sizes do not match schema 2")
 
     for name, offset in (("bin allocations", bin_allocations_offset),
                          ("bin live", bin_live_offset), ("bin peak", bin_peak_offset)):
@@ -179,17 +180,22 @@ def decode_census(data, address=0):
                      "allocations": count, "live": live, "peak_live": peak})
 
     pages = []
+    page_rows_current = 0
     for domain_index, domain in enumerate(DOMAIN_NAMES[:domain_count]):
         for class_index, block_bytes in enumerate(CLASS_BLOCK_BYTES[:class_count]):
             offset = pages_offset + (domain_index * class_count + class_index) * page_stats_bytes
             values = PAGE_STATS.unpack_from(data, offset)
             if any(values):
+                page_rows_current += values[3] + values[5]
                 pages.append({"domain": domain, "class_index": class_index,
                               "block_bytes_including_header": block_bytes,
                               "fresh_refills": values[0], "empty_page_reuses": values[1],
                               "detaches": values[2], "active_pages": values[3],
                               "peak_active_pages": values[4], "empty_pages": values[5],
                               "peak_empty_pages": values[6]})
+
+    page_total_mismatch = page_rows_current != bucket_pages_current
+    page_highwater_error = bucket_pages_peak < bucket_pages_current
 
     tags = []
     for index in range(entry_count):
@@ -207,7 +213,9 @@ def decode_census(data, address=0):
                       "large_free_misses": large_free_misses,
                       "lifetime_overflows": lifetime_overflows,
                       "lifetime_misses": lifetime_misses, "untracked_frees": untracked_frees,
-                      "counter_saturations": saturations, "page_counter_underflows": page_underflows}
+                      "counter_saturations": saturations, "page_counter_underflows": page_underflows,
+                      "page_total_mismatches": int(page_total_mismatch),
+                      "page_highwater_errors": int(page_highwater_error)}
     return {"schema": schema, "address": f"0x{address:08x}", "bytes": byte_count,
             "sequence": sequence, "totals": {"allocations": allocations, "frees": frees,
                                                 "allocation_sequence": allocation_sequence,
@@ -215,6 +223,10 @@ def decode_census(data, address=0):
                                                 "peak_lifetime_samples": lifetime_active_peak},
             "error_counters": error_counters,
             "incomplete": any(error_counters.values()), "bins": bins,
+            "bucket_pages": {"current": bucket_pages_current,
+                              "peak": bucket_pages_peak,
+                              "class_domain_current_sum": page_rows_current,
+                              "current_mismatch": page_total_mismatch},
             "pages": pages, "tags": tags,
             "lifetime_note": "Completed samples are <1 s, 1-30 s, or >=30 s; active samples are right-censored."}
 

@@ -35,12 +35,12 @@ new file mode 100644
 index 00000000..0cdaca81
 --- /dev/null
 +++ b/ntoskrnl/xb/mm/pool-census.h
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,150 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#pragma once
 +
 +#define NXP_POOL_CENSUS_MAGIC 0x4E435031UL /* NCP1 */
-+#define NXP_POOL_CENSUS_SCHEMA 1UL
++#define NXP_POOL_CENSUS_SCHEMA 2UL
 +#define NXP_POOL_CENSUS_BIN_OVERFLOW 4097U
 +#define NXP_POOL_CENSUS_BIN_SLOTS (NXP_POOL_CENSUS_BIN_OVERFLOW + 1U)
 +#define NXP_POOL_CENSUS_KEY_SLOTS 1024U
@@ -121,6 +121,8 @@ index 00000000..0cdaca81
 +    ULONG UntrackedFrees;
 +    ULONG Saturations;
 +    ULONG PageUnderflows;
++    ULONG BucketPagesCurrent;
++    ULONG BucketPagesPeak;
 +    ULONG LifetimeActive;
 +    ULONG LifetimeActivePeak;
 +    ULONG BinSlots;
@@ -412,7 +414,7 @@ new file mode 100644
 index 00000000..955db6bd
 --- /dev/null
 +++ b/ntoskrnl/xb/mm/poolcensus.c
-@@ -0,0 +1,446 @@
+@@ -0,0 +1,453 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +
 +#include <ntoskrnl.h>
@@ -809,6 +811,9 @@ index 00000000..955db6bd
 +    NxpPoolCensusIncrement(&Stats->CurrentActive);
 +    if (Stats->CurrentActive > Stats->PeakActive)
 +        Stats->PeakActive = Stats->CurrentActive;
++    NxpPoolCensusIncrement(&NxpPoolCensusData.BucketPagesCurrent);
++    if (NxpPoolCensusData.BucketPagesCurrent > NxpPoolCensusData.BucketPagesPeak)
++        NxpPoolCensusData.BucketPagesPeak = NxpPoolCensusData.BucketPagesCurrent;
 +    NxpPoolCensusRelease(OldIrql);
 +}
 +
@@ -855,6 +860,10 @@ index 00000000..955db6bd
 +    else
 +        Stats->CurrentEmpty--;
 +    NxpPoolCensusIncrement(&Stats->Detaches);
++    if (NxpPoolCensusData.BucketPagesCurrent == 0)
++        NxpPoolCensusIncrement(&NxpPoolCensusData.PageUnderflows);
++    else
++        NxpPoolCensusData.BucketPagesCurrent--;
 +    NxpPoolCensusRelease(OldIrql);
 +}
 +
@@ -864,7 +873,7 @@ new file mode 100644
 index 00000000..5c59d2c0
 --- /dev/null
 +++ b/tests/host/pool-census/check.py
-@@ -0,0 +1,207 @@
+@@ -0,0 +1,216 @@
 +#!/usr/bin/env python3
 +# SPDX-License-Identifier: GPL-2.0-or-later
 +"""Compile the production pool-census counters with kernel lock/time shims."""
@@ -1031,6 +1040,8 @@ index 00000000..5c59d2c0
 +
 +    NxPoolCensusPageAttach(2, NXP_POOL_CENSUS_DOMAIN_SHARED, FALSE);
 +    NxPoolCensusPageBecameEmpty(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
++    NxPoolCensusPageBecameActive(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
++    NxPoolCensusPageBecameEmpty(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
 +    NxPoolCensusPageDetach(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
 +    NxPoolCensusPageAttach(2, NXP_POOL_CENSUS_DOMAIN_SHARED, TRUE);
 +    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].FreshRefills == 1);
@@ -1039,6 +1050,13 @@ index 00000000..5c59d2c0
 +    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].CurrentActive == 1);
 +    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].PeakActive == 1);
 +    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].CurrentEmpty == 0);
++    assert(NxpPoolCensusData.BucketPagesCurrent == 1);
++    assert(NxpPoolCensusData.BucketPagesPeak == 1);
++    NxPoolCensusPageBecameEmpty(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
++    NxPoolCensusPageDetach(2, NXP_POOL_CENSUS_DOMAIN_SHARED);
++    assert(NxpPoolCensusData.BucketPagesCurrent == 0);
++    assert(NxpPoolCensusData.BucketPagesPeak == 1);
++    assert(NxpPoolCensusData.Pages[NXP_POOL_CENSUS_DOMAIN_SHARED][2].Detaches == 2);
 +
 +    NxPoolCensusInitialize();
 +    for (ULONG i = 0; i < NXP_POOL_CENSUS_KEY_SLOTS + 1; ++i)
