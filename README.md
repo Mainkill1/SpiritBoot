@@ -8,7 +8,7 @@ This BIOS can be shared, bundled, and used more freely without concerns.
 
 Just remember that it was built with love for an open internet
 
-## Save files are NOT compatible with real XBOX bios due to removal of encryption keys. 
+## Save files are NOT compatible with real XBOX bios due to lack of encryption keys. 
 
 <img width="1262" height="911" alt="image" src="https://github.com/user-attachments/assets/fe11b49b-d559-4ce6-a7b0-a92f4248c47f" />
 
