@@ -22,7 +22,7 @@ index 27dd5e75..0cb67bdf 100644
  
  add_executable(ntoskrnl
 diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
-index 998471db..a3e1bf30 100644
+index 998471db..e2715ef5 100644
 --- a/ntoskrnl/xb/mm/cache.c
 +++ b/ntoskrnl/xb/mm/cache.c
 @@ -205,6 +205,24 @@ static FAST_MUTEX NxcMutex;
@@ -102,7 +102,7 @@ index 998471db..a3e1bf30 100644
  }
  
 +/* The block is already on NxcLruList and NxcMutex is held. */
-+static FORCEINLINE VOID
++static inline VOID
 +NxcTouchBlockLocked(
 +    IN NXC_BLOCK *Block)
 +{
@@ -149,7 +149,7 @@ index 998471db..a3e1bf30 100644
              Claim->NewClaim = !Block->Valid;
              if (Claim->NewClaim)
 diff --git a/tests/host/cache/check-completion-waits.py b/tests/host/cache/check-completion-waits.py
-index d160deb1..9792c77a 100644
+index d160deb1..ef566eda 100644
 --- a/tests/host/cache/check-completion-waits.py
 +++ b/tests/host/cache/check-completion-waits.py
 @@ -29,6 +29,7 @@ for name in (
@@ -164,12 +164,12 @@ index d160deb1..9792c77a 100644
  typedef void VOID;
  #define IN
  #define OUT
-+#define FORCEINLINE inline __attribute__((always_inline))
++#define FORCEINLINE extern inline __attribute__((always_inline, gnu_inline))
  #define TRUE 1
  #define FALSE 0
  #define STATUS_SUCCESS ((NTSTATUS)0)
 diff --git a/tests/host/cache/check-full-overwrite.py b/tests/host/cache/check-full-overwrite.py
-index 5d141c50..619a96d6 100755
+index 5d141c50..ba6caa4a 100755
 --- a/tests/host/cache/check-full-overwrite.py
 +++ b/tests/host/cache/check-full-overwrite.py
 @@ -19,6 +19,7 @@ spec.loader.exec_module(extract)
@@ -184,13 +184,13 @@ index 5d141c50..619a96d6 100755
  typedef void VOID;
  #define IN
  #define OUT
-+#define FORCEINLINE inline __attribute__((always_inline))
++#define FORCEINLINE extern inline __attribute__((always_inline, gnu_inline))
  #define TRUE 1
  #define FALSE 0
  #define ASSERT assert
 diff --git a/tests/host/cache/check-lookup-hints.py b/tests/host/cache/check-lookup-hints.py
 new file mode 100644
-index 00000000..13cb9d90
+index 00000000..619ad7aa
 --- /dev/null
 +++ b/tests/host/cache/check-lookup-hints.py
 @@ -0,0 +1,334 @@
@@ -241,7 +241,7 @@ index 00000000..13cb9d90
 +#define TRUE 1
 +#define FALSE 0
 +#define ASSERT assert
-+#define FORCEINLINE inline __attribute__((always_inline))
++#define FORCEINLINE extern inline __attribute__((always_inline, gnu_inline))
 +#define NT_SUCCESS(s) ((s) >= 0)
 +#define NXC_BLOCK_SIZE 16384
 +#define NXC_MAX_BLOCKS 32
