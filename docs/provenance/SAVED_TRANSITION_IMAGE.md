@@ -136,15 +136,35 @@ Windows UART and register checks establish 640x480/depth 3 at both checkpoints.
 Automated rendered-image captures are unavailable because this xemu build does
 not expose QMP `screendump`.
 
-The production AV host fixture passes under UBSan. It covers all recognized
-mode IDs, rejected near-alias IDs and 1080i, padded and short pitches, 15/16/32-bit
+The production AV host fixture passes under UBSan. It covers seven representative
+recognized mode IDs, rejected near-alias IDs and 1080i, padded and short pitches, 15/16/32-bit
 formats, full frame bounds, invalid and missing persisted pages, adjacent owners,
-and late adoption and failure. Warm staging, AV encoder and actual boot-layout
-fixtures pass. Product host tests pass 129 tests, with three optional environment
-checks skipped. Both firmware CI source gates and native guest gates require this
-exact reconstructed tree and 14 saved-image checks.
+and late adoption and failure. Independent production-body review separately
+checked all 28 supported IDs against the pinned public nxdk table. Warm staging,
+AV encoder and actual boot-layout fixtures pass. The 129-test product host suite
+passes with three optional environment skips. Both firmware CI source gates
+and native guest gates require this exact reconstructed tree and 14 checks.
 
-The final native Morrowind visual check and exact-head CI matrix are pending at
-this checkpoint. These independent probes establish the exercised 640x480 xemu
-contract. Physical encoder timing, interlace fidelity, 1080i, unsupported mode
+On the final native Morrowind check, the operator reported that the retained
+image appeared corrected. The public trace confirms 640x480/depth 3 before and
+after reset, matching owned-buffer prefix hashes, saved-address recovery and
+normal unpersist/free/clear. It detached with zero owned breakpoints, no pending
+calls and no cleanup errors.
+
+About four seconds afterward, Windows xemu aborted on
+`parameter < NV2A_VERTEXSHADER_CONSTANTS` in its
+`NV097_SET_TRANSFORM_CONSTANT_LOAD` handler. The host assertion and Windows
+Application Error confirm an actual emulator process exit; no tool closed that
+Morrowind window. This establishes the corrected static image but leaves gameplay
+continuation unverified. The cause of the later GPU command failure is not yet
+established; an untraced isolated retry is pending.
+
+The Open firmware matrix on product commit
+`7fa7533a097fc21d5ee1ddfcc7930807031539af` passed all four release/debug 64/128 MiB
+variants, including the actual kernel host fixtures, 14-check guest, native
+regression suite and release reproducibility.
+[CI run 38304266187](https://github.com/Mainkill1/SpiritBoot/actions/runs/38304266187)
+records the exact tested source tree. The separate host, boot-setup and profiler
+checks also pass on that commit. These probes establish the exercised 640x480
+xemu contract. Physical encoder timing, interlace fidelity, 1080i, unsupported mode
 families and hardware behavior remain unverified.
