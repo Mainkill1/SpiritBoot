@@ -1,0 +1,479 @@
+diff --git a/ntoskrnl/xb/mm/cache.c b/ntoskrnl/xb/mm/cache.c
+index 91ec8896..956d013c 100644
+--- a/ntoskrnl/xb/mm/cache.c
++++ b/ntoskrnl/xb/mm/cache.c
+@@ -78,8 +78,8 @@ ULONG CcDataPages;
+  * needs a cache block -- but every block holds this file's dirty data, and
+  * freeing one means flushing another dirty block that needs the same FAT,
+  * a cycle with no free slot (roswell#26).  These extra blocks are handed
+- * out only to a re-entrant metadata read issued from inside a write-back
+- * (NxcWbDepth > 0); the data-fill path never touches them, so one is always
++ * out only to a re-entrant metadata read issued by the thread performing a
++ * write-back; the data-fill path never touches them, so one is always
+  * available to break the cycle.  Two covers a FAT block plus a directory
+  * block.  Not title-visible capacity (FscGetCacheSize excludes them). */
+ #define NXC_WB_RESERVE      2
+@@ -132,9 +132,20 @@ typedef struct _NXC_BCB
+     LONG PinCount;
+ } NXC_BCB;
+ 
++/* Stack-owned while NxcFlushBlock has dropped NxcMutex.  The synchronous
++ * paging write enters the FSD on the submitting thread before any lower
++ * device completion can occur, so recursive FAT/cache reads retain this
++ * thread identity.  A list supports nested and concurrent write-backs
++ * without allocating permanent state for every cache block. */
++typedef struct _NXC_WB_CONTEXT
++{
++    PKTHREAD Thread;
++    struct _NXC_WB_CONTEXT *Next;
++} NXC_WB_CONTEXT;
++
+ static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];   /* Data==NULL = inactive */
+ static ULONG NxcActiveBlocks;                   /* title-visible; excludes reserve */
+-static ULONG NxcWbDepth;                        /* write-back re-entrancy depth */
++static NXC_WB_CONTEXT *NxcWbContexts;           /* protected by NxcMutex */
+ static LIST_ENTRY NxcLruList;       /* head = oldest */
+ static LIST_ENTRY NxcMapList;
+ static FAST_MUTEX NxcMutex;
+@@ -152,6 +163,48 @@ static PFN_NUMBER NxcZeroPagePfn;   /* backs no-map CcZeroData writes */
+ #define NXC_NODE_PRIVATE_MAP 0x02FE
+ #define NXC_NODE_BCB         0x02FD
+ 
++/* WRITE-BACK CONTEXT (cache lock held) *************************************/
++
++DECLSPEC_NOINLINE
++static VOID
++NxcPushWritebackContext(
++    OUT NXC_WB_CONTEXT *Context)
++{
++    Context->Thread = KeGetCurrentThread();
++    Context->Next = NxcWbContexts;
++    NxcWbContexts = Context;
++}
++
++DECLSPEC_NOINLINE
++static VOID
++NxcPopWritebackContext(
++    IN NXC_WB_CONTEXT *Context)
++{
++    NXC_WB_CONTEXT **Link = &NxcWbContexts;
++
++    while (*Link != NULL && *Link != Context)
++        Link = &(*Link)->Next;
++
++    ASSERT(*Link == Context);
++    if (*Link == Context)
++        *Link = Context->Next;
++}
++
++static BOOLEAN
++NxcOwnsWritebackContext(VOID)
++{
++    PKTHREAD Thread = KeGetCurrentThread();
++
++    for (NXC_WB_CONTEXT *Context = NxcWbContexts;
++         Context != NULL;
++         Context = Context->Next)
++    {
++        if (Context->Thread == Thread)
++            return TRUE;
++    }
++    return FALSE;
++}
++
+ /* IO HELPERS (no cache lock held) ******************************************/
+ 
+ static NTSTATUS
+@@ -259,6 +312,7 @@ NxcFlushBlock(
+     ULONG WriteLen = 0;
+     NTSTATUS Status = STATUS_SUCCESS;
+     SIZE_T Got = 0;
++    NXC_WB_CONTEXT WritebackContext;
+ 
+     ASSERT(Block->Busy && Block->RefCount > 0);
+     ASSERT(Block->Dirty && Block->Valid);
+@@ -277,12 +331,12 @@ NxcFlushBlock(
+          * the cache to map this block's cluster.  Flag the re-entrancy so
+          * that nested read can dip into the write-back reserve if every
+          * title-visible block is otherwise spoken for (roswell#26). */
+-        NxcWbDepth++;
++        NxcPushWritebackContext(&WritebackContext);
+         ExReleaseFastMutex(&NxcMutex);
+         Status = NxcPagingIo(Map->FileObject, Block->Data, Block->Offset,
+                              WriteLen, TRUE, &Got);
+         ExAcquireFastMutex(&NxcMutex);
+-        NxcWbDepth--;
++        NxcPopWritebackContext(&WritebackContext);
+     }
+ 
+     if (NT_SUCCESS(Status) && Got != WriteLen)
+@@ -457,7 +511,7 @@ NxcClaimSlot(
+         /* Every title-visible block is referenced or busy.  If this is the
+          * metadata read of an in-flight write-back, take a reserve block so
+          * the flush can make progress instead of deadlocking on itself. */
+-        if (NxcWbDepth > 0)
++        if (NxcOwnsWritebackContext())
+         {
+             NXC_BLOCK *Block = NxcClaimReserve();
+             if (Block != NULL) return Block;
+diff --git a/tests/host/cache/check-flush-lifetime.py b/tests/host/cache/check-flush-lifetime.py
+index 0c3626a0..0a9c08ff 100644
+--- a/tests/host/cache/check-flush-lifetime.py
++++ b/tests/host/cache/check-flush-lifetime.py
+@@ -16,6 +16,8 @@ spec = importlib.util.spec_from_file_location(
+ extract = importlib.util.module_from_spec(spec)
+ spec.loader.exec_module(extract)
+ source = (root / "ntoskrnl/xb/mm/cache.c").read_text()
++push_context = extract.function(source, "NxcPushWritebackContext")
++pop_context = extract.function(source, "NxcPopWritebackContext")
+ flush_block = extract.function(source, "NxcFlushBlock")
+ flush_map = extract.function(source, "NxcFlushMap")
+ 
+@@ -34,6 +36,7 @@ typedef SIZE_T *PSIZE_T;
+ typedef int BOOLEAN;
+ typedef void *PVOID;
+ typedef void VOID;
++typedef void *PKTHREAD;
+ #define IN
+ #define OUT
+ #define OPTIONAL
+@@ -49,6 +52,7 @@ typedef void VOID;
+ #define ROUND_UP(value, align) (((value) + (align) - 1) & ~((align) - 1))
+ #define min(a, b) ((a) < (b) ? (a) : (b))
+ #define ASSERT assert
++#define DECLSPEC_NOINLINE __attribute__((noinline))
+ 
+ typedef struct { LONGLONG QuadPart; } LARGE_INTEGER;
+ typedef struct {
+@@ -74,14 +78,22 @@ typedef struct {
+     BOOLEAN Busy;
+     LIST_ENTRY LruLink;
+ } NXC_BLOCK;
++typedef struct _NXC_WB_CONTEXT {
++    PKTHREAD Thread;
++    struct _NXC_WB_CONTEXT *Next;
++} NXC_WB_CONTEXT;
+ 
+ static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
+ static int NxcMutex, held;
+-static ULONG CcDataFlushes, CcLazyWriteIos, CcLazyWritePages, NxcWbDepth;
++static ULONG CcDataFlushes, CcLazyWriteIos, CcLazyWritePages;
++static NXC_WB_CONTEXT *NxcWbContexts;
++static int thread;
+ static NTSTATUS io_status;
+ static SIZE_T io_bytes;
+ static unsigned io_calls;
+ 
++static PKTHREAD KeGetCurrentThread(void) { return &thread; }
++
+ static void ExReleaseFastMutex(int *mutex)
+ {
+     (void)mutex;
+@@ -135,7 +147,7 @@ static void setup(void)
+     io_status = STATUS_SUCCESS;
+     io_bytes = NXC_BLOCK_SIZE;
+     io_calls = CcDataFlushes = CcLazyWriteIos = CcLazyWritePages = 0;
+-    NxcWbDepth = 0;
++    NxcWbContexts = NULL;
+     for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i) {
+         NxcBlocks[i].Map = &map;
+         NxcBlocks[i].Offset = i * NXC_BLOCK_SIZE;
+@@ -242,7 +254,8 @@ int main(void)
+ '''
+ 
+ fixture = out / "flush-lifetime.c"
+-fixture.write_text(shim + flush_block + cases + flush_map_stubbed + map_cases)
++fixture.write_text(shim + push_context + pop_context + flush_block + cases +
++                   flush_map_stubbed + map_cases)
+ binary = out / "flush-lifetime"
+ subprocess.run([
+     "cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+diff --git a/tests/host/cache/check-writeback-context.py b/tests/host/cache/check-writeback-context.py
+new file mode 100644
+index 00000000..750298bf
+--- /dev/null
++++ b/tests/host/cache/check-writeback-context.py
+@@ -0,0 +1,236 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise write-back reserve admission through the production cache bodies."""
++
++from pathlib import Path
++import importlib.util
++import subprocess
++import sys
++
++sys.dont_write_bytecode = True
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location(
++    "extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++source = (root / "ntoskrnl/xb/mm/cache.c").read_text()
++
++helpers = ""
++for name in ("NxcPushWritebackContext", "NxcPopWritebackContext",
++             "NxcOwnsWritebackContext"):
++    if name in source:
++        helpers += extract.function(source, name) + "\n"
++bodies = helpers + extract.function(source, "NxcFlushBlock") + "\n"
++bodies += extract.function(source, "NxcClaimSlot")
++
++legacy_state = "static ULONG NxcWbDepth;" if "NxcWbDepth" in bodies else ""
++
++shim = r'''
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef int32_t NTSTATUS;
++typedef unsigned ULONG;
++typedef int64_t LONGLONG;
++typedef size_t SIZE_T, *PSIZE_T;
++typedef int BOOLEAN;
++typedef void VOID;
++typedef void *PKTHREAD;
++#define IN
++#define OUT
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(status) ((status) >= 0)
++#define STATUS_SUCCESS ((NTSTATUS)0)
++#define STATUS_DEVICE_DATA_ERROR ((NTSTATUS)0xc000009c)
++#define PAGE_SIZE 4
++#define NXC_BLOCK_SIZE 16
++#define NXC_MAX_BLOCKS 1
++#define NXC_WB_RESERVE 2
++#define NXC_TOTAL_BLOCKS (NXC_MAX_BLOCKS + NXC_WB_RESERVE)
++#define MAXLONGLONG INT64_MAX
++#define ROUND_UP(value, align) (((value) + (align) - 1) & ~((align) - 1))
++#define min(a, b) ((a) < (b) ? (a) : (b))
++#define ASSERT assert
++#define DECLSPEC_NOINLINE __attribute__((noinline))
++#define DPRINT1(...) ((void)0)
++#define CONTAINING_RECORD(p, t, f) ((t *)((char *)(p) - offsetof(t, f)))
++
++typedef struct { int64_t QuadPart; } LARGE_INTEGER;
++typedef struct _LIST_ENTRY {
++    struct _LIST_ENTRY *Flink;
++    struct _LIST_ENTRY *Blink;
++} LIST_ENTRY, *PLIST_ENTRY;
++typedef struct {
++    void *FileObject;
++    LARGE_INTEGER FileSize;
++    LARGE_INTEGER ValidDataLength;
++} NXC_MAP;
++typedef struct {
++    NXC_MAP *Map;
++    int64_t Offset;
++    unsigned char *Data;
++    LIST_ENTRY LruLink;
++    ULONG RefCount;
++    BOOLEAN Valid;
++    BOOLEAN Dirty;
++    BOOLEAN Busy;
++    BOOLEAN Reserved;
++} NXC_BLOCK;
++typedef struct _NXC_WB_CONTEXT {
++    PKTHREAD Thread;
++    struct _NXC_WB_CONTEXT *Next;
++} NXC_WB_CONTEXT;
++
++static NXC_BLOCK NxcBlocks[NXC_TOTAL_BLOCKS];
++static LIST_ENTRY NxcLruList;
++static int NxcMutex, held;
++static __attribute__((unused)) ULONG NxcActiveBlocks = NXC_MAX_BLOCKS;
++static ULONG CcDataFlushes, CcLazyWriteIos, CcLazyWritePages;
++static NXC_WB_CONTEXT *NxcWbContexts;
++LEGACY_STATE
++static int thread_a, thread_b;
++static PKTHREAD current_thread;
++static unsigned reserve_claims;
++
++static __attribute__((unused)) PKTHREAD KeGetCurrentThread(void)
++{
++    return current_thread;
++}
++static NTSTATUS NxcPagingIo(void *file, void *buffer, LONGLONG offset,
++                           ULONG length, BOOLEAN write,
++                           SIZE_T *transferred);
++static void ExReleaseFastMutex(int *mutex)
++{
++    (void)mutex;
++    assert(held);
++    held = 0;
++}
++static void ExAcquireFastMutex(int *mutex)
++{
++    (void)mutex;
++    assert(!held);
++    held = 1;
++}
++static void RemoveEntryList(LIST_ENTRY *entry)
++{
++    entry->Blink->Flink = entry->Flink;
++    entry->Flink->Blink = entry->Blink;
++}
++static NXC_BLOCK *NxcClaimReserve(void)
++{
++    for (unsigned i = NXC_MAX_BLOCKS; i < NXC_TOTAL_BLOCKS; ++i) {
++        if (NxcBlocks[i].Data && !NxcBlocks[i].Map) {
++            NxcBlocks[i].RefCount = 1;
++            ++reserve_claims;
++            return &NxcBlocks[i];
++        }
++    }
++    return NULL;
++}
++static void NxcShortWait(void) { assert(!"unexpected wait"); }
++static void ExRaiseStatus(NTSTATUS status)
++{
++    (void)status;
++    assert(!"unexpected write-back failure");
++}
++'''.replace("LEGACY_STATE", legacy_state)
++
++cases = r'''
++static unsigned char bytes[NXC_TOTAL_BLOCKS][NXC_BLOCK_SIZE];
++static NXC_MAP map;
++
++static void test_concurrent_contexts(void)
++{
++    NXC_WB_CONTEXT context_a, context_b;
++
++    current_thread = &thread_a;
++    NxcPushWritebackContext(&context_a);
++    current_thread = &thread_b;
++    NxcPushWritebackContext(&context_b);
++
++    current_thread = &thread_a;
++    assert(NxcOwnsWritebackContext());
++    NxcPopWritebackContext(&context_a);
++    assert(!NxcOwnsWritebackContext());
++
++    current_thread = &thread_b;
++    assert(NxcOwnsWritebackContext());
++    NxcPopWritebackContext(&context_b);
++    assert(!NxcOwnsWritebackContext() && NxcWbContexts == NULL);
++}
++
++static NTSTATUS NxcPagingIo(void *file, void *buffer, LONGLONG offset,
++                           ULONG length, BOOLEAN write, SIZE_T *transferred)
++{
++    NXC_BLOCK *block;
++
++    (void)file;
++    (void)buffer;
++    (void)offset;
++    assert(write && !held && current_thread == &thread_a);
++
++    held = 1;
++    current_thread = &thread_b;
++    block = NxcClaimSlot(FALSE);
++    assert(block == NULL);
++
++    current_thread = &thread_a;
++    block = NxcClaimSlot(FALSE);
++    assert(block == &NxcBlocks[NXC_MAX_BLOCKS]);
++    assert(reserve_claims == 1);
++    block->RefCount = 0;
++    block->Map = NULL;
++    held = 0;
++
++    *transferred = length;
++    return STATUS_SUCCESS;
++}
++
++int main(void)
++{
++    SIZE_T written = 0;
++    NTSTATUS status;
++
++    memset(&map, 0, sizeof(map));
++    memset(NxcBlocks, 0, sizeof(NxcBlocks));
++    map.FileObject = &map;
++    map.FileSize.QuadPart = NXC_BLOCK_SIZE;
++    NxcLruList.Flink = NxcLruList.Blink = &NxcLruList;
++    test_concurrent_contexts();
++
++    for (unsigned i = 0; i < NXC_TOTAL_BLOCKS; ++i)
++        NxcBlocks[i].Data = bytes[i];
++    NxcBlocks[0].Map = &map;
++    NxcBlocks[0].Data = bytes[0];
++    NxcBlocks[0].RefCount = 1;
++    NxcBlocks[0].Valid = TRUE;
++    NxcBlocks[0].Dirty = TRUE;
++    NxcBlocks[0].Busy = TRUE;
++    NxcBlocks[1].Reserved = NxcBlocks[2].Reserved = TRUE;
++
++    held = 1;
++    current_thread = &thread_a;
++    status = NxcFlushBlock(&NxcBlocks[0], &written);
++    assert(status == STATUS_SUCCESS && written == NXC_BLOCK_SIZE);
++    assert(!NxcBlocks[0].Dirty && !NxcBlocks[0].Busy);
++    assert(held && NxcWbContexts == NULL);
++    puts("cache write-back reserve: owner admitted, unrelated thread denied PASS");
++    return 0;
++}
++'''
++
++fixture = out / "writeback-context.c"
++fixture.write_text(shim + bodies + cases)
++binary = out / "writeback-context"
++subprocess.run([
++    "cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
++    "-fsanitize=address,undefined", str(fixture), "-o", str(binary),
++], check=True)
++subprocess.run([str(binary)], check=True,
++               env={"ASAN_OPTIONS": "detect_leaks=0"})
+diff --git a/tests/host/cache/check-writeback.py b/tests/host/cache/check-writeback.py
+index 6579c405..633f7095 100644
+--- a/tests/host/cache/check-writeback.py
++++ b/tests/host/cache/check-writeback.py
+@@ -28,13 +28,14 @@ typedef unsigned ULONG;typedef size_t SIZE_T;typedef int BOOLEAN;typedef int32_t
+ typedef struct LIST_ENTRY {struct LIST_ENTRY *Flink,*Blink;} LIST_ENTRY,*PLIST_ENTRY;
+ typedef struct {void *Data,*Map;unsigned RefCount;int Busy,Dirty,Valid,Reserved;LIST_ENTRY LruLink;} NXC_BLOCK;
+ static NXC_BLOCK NxcBlocks[2];static LIST_ENTRY NxcLruList;
+-static unsigned NxcWbDepth, calls;static int NxcMutex, held, status;
++static unsigned calls;static int NxcMutex, held, status;
+ static unsigned char data[16];static jmp_buf failure;
+ static void RemoveEntryList(LIST_ENTRY *l){l->Blink->Flink=l->Flink;l->Flink->Blink=l->Blink;}
+ static void ExReleaseFastMutex(int *m){(void)m;assert(held);held=0;}
+ static void ExAcquireFastMutex(int *m){(void)m;assert(!held);held=1;}
+ static __attribute__((unused,noreturn)) void ExRaiseStatus(NTSTATUS s){assert(s==status);longjmp(failure,1);}
+ static NXC_BLOCK *NxcClaimReserve(void){return NULL;}
++static int NxcOwnsWritebackContext(void){return 0;}
+ static void NxcShortWait(void){abort();}
+ static NTSTATUS NxcFlushBlock(NXC_BLOCK *b,SIZE_T *n){
+  assert(held&&b->Busy&&b->RefCount==1&&b->Dirty&&b->Valid);
+diff --git a/tests/host/metadata/check.py b/tests/host/metadata/check.py
+index bda9c1ee..daf19729 100644
+--- a/tests/host/metadata/check.py
++++ b/tests/host/metadata/check.py
+@@ -74,7 +74,21 @@ typedef struct { FILE_OBJECT *FATFileObject; struct { ULONG FatType; } FatInfo;
+ #define _SEH2_GetExceptionCode() -3
+ #define _SEH2_END
+ #define PIN_WAIT 1
+-static int NxcMutex, NxcWbDepth;
++typedef void *PKTHREAD;
++typedef struct _NXC_WB_CONTEXT {
++    struct _NXC_WB_CONTEXT *Next;
++    PKTHREAD Thread;
++} NXC_WB_CONTEXT;
++static int NxcMutex;
++static PKTHREAD KeGetCurrentThread(void) { return (PKTHREAD)(uintptr_t)1; }
++static void NxcPushWritebackContext(NXC_WB_CONTEXT *context) {
++    context->Next = NULL;
++    context->Thread = KeGetCurrentThread();
++}
++static void NxcPopWritebackContext(NXC_WB_CONTEXT *context) {
++    assert(context->Thread == KeGetCurrentThread());
++    context->Thread = NULL;
++}
+ static ULONG CcDataPages, CcDataFlushes, CcLazyWriteIos, CcLazyWritePages;
+ static struct { ULONG Flags; } globals = { VFAT_WRITE_THROUGH };
+ #define VfatGlobalData (&globals)
