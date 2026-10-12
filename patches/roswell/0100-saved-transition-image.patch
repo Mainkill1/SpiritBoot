@@ -1,0 +1,1123 @@
+diff --git a/boot/nxldr/av-handoff.h b/boot/nxldr/av-handoff.h
+new file mode 100644
+index 00000000..493aea61
+--- /dev/null
++++ b/boot/nxldr/av-handoff.h
+@@ -0,0 +1,26 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independent display contract carried with the existing launch/RAM handoff.
++ * Addresses refer only to title-owned physical RAM aliases, never kernel state.
++ */
++#ifndef NX_AV_HANDOFF_H
++#define NX_AV_HANDOFF_H
++typedef struct _NX_AV_HANDOFF {
++    unsigned SavedAddress;
++    unsigned AllocationBytes;
++    unsigned DisplayMode;
++    unsigned SourceFormat;
++    unsigned Pitch;
++    unsigned FrameBuffer;
++    unsigned Width;
++    unsigned Height;
++    unsigned PixelFormat;
++    unsigned GeneralControl;
++    /* VGA reset clears the linear CPU-framebuffer path independently of
++     * the NV2A accelerated surface. Carry its actual outgoing controls. */
++    unsigned char Sequencer[5];
++    unsigned char Graphics[9];
++    unsigned char Attributes[21];
++    unsigned char AttributeIndex;
++    unsigned char CrtcMode, MaxScan, LineCompare, Overflow;
++} NX_AV_HANDOFF;
++#endif
+diff --git a/boot/nxldr/warm-handoff.h b/boot/nxldr/warm-handoff.h
+index 61485f9e..62a974e7 100644
+--- a/boot/nxldr/warm-handoff.h
++++ b/boot/nxldr/warm-handoff.h
+@@ -11,7 +11,7 @@
+ #define PM_VERSION 2
+ #endif
+ #define PM_LAUNCH_MAGIC 0x6E78436CUL
+-#define PM_LAUNCH_BYTES 3616
++#define PM_LAUNCH_BYTES 3696
+ #define PM_MAX_STAGES 505u
+ 
+ typedef struct _PM_HANDOFF {
+diff --git a/hal/halx86/xbox/av.c b/hal/halx86/xbox/av.c
+index 995a5dd6..ef4d3458 100644
+--- a/hal/halx86/xbox/av.c
++++ b/hal/halx86/xbox/av.c
+@@ -28,6 +28,7 @@
+ 
+ 
+ #include "halxbox.h"
++#include "../../../boot/nxldr/av-handoff.h"
+ 
+ /* SMBus slave addresses. */
+ #define SMBUS_SMC               0x10   /* system management controller    */
+@@ -51,6 +52,12 @@
+ #define NV2A_PCRTC_START        0x600800
+ #define NV2A_PRMCIO_CR_INDEX    0x6013D4
+ #define NV2A_PRMCIO_CR_DATA     0x6013D5
++#define NV2A_PRAMDAC_GENERAL_CONTROL 0x680600
++#define NV2A_PRMVIO_SEQ_INDEX    0x0C03C4
++#define NV2A_PRMVIO_GR_INDEX     0x0C03CE
++#define NV2A_PRMCIO_ATTR_INDEX   0x6013C0
++#define NV2A_PRMCIO_ATTR_READ    0x6013C1
++#define NV2A_PRMCIO_STATUS       0x6013DA
+ 
+ /* ACPI I/O port gating video output (cromwell BootVgaInitialization.c). */
+ #define ACPI_VIDEO_GATE         0x80D3
+@@ -100,6 +107,137 @@
+ /* A framebuffer a prior display owner asked the kernel to preserve across a
+  * mode change (AvSetSavedDataAddress).  NULL on a cold boot -- none saved. */
+ static PVOID NxkAvSavedDataAddress = NULL;
++static ULONG NxkAvDisplayMode, NxkAvSourceFormat, NxkAvPitch;
++
++static UCHAR NxkAvReadCrtc(PVOID RegisterBase, UCHAR Index)
++{
++    *(volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_INDEX) = Index;
++    return *(volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_DATA);
++}
++static VOID NxkAvWriteCrtc(PVOID RegisterBase, UCHAR Index, UCHAR Value)
++{
++    *(volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_INDEX) = Index;
++    *(volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_DATA) = Value;
++}
++
++static UCHAR NxkAvReadByte(PVOID RegisterBase, ULONG Offset)
++{
++    return *(volatile UCHAR *)((ULONG_PTR)RegisterBase + Offset);
++}
++static VOID NxkAvWriteByte(PVOID RegisterBase, ULONG Offset, UCHAR Value)
++{
++    *(volatile UCHAR *)((ULONG_PTR)RegisterBase + Offset) = Value;
++}
++
++static VOID NTAPI NxkAvCaptureVga(PVOID RegisterBase, NX_AV_HANDOFF *State)
++{
++    UCHAR i, seq = NxkAvReadByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX);
++    UCHAR gr = NxkAvReadByte(RegisterBase, NV2A_PRMVIO_GR_INDEX);
++    (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++    State->AttributeIndex = NxkAvReadByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX);
++    for (i = 0; i < sizeof(State->Sequencer); ++i) {
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX, i);
++        State->Sequencer[i] = NxkAvReadByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX + 1);
++    }
++    for (i = 0; i < sizeof(State->Graphics); ++i) {
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_GR_INDEX, i);
++        State->Graphics[i] = NxkAvReadByte(RegisterBase, NV2A_PRMVIO_GR_INDEX + 1);
++    }
++    for (i = 0; i < sizeof(State->Attributes); ++i) {
++        (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++        NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX,
++                      i | (State->AttributeIndex & 0x20));
++        State->Attributes[i] = NxkAvReadByte(RegisterBase, NV2A_PRMCIO_ATTR_READ);
++    }
++    NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX, seq);
++    NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_GR_INDEX, gr);
++    (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++    NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX, State->AttributeIndex);
++    State->CrtcMode = NxkAvReadCrtc(RegisterBase, 0x17);
++    State->MaxScan = NxkAvReadCrtc(RegisterBase, 9);
++    State->LineCompare = NxkAvReadCrtc(RegisterBase, 0x18);
++    State->Overflow = NxkAvReadCrtc(RegisterBase, 7);
++}
++
++static VOID NTAPI NxkAvRestoreVga(PVOID RegisterBase, const NX_AV_HANDOFF *State)
++{
++    UCHAR i;
++    UCHAR protect = NxkAvReadCrtc(RegisterBase, 0x11);
++    /* Unlock the extended CRTC after device reset. Restore row addressing
++     * and line compare too: dimensions alone cannot describe VGA scanout. */
++    NxkAvWriteCrtc(RegisterBase, 0x1f, 0x57);
++    NxkAvWriteCrtc(RegisterBase, 0x17, State->CrtcMode);
++    NxkAvWriteCrtc(RegisterBase, 9, State->MaxScan);
++    NxkAvWriteCrtc(RegisterBase, 0x18, State->LineCompare);
++    NxkAvWriteCrtc(RegisterBase, 0x11, protect & ~0x80);
++    NxkAvWriteCrtc(RegisterBase, 7, State->Overflow);
++    NxkAvWriteCrtc(RegisterBase, 0x11, protect);
++    for (i = 0; i < sizeof(State->Sequencer); ++i) {
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX, i);
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_SEQ_INDEX + 1, State->Sequencer[i]);
++    }
++    for (i = 0; i < sizeof(State->Graphics); ++i) {
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_GR_INDEX, i);
++        NxkAvWriteByte(RegisterBase, NV2A_PRMVIO_GR_INDEX + 1, State->Graphics[i]);
++    }
++    for (i = 0; i < sizeof(State->Attributes); ++i) {
++        (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++        NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX,
++                      i | (State->AttributeIndex & 0x20));
++        NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX, State->Attributes[i]);
++    }
++    (VOID)NxkAvReadByte(RegisterBase, NV2A_PRMCIO_STATUS);
++    NxkAvWriteByte(RegisterBase, NV2A_PRMCIO_ATTR_INDEX, State->AttributeIndex);
++}
++
++static VOID NTAPI NxkAvSetPitch(PVOID RegisterBase, ULONG Pitch)
++{
++    ULONG raw = Pitch >> 3;
++    NxkAvWriteCrtc(RegisterBase, 0x13, raw & 0xff);
++    NxkAvWriteCrtc(RegisterBase, 0x19,
++        (NxkAvReadCrtc(RegisterBase, 0x19) & ~0xe0) | (((raw >> 8) & 7) << 5));
++    NxkAvWriteCrtc(RegisterBase, 0x25,
++        (NxkAvReadCrtc(RegisterBase, 0x25) & ~0x20) | (((raw >> 11) & 1) << 5));
++    NxkAvWriteCrtc(RegisterBase, 0x39, 0xff);
++}
++
++/* Public nxdk mode identifiers describe the active area independently of
++ * framebuffer pitch. Preserve unknown modes rather than infer their size. */
++static ULONG NTAPI NxkAvModeSize(ULONG Mode)
++{
++    switch (Mode) {
++    case 0x44030307: case 0x0401010B: case 0x04010101: case 0x04010103:
++    case 0x60030307: case 0x2001010B: case 0x20010101: case 0x20010103:
++    case 0x48030314: case 0x08010119: case 0x0801010D: case 0x88070701:
++    case 0xC0060601:
++        return (640UL << 16) | 480;
++    case 0x44040408: case 0x0402020C: case 0x04020202: case 0x04020204:
++    case 0x60040408: case 0x2002020C: case 0x20020202: case 0x20020204:
++    case 0x48040415: case 0x0802021A: case 0x0802020E: case 0x88080801:
++        return (720UL << 16) | 480;
++    case 0xC0030303: return (800UL << 16) | 600;
++    case 0xC0040404: return (1024UL << 16) | 768;
++    case 0x880B0A02: return (1280UL << 16) | 720;
++    default: return 0;
++    }
++}
++
++static VOID NTAPI
++NxkAvSetActiveArea(PVOID RegisterBase, ULONG Width, ULONG Height, UCHAR PixelFormat)
++{
++    UCHAR protect = NxkAvReadCrtc(RegisterBase, 0x11);
++    ULONG vertical = Height - 1;
++    NxkAvWriteCrtc(RegisterBase, 0x11, protect & ~0x80);
++    NxkAvWriteCrtc(RegisterBase, 1, Width / 8 - 1);
++    NxkAvWriteCrtc(RegisterBase, 0x12, vertical & 255);
++    NxkAvWriteCrtc(RegisterBase, 7, (NxkAvReadCrtc(RegisterBase, 7) & ~0x42) |
++                     ((vertical >> 7) & 2) | ((vertical >> 3) & 0x40));
++    NxkAvWriteCrtc(RegisterBase, 0x28, PixelFormat);
++    NxkAvWriteCrtc(RegisterBase, 0x11, protect);
++}
++
++ULONG NTAPI AvSetDisplayMode(PVOID RegisterBase, ULONG Step, ULONG DisplayMode,
++                            ULONG SourceColorFormat, ULONG Pitch, ULONG FrameBuffer);
+ 
+ PVOID NTAPI
+ AvGetSavedDataAddress(VOID)
+@@ -113,6 +251,119 @@ AvSetSavedDataAddress(_In_opt_ PVOID Address)
+     NxkAvSavedDataAddress = Address;
+ }
+ 
++/* Capture after shutdown callbacks, before the RAM handoff is hashed. */
++VOID NTAPI
++NxkAvCaptureState(NX_AV_HANDOFF *State)
++{
++    extern SIZE_T NTAPI NxMmQueryAllocationSize(PVOID BaseAddress);
++    ULONG_PTR address = (ULONG_PTR)NxkAvSavedDataAddress;
++    SIZE_T size;
++    UCHAR index, overflow;
++    RtlZeroMemory(State, sizeof(*State));
++    if (address < 0x80000000UL || address >= 0x84000000UL ||
++        (address & (PAGE_SIZE - 1))) return;
++    size = NxMmQueryAllocationSize((PVOID)address);
++    if (!size || size > 0x84000000UL - address) return;
++    State->SavedAddress = address;
++    State->AllocationBytes = size;
++    State->DisplayMode = NxkAvDisplayMode;
++    State->SourceFormat = NxkAvSourceFormat;
++    State->Pitch = NxkAvPitch;
++    State->FrameBuffer = *(volatile ULONG *)(0xFD000000UL + NV2A_PCRTC_START);
++    index = *(volatile UCHAR *)(0xFD000000UL + NV2A_PRMCIO_CR_INDEX);
++    State->Width = ((ULONG)NxkAvReadCrtc((PVOID)0xFD000000UL, 1) + 1) * 8;
++    overflow = NxkAvReadCrtc((PVOID)0xFD000000UL, 7);
++    State->Height = ((ULONG)NxkAvReadCrtc((PVOID)0xFD000000UL, 0x12) |
++                    ((overflow & 2) << 7) | ((overflow & 0x40) << 3)) + 1;
++    State->PixelFormat = NxkAvReadCrtc((PVOID)0xFD000000UL, 0x28);
++    NxkAvCaptureVga((PVOID)0xFD000000UL, State);
++    *(volatile UCHAR *)(0xFD000000UL + NV2A_PRMCIO_CR_INDEX) = index;
++    State->GeneralControl = *(volatile ULONG *)(0xFD000000UL + NV2A_PRAMDAC_GENERAL_CONTROL);
++}
++
++/* The memory manager has already validated and admitted persistent pages.
++ * An ordinary boot or rejected range never publishes an old saved pointer. */
++CODE_SEG("INIT")
++BOOLEAN NTAPI
++NxkAvRestoreState(const NX_AV_HANDOFF *State)
++{
++    extern BOOLEAN NxkMmPersistentPage(ULONG_PTR Page);
++    ULONG address = State->SavedAddress;
++    ULONG physical, offset;
++    ULONG first, last, page;
++    ULONG depth, bytesPerPixel, lineCompare;
++    if (address < 0x80000000UL || address >= 0x84000000UL ||
++        (address & (PAGE_SIZE - 1)) || !State->AllocationBytes ||
++        State->AllocationBytes > 0x84000000UL - address) return FALSE;
++    physical = address - 0x80000000UL;
++    first = physical >> PAGE_SHIFT;
++    last = (physical + State->AllocationBytes - 1) >> PAGE_SHIFT;
++    /* Adjacent saved allocations share a restored run until late adoption.
++     * Check this allocation's pages, not the run's base. */
++    for (page = first; page <= last; ++page)
++        if (!NxkMmPersistentPage(page)) return FALSE;
++    AvSetSavedDataAddress((PVOID)address);
++    if (State->FrameBuffer < physical) return FALSE;
++    offset = State->FrameBuffer - physical;
++    if (offset >= State->AllocationBytes || !State->Pitch ||
++        State->Pitch > State->AllocationBytes - offset) return FALSE;
++    depth = State->PixelFormat & 3;
++    bytesPerPixel = depth == 3 ? 4 : depth;
++    if (!State->Width || State->Width > 2048 || (State->Width & 7) ||
++        !State->Height || State->Height > 1024 ||
++        State->PixelFormat > 255 || depth < 2 ||
++        State->Width > State->Pitch / bytesPerPixel ||
++        State->Height > (State->AllocationBytes - offset) / State->Pitch) return FALSE;
++    /* This bounded handoff covers packed 15/16/32-bit linear images. Planar,
++     * palette, split-screen and repeated-scan modes need a different extent
++     * contract; do not restore them against these linear frame bounds. */
++    lineCompare = State->LineCompare | ((State->Overflow & 0x10) << 4) |
++                  ((State->MaxScan & 0x40) << 3);
++    /* SR1's screen-off flag affects frontend presentation, not linear row
++     * addressing. Preserve the title's outgoing visibility state. */
++    if ((State->Sequencer[0] & 3) != 3 || (State->Sequencer[1] & 8) ||
++        (State->Graphics[5] & 0x60) != 0x40 || !(State->Graphics[6] & 1) ||
++        !(State->AttributeIndex & 0x20) || (State->CrtcMode & 3) != 3 ||
++        (State->MaxScan & 0x9f) || lineCompare < State->Height - 1) return FALSE;
++    /* Boot video can use a 720-pixel viewport. Restore the active area of
++     * the title's image independently of the firmware's boot mode. */
++    /* Do not run cold video initialization: it publishes the boot buffer
++     * and mutes the encoder. Device reset still requires VGA graphics state.
++     * Publish the owned image only after all display controls are restored. */
++    NxkAvRestoreVga((PVOID)0xFD000000UL, State);
++    NxkAvSetActiveArea((PVOID)0xFD000000UL, State->Width, State->Height,
++                      State->PixelFormat);
++    NxkAvSetPitch((PVOID)0xFD000000UL, State->Pitch);
++    *(volatile ULONG *)(0xFD000000UL + NV2A_PRAMDAC_GENERAL_CONTROL) = State->GeneralControl;
++    NxkAvDisplayMode = State->DisplayMode;
++    NxkAvSourceFormat = State->SourceFormat;
++    NxkAvPitch = State->Pitch;
++    *(volatile ULONG *)(0xFD000000UL + NV2A_PCRTC_START) = State->FrameBuffer;
++    return TRUE;
++}
++
++/* Run after INIT/workspace bytes have been restored, before the next title.
++ * Earlier adoption would detach admission bits still needed by staged copies.
++ * Split this known extent out of a maximal restored run so neighbors retain
++ * their ownership when the title unpersists and frees the saved image. */
++VOID NTAPI
++NxkAvAdoptSavedAllocation(const NX_AV_HANDOFF *State)
++{
++    extern BOOLEAN NxkMmAdoptRestored(PVOID Alias, SIZE_T Size);
++    ULONG_PTR address = (ULONG_PTR)AvGetSavedDataAddress();
++    SIZE_T size = State->AllocationBytes;
++    if (!address) return;
++    if (address != State->SavedAddress || address < 0x80000000UL ||
++        address >= 0x84000000UL || (address & (PAGE_SIZE - 1)) ||
++        !size || size > 0x84000000UL - address) {
++        AvSetSavedDataAddress(NULL);
++        return;
++    }
++    size = (size + PAGE_SIZE - 1) & ~(SIZE_T)(PAGE_SIZE - 1);
++    if (!NxkMmAdoptRestored((PVOID)address, size))
++        AvSetSavedDataAddress(NULL);
++}
++
+ /* Probe the SMBus for the TV encoder; 0 if neither known encoder answers
+  * (an Xcalibur box, not handled here). */
+ static UCHAR
+@@ -249,8 +500,9 @@ AvSendTVEncoderOption(
+  * Program the NV2A CRTC for a display mode.  Title drives this in a
+  * do/while loop -- the function returns the next Step to run, 0 when done.
+  * Retail staggers PLL relock and encoder handoff across steps; on the
+- * emulated NV2A that collapses to a single step: point PCRTC_START at the
+- * freshly-allocated framebuffer.  pbkit re-points PCRTC_START on every
++ * emulated NV2A that collapses to a single step: program the active area,
++ * pixel depth and pitch, then point PCRTC_START at the framebuffer.
++ * pbkit re-points PCRTC_START on every
+  * buffer flip; AvSendTVEncoderOption owns the encoder.  RegisterBase is
+  * nxdk's VIDEO_BASE (0xFD000000), reached through the MMIO identity window.
+  */
+@@ -267,44 +519,38 @@ AvSetDisplayMode(
+      *   line_offset = (CR[0x13] | ((CR[0x19]&0xE0)<<3) | ((CR[0x25]&0x20)<<6)) << 3
+      * as the byte pitch.  Build that 12-bit raw value from Pitch/8 and write
+      * it back through PRMCIO so the display path samples the right scanline. */
+-    volatile UCHAR *cr_index =
+-        (volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_INDEX);
+-    volatile UCHAR *cr_data =
+-        (volatile UCHAR *)((ULONG_PTR)RegisterBase + NV2A_PRMCIO_CR_DATA);
+-    ULONG raw = Pitch >> 3;     /* xemu shifts by 3 */
+-    UCHAR cr19, cr25;
++    ULONG size = NxkAvModeSize(DisplayMode), depth = 0;
+ 
+     UNREFERENCED_PARAMETER(Step);
+-    UNREFERENCED_PARAMETER(DisplayMode);
+-    UNREFERENCED_PARAMETER(SourceColorFormat);
++    NxkAvDisplayMode = DisplayMode;
++    NxkAvSourceFormat = SourceColorFormat;
++    NxkAvPitch = Pitch;
++
++    /* The public linear 32-bit format is 0x12; the observed title also uses
++     * 0x1E (linear X8R8G8B8).  15/16-bit modes share CRTC depth 2. */
++    if (SourceColorFormat == 0x12 || SourceColorFormat == 0x1E) depth = 3;
++    else if (SourceColorFormat == 0x10 || SourceColorFormat == 0x11) depth = 2;
++    if (size && depth) {
++        ULONG width = size >> 16, height = size & 0xFFFF;
++        ULONG bytesPerPixel = depth == 3 ? 4 : 2;
++        if (width <= Pitch / bytesPerPixel) {
++            UCHAR format = (NxkAvReadCrtc(RegisterBase, 0x28) & ~3) | depth;
++            NxkAvSetActiveArea(RegisterBase, width, height, format);
++            if (depth == 2) {
++                volatile ULONG *control = (volatile ULONG *)
++                    ((ULONG_PTR)RegisterBase + NV2A_PRAMDAC_GENERAL_CONTROL);
++                *control = (*control & ~(1UL << 12)) |
++                           (SourceColorFormat == 0x11 ? 1UL << 12 : 0);
++            }
++        }
++    }
++
++    NxkAvSetPitch(RegisterBase, Pitch);
+ 
+-    /* PCRTC_START scans out physical RAM; FrameBuffer arrives pre-masked to
+-     * 0x7FFFFFFF by nxdk -- reduce it to the 64 MB physical address space. */
++    /* Publish scanout after the active area, depth and pitch are ready.
++     * nxdk supplies a physical address; this display aperture is low 64 MiB. */
+     *(volatile ULONG *)((ULONG_PTR)RegisterBase + NV2A_PCRTC_START) =
+         FrameBuffer & 0x03FFFFFF;
+ 
+-    /* CR[0x13] holds raw bits 7:0. */
+-    *cr_index = 0x13;
+-    *cr_data  = (UCHAR)(raw & 0xFF);
+-
+-    /* CR[0x19] bits 7:5 hold raw bits 10:8; preserve the other bits. */
+-    *cr_index = 0x19;
+-    cr19 = (*cr_data & ~0xE0) | (UCHAR)(((raw >> 8) & 0x07) << 5);
+-    *cr_data = cr19;
+-
+-    /* CR[0x25] bit 5 holds raw bit 11; preserve the other bits.  640x480x32
+-     * needs raw=0x140 so bit 11 is 0 -- still write to defang any cromwell
+-     * leftover that happens to have it set. */
+-    *cr_index = 0x25;
+-    cr25 = (*cr_data & ~0x20) | (UCHAR)(((raw >> 11) & 0x01) << 5);
+-    *cr_data = cr25;
+-
+-    /* CR[0x39] = 0xFF disables interlace mode (xemu treats any other value
+-     * as interlaced and doubles the display height, producing two stacked
+-     * copies of the framebuffer on screen).  Progressive 480p / 480i without
+-     * interlace from the GPU's side is what nxdk's triangle expects. */
+-    *cr_index = 0x39;
+-    *cr_data  = 0xFF;
+-
+     return 0;   /* single step -- done */
+ }
+diff --git a/ntoskrnl/ex/init.c b/ntoskrnl/ex/init.c
+index 034236a1..15caf06a 100644
+--- a/ntoskrnl/ex/init.c
++++ b/ntoskrnl/ex/init.c
+@@ -1451,10 +1451,10 @@ Phase1InitializationDiscard(IN PVOID Context)
+     {
+         extern VOID NxkMmEnsureMmioWindow(VOID);
+         extern VOID NxConfigurePciDevicesLate(VOID);
+-        extern VOID NxkInitializeVideo(VOID);
++        extern VOID NTAPI NxkInitializeBootVideo(BOOLEAN QuickLaunch);
+         NxkMmEnsureMmioWindow();
+         NxConfigurePciDevicesLate();
+-        NxkInitializeVideo();
++        NxkInitializeBootVideo(QuickLaunch);
+     }
+ 
+     if (!QuickLaunch)
+diff --git a/ntoskrnl/xb/mm/persistence.c b/ntoskrnl/xb/mm/persistence.c
+index c69855d1..3bbadf50 100644
+--- a/ntoskrnl/xb/mm/persistence.c
++++ b/ntoskrnl/xb/mm/persistence.c
+@@ -243,10 +243,14 @@ VOID NxkMmFinishWarmRestore(VOID)
+  */
+ VOID NTAPI NxkMmPublishPersistence(BOOLEAN WarmReset)
+ {
++    extern VOID NTAPI NxkPublishSavedVideo(VOID);
+     PM_HANDOFF *slot = (PM_HANDOFF *)PM_VA;
+     KIRQL irql;
+     slot->Magic = 0;
+     if (!WarmReset) return;
++    /* AV capture queries contig ownership: do it before taking the PFN lock,
++     * preserving the allocator's contig-lock -> PFN-lock order. */
++    NxkPublishSavedVideo();
+     irql = MiAcquirePfnLock();
+     slot->Version = PM_VERSION; slot->BitmapBytes = PM_BYTES;
+     slot->ImageBase = (ULONG)__ImageBase; slot->LaunchHash = PmLaunchHash();
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index d3ae28e4..c3c3f955 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -29,6 +29,8 @@
+ #include "object-types.h"
+ #include "obcreate.h"
+ #include "mm/mm.h"
++#include "../../boot/nxldr/av-handoff.h"
++#include "../../boot/nxldr/warm-handoff.h"
+ 
+ /* ExMutantObjectType + MUTANT_ALL_ACCESS. */
+ #include <ndk/extypes.h>
+@@ -553,8 +555,41 @@ typedef struct _XB_PERSIST_SLOT
+     LAUNCH_DATA_HEADER Header;      /* copied from the title's LaunchDataPage */
+     UCHAR              LaunchData[3072]; /* the payload titles hand across */
+     ULONG              LaunchPagePa; /* independently added original page PA */
++    NX_AV_HANDOFF       Av;
+ } XB_PERSIST_SLOT, *PXB_PERSIST_SLOT;
+ 
++_Static_assert(sizeof(XB_PERSIST_SLOT) == PM_LAUNCH_BYTES,
++               "launch hash must cover the saved display state");
++
++VOID NTAPI NxkPublishSavedVideo(VOID)
++{
++    extern VOID NTAPI NxkAvCaptureState(NX_AV_HANDOFF *State);
++    volatile PXB_PERSIST_SLOT slot = (PXB_PERSIST_SLOT)XB_PERSIST_VA;
++    if (slot->Magic == XB_PERSIST_MAGIC)
++        NxkAvCaptureState((NX_AV_HANDOFF *)&slot->Av);
++}
++
++CODE_SEG("INIT")
++BOOLEAN NTAPI NxkRestoreSavedVideo(VOID)
++{
++    extern BOOLEAN NTAPI NxkAvRestoreState(const NX_AV_HANDOFF *State);
++    volatile PXB_PERSIST_SLOT slot = (PXB_PERSIST_SLOT)XB_PERSIST_VA;
++    return slot->Magic == XB_PERSIST_MAGIC &&
++        NxkAvRestoreState((const NX_AV_HANDOFF *)&slot->Av);
++}
++
++/* Restore a validated retained display, including VGA reset controls. The cold driver
++ * changes scanout to the boot buffer and mutes/reprograms the encoder;
++ * doing that before restoring the image introduces a visible interruption.
++ * Invalid or absent saved displays still require ordinary initialization. */
++CODE_SEG("INIT")
++VOID NTAPI NxkInitializeBootVideo(BOOLEAN QuickLaunch)
++{
++    extern VOID NxkInitializeVideo(VOID);
++    if (!QuickLaunch || !NxkRestoreSavedVideo())
++        NxkInitializeVideo();
++}
++
+ /* Read-only early-boot peek. XeConsumeChainloadSlot remains the only
+  * destructive consumer of the one-shot quick-launch marker. */
+ CODE_SEG("INIT")
+@@ -3734,6 +3769,12 @@ XeConsumeChainloadSlot(VOID)
+     if (slot->Magic != XB_PERSIST_MAGIC)
+         return NULL;          /* cold boot -- caller falls back to search */
+ 
++    /* Staged copies are complete now. Establish the saved image's separate
++     * allocation before adopting the launch page or entering title code. */
++    {
++        extern VOID NTAPI NxkAvAdoptSavedAllocation(const NX_AV_HANDOFF *State);
++        NxkAvAdoptSavedAllocation((const NX_AV_HANDOFF *)&slot->Av);
++    }
+     type = slot->Header.dwLaunchDataType;
+     slot->Magic = 0;
+ 
+diff --git a/tests/host/av-saved-image/check.py b/tests/host/av-saved-image/check.py
+new file mode 100644
+index 00000000..dc7fed59
+--- /dev/null
++++ b/tests/host/av-saved-image/check.py
+@@ -0,0 +1,302 @@
++#!/usr/bin/env python3
++"""Execute the production saved-image capture/restore on controlled MMIO/RAM admission."""
++from pathlib import Path
++import os
++import re
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1])
++out.mkdir(parents=True, exist_ok=True)
++source = (root / 'hal/halx86/xbox/av.c').read_text()
++
++def body(name, text=source):
++    match = re.search(r'(?:PVOID|VOID|ULONG|BOOLEAN) NTAPI\s+' + name + r'\s*\([^;]*?\)\s*\{', text)
++    assert match, 'missing production function: ' + name
++    end = text.index('{', match.start()) + 1
++    depth = 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[match.start():end]
++
++shim = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/mman.h>
++typedef void VOID, *PVOID;
++typedef uint32_t ULONG;
++typedef uint8_t UCHAR;
++typedef uintptr_t ULONG_PTR;
++typedef size_t SIZE_T;
++typedef int BOOLEAN;
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define CODE_SEG(x)
++#define _In_
++#define _In_opt_
++#define PAGE_SIZE 4096
++#define PAGE_SHIFT 12
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define UNREFERENCED_PARAMETER(x) ((void)(x))
++#define NV2A_PCRTC_START 0x600800
++#define NV2A_PRMCIO_CR_INDEX 0x6013d4
++#define NV2A_PRMCIO_CR_DATA 0x6013d5
++#define NV2A_PRAMDAC_GENERAL_CONTROL 0x680600
++#define NV2A_PRMVIO_SEQ_INDEX 0x0c03c4
++#define NV2A_PRMVIO_GR_INDEX 0x0c03ce
++#define NV2A_PRMCIO_ATTR_INDEX 0x6013c0
++#define NV2A_PRMCIO_ATTR_READ 0x6013c1
++#define NV2A_PRMCIO_STATUS 0x6013da
++static UCHAR crtc[256];
++static UCHAR sequencer[5], graphics[9], attributes[21], attribute_index;
++static UCHAR sequencer_index, graphics_index, attribute_phase;
++static UCHAR NxkAvReadByte(PVOID base, ULONG offset)
++{
++    assert(base == (PVOID)0xfd000000UL);
++    switch (offset) {
++    case NV2A_PRMVIO_SEQ_INDEX: return sequencer_index;
++    case NV2A_PRMVIO_SEQ_INDEX + 1:
++        assert(sequencer_index < sizeof(sequencer)); return sequencer[sequencer_index];
++    case NV2A_PRMVIO_GR_INDEX: return graphics_index;
++    case NV2A_PRMVIO_GR_INDEX + 1:
++        assert(graphics_index < sizeof(graphics)); return graphics[graphics_index];
++    case NV2A_PRMCIO_ATTR_INDEX: return attribute_phase ? 0 : attribute_index;
++    case NV2A_PRMCIO_ATTR_READ:
++        assert((attribute_index & 31) < sizeof(attributes)); return attributes[attribute_index & 31];
++    case NV2A_PRMCIO_STATUS: attribute_phase = 0; return 0;
++    default: assert(0); return 0;
++    }
++}
++static VOID NxkAvWriteByte(PVOID base, ULONG offset, UCHAR value)
++{
++    assert(base == (PVOID)0xfd000000UL);
++    switch (offset) {
++    case NV2A_PRMVIO_SEQ_INDEX: sequencer_index = value; break;
++    case NV2A_PRMVIO_SEQ_INDEX + 1:
++        assert(sequencer_index < sizeof(sequencer)); sequencer[sequencer_index] = value; break;
++    case NV2A_PRMVIO_GR_INDEX: graphics_index = value; break;
++    case NV2A_PRMVIO_GR_INDEX + 1:
++        assert(graphics_index < sizeof(graphics)); graphics[graphics_index] = value; break;
++    case NV2A_PRMCIO_ATTR_INDEX:
++        if (!attribute_phase) { attribute_index = value | 0x20; attribute_phase = 1; }
++        else { assert((attribute_index & 31) < sizeof(attributes));
++               attributes[attribute_index & 31] = value; attribute_phase = 0; }
++        break;
++    default: assert(0);
++    }
++}
++static UCHAR NxkAvReadCrtc(PVOID base, UCHAR index)
++{ assert(base == (PVOID)0xfd000000UL); return crtc[index]; }
++static VOID NxkAvWriteCrtc(PVOID base, UCHAR index, UCHAR value)
++{
++    assert(base == (PVOID)0xfd000000UL);
++    if (index <= 7) assert(!(crtc[0x11] & 0x80));
++    crtc[index] = value;
++}
++static PVOID NxkAvSavedDataAddress;
++static ULONG NxkAvDisplayMode, NxkAvSourceFormat, NxkAvPitch;
++static SIZE_T live, restored;
++static int adjacent;
++static int adopt_available = 1, adopt_calls;
++static SIZE_T adopted;
++SIZE_T NxMmQueryAllocationSize(PVOID address)
++{ return address == (PVOID)0x82000000UL ? live : 0; }
++SIZE_T NxkMmQueryRestored(PVOID address)
++{ return !adjacent && address == (PVOID)0x82000000UL ? restored : 0; }
++BOOLEAN NxkMmPersistentPage(ULONG_PTR page)
++{ return (adjacent && page == 0x1fff) ||
++         (page >= 0x2000 && page - 0x2000 < restored / PAGE_SIZE); }
++BOOLEAN NxkMmAdoptRestored(PVOID address, SIZE_T size)
++{
++    ++adopt_calls;
++    assert(address == (PVOID)0x82000000UL);
++    if (!adopt_available) return 0;
++    adopted = size;
++    return 1;
++}
++ULONG AvSetDisplayMode(PVOID, ULONG, ULONG, ULONG, ULONG, ULONG);
++BOOLEAN NxkRestoreSavedVideo(VOID);
++'''
++
++main = r'''
++#define SCANOUT (*(volatile ULONG *)0xfd600800UL)
++#define GENERAL_CONTROL (*(volatile ULONG *)0xfd680600UL)
++static const NX_AV_HANDOFF *warm_state;
++static unsigned cold_video_calls, restore_video_calls;
++BOOLEAN NxkRestoreSavedVideo(VOID)
++{ ++restore_video_calls; return NxkAvRestoreState(warm_state); }
++VOID NxkInitializeVideo(VOID)
++{ ++cold_video_calls; SCANOUT = 0x03c00000; }
++static void boot(void)
++{
++    AvSetSavedDataAddress(NULL); SCANOUT = 0x03c00000;
++    crtc[1] = 89; crtc[7] = 2; crtc[0x12] = 223;
++    crtc[0x28] = 3; crtc[0x11] = 0x80; GENERAL_CONTROL = 0;
++    crtc[0x17] = 0xe3; crtc[0x18] = 0xff;
++    crtc[7] |= 0x10; crtc[9] = 0x40;
++    sequencer[0] = 3; sequencer[1] = 1; sequencer[2] = 15; sequencer[4] = 6;
++    graphics[5] = 0x40; graphics[6] = 5; graphics[7] = 15; graphics[8] = 255;
++    attributes[0x10] = 0x4a; attributes[3] = 7; attribute_index = 0x20;
++    sequencer_index = 2; graphics_index = 7; attribute_phase = 1;
++}
++static void device_reset(void)
++{
++    AvSetSavedDataAddress(NULL); SCANOUT = 0; GENERAL_CONTROL = 0;
++    memset(crtc, 0, sizeof(crtc)); memset(sequencer, 0, sizeof(sequencer));
++    memset(graphics, 0, sizeof(graphics)); memset(attributes, 0, sizeof(attributes));
++    attribute_index = 0;
++    sequencer_index = graphics_index = attribute_phase = 0;
++}
++static void check_linear_renderer(void)
++{
++    /* The actual CPU framebuffer frontend is blank without the attribute
++     * enable/graphics bits; a zero shift mode selects planar pixels instead.
++     * CR17 and line compare independently govern row address progression. */
++    assert(attribute_index & 0x20);
++    assert((graphics[6] & 1) && (graphics[5] & 0x60) == 0x40);
++    assert(!(sequencer[1] & 8));
++    assert((crtc[0x17] & 3) == 3 && !(crtc[9] & 0x9f));
++    ULONG compare = crtc[0x18] | ((crtc[7] & 0x10) << 4) | ((crtc[9] & 0x40) << 3);
++    assert(compare >= 479);
++}
++int main(void)
++{
++    void *mmio = mmap((void *)0xfd000000UL, 0x800000, PROT_READ|PROT_WRITE,
++        MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE, -1, 0);
++    assert(mmio != MAP_FAILED);
++    NX_AV_HANDOFF state;
++    live = 1228864;
++    boot(); GENERAL_CONTROL = 0x00100030;
++    AvSetSavedDataAddress((PVOID)0x82000000UL);
++    AvSetDisplayMode(mmio, 0, 0x88070701, 30, 2560, 0x02000040);
++    assert(crtc[1] == 79 && crtc[0x12] == 223 && (crtc[0x28] & 3) == 3);
++    NxkAvCaptureState(&state);
++    assert(state.SavedAddress == 0x82000000 && state.AllocationBytes == 1228864);
++    assert(state.Width == 640 && state.Height == 480 && state.PixelFormat == 3);
++    assert(sequencer_index == 2 && graphics_index == 7 && attribute_index == 0x20);
++    boot(); restored = 1232896;
++    assert(NxkAvRestoreState(&state));
++    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL && SCANOUT == 0x02000040);
++    assert(crtc[1] == 79 && crtc[0x12] == 223 && (crtc[7] & 0x42) == 2);
++    assert(crtc[0x11] == 0x80 && GENERAL_CONTROL == 0x00100030);
++    boot(); adjacent = 1; NxkAvRestoreState(&state);
++    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL && SCANOUT == 0x02000040);
++    adjacent = 0;
++    assert(adopt_calls == 0); /* Staged copies still need their admission bits. */
++    NxkAvAdoptSavedAllocation(&state);
++    assert(adopt_calls == 1 && adopted == 1232896);
++    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL);
++    adopt_available = 0; NxkAvAdoptSavedAllocation(&state);
++    assert(AvGetSavedDataAddress() == NULL);
++    NxkAvAdoptSavedAllocation(&state); assert(adopt_calls == 2);
++    adopt_available = 1;
++
++    boot(); restored = 0; NxkAvRestoreState(&state);
++    assert(AvGetSavedDataAddress() == NULL && SCANOUT == 0x03c00000);
++    boot(); restored = 4096; NxkAvRestoreState(&state);
++    assert(AvGetSavedDataAddress() == NULL && SCANOUT == 0x03c00000);
++    restored = 1232896;
++    NX_AV_HANDOFF invalid = state;
++    invalid.SavedAddress = 0x7ffff000; NxkAvRestoreState(&invalid);
++    assert(AvGetSavedDataAddress() == NULL);
++    invalid = state; invalid.AllocationBytes = 0xffffffff; NxkAvRestoreState(&invalid);
++    assert(AvGetSavedDataAddress() == NULL);
++    invalid = state; invalid.FrameBuffer = 0x03f00000; NxkAvRestoreState(&invalid);
++    assert(AvGetSavedDataAddress() == (PVOID)0x82000000UL && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.Pitch = invalid.AllocationBytes;
++    NxkAvRestoreState(&invalid);
++    assert(SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.Height = 481; NxkAvRestoreState(&invalid);
++    assert(SCANOUT == 0x03c00000 && crtc[1] == 89);
++    boot(); invalid = state; invalid.Width = 648; NxkAvRestoreState(&invalid);
++    assert(SCANOUT == 0x03c00000 && crtc[1] == 89);
++    boot(); invalid = state; invalid.PixelFormat = 0; NxkAvRestoreState(&invalid);
++    assert(SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.PixelFormat = 1;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.Sequencer[1] |= 0x20;
++    assert(NxkAvRestoreState(&invalid) && sequencer[1] == 0x21);
++    boot(); invalid = state; invalid.Sequencer[1] |= 8;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.Graphics[5] = 0;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.Graphics[6] &= ~1;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.AttributeIndex &= ~0x20;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.CrtcMode &= ~1;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.MaxScan |= 1;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); invalid = state; invalid.LineCompare = 0; invalid.Overflow &= ~0x10;
++    invalid.MaxScan &= ~0x40;
++    assert(!NxkAvRestoreState(&invalid) && SCANOUT == 0x03c00000);
++    boot(); NxkAvCaptureState(&invalid);
++    assert(invalid.SavedAddress == 0 && invalid.AllocationBytes == 0);
++    AvSetSavedDataAddress((PVOID)0x82000000UL); live = 0;
++    NxkAvCaptureState(&invalid); assert(invalid.SavedAddress == 0);
++    /* A valid retained image must never pass through boot scanout. Invalid
++     * or cold handoffs still need the ordinary video initialization path. */
++    warm_state = &state; device_reset(); restored = 1232896;
++    NxkInitializeBootVideo(TRUE);
++    assert(cold_video_calls == 0 && restore_video_calls == 1 && SCANOUT == 0x02000040);
++    check_linear_renderer();
++    assert(!memcmp(sequencer, state.Sequencer, sizeof(sequencer)));
++    assert(!memcmp(graphics, state.Graphics, sizeof(graphics)));
++    assert(!memcmp(attributes, state.Attributes, sizeof(attributes)));
++    boot(); restored = 0; NxkInitializeBootVideo(TRUE);
++    assert(cold_video_calls == 1 && restore_video_calls == 2 && SCANOUT == 0x03c00000);
++    boot(); restored = 1232896; NxkInitializeBootVideo(FALSE);
++    assert(cold_video_calls == 2 && restore_video_calls == 2 && SCANOUT == 0x03c00000);
++    invalid = state; invalid.Height = 481; warm_state = &invalid;
++    NxkInitializeBootVideo(TRUE);
++    assert(cold_video_calls == 3 && restore_video_calls == 3 && SCANOUT == 0x03c00000);
++    /* Mode dimensions must come from the public identifier, not padded pitch
++     * or the 720-pixel boot viewport. Exercise both observed title formats. */
++    const ULONG modes[][4] = {
++        {0x0801010d, 640, 480, 2720}, {0x88070701, 640, 480, 2560},
++        {0x44030307, 640, 480, 2560}, {0x88080801, 720, 480, 2880},
++        {0xc0030303, 800, 600, 3200}, {0xc0040404, 1024, 768, 4096},
++        {0x880b0a02, 1280, 720, 5120}
++    };
++    for (unsigned i = 0; i < sizeof(modes)/sizeof(modes[0]); ++i) {
++        boot(); crtc[0x28] = 0xa2;
++        AvSetDisplayMode(mmio, 0, modes[i][0], 0x12, modes[i][3], 0x02000040);
++        assert((crtc[1]+1)*8UL == modes[i][1]);
++        assert((crtc[0x12] | ((crtc[7]&2)<<7) | ((crtc[7]&0x40)<<3))+1UL == modes[i][2]);
++        assert(crtc[0x28] == 0xa3 && crtc[0x11] == 0x80);
++    }
++    boot(); GENERAL_CONTROL = 0x00101030;
++    AvSetDisplayMode(mmio, 0, 0x88070701, 0x10, 1280, 0x02000040);
++    assert((crtc[0x28]&3) == 2 && GENERAL_CONTROL == 0x00100030);
++    AvSetDisplayMode(mmio, 0, 0x88070701, 0x11, 1280, 0x02000040);
++    assert((crtc[0x28]&3) == 2 && GENERAL_CONTROL == 0x00101030);
++    const ULONG unknownModes[] = {0, 0x00010100, 0x880707ff, 0xc00303ff, 0x880e0c03};
++    for (unsigned i = 0; i < sizeof(unknownModes)/sizeof(unknownModes[0]); ++i) {
++        boot(); AvSetDisplayMode(mmio, 0, unknownModes[i], 0x12, 5120, 0x02000040);
++        assert(crtc[1] == 89); /* Opaque near-aliases must remain unknown. */
++    }
++    boot(); AvSetDisplayMode(mmio, 0, 0x88070701, 0x12, 2552, 0x02000040);
++    assert(crtc[1] == 89); /* A short row cannot admit the requested width. */
++    puts("saved image capture/restore: admitted RAM, missing/short RAM, stale ranges, scanout bounds and clear pass");
++}
++'''
++text = shim + (root/'boot/nxldr/av-handoff.h').read_text()
++for name in ('NxkAvModeSize', 'NxkAvSetActiveArea', 'NxkAvSetPitch',
++             'NxkAvCaptureVga', 'NxkAvRestoreVga',
++             'AvGetSavedDataAddress', 'AvSetSavedDataAddress', 'AvSetDisplayMode',
++             'NxkAvCaptureState', 'NxkAvRestoreState', 'NxkAvAdoptSavedAllocation'):
++    text += '\n' + body(name)
++text += '\n' + body('NxkInitializeBootVideo', (root/'ntoskrnl/xb/xbe.c').read_text())
++unit = out/'check.c'; binary = out/'check'
++unit.write_text(text + main)
++subprocess.run(['cc','-std=c11','-D_GNU_SOURCE','-O2','-g','-Wall','-Wextra','-Werror',
++                # The fixed 32-bit MMIO window overlaps ASan's shadow gap.
++                '-Wno-int-to-pointer-cast','-fsanitize=undefined',
++                '-fno-omit-frame-pointer',str(unit),'-o',str(binary)],check=True)
++subprocess.run([str(binary)],check=True,env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0'))
+diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
+index 44a3bad7..439b992e 100644
+--- a/tests/host/boot-layout/check.py
++++ b/tests/host/boot-layout/check.py
+@@ -159,6 +159,8 @@ static KIRQL MiAcquirePfnLock(void) {return 0;}
+ static void MiReleasePfnLock(KIRQL irql) {(void)irql;}
+ static BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER p) {(void)p;return FALSE;}
+ static unsigned returned[0x8000];static PFN_NUMBER MmHighestPhysicalPage;
++static unsigned saved_video_captures;
++VOID NTAPI NxkPublishSavedVideo(VOID) {saved_video_captures++;}
+ static void NxkPageSupplyReturn(PFN_NUMBER p) {returned[p]++;}
+ BOOLEAN NxkMmPersistentPage(PFN_NUMBER);
+ static void NxkMmDonateHeapPages(ULONG_PTR pa, ULONG count) {
+@@ -240,6 +242,8 @@ int main(void) {
+  compressed->DecompressedSize=NXBL_IMAGE_BYTES+1;LoaderFailCode=0;
+  check(!DecompressKernel()&&LoaderFailCode==0x585a,"decompression rejects overflow of final image reservation");
+  void *alias=mmap((void *)NXK_KSEG0_BASE,XBOX_RAM_MIB*1024u*1024,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);if(alias==MAP_FAILED){perror("mmap persistence alias");return 2;}
++ NxkMmPublishPersistence(FALSE);
++ check(saved_video_captures==0,"cold handoff skips saved video capture");
+  unsigned ranges[][2]={{0x3800000,0x1000},{0x381f000,0x1000},{0x37ff000,0x2000},{0x3bbf000,0x2000},{0x3bc0000,0x1000}};
+  for(unsigned i=0;i<5;i++){
+   memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(ranges[i][0],ranges[i][1],TRUE);
+@@ -248,6 +252,7 @@ int main(void) {
+  }
+  memset(PmSelected,0,sizeof(PmSelected));NxkMmSetPersistentPages(0x1000000,0x1000,TRUE);check(PmBit(PmSelected,0x1000),"ordinary title page can persist");
+  NxkMmPublishPersistence(TRUE);NxkMmReadPersistence(&lb);check(PmBit(PmRestored,0x1000)&&((PM_HANDOFF *)PM_VA)->Magic==0,"valid warm handoff restored and consumed");
++ check(saved_video_captures==1,"warm handoff captures saved video once before publication");
+  memset(PmRestored,0,sizeof(PmRestored));NxkMmReadPersistence(&lb);check(!PmBit(PmRestored,0x1000),"handoff consumed only once");
+  unsigned ordinary[]={0x100,0x2001,0x37ff,0x3820,0x3900,0x39ff,0x3a00};
+  for(unsigned i=0;i<sizeof(ordinary)/sizeof(*ordinary);i++) {
+diff --git a/tests/host/clean-room/persistence.c b/tests/host/clean-room/persistence.c
+index 4edef078..9180a2bc 100644
+--- a/tests/host/clean-room/persistence.c
++++ b/tests/host/clean-room/persistence.c
+@@ -15,6 +15,8 @@ VOID NxkMmDonateHeapPages(ULONG_PTR pa, ULONG count)
+ { (void)pa; (void)count; abort(); }
+ static bool pinned;
+ static unsigned returned;
++static unsigned video_publications;
++VOID NTAPI NxkPublishSavedVideo(VOID) { ++video_publications; }
+ void NxkPageSupplyReturn(PFN_NUMBER page) { (void)page; ++returned; }
+ BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER page) { (void)page; return pinned; }
+ #include "../../../ntoskrnl/xb/mm/persistence.c"
+@@ -25,6 +27,7 @@ static void reset(void)
+     memset((void *)PM_VA, 0, PAGE_SIZE); memset((void *)PM_LAUNCH_VA, 0, PAGE_SIZE);
+     memset(PmSelected, 0, sizeof(PmSelected)); memset(PmRestored, 0, sizeof(PmRestored));
+     pinned = false; returned = 0;
++    video_publications = 0;
+ }
+ static void reboot_read(LOADER_PARAMETER_BLOCK *lb)
+ {
+@@ -47,6 +50,7 @@ int main(void)
+     NxkMmSetPersistentPages(0x2001011, 20, TRUE);
+     CHECK(PmBit(PmSelected, 0x2001) && !PmBit(PmSelected, 0x2000));
+     NxkMmPublishPersistence(TRUE); CHECK(slot->Magic == PM_MAGIC);
++    CHECK(video_publications == 1);
+     reboot_read(&lb); CHECK(slot->Magic == 0 && NxkMmPersistentPage(0x2001));
+     CHECK(NxkMmQueryRestored(alias) == PAGE_SIZE);
+     NxkMmSetPersistentPages(0x2001000, PAGE_SIZE, FALSE);
+@@ -69,6 +73,7 @@ int main(void)
+     reboot_read(&lb); reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
+     reset(); PmSet(PmSelected, 0x2001, TRUE); NxkMmPublishPersistence(FALSE);
+     CHECK(slot->Magic == 0);
++    CHECK(video_publications == 0);
+     reset(); NxkMmSetPersistentPages(0x30000, PAGE_SIZE, TRUE);
+     CHECK(!PmBit(PmSelected, 0x30));
+     printf("persistence host checks: %u/%u passed\n", tests - failed, tests);
+diff --git a/tests/host/quick-launch-ui/check.py b/tests/host/quick-launch-ui/check.py
+index 8aee8569..a6b7f1c1 100644
+--- a/tests/host/quick-launch-ui/check.py
++++ b/tests/host/quick-launch-ui/check.py
+@@ -75,9 +75,12 @@ subprocess.run([str(binary)], check=True)
+ 
+ phase = function(init, "Phase1InitializationDiscard")
+ peek = phase.index("QuickLaunch = NxkQuickLaunchPending()")
+-video = phase.index("NxkInitializeVideo()")
++mmio = phase.index("NxkMmEnsureMmioWindow()")
++pci = phase.index("NxConfigurePciDevicesLate()")
++video = phase.index("NxkInitializeBootVideo(QuickLaunch)")
+ bootvid = phase.index("InbvDriverInitialize")
+-assert peek < video < bootvid
++assert peek < mmio < pci < video < bootvid
++assert "NxkInitializeVideo()" not in phase
+ 
+ cold = block_after(phase, "if (!QuickLaunch)")
+ assert "InbvDriverInitialize" in cold
+diff --git a/tests/xbe/saved-image/Makefile b/tests/xbe/saved-image/Makefile
+new file mode 100644
+index 00000000..99bce320
+--- /dev/null
++++ b/tests/xbe/saved-image/Makefile
+@@ -0,0 +1,5 @@
++XBE_TITLE = saved-image-probe
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /usr/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/saved-image/main.c b/tests/xbe/saved-image/main.c
+new file mode 100644
+index 00000000..54759adf
+--- /dev/null
++++ b/tests/xbe/saved-image/main.c
+@@ -0,0 +1,196 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independent public-API characterization. No reference implementation input.
++ * Reproduces the observed Morrowind public AV/persistence/quick-launch chain.
++ */
++#include <xboxkrnl/xboxkrnl.h>
++#include <hal/video.h>
++#include <hal/xbox.h>
++#include <string.h>
++#include <stdio.h>
++#include "../api-regression/tap.h"
++
++#define MAGIC 0x53495031UL
++#define BYTES (640 * 480 * 4)
++#define HEADER_BYTES 64
++#define SCANOUT (*(volatile ULONG *)0xFD600800UL)
++typedef struct {
++    ULONG magic, pointer, physical, allocation, scanout, before, after, mode_geometry;
++} State;
++static UCHAR cr_read(UCHAR index)
++{
++    *(volatile UCHAR *)0xfd6013d4 = index;
++    return *(volatile UCHAR *)0xfd6013d5;
++}
++static UCHAR vga_read(ULONG offset, UCHAR index)
++{
++    volatile UCHAR *selector = (volatile UCHAR *)(0xfd000000UL + offset);
++    UCHAR previous = *selector;
++    *selector = index;
++    UCHAR value = selector[1];
++    *selector = previous;
++    return value;
++}
++static BOOLEAN linear_scanout_ready(ULONG height)
++{
++    UCHAR seq0 = vga_read(0x0c03c4, 0), seq1 = vga_read(0x0c03c4, 1);
++    UCHAR gr5 = vga_read(0x0c03ce, 5), gr6 = vga_read(0x0c03ce, 6);
++    (void)*(volatile UCHAR *)0xfd6013da; /* Select the attribute index phase. */
++    UCHAR attr = *(volatile UCHAR *)0xfd6013c0;
++    UCHAR mode = cr_read(0x17), maxscan = cr_read(9), overflow = cr_read(7);
++    ULONG compare = cr_read(0x18) | ((overflow & 0x10) << 4) | ((maxscan & 0x40) << 3);
++    char diagnostic[200];
++    snprintf(diagnostic, sizeof(diagnostic),
++        "# vga_after seq0=%02x seq1=%02x gr5=%02x gr6=%02x attr=%02x cr17=%02x maxscan=%02x line_compare=%lu\n",
++        seq0, seq1, gr5, gr6, attr, mode, maxscan, compare);
++    tap_puts(diagnostic);
++    return (seq0 & 3) == 3 && !(seq1 & 8) && (gr5 & 0x60) == 0x40 &&
++           (gr6 & 1) && (attr & 0x20) && (mode & 3) == 3 && !(maxscan & 0x9f) &&
++           height && compare >= height - 1;
++}
++static void check(ULONG n, BOOLEAN pass, const char *name)
++{
++    if (pass) tap_ok(n, name); else tap_not_ok(n, name);
++}
++static void stop(void)
++{
++    tap_puts("# saved_image_probe_finished\n");
++    tap_drain();
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    for (;;) __asm__ __volatile__("hlt");
++}
++static ULONG pixel(ULONG i)
++{
++    ULONG x = i % 640, y = i / 640;
++    return 0xff000000UL | ((x & 255) << 16) | ((y & 255) << 8) | ((x ^ y) & 255);
++}
++int main(void)
++{
++    State state = {0};
++    if (LaunchDataPage) memcpy(&state, LaunchDataPage->LaunchData, sizeof(state));
++    if (state.magic == MAGIC) {
++        ULONG scanout = SCANOUT;
++        UCHAR cr1 = cr_read(1), cr7 = cr_read(7), cr12 = cr_read(0x12), cr28 = cr_read(0x28);
++        ULONG width = (cr1 + 1) * 8;
++        ULONG height = (cr12 | ((cr7 & 2) << 7) | ((cr7 & 0x40) << 3)) + 1;
++        char dimensions[160];
++        snprintf(dimensions, sizeof(dimensions), "# geometry_after width=%lu height=%lu depth=%u\n", width, height, cr28 & 3);
++        tap_puts(dimensions);
++        BOOLEAN ready = linear_scanout_ready(height);
++        PVOID saved = AvGetSavedDataAddress();
++        PULONG record = saved ? (PULONG)saved : (PULONG)state.pointer;
++        PULONG image = (PULONG)((PUCHAR)record + HEADER_BYTES);
++        tap_puts("# saved_image_stage2\n");
++        check(4, saved != NULL, "saved image is discoverable after quick title relaunch");
++        BOOLEAN contents = TRUE;
++        for (ULONG i = 0; i < BYTES / 4; ++i) if (image[i] != pixel(i)) { contents = FALSE; break; }
++        check(5, contents, "every retained image pixel survives relaunch");
++        check(6, MmQueryAllocationSize(record) == ((state.allocation + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)),
++              "retained image keeps its allocation ownership");
++        ULONG physical = MmGetPhysicalAddress(record);
++        PVOID competitor = MmAllocateContiguousMemoryEx(PAGE_SIZE, physical,
++                physical + PAGE_SIZE - 1, PAGE_SIZE, PAGE_READWRITE);
++        check(7, competitor == NULL, "retained image cannot be allocated to a new owner");
++        if (competitor) MmFreeContiguousMemory(competitor);
++        check(8, scanout == physical + HEADER_BYTES, "scanout still addresses the retained image");
++        char diagnostic[240];
++        snprintf(diagnostic, sizeof(diagnostic), "# warm pointer=%08lx saved=%08lx physical=%08lx bytes=%lu scanout_before=%08lx scanout_after=%08lx\n",
++                   state.pointer, (ULONG)saved, state.physical, state.allocation, state.scanout, scanout);
++        tap_puts(diagnostic);
++        AvSetSavedDataAddress(NULL);
++        check(9, AvGetSavedDataAddress() == NULL, "next owner clears the saved address");
++        MmPersistContiguousMemory(record, MmQueryAllocationSize(record), FALSE);
++        MmFreeContiguousMemory(record);
++        PULONG before = (PULONG)state.before, after = (PULONG)state.after;
++        BOOLEAN neighbors = MmQueryAllocationSize(before) == PAGE_SIZE &&
++                MmQueryAllocationSize(after) == PAGE_SIZE;
++        for (ULONG i = 0; i < PAGE_SIZE / 4; ++i)
++            if (before[i] != (0x53555050 ^ i) || after[i] != (0x53555050 ^ i)) neighbors = FALSE;
++        check(10, neighbors, "freeing saved image preserves neighboring persistent owners");
++        PVOID competingBefore = MmAllocateContiguousMemoryEx(PAGE_SIZE,
++                MmGetPhysicalAddress(before), MmGetPhysicalAddress(before) + PAGE_SIZE - 1,
++                PAGE_SIZE, PAGE_READWRITE);
++        PVOID competingAfter = MmAllocateContiguousMemoryEx(PAGE_SIZE,
++                MmGetPhysicalAddress(after), MmGetPhysicalAddress(after) + PAGE_SIZE - 1,
++                PAGE_SIZE, PAGE_READWRITE);
++        check(11, competingBefore == NULL && competingAfter == NULL,
++                "freeing saved image keeps neighboring pages exclusive");
++        if (competingBefore) MmFreeContiguousMemory(competingBefore);
++        if (competingAfter) MmFreeContiguousMemory(competingAfter);
++        ULONG reclaimedBytes = (state.allocation + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
++        PVOID reclaimed = MmAllocateContiguousMemoryEx(reclaimedBytes, physical,
++                physical + reclaimedBytes - 1, PAGE_SIZE, PAGE_READWRITE);
++        check(12, reclaimed != NULL, "next owner can reclaim the entire saved allocation");
++        if (reclaimed) MmFreeContiguousMemory(reclaimed);
++        check(13, width == 640 && height == 480 && (cr28 & 3) == 3,
++                "retained image keeps its 640x480 32-bit display geometry");
++        check(14, state.mode_geometry, "AvSetDisplayMode programs the retained image geometry");
++        check(15, ready, "retained image keeps packed VGA renderer controls");
++        MmPersistContiguousMemory(before, PAGE_SIZE, FALSE);
++        MmPersistContiguousMemory(after, PAGE_SIZE, FALSE);
++        MmFreeContiguousMemory(before); MmFreeContiguousMemory(after);
++        stop();
++    }
++    tap_version(14); tap_plan(15);
++    if (!XVideoSetMode(640,480,32,REFRESH_DEFAULT)) {
++        tap_not_ok(1,"required video mode is available"); stop();
++    }
++    PULONG record = MmAllocateContiguousMemoryEx(BYTES + HEADER_BYTES, 0x02000000,
++                0x02000000 + ((BYTES + HEADER_BYTES + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)) - 1,
++                                                PAGE_SIZE, PAGE_READWRITE | PAGE_WRITECOMBINE);
++    if (!record) { tap_not_ok(1,"owned saved image is available"); stop(); }
++    state.pointer = (ULONG)record;
++    state.physical = MmGetPhysicalAddress(record);
++    state.allocation = MmQueryAllocationSize(record);
++    ULONG rounded = (state.allocation + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
++    PULONG before = MmAllocateContiguousMemoryEx(PAGE_SIZE, state.physical - PAGE_SIZE,
++            state.physical - 1, PAGE_SIZE, PAGE_READWRITE);
++    PULONG after = MmAllocateContiguousMemoryEx(PAGE_SIZE, state.physical + rounded,
++            state.physical + rounded + PAGE_SIZE - 1, PAGE_SIZE, PAGE_READWRITE);
++    if (!before || !after) { tap_puts("Bail out! exact neighboring pages unavailable\n"); stop(); }
++    state.before = (ULONG)before; state.after = (ULONG)after;
++    for (ULONG i = 0; i < PAGE_SIZE / 4; ++i) before[i] = after[i] = 0x53555050 ^ i;
++    MmPersistContiguousMemory(before, PAGE_SIZE, TRUE);
++    MmPersistContiguousMemory(after, PAGE_SIZE, TRUE);
++    memset(record, 0, HEADER_BYTES);
++    /* Public data observed at the saved-buffer boundary: resource kind,
++     * pixel address, unlocked state, linear format, 640x480 / 2560-byte pitch.
++     * The payload below is independently generated, never a game image. */
++    record[0] = 0x81050001; record[1] = state.physical + HEADER_BYTES;
++    record[3] = 0x00011e29; record[4] = 0x271df27f;
++    PULONG image = (PULONG)((PUCHAR)record + HEADER_BYTES);
++    for (ULONG i = 0; i < BYTES / 4; ++i) image[i] = pixel(i);
++    __asm__ __volatile__("sfence" ::: "memory");
++    ULONG step = 0;
++    do { step = AvSetDisplayMode((PVOID)0xfd000000, step, 0x88070701, 30,
++                                 2560, state.physical + HEADER_BYTES); } while (step);
++    UCHAR cr1 = cr_read(1), cr7 = cr_read(7), cr12 = cr_read(0x12), cr28 = cr_read(0x28);
++    ULONG width = (cr1 + 1) * 8;
++    ULONG height = (cr12 | ((cr7 & 2) << 7) | ((cr7 & 0x40) << 3)) + 1;
++    state.mode_geometry = width == 640 && height == 480 && (cr28 & 3) == 3;
++    char dimensions[160];
++    snprintf(dimensions, sizeof(dimensions), "# geometry_before width=%lu height=%lu depth=%u\n", width, height, cr28 & 3);
++    tap_puts(dimensions);
++    state.scanout = SCANOUT;
++    PVOID other = MmAllocateContiguousMemory(PAGE_SIZE);
++    if (!other) { tap_not_ok(1,"owned saved-slot replacement is available"); stop(); }
++    AvSetSavedDataAddress(record);
++    check(1, AvGetSavedDataAddress() == record, "saved slot returns the owned image address");
++    AvSetSavedDataAddress(other);
++    check(2, AvGetSavedDataAddress() == other, "saved slot replaces the previous address");
++    AvSetSavedDataAddress(NULL);
++    check(3, AvGetSavedDataAddress() == NULL, "saved slot accepts an explicit clear");
++    MmFreeContiguousMemory(other);
++    AvSetSavedDataAddress(record);
++    MmPersistContiguousMemory(record, state.allocation, TRUE);
++    state.magic = MAGIC;
++    if (!LaunchDataPage) LaunchDataPage = MmAllocateContiguousMemory(PAGE_SIZE);
++    if (!LaunchDataPage) { tap_puts("# launch page setup failed\n"); stop(); }
++    memset(LaunchDataPage, 0, PAGE_SIZE);
++    LaunchDataPage->Header.dwLaunchDataType = 0;
++    strcpy(LaunchDataPage->Header.szLaunchPath, "\\Device\\CdRom0\\default.xbe");
++    memcpy(LaunchDataPage->LaunchData, &state, sizeof(state));
++    MmPersistContiguousMemory(LaunchDataPage, PAGE_SIZE, TRUE);
++    tap_puts("# saved_image_stage1_quick_relaunch\n"); tap_drain();
++    HalReturnToFirmware(HalQuickRebootRoutine);
++    tap_puts("# relaunch unexpectedly returned\n"); stop();
++}

@@ -2,6 +2,11 @@
 
 This directory is for concise records describing how non-obvious compatibility behavior was learned.
 
+Every compatibility fix must include a writeup in this directory. State what
+SpiritBoot does differently, the demonstrated cause, the resulting change, and
+the regression evidence. Record failed candidates and limits when they affect
+the conclusion; distinguish observations from hypotheses.
+
 Suggested file format:
 
 ```markdown
