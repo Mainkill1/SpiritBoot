@@ -226,8 +226,16 @@ selects that image and then its relocated image at `0x0003d040`. The intermediat
 skip-only BIOS fails check 15 with all VGA reset controls zero, while Complex
 passes. Both BIOSes also pass 15/15 on Windows NVIDIA Vulkan at 64 MiB.
 
-Current-source firmware CI and the final native Morrowind visual check remain
-pending. This draft does not substitute earlier CI for current-source validation.
+The final untraced native Morrowind test uses the 64 MiB BIOS listed above.
+The operator reports: “Tested, looking pretty good now.” The process remains
+running after that test and its stderr contains no assertion. This is a positive
+visual retest of the continuity candidate; no frame-by-frame continuity capture
+was recorded. It does not establish the cause of the earlier traced GPU abort.
+
+Current firmware CI requires this exact source tree in both source gates and
+15 saved-image assertions in every release/debug 64/128 MiB build. See the
+[PR checks](https://github.com/Mainkill1/SpiritBoot/pull/224/checks) for the
+current run; earlier mode-only CI is historical evidence.
 
 The register-write oracle covers software writes to PCRTC_START from the owned
 outgoing image through the incoming checkpoint. It does not observe the reset's
