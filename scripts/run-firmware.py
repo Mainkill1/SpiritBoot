@@ -22,11 +22,14 @@ def main():
                         help="retain guest writes on a private HDD copy in the capture directory")
     parser.add_argument("--tb-plugin", type=Path,
                         help="explicit optional TB-frequency plugin; requires plugin-enabled xemu")
+    parser.add_argument("--gdb-port", type=int,
+                        help="bind xemu's diagnostic GDB stub to localhost on this TCP port")
     args = parser.parse_args()
     try:
         result = run_firmware(args.xemu, args.flash, args.hdd, args.dvd,
                               args.output, args.timeout, args.expect_tap, args.preserve_hdd,
-                              tb_plugin=args.tb_plugin, memory_mib=args.memory_mib)
+                              tb_plugin=args.tb_plugin, memory_mib=args.memory_mib,
+                              gdb_port=args.gdb_port)
     except (OSError, ValueError) as error:
         print(f"launch failed: {error}", file=sys.stderr)
         return 1
