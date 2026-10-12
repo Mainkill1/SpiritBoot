@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 5533)
+Total output lines: 260
+
 name: Open firmware
 on:
   push:
@@ -55,7 +58,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = eaa9dd465c7fbb0f7cf8e71afe90a8bac68bf788
+            test "$actual_tree" = 17c8935d36fcf4dc225427b5c97bcd3ed6028a3b
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -107,23 +110,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/dma-lifetime/check.py" "$output/dma-lifetime" >"$output/dma-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-channel/check.py" "$output/dma-channel" >"$output/dma-channel.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/interrupt-admission/check.py" "$output/interrupt-admission" >"$output/interrupt-admission.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/performance-counter/check.py" "$output/performance-counter" >"$output/performance-counter.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/io-apc-order/check.py" "$output/io-apc-order" >"$output/io-apc-order.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/critical-section/check.py" "$output/critical-section" >"$output/critical-section.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/workqueue/check-fixed-worker-queue.py" "$output/fixed-worker-queue" >"$output/fixed-worker-queue.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/xdvdfs/check.py" "$output/xdvdfs-create" >"$output/xdvdfs-create.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/xdvdfs-directory/check.py" "$output/xdvdfs-directory" >"$output/xdvdfs-directory.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/xdvdfs-masks/check.py" "$output/xdvdfs-masks" >"$output/xdvdfs-masks.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/xdvdfs-read-completion/check.py" "$output/xdvdfs-read-completion" >"$output/xdvdfs-read-completion.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/xbox-rename/check.py" "$GUEST_SOURCE" "$output/xbox-rename" >"$output/xbox-rename.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/video-aspect/check.py" "$GUEST_SOURCE" "$output/video-aspect" >"$output/video-aspect.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/xbe-media/check.py" "$GUEST_SOURCE" "$output/xbe-media" >"$output/xbe-media.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/tap-uart/check.py" "$output/tap-uart" >"$output/tap-uart.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/thread-wait/check.py" "$output/thread-wait" >"$output/thread-wait.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/thread-stack/check.py" "$output/thread-stack" >"$output/thread-stack.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/thread-shadow/check.py" "$output/thread-shadow" >"$output/thread-shadow.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/dead-stack-policy/check.py" "$output/dead-stack-policy" >"$output/dead-stack-policy.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/zero-alias/check.py" "$output/zero-alias" >"$output/zero-alias.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/performance-counter/check.py" "$output/performance…533 tokens truncated… >"$output/zero-alias.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/pool-refill/check.py" "$output/pool-refill" >"$output/pool-refill.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/pool-size/check.py" "$output/pool-size" >"$output/pool-size.log" 2>&1
             "$GUEST_SOURCE/tests/host/clean-room/run.sh" "$output/clean-room" >"$output/clean-room.log" 2>&1
@@ -142,7 +129,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'eaa9dd465c7fbb0f7cf8e71afe90a8bac68bf788', result
+          assert result['source_tree'] == '17c8935d36fcf4dc225427b5c97bcd3ed6028a3b', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
