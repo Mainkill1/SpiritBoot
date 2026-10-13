@@ -9,7 +9,7 @@ not the exponent's mathematical size.
 
 Patch `0125` normalizes internal arithmetic to the modulus' highest nonzero
 word, while retaining the caller word count for all exponent bits and output
-width. Leading zero value words do not contribute reduction bits. The odd
+width. Leading zero base words do not contribute initial reduction bits. The odd
 path still computes a Montgomery factor for its chosen width and converts
 both input and output accordingly. The even path retains the same multiply
 and bit-reduce algorithm. No exponent-one shortcut or new cryptographic
@@ -44,7 +44,7 @@ Actual production work for the unchanged exponent-one numeric inputs:
 | 512 | 1,572,864 / 6 | 16,384 / 32 | 10,248 / 28 |
 
 For the even-modulus 64-word leaf inputs (7^5 mod 100), products fall from
-16,384 to four, reduction bits from 18,432 to 160, and scratch bytes from 1,288
+16,384 to four, reduction bits from 18,432 to 288, and scratch bytes from 1,288
 to 28. These are deterministic source counters, not guest timing measurements.
 Full-width moduli keep their arithmetic width. This change does not claim a
 similar improvement for full-width RSA keys or expensive full-width even
@@ -63,8 +63,8 @@ builds explicitly pass `--variant release --memory-mib 64`. Public nxdk input
 structures and Python arithmetic supply the independent contracts. No third
 party implementation was copied and no proprietary firmware source,
 disassembly or decompilation was used. Native execution is owned by the root
-workflow; final reference/baseline/candidate contract and unchanged timing
-receipts are required before acceptance.
+workflow; final placement timing receipts are required before acceptance. The first
+layout is rejected, with its complete native evidence retained below.
 
 Reproduction inside the existing toolchain image:
 
@@ -80,3 +80,42 @@ The native contract probe uses pinned nxdk and is separate from timing. The
 original portable kernel/API performance fixtures are retained unchanged.
 Artifact identities, red/green receipts, work counts and static layout are in
 `evidence/modexp-padding-20261013`.
+
+The first native candidate passes 364/364 fixed checks, as does the baseline.
+Complex passes 357/364: all seven failures are the same vector across output
+placements, with `Words=512`, `Base=2^16383+123`, exponent one and modulus 17.
+Complex returns status one and residue four. Both SpiritBoot images return
+status one and residue thirteen, matching the independent mathematical oracle.
+This reference discrepancy predates the optimization and is retained verbatim;
+it is not classified as an unsupported call or hidden as an exclusion. The
+other twelve vectors pass on all three kernels, including the frozen padded
+performance operands, full-width two-word arithmetic, high-word exponents, and
+all whole/shifted aliases.
+
+Seven alternating triplets for the first layout validate all 40 frozen portable
+workloads, every expected sample/checksum, exact input/ROM/ISO/executable
+identities, 64 MiB configuration and per-run launch-config bytes. The two BIOS
+clock frequencies differ (3,374,488/3,375,000 Hz); each counter is normalized
+using its own reported frequency. All 118 declared iteration-batch samples
+are included in each aggregate. Original timings and failures remain in
+`evidence/modexp-padding-20261013/rejected-layout`.
+
+That first layout changes the padded 512-word exponent-one median from
+352.082 to 0.191 ms, the padded 64-word exponent-65537 median from 7.537 to
+0.078 ms, and the sampled-body aggregate from 1.510 to 0.426 seconds
+(-71.77%, all seven lower, disjoint observed trial-median ranges). It is
+rejected because DES3-CBC median rises 9.40% (9.849 to 10.774 ms), all seven
+higher with disjoint ranges. DES-CBC rises 8.12%, all seven higher with
+overlapping ranges. Higher disjoint ranges also occur for SYSVA 1025/4096,
+object-warm-64 and SHA-65. All forty rows are retained; the aggregate does
+not erase these regressions and is not a game/FPS measurement.
+
+The source addition to the shared `BnReduce` moved several early function
+addresses eight bytes. The placement variant restores that source body
+byte-for-byte and trims `BaseWords` within `XcpModExp` only. Internal modulus
+normalization, the complete exponent scan, deferred output writes and all
+alias/status checks remain. Under LTO, DES/SHA/BnReduce addresses are four
+bytes before their baseline locations rather than identical; no causal claim
+is made from addresses alone. Source 3,111, sanitized 364 and full-source
+30,978 checks pass. Permanent RAM remains 14 pages and the ROM DES table
+bytes/addresses remain identical. Final seven-triplet timing is pending.

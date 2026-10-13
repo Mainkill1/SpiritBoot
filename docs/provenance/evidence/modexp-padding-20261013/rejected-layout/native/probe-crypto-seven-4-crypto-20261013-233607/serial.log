@@ -1,0 +1,165 @@
+== kernel-performance-portable begin ==
+TAP version 14
+1..41
+# PERF-META version=1 clock=KeQueryPerformanceCounter frequency=3374488 samples=3
+ok 1 - public-known-answers
+# PERF workload=empty sample=0 iterations=1000 ticks=1195 correct=1 checksum=811c9dc5
+# PERF workload=empty sample=1 iterations=1000 ticks=638 correct=1 checksum=811c9dc5
+# PERF workload=empty sample=2 iterations=1000 ticks=650 correct=1 checksum=811c9dc5
+ok 2 - empty
+# PERF workload=pin-1 sample=0 iterations=1000 ticks=4467 correct=1 checksum=001f0ae5
+# PERF workload=pin-1 sample=1 iterations=1000 ticks=3443 correct=1 checksum=001f0ae5
+# PERF workload=pin-1 sample=2 iterations=1000 ticks=3399 correct=1 checksum=001f0ae5
+ok 3 - pin-1
+# PERF workload=pin-16 sample=0 iterations=500 ticks=11454 correct=1 checksum=64683dd5
+# PERF workload=pin-16 sample=1 iterations=500 ticks=12478 correct=1 checksum=64683dd5
+# PERF workload=pin-16 sample=2 iterations=500 ticks=11468 correct=1 checksum=64683dd5
+ok 4 - pin-16
+# PERF workload=pin-64 sample=0 iterations=100 ticks=8422 correct=1 checksum=47064095
+# PERF workload=pin-64 sample=1 iterations=100 ticks=8455 correct=1 checksum=47064095
+# PERF workload=pin-64 sample=2 iterations=100 ticks=8561 correct=1 checksum=47064095
+ok 5 - pin-64
+# PERF workload=pin-65 sample=0 iterations=100 ticks=10494 correct=1 checksum=87328095
+# PERF workload=pin-65 sample=1 iterations=100 ticks=10262 correct=1 checksum=87328095
+# PERF workload=pin-65 sample=2 iterations=100 ticks=10201 correct=1 checksum=87328095
+ok 6 - pin-65
+# PERF workload=pin-256 sample=0 iterations=32 ticks=12701 correct=1 checksum=3dcae445
+# PERF workload=pin-256 sample=1 iterations=32 ticks=12643 correct=1 checksum=3dcae445
+# PERF workload=pin-256 sample=2 iterations=32 ticks=13596 correct=1 checksum=3dcae445
+ok 7 - pin-256
+# PERF workload=pin-4096 sample=0 iterations=4 ticks=25203 correct=1 checksum=8995f515
+# PERF workload=pin-4096 sample=1 iterations=4 ticks=25153 correct=1 checksum=8995f515
+# PERF workload=pin-4096 sample=2 iterations=4 ticks=25240 correct=1 checksum=8995f515
+ok 8 - pin-4096
+# PERF workload=pin-reject-0 sample=0 iterations=500 ticks=1167 correct=1 checksum=fa823dd5
+# PERF workload=pin-reject-0 sample=1 iterations=500 ticks=854 correct=1 checksum=fa823dd5
+# PERF workload=pin-reject-0 sample=2 iterations=500 ticks=813 correct=1 checksum=fa823dd5
+ok 9 - pin-reject-0
+# PERF workload=pin-reject-32 sample=0 iterations=100 ticks=2106 correct=1 checksum=d6d598d5
+# PERF workload=pin-reject-32 sample=1 iterations=100 ticks=2110 correct=1 checksum=d6d598d5
+# PERF workload=pin-reject-32 sample=2 iterations=100 ticks=2112 correct=1 checksum=d6d598d5
+ok 10 - pin-reject-32
+# PERF workload=pin-reject-64 sample=0 iterations=100 ticks=4085 correct=1 checksum=05406a95
+# PERF workload=pin-reject-64 sample=1 iterations=100 ticks=4063 correct=1 checksum=05406a95
+# PERF workload=pin-reject-64 sample=2 iterations=100 ticks=4184 correct=1 checksum=05406a95
+ok 11 - pin-reject-64
+# PERF workload=pin-reject-65 sample=0 iterations=100 ticks=4120 correct=1 checksum=5e9252d9
+# PERF workload=pin-reject-65 sample=1 iterations=100 ticks=4111 correct=1 checksum=5e9252d9
+# PERF workload=pin-reject-65 sample=2 iterations=100 ticks=4126 correct=1 checksum=5e9252d9
+ok 12 - pin-reject-65
+# PERF workload=pool-1 sample=0 iterations=64 ticks=2376 correct=1 checksum=94b82d05
+# PERF workload=pool-1 sample=1 iterations=64 ticks=591 correct=1 checksum=94b82d05
+# PERF workload=pool-1 sample=2 iterations=64 ticks=715 correct=1 checksum=94b82d05
+ok 13 - pool-1
+# PERF workload=pool-16 sample=0 iterations=16 ticks=813 correct=1 checksum=e42fe4b5
+# PERF workload=pool-16 sample=1 iterations=16 ticks=720 correct=1 checksum=e42fe4b5
+# PERF workload=pool-16 sample=2 iterations=16 ticks=818 correct=1 checksum=e42fe4b5
+ok 14 - pool-16
+# PERF workload=pool-256 sample=0 iterations=4 ticks=2302 correct=1 checksum=71edb609
+# PERF workload=pool-256 sample=1 iterations=4 ticks=2248 correct=1 checksum=71edb609
+# PERF workload=pool-256 sample=2 iterations=4 ticks=2431 correct=1 checksum=71edb609
+ok 15 - pool-256
+# PERF workload=pool-1024 sample=0 iterations=1 ticks=2246 correct=1 checksum=9c0bb7d4
+# PERF workload=pool-1024 sample=1 iterations=1 ticks=2214 correct=1 checksum=9c0bb7d4
+# PERF workload=pool-1024 sample=2 iterations=1 ticks=2197 correct=1 checksum=9c0bb7d4
+ok 16 - pool-1024
+# PERF workload=sysva-1 sample=0 iterations=32 ticks=2814 correct=1 checksum=d59e4cc5
+# PERF workload=sysva-1 sample=1 iterations=32 ticks=1388 correct=1 checksum=d59e4cc5
+# PERF workload=sysva-1 sample=2 iterations=32 ticks=1359 correct=1 checksum=d59e4cc5
+ok 17 - sysva-1
+# PERF workload=sysva-16 sample=0 iterations=8 ticks=1634 correct=1 checksum=c3aaac85
+# PERF workload=sysva-16 sample=1 iterations=8 ticks=1506 correct=1 checksum=c3aaac85
+# PERF workload=sysva-16 sample=2 iterations=8 ticks=1498 correct=1 checksum=c3aaac85
+ok 18 - sysva-16
+# PERF workload=sysva-1024 sample=0 iterations=1 ticks=9639 correct=1 checksum=a10bbfb3
+# PERF workload=sysva-1024 sample=1 iterations=1 ticks=9593 correct=1 checksum=a10bbfb3
+# PERF workload=sysva-1024 sample=2 iterations=1 ticks=9466 correct=1 checksum=a10bbfb3
+ok 19 - sysva-1024
+# PERF workload=sysva-1025 sample=0 iterations=1 ticks=9697 correct=1 checksum=a10bbfb3
+# PERF workload=sysva-1025 sample=1 iterations=1 ticks=9576 correct=1 checksum=a10bbfb3
+# PERF workload=sysva-1025 sample=2 iterations=1 ticks=9481 correct=1 checksum=a10bbfb3
+ok 20 - sysva-1025
+# PERF workload=sysva-4096 sample=0 iterations=1 ticks=39710 correct=1 checksum=a10bbfb3
+# PERF workload=sysva-4096 sample=1 iterations=1 ticks=39845 correct=1 checksum=a10bbfb3
+# PERF workload=sysva-4096 sample=2 iterations=1 ticks=40952 correct=1 checksum=a10bbfb3
+ok 21 - sysva-4096
+# PERF workload=object-cold-64 sample=0 iterations=1 ticks=1459 correct=1 checksum=5b4102c5
+ok 22 - object-cold-64
+# PERF workload=object-warm-1 sample=0 iterations=1000 ticks=4224 correct=1 checksum=bb222565
+# PERF workload=object-warm-1 sample=1 iterations=1000 ticks=4108 correct=1 checksum=bb222565
+# PERF workload=object-warm-1 sample=2 iterations=1000 ticks=4108 correct=1 checksum=bb222565
+ok 23 - object-warm-1
+# PERF workload=object-warm-8 sample=0 iterations=128 ticks=3371 correct=1 checksum=1f6f2dc5
+# PERF workload=object-warm-8 sample=1 iterations=128 ticks=3258 correct=1 checksum=1f6f2dc5
+# PERF workload=object-warm-8 sample=2 iterations=128 ticks=3240 correct=1 checksum=1f6f2dc5
+ok 24 - object-warm-8
+# PERF workload=object-warm-64 sample=0 iterations=16 ticks=4493 correct=1 checksum=1f6f2dc5
+# PERF workload=object-warm-64 sample=1 iterations=16 ticks=4499 correct=1 checksum=1f6f2dc5
+# PERF workload=object-warm-64 sample=2 iterations=16 ticks=4466 correct=1 checksum=1f6f2dc5
+ok 25 - object-warm-64
+# PERF workload=modexp-1-e1-odd sample=0 iterations=64 ticks=14589 correct=1 checksum=f1f76b05
+# PERF workload=modexp-1-e1-odd sample=1 iterations=64 ticks=12702 correct=1 checksum=f1f76b05
+# PERF workload=modexp-1-e1-odd sample=2 iterations=64 ticks=12414 correct=1 checksum=f1f76b05
+ok 26 - modexp-1-e1-odd
+# PERF workload=modexp-1-e65537-odd sample=0 iterations=32 ticks=7939 correct=1 checksum=44f81c65
+# PERF workload=modexp-1-e65537-odd sample=1 iterations=32 ticks=7275 correct=1 checksum=44f81c65
+# PERF workload=modexp-1-e65537-odd sample=2 iterations=32 ticks=6578 correct=1 checksum=44f81c65
+ok 27 - modexp-1-e65537-odd
+# PERF workload=modexp-2-e3-even sample=0 iterations=8 ticks=2324 correct=1 checksum=66c37b0d
+# PERF workload=modexp-2-e3-even sample=1 iterations=8 ticks=1672 correct=1 checksum=66c37b0d
+# PERF workload=modexp-2-e3-even sample=2 iterations=8 ticks=1510 correct=1 checksum=66c37b0d
+ok 28 - modexp-2-e3-even
+# PERF workload=modexp-32-e3-odd sample=0 iterations=2 ticks=445 correct=1 checksum=cb71ac6d
+# PERF workload=modexp-32-e3-odd sample=1 iterations=2 ticks=496 correct=1 checksum=cb71ac6d
+# PERF workload=modexp-32-e3-odd sample=2 iterations=2 ticks=470 correct=1 checksum=cb71ac6d
+ok 29 - modexp-32-e3-odd
+# PERF workload=modexp-64-e65537-odd sample=0 iterations=1 ticks=264 correct=1 checksum=000c5540
+# PERF workload=modexp-64-e65537-odd sample=1 iterations=1 ticks=265 correct=1 checksum=000c5540
+# PERF workload=modexp-64-e65537-odd sample=2 iterations=1 ticks=262 correct=1 checksum=000c5540
+ok 30 - modexp-64-e65537-odd
+# PERF workload=modexp-512-e1-odd sample=0 iterations=1 ticks=654 correct=1 checksum=000c5540
+# PERF workload=modexp-512-e1-odd sample=1 iterations=1 ticks=668 correct=1 checksum=000c5540
+# PERF workload=modexp-512-e1-odd sample=2 iterations=1 ticks=658 correct=1 checksum=000c5540
+ok 31 - modexp-512-e1-odd
+# PERF workload=sha-0 sample=0 iterations=512 ticks=14836 correct=1 checksum=e2534dc5
+# PERF workload=sha-0 sample=1 iterations=512 ticks=14124 correct=1 checksum=e2534dc5
+# PERF workload=sha-0 sample=2 iterations=512 ticks=14215 correct=1 checksum=e2534dc5
+ok 32 - sha-0
+# PERF workload=sha-1 sample=0 iterations=512 ticks=14449 correct=1 checksum=c637ddc5
+# PERF workload=sha-1 sample=1 iterations=512 ticks=14573 correct=1 checksum=c637ddc5
+# PERF workload=sha-1 sample=2 iterations=512 ticks=15697 correct=1 checksum=c637ddc5
+ok 33 - sha-1
+# PERF workload=sha-63 sample=0 iterations=256 ticks=11332 correct=1 checksum=13e74dc5
+# PERF workload=sha-63 sample=1 iterations=256 ticks=10176 correct=1 checksum=13e74dc5
+# PERF workload=sha-63 sample=2 iterations=256 ticks=9964 correct=1 checksum=13e74dc5
+ok 34 - sha-63
+# PERF workload=sha-65 sample=0 iterations=256 ticks=9937 correct=1 checksum=6a9f6dc5
+# PERF workload=sha-65 sample=1 iterations=256 ticks=9868 correct=1 checksum=6a9f6dc5
+# PERF workload=sha-65 sample=2 iterations=256 ticks=9905 correct=1 checksum=6a9f6dc5
+ok 35 - sha-65
+# PERF workload=sha-4096 sample=0 iterations=8 ticks=5471 correct=1 checksum=ffbbb025
+# PERF workload=sha-4096 sample=1 iterations=8 ticks=5315 correct=1 checksum=ffbbb025
+# PERF workload=sha-4096 sample=2 iterations=8 ticks=5380 correct=1 checksum=ffbbb025
+ok 36 - sha-4096
+# PERF workload=sha-1MiB sample=0 iterations=1 ticks=166136 correct=1 checksum=70d531fa
+# PERF workload=sha-1MiB sample=1 iterations=1 ticks=165724 correct=1 checksum=70d531fa
+# PERF workload=sha-1MiB sample=2 iterations=1 ticks=163864 correct=1 checksum=70d531fa
+ok 37 - sha-1MiB
+# PERF workload=des-block sample=0 iterations=128 ticks=5066 correct=1 checksum=1ecc1ac5
+# PERF workload=des-block sample=1 iterations=128 ticks=4309 correct=1 checksum=1ecc1ac5
+# PERF workload=des-block sample=2 iterations=128 ticks=4283 correct=1 checksum=1ecc1ac5
+ok 38 - des-block
+# PERF workload=des3-block sample=0 iterations=64 ticks=6197 correct=1 checksum=097b5b45
+# PERF workload=des3-block sample=1 iterations=64 ticks=6053 correct=1 checksum=097b5b45
+# PERF workload=des3-block sample=2 iterations=64 ticks=6067 correct=1 checksum=097b5b45
+ok 39 - des3-block
+# PERF workload=des-cbc-4096 sample=0 iterations=2 ticks=25144 correct=1 checksum=5478e751
+# PERF workload=des-cbc-4096 sample=1 iterations=2 ticks=24364 correct=1 checksum=5478e751
+# PERF workload=des-cbc-4096 sample=2 iterations=2 ticks=24554 correct=1 checksum=5478e751
+ok 40 - des-cbc-4096
+# PERF workload=des3-cbc-4096 sample=0 iterations=1 ticks=36536 correct=1 checksum=5d7864c7
+# PERF workload=des3-cbc-4096 sample=1 iterations=1 ticks=36814 correct=1 checksum=5d7864c7
+# PERF workload=des3-cbc-4096 sample=2 iterations=1 ticks=35649 correct=1 checksum=5d7864c7
+ok 41 - des3-cbc-4096
+# PERF-SUMMARY workloads=40 failures=0
+== kernel-performance-portable end PASS ==
