@@ -98,8 +98,12 @@ increase stack ownership from 37 to 165 pages and return it to 37 after all
 handles/references retired. That is **128 pages / 512 KiB returned** per run.
 With the selected classes, pool backing grows 38 to 45 pages and stays 45 after
 retirement. This is retained allocator capacity, not evidence that 32 native
-thread objects leaked. The raw diagnostic conservation checks and zero live
-guard allocations provide separate allocator evidence. These captures establish
+thread objects leaked. The integrity-clean first diagnostic census independently
+records live `Thre` objects 7 to 39 to 7: 32 new allocations and 32 corresponding
+frees. The live count stays 7 through IRP/file/ladder/churn checkpoints. This
+checks native object retirement as well as stack release; its
+[exact tag rows](../optimization/mm-final-sweep-2026-10-13/thread-census.json)
+retain the serial identity. These captures establish
 one 32-worker lifetime cycle per launch, not an unbounded thread soak or a game
 lifetime proof. Full view backing must not be shortened based on a lower subset
 of fields presently touched by a guest.
