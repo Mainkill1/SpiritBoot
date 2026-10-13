@@ -129,7 +129,12 @@ product setting.
 The native probe does not identify which internal branch executed for each
 request. Host branch coverage and native lifetime coverage establish different
 parts of the evidence. Additional native probes pass 338 zero-IOSB/APC checks,
-2,071 seek/mutation checks, and 16 broad API checks.
+2,071 seek/mutation checks, and 16 broad API checks. A separate physically
+scattered replay passes 21 checks on each BIOS, with exact dataset hashes. Its
+204-page arena has 77 nonadjacent boundaries on Complex and 203 on SpiritBoot.
+The initial fixture incorrectly required at least half the boundaries to be
+nonadjacent; the corrected fixture verifies and reports actual scatter. These
+runs qualify scattered-buffer I/O, not equal-layout performance.
 
 The lifetime test also found preexisting public thread-object discrepancies:
 nxdk's ID and exit-code wrappers report incorrect values on both earlier and
@@ -146,6 +151,7 @@ the standalone native fixture. Native measurements here are on 64 MiB xemu;
 physical Xbox qualification and game-level acceptance remain outstanding.
 
 The provenance JSON beside this document records candidate, emulator and
-fixture hashes, source trees, run identities and archive hashes. A test-only
-packaging rebuild must reproduce the already qualified runtime ROM before it
-can inherit the native results.
+fixture hashes, source trees, run identities and archive hashes. The test-only
+packaging rebuild reproduced the qualified runtime ROM byte for byte. All CI
+checks at product commit `7f5e291f` pass, including the complete kernel host suite
+and the 64/128 MiB debug/release firmware matrix.
