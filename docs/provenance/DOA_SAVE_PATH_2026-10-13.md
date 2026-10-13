@@ -65,7 +65,15 @@ volumes retain their original path handling.
 
 [Native TAP logs and launch provenance](doa-save-path-2026-10-13/) are committed.
 The candidate's game run uses the optimized release emulator without a debugger.
-Human save/reset/reload verification is pending.
+The operator tested the requested slot/purchase/menu/reset/reload sequence and
+reported: “The save appears to be working now.” A subsequent FATX inspection
+found `doaxuser.dat` at 11,176 bytes with a complete readable chain (SHA256
+`30ee38a220af5a07ca93e3f6ac27ca1c65b68f6a7f5a6713c92d56c7af573eff`). The baseline
+still has only slot metadata. Both final directory captures were taken after
+flushing xemu's host block backend to publish QCOW2 metadata; this is not a
+forced guest filesystem flush, and occurred after the operator's reload test.
+Direct inspection of an active QCOW2 before that host flush can see stale L2
+mappings, so the committed final listings supersede earlier live observations.
 
 ## Limits and separate findings
 
