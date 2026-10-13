@@ -1,10 +1,11 @@
 # Building and running the open firmware
 
 SpiritBoot integrates Roswell's open `nxldr` loader and Xbox kernel. The build
-produces an xemu flash image: 256 KiB release or 512 KiB checked. It does not
-require Microsoft BIOS or MCPX files. The first runtime target is xemu with
-128 MiB RAM. Conker: Live & Reloaded is the retail compatibility target; its
-gameplay has not yet been verified with this firmware.
+produces a 512 KiB 64 MiB release image, a 256 KiB 128 MiB release image, or a
+512 KiB checked image. It does not
+require Microsoft BIOS or MCPX files. The qualified runtime target is xemu
+with 64 or 128 MiB RAM. The current 64 MiB title checks include Halo and Halo 2
+through their initial menu screens.
 
 Use Linux, Python 3.11+, Git, and Docker, or install the cross compiler and
 tools listed in [Dockerfile.firmware](../tools/Dockerfile.firmware) on your host.
@@ -54,13 +55,21 @@ epoch. `source` identifies the supplied pristine checkout; `source_directory`
 is the actual source used by CMake and guest builds; `build_directory` and
 `output_directory` identify their outputs. `base_source_tree` is the pristine
 tree and `source_tree` is the patched Git index tree, including new guest tests.
-The current reviewed patched tree is `8ba32f2153b4716c8cac269bad06a78553f98ded`.
+The current reviewed patched tree is `eee7de60ad3d2047efab3161491edb17768b5482`.
 The base epoch is exported as `SOURCE_DATE_EPOCH` to avoid wall-clock PE linker
 timestamps. Each build uses a fresh configure tree so previous CMake cache flags,
 compiler selections, or timestamps cannot leak into a newly attributed image.
 Failed builds invalidate the published
 image and preserve diagnostics.
 Use new output directories for a clean reproducibility comparison.
+
+The 64 MiB release profile records `rom_kernel: true` and maps verified,
+immutable kernel pages directly from the flash window. This returns their RAM
+shadows to the title allocator and requires a 512 KiB BIOS image. xemu accepts
+this image directly. A physical modchip or flash bank must expose the complete
+512 KiB image; physical hardware has not yet been qualified. The 128 MiB
+release profile keeps its 256 KiB image because it already has sufficient game
+memory and does not enable ROM-backed kernel pages.
 
 ## Prepare the pinned emulator and open fixtures
 

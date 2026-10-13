@@ -51,8 +51,10 @@ Window sizing and final presentation remain xemu responsibilities.
 
 The [public interrupt ABI repair](docs/provenance/TITLE_INTERRUPT_PUBLIC_ABI.md)
 initializes the title object and preserves its identity in actual ISR callbacks.
-Its direct17-check probe passes; the separately reproduced Halo boot failures
-remain unresolved.
+Its direct17-check probe passes. The subsequent
+[64 MiB memory-compatibility repair](docs/provenance/HALO_64MIB_MEMORY_COMPATIBILITY.md)
+returns immutable kernel RAM shadows to the title allocator; matched native
+tests now reach the Halo menu and Halo 2 title prompt.
 
 ## Project goals
 

@@ -17,6 +17,13 @@ DEFAULT_LOCK = ROOT / "sources/firmware-lock.json"
 FLASH_SIZES = {"release": 256 * 1024, "debug": 512 * 1024}
 
 
+def firmware_profile(variant, memory_mib):
+    """Return the immutable build policy for a supported firmware profile."""
+    rom_kernel = variant == "release" and memory_mib == 64
+    flash_size = 512 * 1024 if rom_kernel else FLASH_SIZES[variant]
+    return {"rom_kernel": rom_kernel, "flash_size": flash_size}
+
+
 def sha256(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -105,6 +112,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
         raise ValueError("upper RAM reservation must be a boolean")
     if reserve_upper_ram and memory_mib != 128:
         raise ValueError("upper RAM reservation requires 128 MiB")
+    profile = firmware_profile(variant, memory_mib)
     if output == source or source.is_relative_to(output) or output.is_relative_to(source):
         raise ValueError("source and output directories must not overlap")
     output.mkdir(parents=True, exist_ok=True)
@@ -113,6 +121,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
     manifest = {"schema": 1, "status": "failed", "variant": variant,
                 "media_policy": media_policy, "memory_mib": memory_mib,
                 "reserve_upper_ram": reserve_upper_ram,
+                "rom_kernel": profile["rom_kernel"],
                 "metadata_counters": metadata_counters,
                 "source": str(source), "source_directory": str(source), "output_directory": str(output),
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -181,6 +190,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                  "-DCMAKE_BUILD_TYPE=Release", f"-DDBG={int(variant == 'debug')}", "-DKDBG=FALSE",
                  f"-DXBOX_RAM_MIB={memory_mib}",
                  "-DXBOX_RESERVE_UPPER_RAM=" + ("ON" if reserve_upper_ram else "OFF"),
+                 "-DNXK_ROM_KERNEL=" + ("ON" if profile["rom_kernel"] else "OFF"),
                  "-DXBOX_EMULATOR_FILE_MEDIA=" +
                  ("ON" if media_policy == "emulator-file-media" else "OFF"),
                  "-DNXK_METADATA_COUNTERS=" +
@@ -192,8 +202,8 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                      str(build / "ntoskrnl/xboxkrnl.unstripped.exe"),
                      "--final-kernel", str(build / "ntoskrnl/xboxkrnl.exe")])
         image = build / "flash.bin"
-        if image.stat().st_size != FLASH_SIZES[variant]:
-            raise ValueError(f"invalid flash size: expected {FLASH_SIZES[variant]} bytes")
+        if image.stat().st_size != profile["flash_size"]:
+            raise ValueError(f"invalid flash size: expected {profile['flash_size']} bytes")
         shutil.copyfile(image, published)
         manifest.update(status="built", flash_size=published.stat().st_size,
                         flash_sha256=sha256(published))
@@ -275,7 +285,7 @@ def run_firmware(xemu, flash, hdd, dvd, output, timeout=240, tap=False, preserve
     if not os.access(paths["xemu"], os.X_OK):
         raise ValueError("xemu is not executable")
     if paths["flash"].stat().st_size not in FLASH_SIZES.values():
-        raise ValueError("flash size must be 262144 (release) or 524288 (debug) bytes")
+        raise ValueError("flash size must be 262144 or 524288 bytes")
     output = Path(output).resolve()
     # Exclusive directory creation preserves previous captures and input files.
     output.mkdir(parents=True, exist_ok=False)
