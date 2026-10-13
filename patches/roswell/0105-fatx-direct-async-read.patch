@@ -1,0 +1,633 @@
+--- a/drivers/filesystems/vfatfs/fat.c
++++ b/drivers/filesystems/vfatfs/fat.c
+@@ -1702,3 +1702,126 @@
+ #endif /* !SARCH_XBOX */
+ 
+ /* EOF */
++
++#ifdef SARCH_XBOX
++/* Resolve one physical run without fetching missing FAT metadata. MainResource
++ * is held by the caller, so its chain cannot be resized during the walk.
++ * MAP_WAIT=0 avoids backing I/O; the cache can still acquire its short mutex
++ * and allocate a mapping descriptor. Any miss, exception or work-budget limit
++ * uses the ordinary filesystem worker. No LastCluster hint is trusted here. */
++BOOLEAN
++VfatTryMapRead(
++    PDEVICE_EXTENSION DeviceExt,
++    ULONG FirstCluster,
++    ULONG FileOffset,
++    ULONG Length,
++    PLARGE_INTEGER DiskOffset,
++    PULONG ReadCluster)
++{
++    ULONG EntrySize, ChunkSize, ClusterBytes = DeviceExt->FatInfo.BytesPerCluster;
++    ULONG Skip, Needed, Steps, Step = 0, Current = FirstCluster, Start = 0;
++    ULONGLONG Limit, FatBytes;
++    BOOLEAN Usable = TRUE;
++
++    if (DeviceExt->FatInfo.FatType == FATX16 &&
++        DeviceExt->GetNextCluster == FAT16GetNextCluster)
++        EntrySize = sizeof(USHORT);
++    else if (DeviceExt->FatInfo.FatType == FATX32 &&
++             DeviceExt->GetNextCluster == FAT32GetNextCluster)
++        EntrySize = sizeof(ULONG);
++    else
++        return FALSE;
++    if (ClusterBytes == 0 || Length == 0)
++        return FALSE;
++
++    Skip = FileOffset / ClusterBytes;
++    Needed = (ULONG)(((ULONGLONG)(FileOffset % ClusterBytes) + Length +
++                      ClusterBytes - 1) / ClusterBytes);
++    /* This is an optimization budget, not a limit on readable file offsets. */
++    if (Skip > 8192 || Needed > 8192 - Skip)
++        return FALSE;
++    Steps = Skip + Needed;
++    FatBytes = (ULONGLONG)DeviceExt->FatInfo.FATSectors *
++               DeviceExt->FatInfo.BytesPerSector;
++    Limit = (ULONGLONG)DeviceExt->FatInfo.NumberOfClusters + 2;
++    if (Limit > FatBytes / EntrySize)
++        Limit = FatBytes / EntrySize;
++    if (Limit > (ULONGLONG)MAXULONG / EntrySize + 1)
++        Limit = (ULONGLONG)MAXULONG / EntrySize + 1;
++    ChunkSize = CACHEPAGESIZE(DeviceExt);
++
++    while (Step < Steps && Usable)
++    {
++        PVOID Context = NULL, Base = NULL;
++        ULONG MappedOffset = 0, BatchEnd = Step + 256;
++        if (BatchEnd > Steps)
++            BatchEnd = Steps;
++        if (!ExAcquireResourceSharedLite(&DeviceExt->FatResource, FALSE))
++            return FALSE;
++        _SEH2_TRY
++        {
++            while (Step < BatchEnd)
++            {
++                ULONG FatOffset, ChunkOffset, Next;
++                LARGE_INTEGER Offset;
++                if (Current < 2 || Current >= Limit)
++                {
++                    Usable = FALSE;
++                    break;
++                }
++                if (Step == Skip)
++                    Start = Current;
++                FatOffset = Current * EntrySize;
++                ChunkOffset = ROUND_DOWN(FatOffset, ChunkSize);
++                if (Context == NULL || ChunkOffset != MappedOffset)
++                {
++                    if (Context != NULL)
++                    {
++                        CcUnpinData(Context);
++                        Context = NULL;
++                    }
++                    Offset.QuadPart = ChunkOffset;
++                    if (!CcMapData(DeviceExt->FATFileObject, &Offset, ChunkSize,
++                                   0, &Context, &Base))
++                    {
++                        Usable = FALSE;
++                        break;
++                    }
++                    MappedOffset = ChunkOffset;
++                }
++                Next = EntrySize == sizeof(USHORT) ?
++                    *(PUSHORT)((char *)Base + FatOffset % ChunkSize) :
++                    *(PULONG)((char *)Base + FatOffset % ChunkSize);
++                if ((EntrySize == sizeof(USHORT) && Next >= 0xfff8) ||
++                    (EntrySize == sizeof(ULONG) && FAT32IsEndOfChain(Next)))
++                    Next = 0xffffffff;
++                if ((Next != 0xffffffff && (Next < 2 || Next >= Limit)) ||
++                    (Step + 1 < Steps && Next == 0xffffffff) ||
++                    (Step >= Skip && Step + 1 < Steps && Next != Current + 1))
++                {
++                    Usable = FALSE;
++                    break;
++                }
++                Current = Next;
++                ++Step;
++            }
++        }
++        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
++        {
++            Usable = FALSE;
++        }
++        _SEH2_END;
++        if (Context != NULL)
++            CcUnpinData(Context);
++        ExReleaseResourceLite(&DeviceExt->FatResource);
++    }
++    if (!Usable)
++        return FALSE;
++    *ReadCluster = Start;
++    DiskOffset->QuadPart = ClusterToSector(DeviceExt, Start) *
++                           DeviceExt->FatInfo.BytesPerSector +
++                           FileOffset % ClusterBytes;
++    return TRUE;
++}
++#endif
++
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -909,6 +909,133 @@
+     KeWaitForSingleObject(&Event, Executive, KernelMode, FALSE, NULL);
+ }
+ 
++#ifdef SARCH_XBOX
++typedef struct _VFAT_ASYNC_READ
++{
++    PERESOURCE Resource;
++} VFAT_ASYNC_READ, *PVFAT_ASYNC_READ;
++
++static
++NTSTATUS
++NTAPI
++VfatAsyncReadComplete(
++    PDEVICE_OBJECT DeviceObject,
++    PIRP Irp,
++    PVOID Context)
++{
++    PVFAT_ASYNC_READ Read = Context;
++
++    UNREFERENCED_PARAMETER(DeviceObject);
++    if (Irp->PendingReturned)
++        IoMarkIrpPending(Irp);
++    ExReleaseResourceForThreadLite(Read->Resource,
++                                   (ERESOURCE_THREAD)((ULONG_PTR)Read | 3));
++    ExFreePoolWithTag(Read, TAG_IRP);
++    return STATUS_SUCCESS;
++}
++
++/* Forward only complete, resident, contiguous reads. The dispatcher context
++ * can disappear as soon as this returns; completion owns a separate lease.
++ * Cancellation does not release that lease until the lower IRP completes. */
++static
++BOOLEAN
++VfatTryAsyncRead(
++    PVFAT_IRP_CONTEXT IrpContext)
++{
++    PIRP Irp = IrpContext->Irp;
++    PVFATFCB Fcb = IrpContext->FileObject->FsContext;
++    PERESOURCE Resource = &Fcb->MainResource;
++    LARGE_INTEGER Offset = IrpContext->Stack->Parameters.Read.ByteOffset;
++    ULONG Length = IrpContext->Stack->Parameters.Read.Length;
++    LARGE_INTEGER End, DiskOffset;
++    ULONG First, RelativeOffset, ReadCluster, HintCluster = 0, HintOffset = 0;
++    PVFAT_ASYNC_READ Read;
++    PVOID Buffer;
++    PIO_STACK_LOCATION Lower;
++
++    Buffer = Irp->MdlAddress ? MmGetMdlVirtualAddress(Irp->MdlAddress) :
++                              Irp->UserBuffer;
++    if (Irp->Cancel || BooleanFlagOn(Fcb->Flags, FCB_IS_FAT) ||
++        IoGetRemainingStackSize() < OVERFLOW_READ_THRESHHOLD ||
++        ((ULONG_PTR)Buffer & IrpContext->DeviceObject->AlignmentRequirement) ||
++        !VfatComputeRequestEnd(Offset, Length, &End) ||
++        ExIsResourceAcquiredSharedLite(Resource) ||
++        !ExAcquireResourceSharedLite(Resource, FALSE))
++    {
++        return FALSE;
++    }
++
++    /* Recheck mutable bounds while excluding truncate and cleanup. Cached
++     * files retain the existing coherency path. Owner transfer must only
++     * replace this one fresh acquisition, never a caller's recursive lease. */
++    if (BooleanFlagOn(IrpContext->FileObject->Flags, FO_CLEANUP_COMPLETE) ||
++        End.QuadPart > Fcb->RFCB.FileSize.QuadPart ||
++        End.QuadPart > Fcb->RFCB.ValidDataLength.QuadPart ||
++        Fcb->SectionObjectPointers.SharedCacheMap != NULL)
++    {
++        ExReleaseResourceLite(Resource);
++        return FALSE;
++    }
++
++    First = vfatDirEntryGetFirstCluster(IrpContext->DeviceExt, &Fcb->entry);
++    RelativeOffset = Offset.u.LowPart;
++    if (VfatPrepareSeekCache(Fcb))
++    {
++        ExAcquireFastMutex(&Fcb->LastMutex);
++        VfatLookupSeekCheckpoint(Fcb, Offset.u.LowPart, &HintCluster, &HintOffset);
++        ExReleaseFastMutex(&Fcb->LastMutex);
++        if (HintCluster != 0)
++        {
++            First = HintCluster;
++            RelativeOffset -= HintOffset;
++        }
++    }
++    if (!VfatTryMapRead(IrpContext->DeviceExt, First, RelativeOffset, Length,
++                        &DiskOffset, &ReadCluster))
++    {
++        ExReleaseResourceLite(Resource);
++        return FALSE;
++    }
++    ExAcquireFastMutex(&Fcb->LastMutex);
++    VfatRememberSeekCheckpoint(Fcb,
++        ROUND_DOWN(Offset.u.LowPart, IrpContext->DeviceExt->FatInfo.BytesPerCluster),
++        ReadCluster,
++        ROUND_DOWN(End.u.LowPart - 1, IrpContext->DeviceExt->FatInfo.BytesPerCluster),
++        ReadCluster + (RelativeOffset % IrpContext->DeviceExt->FatInfo.BytesPerCluster +
++                       Length - 1) / IrpContext->DeviceExt->FatInfo.BytesPerCluster);
++    ExReleaseFastMutex(&Fcb->LastMutex);
++
++    Read = ExAllocatePoolWithTag(NonPagedPool, sizeof(*Read), TAG_IRP);
++    if (Read == NULL)
++    {
++        ExReleaseResourceLite(Resource);
++        return FALSE;
++    }
++    if (!NT_SUCCESS(VfatLockUserBuffer(Irp, Length, IoWriteAccess)))
++    {
++        ExFreePoolWithTag(Read, TAG_IRP);
++        ExReleaseResourceLite(Resource);
++        return FALSE;
++    }
++
++    vfatAddToStat(IrpContext->DeviceExt, Fat.NonCachedReads, 1);
++    vfatAddToStat(IrpContext->DeviceExt, Fat.NonCachedReadBytes, Length);
++    Read->Resource = Resource;
++    ExSetResourceOwnerPointer(Resource, (PVOID)((ULONG_PTR)Read | 3));
++    IoCopyCurrentIrpStackLocationToNext(Irp);
++    Lower = IoGetNextIrpStackLocation(Irp);
++    Lower->Parameters.Read.ByteOffset = DiskOffset;
++    Lower->FileObject = NULL;
++    IoSetCompletionRoutine(Irp, VfatAsyncReadComplete, Read, TRUE, TRUE, TRUE);
++    IoMarkIrpPending(Irp);
++    IrpContext->Flags &= ~IRPCONTEXT_COMPLETE;
++    IoCallDriver(IrpContext->DeviceExt->StorageDevice, Irp);
++    /* The lower driver is allowed to have completed and freed Read already. */
++    return TRUE;
++}
++#endif
++
++
+ NTSTATUS
+ VfatRead(
+     PVFAT_IRP_CONTEXT IrpContext)
+@@ -1010,6 +1137,8 @@
+      * The existing queue pins its buffer and grants the worker CANWAIT. */
+     if (NoCache && !PagingIo && !IsVolume && !CanWait)
+     {
++        if (VfatTryAsyncRead(IrpContext))
++            return STATUS_PENDING;
+         Status = STATUS_PENDING;
+         goto ByeBye;
+     }
+--- a/drivers/filesystems/vfatfs/vfat.h
++++ b/drivers/filesystems/vfatfs/vfat.h
+@@ -1309,3 +1309,8 @@
+     PVFAT_IRP_CONTEXT IrpContext);
+ 
+ #endif /* _VFATFS_PCH_ */
++
++#ifdef SARCH_XBOX
++BOOLEAN VfatTryMapRead(PDEVICE_EXTENSION DeviceExt, ULONG FirstCluster,
++                       ULONG FileOffset, ULONG Length, PLARGE_INTEGER DiskOffset, PULONG ReadCluster);
++#endif
+--- /dev/null
++++ b/tests/host/fatx/check-async-read.py
+@@ -0,0 +1,181 @@
++#!/usr/bin/env python3
++"""Run the real FATX read entry point against controlled storage completions.
++
++Catches unnecessary worker posting, early lock release, double completion,
++issuer-owned leases, and forwarding requests outside the eligible read range.
++"""
++import importlib.util
++import subprocess
++import sys
++from pathlib import Path
++root = Path(sys.argv[1]).resolve()
++out = Path(sys.argv[2]).resolve(); out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location('extract', root/'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec); spec.loader.exec_module(extract)
++s = (root/'drivers/filesystems/vfatfs/rw.c').read_text()
++body = extract.function(s, 'VfatComputeRequestEnd')
++if 'VfatTryAsyncRead(' in s:
++    body += s[s.index('typedef struct _VFAT_ASYNC_READ'):s.index('static\nNTSTATUS\nNTAPI\nVfatAsyncReadComplete')]
++    body += extract.function(s, 'VfatAsyncReadComplete')
++    body += extract.function(s, 'VfatTryAsyncRead')
++body += extract.function(s, 'VfatRead')
++shim = r'''
++#include <stdint.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <assert.h>
++#include <string.h>
++#define SARCH_XBOX 1
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(s) ((s)>=0)
++#define ASSERT(x) assert(x)
++#define DPRINT(...) ((void)0)
++#define UNREFERENCED_PARAMETER(x) ((void)(x))
++#define BooleanFlagOn(x,f) (((x)&(f))!=0)
++#define MAXLONGLONG INT64_MAX
++#define STATUS_SUCCESS 0
++#define STATUS_PENDING 0x103
++#define STATUS_INVALID_DEVICE_REQUEST ((NTSTATUS)0xc0000010)
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000d)
++#define STATUS_END_OF_FILE ((NTSTATUS)0xc0000011)
++#define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xc000009a)
++#define STATUS_CANCELLED ((NTSTATUS)0xc0000120)
++#define IRP_PAGING_IO 1
++#define IRP_NOCACHE 2
++#define IRPCONTEXT_CANWAIT 1
++#define IRPCONTEXT_COMPLETE 2
++#define FCB_IS_PAGE_FILE 1
++#define FCB_IS_VOLUME 2
++#define FCB_IS_FAT 4
++#define FO_SYNCHRONOUS_IO 1
++#define FO_CLEANUP_COMPLETE 2
++#define OVERFLOW_READ_THRESHHOLD 0xe00
++#define IoWriteAccess 1
++#define IO_DISK_INCREMENT 1
++#define NonPagedPool 0
++#define TAG_IRP 123
++#define vfatAddToStat(d,f,n) (stats_calls++,stats_sum+=(n))
++typedef uint32_t ULONG,*PULONG;
++typedef uint64_t ULONGLONG;
++typedef uintptr_t ULONG_PTR, ERESOURCE_THREAD;
++typedef int32_t NTSTATUS;
++typedef int BOOLEAN;
++typedef void *PVOID;
++typedef union { int64_t QuadPart; struct { ULONG LowPart; int32_t HighPart; } u; } LARGE_INTEGER,*PLARGE_INTEGER;
++typedef struct { unsigned count; uintptr_t owner; int busy; } ERESOURCE,*PERESOURCE;
++typedef struct { LARGE_INTEGER ByteOffset; ULONG Length; } READ;
++typedef struct { struct { READ Read; } Parameters; void *FileObject; } STACK,*PIO_STACK_LOCATION;
++typedef struct { NTSTATUS Status; uintptr_t Information; } IOSB;
++typedef struct { ULONG AlignmentRequirement; } DEVICE,*PDEVICE_OBJECT;
++typedef struct _IRP IRP,*PIRP;
++typedef NTSTATUS (*COMPLETION)(PDEVICE_OBJECT,PIRP,PVOID);
++struct _IRP { ULONG Flags; IOSB IoStatus; void *MdlAddress,*UserBuffer; BOOLEAN Cancel,PendingReturned; STACK lower; COMPLETION done; PVOID context; unsigned pending; };
++typedef struct { ULONG Flags; struct { LARGE_INTEGER FileSize,AllocationSize,ValidDataLength; } RFCB; struct { void *SharedCacheMap; } SectionObjectPointers; ERESOURCE MainResource,PagingIoResource; ULONG entry; int directory; int LastMutex; } FCB,*PVFATFCB;
++typedef struct { FCB *FsContext; void *FsContext2; ULONG Flags; LARGE_INTEGER CurrentByteOffset; } FILE_OBJECT,*PFILE_OBJECT;
++typedef struct { struct { ULONG BytesPerSector,BytesPerCluster,dataStart; } FatInfo; ERESOURCE DirResource; PDEVICE_OBJECT StorageDevice; } DEVICE_EXTENSION,*PDEVICE_EXTENSION;
++typedef struct { IRP *Irp; FILE_OBJECT *FileObject; STACK *Stack; DEVICE_EXTENSION *DeviceExt; DEVICE *DeviceObject; ULONG Flags,PriorityBoost; } CONTEXT,*PVFAT_IRP_CONTEXT;
++typedef __typeof__(((DEVICE_EXTENSION*)0)->FatInfo) *PFATINFO;
++static struct { DEVICE *DeviceObject; } global,*VfatGlobalData=&global;
++static uintptr_t current=0x1000;
++static unsigned submitted,queued,freed,allocated,completed,lock_calls,stats_calls,stats_sum;
++static int immediate,allocation_fail,lock_fail,mapping_fail,checkpoint;
++static unsigned stack_size=0x4000;
++static NTSTATUS backend;
++static IRP *active;
++static int vfatFCBIsDirectory(FCB *f){return f->directory;}
++static ULONG vfatDirEntryGetFirstCluster(DEVICE_EXTENSION*d,ULONG*e){(void)d;return *e;}
++static int ExIsResourceAcquiredSharedLite(ERESOURCE*r){return r->owner==current?r->count:0;}
++static int ExIsResourceAcquiredExclusiveLite(ERESOURCE*r){return ExIsResourceAcquiredSharedLite(r);}
++static int ExAcquireResourceSharedLite(ERESOURCE*r,int wait){(void)wait;if(r->busy)return 0;r->count++;r->owner=current;return 1;}
++static void ExReleaseResourceLite(ERESOURCE*r){assert(r->count&&r->owner==current);if(!--r->count)r->owner=0;}
++static void ExSetResourceOwnerPointer(ERESOURCE*r,void*p){assert(r->count==1&&r->owner==current&&((uintptr_t)p&3)==3);r->owner=(uintptr_t)p;}
++static void ExReleaseResourceForThreadLite(ERESOURCE*r,uintptr_t owner){assert(r->count==1&&r->owner==owner&&(owner&3)==3);r->count=0;r->owner=0;}
++static void *ExAllocatePoolWithTag(int pool,size_t n,int tag){(void)pool;(void)tag;if(allocation_fail)return NULL;allocated++;return calloc(1,n);}
++static void ExFreePoolWithTag(void*p,int tag){(void)tag;freed++;free(p);}
++static void *MmGetMdlVirtualAddress(void*p){return p;}
++static unsigned IoGetRemainingStackSize(void){return stack_size;}
++static NTSTATUS VfatLockUserBuffer(IRP*i,ULONG n,int access){(void)n;(void)access;lock_calls++;if(lock_fail)return STATUS_INSUFFICIENT_RESOURCES;i->MdlAddress=i->UserBuffer;return 0;}
++static NTSTATUS VfatMarkIrpContextForQueue(CONTEXT*c){(void)c;queued++;return STATUS_PENDING;}
++static NTSTATUS VfatCommonRead(CONTEXT*c){(void)c;return 0;}
++static void VfatPostRead(CONTEXT*c,ERESOURCE*r,int paging){(void)c;(void)r;(void)paging;queued++;}
++static BOOLEAN VfatTryMapRead(DEVICE_EXTENSION*d,ULONG first,ULONG off,ULONG n,LARGE_INTEGER*at){(void)d;assert(first==42&&n==512&&off==4096);if(mapping_fail)return 0;at->QuadPart=0x123400;return 1;}
++static void IoSkipCurrentIrpStackLocation(IRP*i){(void)i;}
++static void IoCopyCurrentIrpStackLocationToNext(IRP*i){i->lower.Parameters.Read.Length=512;i->lower.FileObject=(void*)0xaaaa;}
++static STACK *IoGetNextIrpStackLocation(IRP*i){return &i->lower;}
++static void IoMarkIrpPending(IRP*i){i->pending++;}
++static void IoSetCompletionRoutine(IRP*i,COMPLETION f,void*c,int a,int b,int x){assert(a&&b&&x);i->done=f;i->context=c;}
++static void finish(IRP*i){i->IoStatus.Status=backend;i->IoStatus.Information=backend?0:512;i->PendingReturned=!immediate;assert(i->done);assert(i->done(NULL,i,i->context)==0);completed++;}
++static NTSTATUS IoCallDriver(DEVICE*d,IRP*i){(void)d;submitted++;assert(!i->lower.FileObject);assert(i->lower.Parameters.Read.ByteOffset.QuadPart==0x123400);active=i;if(immediate)finish(i);return immediate?backend:STATUS_PENDING;}
++'''
++tests=r'''
++static unsigned checks,failures;
++static void check(int ok,const char*name){checks++;if(!ok){failures++;printf("FAIL: %s\n",name);}}
++int main(void){
++ for(unsigned scenario=0;scenario<20;scenario++){
++  FCB f={.RFCB.FileSize.QuadPart=8192,.RFCB.AllocationSize.QuadPart=8192,.RFCB.ValidDataLength.QuadPart=8192,.entry=42};
++  FILE_OBJECT file={.FsContext=&f,.FsContext2=&f};
++  IRP irp={.Flags=IRP_NOCACHE,.UserBuffer=(void*)0x200000};
++  STACK stack={.Parameters.Read={.ByteOffset.QuadPart=4096,.Length=512}};
++  DEVICE dev={.AlignmentRequirement=1};
++  DEVICE_EXTENSION de={.FatInfo={512,4096,64},.StorageDevice=&dev};
++  CONTEXT c={&irp,&file,&stack,&de,&dev,IRPCONTEXT_COMPLETE,0};
++  submitted=queued=freed=allocated=completed=lock_calls=stats_calls=stats_sum=0;active=NULL;current=0x1000;
++  immediate=allocation_fail=lock_fail=mapping_fail=0;checkpoint=scenario==19;backend=0;stack_size=0x4000;
++  int eligible=scenario<6 || scenario==19;
++  if(scenario==1)immediate=1;
++  if(scenario==2){immediate=1;backend=STATUS_INVALID_PARAMETER;}
++  if(scenario==3)backend=STATUS_CANCELLED;
++  if(scenario==4)backend=STATUS_INVALID_PARAMETER;
++  if(scenario==6)f.MainResource.busy=1;
++  if(scenario==7){f.MainResource.count=1;f.MainResource.owner=current;}
++  if(scenario==8)file.Flags=FO_CLEANUP_COMPLETE;
++  if(scenario==9)f.RFCB.FileSize.QuadPart=4300;
++  if(scenario==10)f.RFCB.ValidDataLength.QuadPart=4300;
++  if(scenario==11)f.SectionObjectPointers.SharedCacheMap=&f;
++  if(scenario==12)allocation_fail=1;
++  if(scenario==13)lock_fail=1;
++  if(scenario==14)mapping_fail=1;
++  if(scenario==15)stack_size=0x500;
++  if(scenario==16)irp.UserBuffer=(void*)0x200001;
++  if(scenario==17)irp.Cancel=1;
++  if(scenario==18)f.Flags=FCB_IS_FAT;
++  NTSTATUS result=VfatRead(&c);
++  if(eligible){
++   check(result==STATUS_PENDING,"eligible read preserves asynchronous return");
++   check(submitted==1&&queued==0,"eligible resident read reaches storage without worker");
++   if(!submitted)continue;
++   check(stats_calls==2&&stats_sum==513,"noncached read statistics preserved");
++   check(!(c.Flags&IRPCONTEXT_COMPLETE),"dispatcher relinquishes completion ownership");
++   check(irp.MdlAddress==irp.UserBuffer,"parent MDL stays owned by I/O manager");
++   if(!immediate){
++    check(f.MainResource.count==1&&(f.MainResource.owner&3)==3&&freed==0,"pending DMA retains tagged resource and context");
++    irp.Cancel=scenario==3;current=0x9000; /* issuer can disappear */
++    memset(&c,0xa5,sizeof(c));finish(&irp);
++   }
++   check(completed==1&&freed==1&&!f.MainResource.count,"actual completion releases exactly once independent of issuer/context");
++   check(irp.IoStatus.Status==backend&&irp.IoStatus.Information==(backend?0:512),"lower status and byte count survive completion");
++  }else{
++   check(!submitted,"ineligible read preserves worker fallback");
++   check(c.Flags&IRPCONTEXT_COMPLETE,"fallback retains dispatcher ownership");
++   check(allocated==freed,"fallback releases allocated context");
++   check(f.MainResource.count==(scenario==7?1u:0u),"fallback preserves preexisting resource ownership");
++  }
++ }
++ printf("%u async dispatcher checks, %u failures\n",checks,failures);return failures?1:0;
++}
++'''
++if 'VfatLookupSeekCheckpoint(Fcb, Offset.u.LowPart' in s:
++    shim=shim.replace('#define SARCH_XBOX 1','#define SARCH_XBOX 1\n#define ROUND_DOWN(x,a) ((x)&~((a)-1))')
++    shim=shim.replace('LARGE_INTEGER*at){(void)d;assert(first==42&&n==512&&off==4096);if(mapping_fail)return 0;at->QuadPart=0x123400;return 1;}', 'LARGE_INTEGER*at,PULONG cluster){(void)d;assert(n==512);assert(checkpoint?(first==63&&off==0):(first==42&&off==4096));if(mapping_fail)return 0;at->QuadPart=0x123400;*cluster=63;return 1;}')
++    shim+=r'''
++static int ExAcquireFastMutex(int*m){assert(!*m);*m=1;return 0;}
++static void ExReleaseFastMutex(int*m){assert(*m);*m=0;}
++static int VfatPrepareSeekCache(FCB*f){assert(f->MainResource.count);return checkpoint;}
++static void VfatLookupSeekCheckpoint(FCB*f,ULONG off,PULONG cluster,PULONG at){assert(f->LastMutex&&off==4096);*cluster=63;*at=4096;}
++static void VfatRememberSeekCheckpoint(FCB*f,ULONG off,ULONG cluster,ULONG end,ULONG last){assert(f->LastMutex&&f->MainResource.count);assert(off==4096&&end==4096&&cluster==63&&last==63);}
++'''
++(out/'read.c').write_text(shim+body+tests)
++subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined',str(out/'read.c'),'-o',str(out/'read')],check=True)
++subprocess.run([str(out/'read')],check=True)
+--- /dev/null
++++ b/tests/host/fatx/check-async-map.py
+@@ -0,0 +1,84 @@
++#!/usr/bin/env python3
++"""Exercise the production resident FAT traversal, including malformed links.
++
++Removing per-link validation, permitting fragmented runs or issuing cache I/O
++must fail. Disk offsets below are independent hand-calculated fixtures.
++"""
++import ast, importlib.util, subprocess, sys
++from pathlib import Path
++root=Path(sys.argv[1]).resolve();out=Path(sys.argv[2]).resolve();out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py')
++extract=importlib.util.module_from_spec(spec);spec.loader.exec_module(extract)
++old=ast.parse((root/'tests/host/fatx/check-chain-walk.py').read_text())
++shim=next(ast.literal_eval(x.value) for x in old.body if isinstance(x,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='shim' for t in x.targets))
++shim=shim.replace('NumberOfClusters, FATSectors, BytesPerSector;','NumberOfClusters, FATSectors, BytesPerSector, dataStart;')
++shim=shim.replace('typedef struct { int64_t QuadPart; } LARGE_INTEGER;','typedef struct { int64_t QuadPart; } LARGE_INTEGER, *PLARGE_INTEGER;')
++shim=shim.replace(', max_links;', ';')
++shim=shim.replace('static unsigned maps,','static unsigned wait_maps, busy;\nstatic unsigned maps,')
++shim=shim.replace('(void)file; (void)wait;','(void)file; wait_maps += wait != 0;')
++shim=shim.replace('(void)r; (void)wait; assert(!held && !pins);','(void)r; (void)wait; assert(!held && !pins); if(busy)return FALSE;')
++fat=(root/'drivers/filesystems/vfatfs/fat.c').read_text()
++names=['FAT32EntryMask','FAT32IsEndOfChain','VfatIsValidDataCluster','FAT32GetNextCluster','FAT16GetNextCluster','GetNextCluster','WalkFatChain','GetContiguousClusterRun','ClusterToSector']
++body='\n'.join(extract.function(fat,n) for n in names)
++if 'VfatTryMapRead(' in fat:body+=extract.function(fat,'VfatTryMapRead').replace('#ifdef SARCH_XBOX', '')
++else:
++    body+='''
++static BOOLEAN VfatTryMapRead(PDEVICE_EXTENSION d,ULONG first,ULONG off,ULONG length,PLARGE_INTEGER diskoff) {
++ ULONG cluster,count,next; if(!NT_SUCCESS(WalkFatChain(d,first,off/4096,&cluster)))return FALSE;
++ if(!NT_SUCCESS(GetContiguousClusterRun(d,cluster,(off%4096+length+4095)/4096,&count,&next)))return FALSE;
++ if(count<(off%4096+length+4095)/4096)return FALSE;
++ diskoff->QuadPart=ClusterToSector(d,cluster)*512+off%4096;return TRUE;
++}
++'''
++tests=r'''
++static unsigned checks,failures;
++static void check(int ok,const char*s){checks++;if(!ok){failures++;printf("FAIL: %s\n",s);}}
++static void put(unsigned type,unsigned c,unsigned n){if(type==FATX16)disk.halves[c]=n;else disk.words[c]=n;}
++static DEVICE_EXTENSION setup(unsigned type){
++ DEVICE_EXTENSION d={0};d.FatInfo.FatType=type;d.FatInfo.BytesPerSector=512;
++ d.FatInfo.BytesPerCluster=4096;d.FatInfo.SectorsPerCluster=8;d.FatInfo.NumberOfClusters=16000;
++ d.FatInfo.FATSectors=256;d.FatInfo.dataStart=32;chunk_size=4096;
++ d.GetNextCluster=type==FATX16?FAT16GetNextCluster:FAT32GetNextCluster;
++ memset(&disk,0,sizeof(disk));for(unsigned c=2;c<15000;c++)put(type,c,c+1);
++ maps=unpins=pins=acquisitions=releases=held=wait_maps=busy=fault_map=false_map=0;return d;
++}
++static void run(DEVICE_EXTENSION*d,unsigned first,unsigned off,unsigned length,int want,int64_t at){
++ LARGE_INTEGER diskoff={-1};unsigned prior_maps=maps,prior_unpins=unpins;
++ int result=VfatTryMapRead(d,first,off,length,&diskoff);
++ check(result==want,"resident/fragmented/malformed outcome");
++ if(result)check(diskoff.QuadPart==at,"translated disk offset");
++ check(!pins&&!held&&acquisitions==releases,"all FAT leases released");
++ check(!wait_maps,"metadata lookup never requests backing I/O");
++ check(maps-prior_maps <= 64 && unpins-prior_unpins <= maps-prior_maps,"finite metadata work");
++}
++int main(void){
++ for(unsigned t=FATX16;t<=FATX32;t++){
++  DEVICE_EXTENSION d=setup(t);run(&d,2,4608,8192,1,20992);
++  d=setup(t);put(t,3,7);run(&d,2,4096,8192,0,0);
++  d=setup(t);put(t,2,10);run(&d,2,4096,8192,1,49152);
++  const unsigned bad[]={0,1,16002,0xfffffffe};
++  for(unsigned b=0;b<4;b++){d=setup(t);put(t,3,bad[b]);run(&d,2,4096,8192,0,0);}
++  d=setup(t);put(t,3,t==FATX16?0xffff:0xffffffff);run(&d,2,4096,4096,1,20480);
++  d=setup(t);put(t,3,0);run(&d,2,4096,4096,0,0); /* final outgoing entry is validated */
++  d=setup(t);run(&d,2047,0,8192,1,8392704);
++  d=setup(t);false_map=1;run(&d,2,4096,512,0,0);
++  d=setup(t);fault_map=1;run(&d,2,4096,512,0,0);
++  d=setup(t);busy=1;run(&d,2,4096,512,0,0);
++  d=setup(t);run(&d,2,10000*4096,512,0,0);
++  d=setup(t);run(&d,1,0,512,0,0);
++  d=setup(t);d.FatInfo.FATSectors=0;run(&d,2,0,512,0,0);
++  d=setup(t);d.FatInfo.FatType=FAT12;run(&d,2,0,512,0,0);
++ }
++ printf("%u resident FAT mapping checks, %u failures\n",checks,failures);return failures?1:0;
++}
++'''
++if 'VfatTryMapRead(' not in fat:
++    tests=tests[:tests.index('int main(void)')]+'''int main(void){DEVICE_EXTENSION d=setup(FATX32);run(&d,2,4608,8192,1,20992);printf("%u checks, %u failures\\n",checks,failures);return failures?1:0;}'''
++if 'PULONG ReadCluster)' in fat:
++    tests=tests.replace('int want,int64_t at){','int want,int64_t at,ULONG expected_cluster){')
++    tests=tests.replace('LARGE_INTEGER diskoff={-1};','ULONG resolved=0;LARGE_INTEGER diskoff={-1};').replace('length,&diskoff);','length,&diskoff,&resolved);')
++    tests=tests.replace('check(result==want,', 'check(resolved==(result?expected_cluster:0),"resolved request-start cluster is exact and unpublished on failure");\n check(result==want,')
++    tests=tests.replace(',1,20992);',',1,20992,3);').replace(',1,49152);',',1,49152,10);').replace(',1,20480);',',1,20480,3);').replace(',1,8392704);',',1,8392704,2047);').replace(',0,0);',',0,0,0);')
++(out/'map.c').write_text(shim+body+tests)
++subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined',str(out/'map.c'),'-o',str(out/'map')],check=True)
++subprocess.run([str(out/'map')],check=True)
+--- /dev/null
++++ b/tests/host/fatx/check-async-coupling.py
+@@ -0,0 +1,74 @@
++#!/usr/bin/env python3
++"""Real async entry + resident FAT walk + real seek-checkpoint integration.
++
++The hand-checked fragmented prefix maps file cluster4 to disk100. A read at
++file6+512 spans disk102..104. A later read reuses the published file8/disk104
++endpoint. A backward read and invalidation must resolve the correct generation.
++"""
++import ast,importlib.util,subprocess,sys
++from pathlib import Path
++r=Path(__file__).resolve().parent;root=Path(sys.argv[1]).resolve();out=Path(sys.argv[2]).resolve();out.mkdir(parents=True,exist_ok=True)
++tree=ast.parse((r/'check-async-read.py').read_text())
++shim=next(ast.literal_eval(x.value) for x in tree.body if isinstance(x,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='shim' for t in x.targets))
++shim='\n'.join(line for line in shim.splitlines() if 'static BOOLEAN VfatTryMapRead(' not in line)+'\n'
++shim=shim.replace('#define TAG_IRP 123','#define TAG_IRP 123\n#define TAG_FCB 124\n#define MAXULONG UINT32_MAX\n#define ROUND_DOWN(x,a) ((x)&~((a)-1))\n#define CACHEPAGESIZE(d) 4096\n#define FATX16 4\n#define FATX32 5\n#define _SEH2_TRY if (1)\n#define _SEH2_EXCEPT(x) else\n#define _SEH2_END')
++shim=shim.replace('typedef uint32_t ULONG,*PULONG;','typedef uint32_t ULONG,*PULONG;\ntypedef uint16_t USHORT,*PUSHORT;\ntypedef void VOID;\n#define RtlZeroMemory(p,n) memset(p,0,n)\n#define VFAT_SEEK_CHECKPOINTS 16\ntypedef struct { struct { ULONG Offset,Cluster; } Positions[16]; } VFAT_SEEK_CACHE,*PVFAT_SEEK_CACHE;')
++shim=shim.replace('int LastMutex;','int LastMutex; PVFAT_SEEK_CACHE SeekCache;')
++shim=shim.replace('ULONG BytesPerSector,BytesPerCluster,dataStart;','ULONG BytesPerSector,BytesPerCluster,dataStart,FatType,SectorsPerCluster,NumberOfClusters,FATSectors;')
++shim=shim.replace('ERESOURCE DirResource; PDEVICE_OBJECT StorageDevice;','ERESOURCE DirResource,FatResource; PDEVICE_OBJECT StorageDevice; void *FATFileObject; NTSTATUS (*GetNextCluster)();')
++shim=shim.replace('static IRP *active;','static IRP *active;\nstatic ULONG requested; static int64_t expected_disk;')
++shim=shim.replace('i->lower.Parameters.Read.Length=512;', 'i->lower.Parameters.Read.Length=requested;')
++shim=shim.replace('backend?0:512','backend?0:requested').replace('==0x123400','==expected_disk')
++shim+=r'''
++static ULONG fat[16384];
++static int fat_pins;
++static NTSTATUS FAT16GetNextCluster(void){return 0;}
++static NTSTATUS FAT32GetNextCluster(void){return 0;}
++static int ExAcquireFastMutex(int*m){assert(!*m);*m=1;return 0;}
++static void ExReleaseFastMutex(int*m){assert(*m);*m=0;}
++static void ExFreePool(void*p){free(p);}
++static int CcMapData(void*f,LARGE_INTEGER*off,ULONG n,int wait,void**ctx,void**data){
++ (void)f;assert(!wait&&n==4096&&!fat_pins);if(mapping_fail)return 0;
++ assert(off->QuadPart>=0&&(uint64_t)off->QuadPart+n<=sizeof(fat));*data=(char*)fat+off->QuadPart;*ctx=*data;fat_pins++;return 1;
++}
++static void CcUnpinData(void*p){assert(p&&fat_pins==1);fat_pins--;}
++'''
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');extract=importlib.util.module_from_spec(spec);spec.loader.exec_module(extract)
++rw=(root/'drivers/filesystems/vfatfs/rw.c').read_text();fat=(root/'drivers/filesystems/vfatfs/fat.c').read_text()
++body=''.join(extract.function(fat,n).replace('#ifdef SARCH_XBOX','') for n in ['FAT32IsEndOfChain','ClusterToSector','VfatTryMapRead'])
++body+=''.join(extract.function(rw,n) for n in ['VfatComputeRequestEnd','VfatPrepareSeekCache','VfatLookupSeekCheckpoint','VfatRememberSeekCheckpoint','VfatInvalidateSeekCheckpoints'])
++body+=rw[rw.index('typedef struct _VFAT_ASYNC_READ'):rw.index('static\nNTSTATUS\nNTAPI\nVfatAsyncReadComplete')]
++body+=''.join(extract.function(rw,n) for n in ['VfatAsyncReadComplete','VfatTryAsyncRead','VfatRead'])
++tests=r'''
++static void run(FCB*f,DEVICE_EXTENSION*de,ULONG off,ULONG n,int64_t diskoff,ULONG hintoff,ULONG hintcluster){
++ FILE_OBJECT file={.FsContext=f,.FsContext2=f};IRP irp={.Flags=IRP_NOCACHE,.UserBuffer=(void*)0x200000};
++ STACK stack={.Parameters.Read={.ByteOffset.QuadPart=off,.Length=n}};
++ DEVICE dev={.AlignmentRequirement=1};CONTEXT c={&irp,&file,&stack,de,&dev,IRPCONTEXT_COMPLETE,0};
++ requested=n;expected_disk=diskoff;submitted=queued=completed=0;immediate=1;
++ assert(VfatRead(&c)==STATUS_PENDING);assert(submitted==1&&!queued&&completed==1);
++ assert(!f->MainResource.count&&!de->FatResource.count&&!fat_pins);
++ assert(f->SeekCache->Positions[15].Offset==hintoff);
++ assert(f->SeekCache->Positions[15].Cluster==hintcluster);
++ assert(irp.IoStatus.Information==n&&irp.IoStatus.Status==0);
++}
++int main(void){
++ VFAT_SEEK_CACHE cache={0};FCB f={.RFCB.FileSize.QuadPart=131072,.RFCB.ValidDataLength.QuadPart=131072,.RFCB.AllocationSize.QuadPart=2097152,.entry=42,.SeekCache=&cache};
++ DEVICE dev={0};DEVICE_EXTENSION de={.FatInfo={512,4096,64,FATX32,8,16000,128},.StorageDevice=&dev,.GetNextCluster=FAT32GetNextCluster};
++ for(unsigned i=2;i<15999;i++)fat[i]=i+1;
++ fat[45]=100; /* file0..3 disk42..45, file4.. disk100.. */
++ cache.Positions[1].Offset=16384;cache.Positions[1].Cluster=100;
++ run(&f,&de,25088,8192,442880,32768,104);
++ run(&f,&de,33792,512,451584,32768,104);
++ run(&f,&de,4608,512,201216,4096,43); /* backwards before all cached bands */
++ VfatInvalidateSeekCheckpoints(&f);fat[45]=200;
++ run(&f,&de,25088,8192,852480,32768,204);
++ VfatInvalidateSeekCheckpoints(&f);f.entry=500;
++ run(&f,&de,512,8192,2073088,8192,502);
++ assert(allocated==freed);
++ printf("5 real async/checkpoint/FAT scenarios PASS (unaligned cluster offset, multi-cluster run, endpoint reuse, backwards, invalidation)\n");
++ return 0;
++}
++'''
++(out/'coupling.c').write_text(shim+body+tests)
++subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-fsanitize=address,undefined',str(out/'coupling.c'),'-o',str(out/'coupling')],check=True)
++subprocess.run([str(out/'coupling')],check=True)
