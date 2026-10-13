@@ -118,4 +118,53 @@ alias/status checks remain. Under LTO, DES/SHA/BnReduce addresses are four
 bytes before their baseline locations rather than identical; no causal claim
 is made from addresses alone. Source 3,111, sanitized 364 and full-source
 30,978 checks pass. Permanent RAM remains 14 pages and the ROM DES table
-bytes/addresses remain identical. Final seven-triplet timing is pending.
+bytes/addresses remain identical. Final seven-triplet timing is retained in `final-layout` below.
+
+The placement variant completes seven alternating native triplets with all
+40 workloads and 118 samples per run intact. The strict analyzer checks every
+TAP assertion, exact declared samples/iterations/order, success flags, complete
+checksums, input seed records, hashed launch-config bytes, ROM/ISO/executable
+identities, per-BIOS clock frequency, alternating triplet order and nonoverlap
+of reported process intervals. Overlay bytes are not independently reread;
+input and fresh per-run paths are verified from the exported records.
+
+Final paired medians (each run's within-workload median, then seven-run median):
+
+| Workload | Baseline ms | Candidate ms | Complex ms | Candidate change | Lower pairs | Observed median ranges |
+|---|---:|---:|---:|---:|---:|---|
+| modexp-2-e3-even | 0.081086 | 0.061676 | 0.047593 | -23.94% | 7/7 | disjoint lower |
+| modexp-32-e3-odd | 1.685293 | 0.062528 | 0.048889 | -96.29% | 7/7 | disjoint lower |
+| modexp-64-e65537-odd | 7.509880 | 0.074974 | 0.055407 | -99.00% | 7/7 | disjoint lower |
+| modexp-512-e1-odd | 348.046578 | 0.189066 | 0.082667 | -99.946% | 7/7 | disjoint lower |
+| DES-CBC 4 KiB | 3.636404 | 3.681744 | 0.423852 | +1.25% | 2/7 | overlapping |
+| DES3-CBC 4 KiB | 10.647541 | 10.755113 | 0.998815 | +1.01% | 3/7 | overlapping |
+
+The median sum of every declared workload sample is 71.65% shorter, all seven
+pairs lower with disjoint observed ranges. This fixed companion aggregate is
+dominated by the padded exponent-one workload and does not estimate game
+loading or FPS. All 40 rows, including non-crypto controls, are preserved in
+`evidence/modexp-padding-20261013/final-layout/all40.csv` and `native-report.json`.
+
+The earlier DES trend does not recur relative to the final cohort's paired
+baseline: both CBC controls and every SHA control overlap. Candidate DES
+absolute times are similar across cohorts while the paired baseline also
+changes, so this experiment does not prove that instruction placement caused
+the earlier trend. It qualifies the final candidate against its contemporaneous
+control. Two controls retain higher disjoint ranges: object-warm-1 +8.44% and
+object-warm-8 +9.46%, each seven of seven higher. Their paths are unchanged;
+the cause is not established, and these observations remain visible for the
+combined final sweep. This is an arithmetic padding improvement with measured
+limits, not a uniform speedup or universal parity claim against Complex.
+
+The final placement kernel timings refer to ROM
+`80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36`. The
+364 native contract receipts were obtained on the baseline and first arithmetic
+layout; the placement change keeps its math/status/alias contracts and passes
+all 3,111 actual-source and 364 sanitized checks again. All seven Complex
+high-base discrepancies remain retained in both campaign reports.
+
+Reproduce the final native analysis without contacting the native host:
+
+```sh
+python3 docs/provenance/evidence/modexp-padding-20261013/analyze-native.py RESULTS OUTPUT --kernel-prefix probe-crypto-layout --kernel-candidate-hash 80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36
+```

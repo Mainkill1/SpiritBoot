@@ -8,7 +8,7 @@ from statistics import median
 ROOT=Path(__file__).resolve().parents[4];sys.path.insert(0,str(ROOT))
 from tools.firmware import grade_tap
 from tools.kernel_performance import WORKLOADS,META,SAMPLE
-p=argparse.ArgumentParser();p.add_argument('results',type=Path);p.add_argument('output',type=Path);args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('results',type=Path);p.add_argument('output',type=Path);p.add_argument('--kernel-prefix',default='probe-crypto-seven');p.add_argument('--kernel-candidate-hash');args=p.parse_args()
 args.output.mkdir(parents=True,exist_ok=True)
 WORK={k:v for k,v in WORKLOADS.items() if k!='pool-fragmented-fail-4'}
 BIOS={'complex':'1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f','baseline':'be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827','crypto':'d0e907d32d12d950dbcf97d9678079bc81e3dead5c8f5d66079cbd30621d5cc2'}
@@ -55,10 +55,13 @@ for side in BIOS:
  need(len(records)==91 and [(int(x[0]),int(x[2])) for x in records]==[(v,a) for v in range(13) for a in range(7)],side+': vector ordering')
  need(all(x[3]=='1' for x in records),side+': vector return status')
  contracts.append({'run':ds[0].name,'side':side,'tap':tap,'failures':failures,'vector10':[list(x) for x in records if x[0]=='10']})
+if args.kernel_candidate_hash:
+ need(re.fullmatch('[0-9a-f]{64}',args.kernel_candidate_hash) is not None,'candidate hash format')
+ BIOS['crypto']=args.kernel_candidate_hash
 trials={};frequencies={};ordered=[];checksum_reference=None
 for pair in range(7):
  for side in BIOS:
-  ds=list(args.results.glob(f'probe-crypto-seven-{pair}-{side}-*'));need(len(ds)==1,f'pair cardinality {pair}/{side}')
+  ds=list(args.results.glob(f'{args.kernel_prefix}-{pair}-{side}-*'));need(len(ds)==1,f'pair cardinality {pair}/{side}')
   d=ds[0];serial,result=validate(d,side,ISO);tap=grade_tap(serial)
   need(tap['passed'] and tap['plan']==41 and tap['ok']==tap['ran']==41 and tap['failed']==tap['todo']==tap['skipped']==0 and not tap['errors'],d.name+': TAP')
   lines=serial.splitlines();need(lines[0]=='== kernel-performance-portable begin ==' and lines[-1]=='== kernel-performance-portable end PASS ==',d.name+': boundaries')
@@ -97,6 +100,6 @@ for n in WORK:
 with (args.output/'all40.csv').open('w',newline='') as f:
  fields=[k for k in rows[0] if k!='exact_median_difference_us'];w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows([{k:r[k] for k in fields} for r in rows])
 suite={s:[trials[k,s]['total'] for k in range(7)] for s in BIOS};aggregate={s:{'median_us':float(median(a)),'min_us':float(min(a)),'max_us':float(max(a)),'raw_totals_exact':[record(x) for x in a]} for s,a in suite.items()};aggregate.update(metrics(suite['baseline'],suite['crypto']))
-report={'schema':1,'validated_kernel_runs':21,'workloads_per_run':40,'samples_per_workload':{'object-cold-64':1,'others':3},'contracts':contracts,'frequencies_hz':frequencies,'aggregate_all_recorded_workload_samples':aggregate,'workloads':rows,'chronological_execution':[{'run':n,'pair':k,'side':s,'derived_start':a.isoformat(),'end':b.isoformat()} for a,b,k,s,n in ordered],'manifest':manifest,'limitations':['Process intervals derive from recorded exit UTC and elapsed duration; overlays are identified by exported metadata/configuration, not independently reread disk image bytes.','Complex high-base vector10 differs from both unchanged SpiritBoot answers; all seven reference failures are retained.','Counter normalization uses each BIOS reported frequency; no same-frequency assumption is made.','Aggregate sums all118 declared iteration-batch samples; boot time and FPS are not measured.']}
+report={'schema':1,'kernel_candidate_sha256':BIOS['crypto'],'kernel_prefix':args.kernel_prefix,'validated_kernel_runs':21,'workloads_per_run':40,'samples_per_workload':{'object-cold-64':1,'others':3},'contracts':contracts,'frequencies_hz':frequencies,'aggregate_all_recorded_workload_samples':aggregate,'workloads':rows,'chronological_execution':[{'run':n,'pair':k,'side':s,'derived_start':a.isoformat(),'end':b.isoformat()} for a,b,k,s,n in ordered],'manifest':manifest,'limitations':['Process intervals derive from recorded exit UTC and elapsed duration; overlays are identified by exported metadata/configuration, not independently reread disk image bytes.','Complex high-base vector10 differs from both unchanged SpiritBoot answers; all seven reference failures are retained.','Counter normalization uses each BIOS reported frequency; no same-frequency assumption is made.','Aggregate sums all118 declared iteration-batch samples; boot time and FPS are not measured.']}
 (args.output/'native-report.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps({'kernel_runs':21,'workloads':40,'contracts':[(x['side'],x['tap']['ok'],x['tap']['failed']) for x in contracts],'aggregate':aggregate,'changes':[(r['workload'],round(r['median_change_percent'],3),r['range_class']) for r in rows]},indent=2))
