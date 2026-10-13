@@ -37,12 +37,12 @@ Behavioral tests execute the actual production functions:
   data/guard/IOSB/APC contracts and flat repeated-read page/pool counts.
 
 These changes demonstrably remove work, but repeated untraced replay does not
-establish an incremental end-to-end speedup. In the lease ABBA control, depth12
+establish an incremental end-to-end speedup. In the lease ABBA control, depth 12
 with 900 available pages takes 75.2/78.7 ms on the earlier implementation and
-82.2/75.4 ms on the new one for dataset0; dataset1 is 77.3/74.4 versus75.3/85.9.
+82.2/75.4 ms on the new one for dataset 0; dataset 1 is 77.3/74.4 versus 75.3/85.9.
 The clock-only ABBA likewise has mixed results. Separate public callback
 attribution reduces exclusive completion time in all twelve phases by
-0.872–2.483 ms per1,024 requests. Instrumented attribution is not untraced
+0.872–2.483 ms per 1,024 requests. Instrumented attribution is not untraced
 performance acceptance.
 
 The exact packaged 64 MiB artifact also passes 10,779 native assertions across
@@ -56,7 +56,7 @@ The evidence archive SHA-256 is
 
 The combined private candidate, also containing immediate-delay semantics and
 the separate public critical-section owner fix, passes 11,040 native assertions
-and four19-check replays. It still trails Complex substantially. It is a
+and four 19-check replays. It still trails Complex substantially. It is a
 different composition from this PR and is not substituted for this PR's exact
 artifact identity. None of these results establishes that delayed Forza scenery
 is fixed; game-level and physical-Xbox acceptance remain outstanding.
@@ -65,3 +65,8 @@ The JSON beside this document records exact artifacts, source trees, controls,
 archive identities and the separately qualified combined candidate. All
 comparison fixtures use owned code and public APIs/callbacks; proprietary
 firmware, game assets and implementation code are not included.
+
+All CI checks at `416cbc73` pass, including the complete kernel host suite and
+the 64/128 MiB debug/release matrix. Independent review confirms the packaged
+source and ROM identities, audits every clock-field consumer, and reruns all
+32 completion cases without a concrete concern.
