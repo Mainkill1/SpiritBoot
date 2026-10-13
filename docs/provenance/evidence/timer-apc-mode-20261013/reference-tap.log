@@ -1,0 +1,37 @@
+TAP version 14
+ok 1 - create timer
+ok 2 - create unsignaled event
+ok 3 - arm timer callback
+# mode=1 alertable=1 cancel=0 status=000000c0 elapsed=52 callbacks=1
+ok 4 - wait status honors timer APC mode
+ok 5 - callback count is exact
+ok 6 - callback receives original context
+ok 7 - callback runs on setting thread
+ok 8 - create timer
+ok 9 - create unsignaled event
+ok 10 - arm timer callback
+# mode=1 alertable=0 cancel=0 status=00000102 elapsed=502 callbacks=0
+ok 11 - wait status honors timer APC mode
+ok 12 - user callback stays queued during nonalertable wait
+ok 13 - queued user APC dispatch or cancellation controls next alertable wait
+ok 14 - callback count is exact
+ok 15 - callback receives original context
+ok 16 - callback runs on setting thread
+ok 17 - create timer
+ok 18 - create unsignaled event
+ok 19 - arm timer callback
+# mode=1 alertable=0 cancel=1 status=00000102 elapsed=501 callbacks=0
+ok 20 - wait status honors timer APC mode
+ok 21 - user callback stays queued during nonalertable wait
+ok 22 - queued user APC dispatch or cancellation controls next alertable wait
+ok 23 - callback count is exact
+ok 24 - create timer
+ok 25 - create unsignaled event
+ok 26 - arm timer callback
+# mode=0 alertable=1 cancel=0 status=00000102 elapsed=502 callbacks=1
+ok 27 - wait status honors timer APC mode
+ok 28 - callback count is exact
+ok 29 - callback receives original context
+ok 30 - callback runs on setting thread
+# checks=30 failures=0
+1..30

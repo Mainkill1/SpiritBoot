@@ -1,0 +1,19 @@
+test_mode_validation_precedes_timer_mutation (test_timer_apc_mode.TimerApcModeTests.test_mode_validation_precedes_timer_mutation) ... timer-mode: /tmp/tmp0sbm18y9/timer-mode.c:52: main: Assertion `XeNtSetTimerEx(handle,&due,callback,invalid[i],0,1,0,&previous)==STATUS_INVALID_PARAMETER' failed.
+ERROR
+
+======================================================================
+ERROR: test_mode_validation_precedes_timer_mutation (test_timer_apc_mode.TimerApcModeTests.test_mode_validation_precedes_timer_mutation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/codex/xemu-shader-workbench-handoff/.scratch/timer-apc-mode-20261013/branch/tests/host/test_timer_apc_mode.py", line 75, in test_mode_validation_precedes_timer_mutation
+    subprocess.run([str(binary)],check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/tmp/tmp0sbm18y9/timer-mode']' died with <Signals.SIGABRT: 6>.
+
+----------------------------------------------------------------------
+Ran 1 test in 0.046s
+
+FAILED (errors=1)
