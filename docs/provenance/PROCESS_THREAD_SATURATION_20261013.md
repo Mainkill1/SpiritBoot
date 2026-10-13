@@ -34,8 +34,9 @@ requirements). Source arithmetic follows the pinned GPL-compatible native
 scheduler. Reference kernel behavior is obtained only from public guest calls;
 no proprietary source, disassembly, or decompilation is used.
 
-Native v6 qualification and artifact identities are recorded by the root
-integration workflow before acceptance.
+Native v6 qualification confirms 197/197 on Complex, release64 and debug64.
+The raw receipts and strict identity/TAP/input validation manifest are retained
+in `evidence/process-thread-saturation-20261013/native` and `native-report.json`.
 
 The first v5 reference run identified an observer lifetime bug: it retained
 retired case IDs and scanned beyond a matching active case, allowing an ID
@@ -45,3 +46,9 @@ clears retired IDs after all terminal checks and stops at the first current
 match. Every callback ordering assertion remains enabled. The v5 release and
 debug candidates passed all 197 checks; final v6 qualification supersedes
 that faulty reference receipt.
+
+Final v6 validation checks exact ROM/ISO/executable hashes, interactive session,
+64 MiB configuration, unchanged recorded HDD/EEPROM/boot-ROM seeds, and all
+197 ordinary assertions without skips or TODOs. It supersedes the v5 observer
+false failures. No reference mismatch remains in the qualified priority,
+membership, creation, notification, retirement and terminal-query contracts.
