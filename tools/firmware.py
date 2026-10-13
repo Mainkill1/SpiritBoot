@@ -98,7 +98,7 @@ def patch_inputs(patches):
 
 def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                    media_policy="emulator-file-media", metadata_counters=False,
-                   memory_mib=128, reserve_upper_ram=False):
+                   memory_mib=128, reserve_upper_ram=False, pool_audit=False):
     source, output = Path(source).resolve(), Path(output).resolve()
     if variant not in ("release", "debug"):
         raise ValueError("variant must be release or debug")
@@ -106,6 +106,8 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
         raise ValueError("invalid media policy")
     if not isinstance(metadata_counters, bool):
         raise ValueError("metadata counters must be a boolean")
+    if not isinstance(pool_audit, bool):
+        raise ValueError("pool audit must be a boolean")
     if memory_mib not in (64, 128):
         raise ValueError("memory capacity must be 64 or 128 MiB")
     if not isinstance(reserve_upper_ram, bool):
@@ -123,6 +125,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                 "reserve_upper_ram": reserve_upper_ram,
                 "rom_kernel": profile["rom_kernel"],
                 "metadata_counters": metadata_counters,
+                "pool_audit": pool_audit,
                 "source": str(source), "source_directory": str(source), "output_directory": str(output),
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "commands": []}
@@ -194,7 +197,9 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                  "-DXBOX_EMULATOR_FILE_MEDIA=" +
                  ("ON" if media_policy == "emulator-file-media" else "OFF"),
                  "-DNXK_METADATA_COUNTERS=" +
-                 ("ON" if metadata_counters else "OFF")])
+                 ("ON" if metadata_counters else "OFF"),
+                 "-DNXK_POOL_CENSUS=" + ("ON" if pool_audit else "OFF"),
+                 "-DNXK_POOL_AUDIT=" + ("ON" if pool_audit else "OFF")])
             run(["cmake", "--build", str(build), "--clean-first", "--target", "flash", "--parallel", "4"])
             boot_setup = actual_source / "ntoskrnl/xb/bootsetup_native.c"
             if boot_setup.exists():

@@ -1,0 +1,211 @@
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -180,6 +180,7 @@
+ # Diagnostic-only request/tag/lifetime census for evidence-based pool-class
+ # selection.  This adds fixed BSS storage and counters to opt-in builds only.
+ option(NXK_POOL_CENSUS "Enable diagnostic pool allocation census" OFF)
++option(NXK_POOL_AUDIT "Enable diagnostic pool refill scan counters" OFF)
+ if(NXK_POOL_CENSUS)
+     if(NOT NXK_MM_POOL)
+         message(FATAL_ERROR "NXK_POOL_CENSUS requires NXK_MM_POOL")
+@@ -284,6 +285,9 @@
+     ${NXK_EXPORT_ROOTS_SOURCE})
+ if(NXK_POOL_CENSUS)
+     target_compile_definitions(ntoskrnl PRIVATE NXK_POOL_CENSUS=1)
++endif()
++if(NXK_POOL_AUDIT)
++    target_compile_definitions(ntoskrnl PRIVATE NXK_POOL_AUDIT=1)
+ endif()
+ target_link_options(ntoskrnl PRIVATE
+     -Wl,-u,_NxkExportRoots -Wl,-u,_NxkExportDirectory)
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -35,6 +35,7 @@
+ #include <mm/ARM3/miarm.h>
+ 
+ #include "mm.h"
++#include "pool-audit.h"
+ #ifdef NXK_POOL_CENSUS
+ #include "pool-census.h"
+ #if XBOX_RESERVE_UPPER_RAM
+@@ -107,6 +108,9 @@
+ static UCHAR NxpClassMap[(PAGE_SIZE >> 4) + 1];
+ static NXP_FREE *NxpFreeLists[NXP_BUCKET_LISTS];
+ static KSPIN_LOCK NxpLock;
++#ifdef NXK_POOL_AUDIT
++NXP_POOL_AUDIT NxpPoolAudit;
++#endif
+ 
+ /* Per-window-page state for sub-page bucket pages.  One byte per page:
+  * NXP_NOT_BUCKET means the page isn't a bucket page; 0..128 is the live
+@@ -306,6 +310,10 @@
+ {
+     ULONG i;
+     ULONG FirstClass = 0;
++#ifdef NXK_POOL_AUDIT
++    ULONG Examined = 0;
++    NxpPoolAudit.SearchCalls++;
++#endif
+ #if XBOX_RESERVE_UPPER_RAM
+     FirstClass = Class - NXP_SIZE_CLASS(Class);
+ #else
+@@ -317,15 +325,28 @@
+     {
+         NXP_FREE *Head = NxpFreeLists[i];
+         ULONG Index;
++#ifdef NXK_POOL_AUDIT
++        NxpPoolAudit.HeadChecks++;
++#endif
+         if (Head == NULL) continue;
+         Index = NXP_PAGE_INDEX(Head);
+         if (NxpPageState[Index] == 0)
+         {
++#ifdef NXK_POOL_AUDIT
++            NxpPoolAudit.HeadHits++;
++            NxpPoolAudit.ScanLength[0]++;
++#endif
+             return NxpDetachEmptyBucketPage(Index);
+         }
+     }
++#ifdef NXK_POOL_AUDIT
++    NxpPoolAudit.FallbackCalls++;
++#endif
+     for (i = 0; i < NXK_POOL_WINDOW_PAGES; ++i)
+     {
++#ifdef NXK_POOL_AUDIT
++        Examined++;
++#endif
+ #if XBOX_RESERVE_UPPER_RAM
+         ULONG OldClass;
+ #endif
+@@ -335,8 +356,22 @@
+                    ((ULONG_PTR)i << PAGE_SHIFT)))->ClassIndex;
+         if (OldClass / NXP_CLASSES != Class / NXP_CLASSES) continue;
+ #endif
++#ifdef NXK_POOL_AUDIT
++        NxpPoolAudit.PagesExamined += Examined;
++        if (Examined > NxpPoolAudit.MaxPagesExamined)
++            NxpPoolAudit.MaxPagesExamined = Examined;
++        NxpPoolAudit.FallbackHits++;
++        NxpPoolAudit.ScanLength[(Examined + 31) / 32]++;
++#endif
+         return NxpDetachEmptyBucketPage(i);
+     }
++#ifdef NXK_POOL_AUDIT
++    NxpPoolAudit.PagesExamined += Examined;
++    if (Examined > NxpPoolAudit.MaxPagesExamined)
++        NxpPoolAudit.MaxPagesExamined = Examined;
++    NxpPoolAudit.NotFound++;
++    NxpPoolAudit.ScanLength[(Examined + 31) / 32]++;
++#endif
+     return NULL;
+ }
+ 
+@@ -666,6 +701,9 @@
+         }
+ 
+         PageVa = (ULONG_PTR)NxpDetachEmptyBucketPage(Idx);
++#ifdef NXK_POOL_AUDIT
++        NxpPoolAudit.Reclaims++;
++#endif
+         KeReleaseSpinLock(&NxpLock, OldIrql);
+ 
+         NXP_PAGES_FREE((PVOID)PageVa);
+diff --git a/ntoskrnl/xb/mm/pool-audit.h b/ntoskrnl/xb/mm/pool-audit.h
+new file mode 100644
+--- /dev/null
++++ b/ntoskrnl/xb/mm/pool-audit.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#ifdef NXK_POOL_AUDIT
++typedef struct _NXP_POOL_AUDIT {
++    ULONG SearchCalls;
++    ULONG HeadChecks;
++    ULONG HeadHits;
++    ULONG FallbackCalls;
++    ULONG PagesExamined;
++    ULONG MaxPagesExamined;
++    ULONG FallbackHits;
++    ULONG NotFound;
++    ULONG Reclaims;
++    /* Bucket 0 is a head hit; bucket k records 32*(k-1)+1..32*k pages. */
++    ULONG ScanLength[129];
++} NXP_POOL_AUDIT;
++extern NXP_POOL_AUDIT NxpPoolAudit;
++#endif
+diff --git a/tests/host/pool-audit/check.py b/tests/host/pool-audit/check.py
+new file mode 100644
+--- /dev/null
++++ b/tests/host/pool-audit/check.py
+@@ -0,0 +1,29 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Execute production allocator bodies and prove scan accounting."""
++import importlib.util
++import subprocess
++import sys
++from pathlib import Path
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location("extract", root / "tests/host/kernel-performance/check.py")
++m = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(m)
++pool = (root / "ntoskrnl/xb/mm/pool.c").read_text()
++macros = pool[pool.index("#ifdef NXK_MM_POOLPAGES"):pool.index("/* SIZE CLASSES")]
++definitions = pool[pool.index("static const USHORT NxpClassSize"):pool.index("/* BIG-BLOCK TABLE")]
++names = ["InitializePool", "NxpAllocFailed", "NxpDetachEmptyBucketPage", "NxpReuseEmptyBucketPage", "NxpAllocatePoolWithTag", "ExAllocatePoolWithTag", "NxTitleAllocatePoolWithTag", "ExFreePoolWithTag", "NxpReclaimEmptyBucketPages", "ExQueryPoolBlockSize"]
++bodies = "".join(m.function(pool, n) for n in names)
++audit = root / "ntoskrnl/xb/mm/pool-audit.h"
++# Before implementation this fallback lets the real behavior run and makes
++# missing accounting fail an assertion, rather than a compiler diagnostic.
++header = audit.read_text().replace("#pragma once", "") if audit.exists() else "typedef struct {unsigned SearchCalls, HeadChecks, HeadHits, FallbackCalls, PagesExamined, MaxPagesExamined, FallbackHits, NotFound, Reclaims;} NXP_POOL_AUDIT; static NXP_POOL_AUDIT NxpPoolAudit;"
++for reserve in (0, 1):
++    src = out / f"audit-{reserve}.c"
++    src.write_text((root / "tests/host/pool-refill/shim.c").read_text() + f"\n#define XBOX_RESERVE_UPPER_RAM {reserve}\n#define NXK_POOL_AUDIT 1\n" + header + "\n" + macros + definitions + "\nULONG NxpReclaimEmptyBucketPages(void);\n" + bodies + (root / "tests/host/pool-audit/cases.c").read_text())
++    exe = src.with_suffix("")
++    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unknown-pragmas", "-g", "-fsanitize=address,undefined", str(src), "-o", str(exe)], check=True)
++    subprocess.run([str(exe)], check=True)
+diff --git a/tests/host/pool-audit/cases.c b/tests/host/pool-audit/cases.c
+new file mode 100644
+--- /dev/null
++++ b/tests/host/pool-audit/cases.c
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++static void reset(void) {
++ assert(!pool_lock_held);memset(used,0,sizeof(used));memset(runs,0,sizeof(runs));
++ memset(NxpFreeLists,0,sizeof(NxpFreeLists));memset(&NxpPoolAudit,0,sizeof(NxpPoolAudit));
++ committed=peak=allocations=releases=0;allow_pages=1;page_limit=NXK_POOL_WINDOW_PAGES;
++ InitializePool(NonPagedPool,0);
++}
++int main(void) {
++ arena=aligned_alloc(PAGE_SIZE,NXK_POOL_WINDOW_PAGES*PAGE_SIZE);assert(arena);
++ reset();void *a=ExAllocatePoolWithTag(NonPagedPool,64,7);assert(a);
++ assert(NxpPoolAudit.SearchCalls==1);
++ assert(NxpPoolAudit.HeadChecks==NXP_CLASSES&&NxpPoolAudit.HeadHits==0);
++ assert(NxpPoolAudit.FallbackCalls==1&&NxpPoolAudit.PagesExamined==NXK_POOL_WINDOW_PAGES);
++ assert(NxpPoolAudit.MaxPagesExamined==NXK_POOL_WINDOW_PAGES&&NxpPoolAudit.NotFound==1);
++ ExFreePoolWithTag(a,7);a=ExAllocatePoolWithTag(NonPagedPool,1024,8);assert(a);
++ assert(NxpPoolAudit.SearchCalls==2&&NxpPoolAudit.HeadHits==1);
++ assert(NxpPoolAudit.FallbackCalls==1&&NxpPoolAudit.PagesExamined==NXK_POOL_WINDOW_PAGES);
++ ExFreePoolWithTag(a,8);assert(NxpReclaimEmptyBucketPages()==1&&NxpPoolAudit.Reclaims==1);
++ puts("PASS accounting distinguishes full miss and list-head hit");
++ reset();void *objects[34];
++ for(unsigned i=0;i<34;i++){objects[i]=ExAllocatePoolWithTag(NonPagedPool,64,7);assert(objects[i]);}
++ /* Page zero in this shim's kernel region becomes empty while a live page
++  * supplies the free-list head, forcing a late fallback scan. */
++ for(unsigned i=0;i<32;i++)ExFreePoolWithTag(objects[i],7);
++ ExFreePoolWithTag(objects[32],7);
++ memset(&NxpPoolAudit,0,sizeof(NxpPoolAudit));
++ void *b=ExAllocatePoolWithTag(NonPagedPool,1024,8);assert(b);
++ assert(NxpPoolAudit.SearchCalls==1&&NxpPoolAudit.FallbackCalls==1);
++ assert(NxpPoolAudit.FallbackHits==1&&NxpPoolAudit.PagesExamined==NXK_POOL_WINDOW_PAGES/2+1);
++ ExFreePoolWithTag(objects[33],7);ExFreePoolWithTag(b,8);
++ assert(NxpReclaimEmptyBucketPages()==2);
++ puts("PASS late compatible page search has exact measured length");
++ free(arena);return 0;
++}
