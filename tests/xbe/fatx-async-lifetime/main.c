@@ -241,8 +241,9 @@ static void exiting_case(HANDLE file,UCHAR salt,ULONG n) {
     /* Event and IOSB publication on a dead issuer are observations, not the
      * lifetime fence. Thread exit is the public cancellation/rundown fence. */
     verify(&slots[0],FALSE);CloseHandle(thread);
-    /* A subsequent full read proves the file resource was released after
-     * cancellation; a write/truncate would also exercise exclusive acquisition. */
+    /* A subsequent read checks continued data access. Shared acquisition alone
+     * does not prove lease release; final close and the later mutation cases
+     * exercise the exclusive resource path. */
     warm(file,salt);
 }
 int main(void) {
