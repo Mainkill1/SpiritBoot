@@ -47,13 +47,17 @@ Baseline assembled source tree: 04e3879e287135735111efdc8d25488d94a7793c
 Candidate assembled source tree: 97826a931ea1110ee3341467ccee27131e1e1c00
 Product base: 464e7ea67cefcd639b65aefbbe732885816f8d8c
 
-Qualification remaining
+Native qualification
 
-Native release/checked firmware build, layout/residency review, full API regression
-and paired repeated DES/3DES real-buffer timings must precede a speedup claim.
-Root coordinator owns serial Windows/lab execution. No native benchmark or Windows
-operation was performed by this task. Source work reduction alone does not establish
-wall-clock speedup.
+The standalone final Release64 ROM cee608a... passed the full API suite with no
+new mismatch (630 ordinary passes, four existing TODO failures, five skips).
+Seven alternating matched baseline/candidate trials of the unchanged portable
+40-workload fixture verified all results. Median DES-CBC-4096 fell from
+33.369 to 3.530 ms (9.45x throughput), and 3DES-CBC-4096 from 100.172 to 10.063 ms
+(9.95x). These are synthetic real-buffer workloads, not game FPS measurements.
+The layout audit adds zero permanent image RAM pages; see des-final-layout-
+2026-10-13.txt. Final combined qualification and all slower observations are in
+native-performance-2026-10-13.txt and its reproducible evidence archive.
 
 Independent review verified all 512 generated SP values against the baseline
 S-box/P constants and every E window against all 32 bit-basis inputs. No blocking

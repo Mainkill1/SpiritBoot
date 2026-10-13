@@ -1,0 +1,74 @@
+Validated memory pin commit candidate, 2026-10-13
+
+Product baseline 464e7ea, assembled source 04e3879e287135735111efdc8d25488d94a7793c.
+Patch 0115-pin-validated-commit.patch is independent of the rejected consecutive
+frame candidate. It contains no consecutive-range tracking or inferred PFNs.
+
+Problem: the public buffer lock first validates every mapping and PFN while
+holding the PFN lock. Its commit pass then calls NxkPageSupplyPin, which calls
+NxkPageSupplyCanPin again for every PFN. Those second eligibility checks repeat
+stable metadata tests. The existing release assembly has a nested function
+call, several global/table loads, and conditional branches for each duplicate
+check. The common scalar Pin routine also branches between lock and unlock.
+
+Change: buffer locking commits through NxkPageSupplyCommitPin, which only
+updates the count with the existing sticky-overflow policy. All eligibility
+checks occur in the complete validation pass. Checked builds assert the
+metadata invariants at the new internal helper's entry. The physical-pin API
+and buffer unlock still use the original checked transitions. No relocation,
+map validation, rollback, unlock, release order, stack storage, or address
+translation behavior changes. The scalar pin implementation is unchanged and
+therefore remains an independent oracle for the new helper's behavior.
+
+Proof: the PFN lock stays held from the first validation through commit.
+Locking modifies only count/overflow bits and cannot change a frame's bounds,
+free status or RETURN_PENDING flag. Thus previously validated pages remain
+eligible even when a buffer aliases the same frame repeatedly. The helper
+still checks sticky overflow and sets it when the count reaches its limit;
+subsequent aliases cannot wrap the count or clear a permanent pin. Invalid
+requests never reach the commit pass, preserving whole-request atomicity.
+
+The first optimization attempt tracked consecutive PFNs across the entire
+buffer and regressed in initial native pairs (root reports 3.7% in the seven-pair median).
+The guest uses NtAllocateVirtualMemory, not contiguous memory. NxvCommitRange
+allocates page-table frames through the same page supply at 4 MiB boundaries,
+so data PFNs need not be consecutive even in a clean guest. Its actual PFN
+sequence was not captured. Added per-page geometry tracking was paid even
+when the candidate could not avoid translations. That version is rejected.
+This candidate instead removes a duplicate validation on every successful
+buffer lock, independent of mapping geometry. Native performance is still a
+required gate; operation counts alone are not evidence of latency savings.
+
+Test-first: the new eligibility counter failed at the first one-page lock
+(two checks instead of one). Then release and checked production-extraction
+runs passed 672/672 assertions and 1,134/1,134 whole-state comparisons. ASan/UBSan
+runs pass the same. Whole-state fixtures cover aliased, scattered, descending,
+ascending-gap and final-gap mappings; malformed addresses/PFNs, rejection
+prefixes, under-unlock rollback, deferred frees, sticky overflow and count
+saturation. Free-list links, owners, heads, availability and spill hint match
+the original scalar semantics. Small-vector and large retranslation counts
+remain unchanged. Product host suite: 130 tests pass, three skipped.
+Release 64 MB ROM build passes; assembled tree: 92af6b47b5157031931454021407420c5f9920a8
+Flash SHA256: 647f9d6fc74a411cba716e3c0343b90300fc40ea9a8daf0b64bf8a5e9cd30e75
+
+Reproduce on assembled source:
+python3 tests/host/kernel-performance/pins.py SOURCE OUTPUT --optimized --vector
+python3 tests/host/kernel-performance/pins.py SOURCE OUTPUT --optimized --vector --diagnostics
+
+Built assembly confirms the commit helper is fully inlined into buffer lock;
+there is no repeated CanPin or scalar Pin call in the lock commit path. The
+remaining scalar Pin call is the existing aliased deferred-unlock fallback.
+Independent review by timer APC agent found no blocker and independently reran
+672 assertions / 1,134 state cases. Reviewer confirmed lock count/overflow changes
+cannot invalidate later aliases under the continuous PFN-lock hold.
+
+Native qualification: seven matched alternating trials passed all 40 workloads
+and 118 samples per run. The 4,096-page lock/unlock pair fell from 2.239006 ms to
+1.906808 ms (14.84% less time), faster in 7/7 with separated observed ranges.
+All six successful pin sizes improved 9.1–17.6%; rejection workloads overlap.
+The full API suite retains 630 ordinary passes, four existing TODO failures, five skips.
+Object-warm-1/8 were 5.7%/7.7% slower in these trials; retain these observations
+without attributing them to a proven cause. Final integrated measurements and
+all raw receipts are in native-performance-2026-10-13.txt and its archive.
+The first consecutive-frame candidate was rejected after a native slowdown;
+its reduced translation count was insufficient and it is not in this patch.

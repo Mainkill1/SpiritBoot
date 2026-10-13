@@ -95,7 +95,21 @@ setter/output mutation after rejection. It fails before the guard at the invalid
 mode status assertion and passes with the guard under ASan/UBSan.
 
 The guarded Release64 candidate builds successfully from source tree
-`4cc08b8fbc235d94600eacabfb03866563039256`; both CI pins track this tree.
-The full host suite now passes 131 tests with three skips. The first-candidate
-native evidence above predates this guard; repeated native qualification of the
-guarded candidate is pending.
+`4cc08b8fbc235d94600eacabfb03866563039256`.
+The full host suite passes 131 tests with three skips. Subsequent guarded timer
+plus DES qualification passed 30/30 checks (52 ms user alertable return), all
+630 ordinary API leaves, and the same four pre-existing TODOs, with five skips.
+The integrated performance report records the final three-change candidate.
+
+## Continuous regression coverage
+
+Patch `0114a-native-timer-apc-mode.patch` installs the same six guest source files
+in the assembled source tree. `sources/native-regressions.json` registers the
+30-check ISO, so the existing firmware workflow builds and runs the focused
+fixture for each kernel variant. The product copy remains the maintained mirror.
+This patch adds test files only; no kernel production file changes.
+
+The standalone registered-test tree was `68b32832d04711741530d1e853a771dc875c221a`.
+The combined tree, including the memory and DES improvements, is
+`9ef0d1d0f503eccf9d966d4b6901993c7364754c`; both CI assertions pin this identity.
+See `../optimization/native-performance-2026-10-13.txt` for final qualification.

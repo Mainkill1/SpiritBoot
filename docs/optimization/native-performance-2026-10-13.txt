@@ -1,0 +1,143 @@
+Native BIOS performance improvements, 2026-10-13
+
+Three measured changes prioritize a game-facing timer contract, memory used by
+I/O buffers, then the slow DES/3DES implementation. This branch includes the
+latest DOA save-path fix from PR #239 and addresses part of tracking issue #240.
+It does not close #240 or claim that SpiritBoot now beats Complex in every path.
+
+Final 64 MB release candidate
+
+Product baseline: 464e7ea67cefcd639b65aefbbe732885816f8d8c
+Assembled source: 9ef0d1d0f503eccf9d966d4b6901993c7364754c
+Flash SHA256: 62edb78f3ac8dd5739c2b6b9d1a838a4447f3c7662db4e4166e3c795081db027
+Windows file: C:\xemu-lab\incoming\perf-improve-20261013\performance64.bin
+The evidence archive also contains this exact flash.bin and its build manifest.
+This is a test candidate, not a tagged release.
+
+Final integrated results versus the latest save-fixed SpiritBoot baseline
+
+Each result below is the median of three alternating baseline/candidate pairs.
+Microbenchmarks use the median of the fixture's per-operation samples within
+each run. The two BIOSes execute identical frozen XISOs on optimized xemu with
+64 MB RAM, fresh HDD overlays/EEPROM copies, no debugger, and no concurrent VMs.
+All tests run through the interactive PowerShell user session on Windows.
+
+Workload                       Baseline        Candidate       Result
+Timer user APC                 500.851 ms      50.296 ms       Correct early return; 10x shorter wait
+Pin/unpin 4096 pages           2.245 ms        1.866 ms        16.9% less time
+DES CBC 4096 bytes             32.593 ms       3.697 ms        8.8x throughput
+3DES CBC 4096 bytes            97.567 ms       10.623 ms       9.2x throughput
+
+The 630 common-passing API leaf bodies total 12.894 to
+12.444 seconds (3.49% shorter median). The arithmetic means are
+12.899 and 12.457 seconds. Most of this aggregate gain comes from
+correctly ending the user timer wait. This is not a game FPS/load-time claim.
+Normal streaming ranges overlap (161 to 158 ms median). Low-headroom streaming
+is lower in this three-pair campaign (167 to 152 ms), but we do not infer a game
+streaming improvement from this limited synthetic observation.
+
+Why the code changed
+
+1. XeNtSetTimerEx discarded the caller's APC mode. The generic setter derived
+   KernelMode from the title's execution context, delivered a callback, then let
+   an alertable wait run to its 500 ms timeout. An internal explicit-mode setter
+   now honors the requested queue while preserving PreviousMode for access and
+   pointer checks. Native NtSetTimer retains its existing behavior. Unsupported
+   modes are rejected before timer mutation. The stronger 30-check XBE covers
+   returned status, callback context/thread, nonalertable deferral, cancellation,
+   and a KernelMode control. It is registered in all CI firmware profiles.
+
+2. Buffer locking validated every page, then repeated the same eligibility
+   checks while committing each pin under the SAME PFN-lock hold. CommitPin now
+   changes the count directly after validation, preserving sticky overflow,
+   aliases, invalid-input atomicity, unlock rollback and deferred release. Host
+   comparison covers 672 assertions and 1,134 full-state cases in release,
+   checked and sanitizer builds. The scalar transition remains an oracle.
+
+3. DES expanded/permuted every round bit individually. Word operations and a
+   generated 2 KiB S/P table replace that round work. The original key schedule,
+   API layout, boundary permutations and CBC semantics remain. A 6,144-case
+   differential checks mutable schedules, aliasing, tails and sentinels, with
+   existing known-vector tests and independent table/bit-order review.
+
+Before combination, seven matched pairs confirmed pin4096 at 2.239 to 1.907 ms
+(14.84% less time), DES CBC at 33.369 to 3.530 ms (9.45x), and 3DES CBC at 100.172 to
+10.063 ms (9.95x). Results fluctuate across campaigns; the final image's table
+above is the direct qualification of the artifact being offered for testing.
+
+Compatibility and footprint
+
+The final campaign validates 25/25 runs: three pairs each of all API leaves,
+all 40 portable workloads, both streaming phases and all four synchronization
+modes, plus the focused timer guest. The timer guest passes 30/30 and returns
+STATUS_USER_APC in 51 ms; Complex returned it in 52 ms in the initial reference.
+All 639 API leaves remain accounted for: 630 ordinary passes, four existing TODO
+failures and five frozen skips. No new correctness failure was observed. All
+microbenchmark outputs/checksums and streaming/synchronization checks match.
+The four unresolved TODO failures are EOF/free-space status, read-only volume
+flush, initial thread priority and the published process thread list. No skip
+was added to conceal a candidate regression. The inherited FP-exception skip
+labels are not proof of the emulator's underlying cause.
+
+All four release/debug 64/128 firmware profiles build locally. The product host
+suite passes 131 tests with three skips. All 94 source-check commands from the
+firmware CI job pass on the final release64 source. The added DES differential
+also runs in CI, and the timer guest is no longer a manual-only check.
+
+Permanent IMAGE RAM remains 14 pages (56 KiB), ROM backing 92 pages, total image
+139 pages, discardable 33 pages, warm staging 177 of 505 pages. The DES table lives
+in existing ROM pages. Compressed payload grows only 16 bytes versus baseline;
+flash remains 524,288 bytes. This is a static image residency audit, not a claim
+about total runtime free memory. No new runtime allocation or per-call tracing
+was introduced.
+
+Slower observations and rejected work
+
+All leaf/workload results are retained. Among 630 comparable leaves, 37 have a
+lower observed range, 34 a higher range and 559 overlap in the final campaign.
+Three pairs do not establish statistical significance. Examples with higher
+ranges include flush_buffers_visibility (7.747 to 8.546 ms),
+overwrite_reextend_same_handle (16.925 to 18.483 ms), and the idempotent system
+interrupt leaf (0.087 to 0.370 ms). Portable pin-reject-0, pool-1 and sysva-1024
+also have higher ranges. These are observations requiring targeted repeat and
+attribution; they are not hidden by the aggregate gain.
+
+The earlier timer+DES image had slower breakpoint leaves. Their timed region
+contains the exception path, not the following TAP print; no logging explanation
+was proven. Those separated ranges do not recur in the final three-change
+comparison. Earlier standalone memory trials showed 5.7%/7.7% slower object-warm
+workloads; final object-warm-1 improves and object-warm-8 overlaps. Keep all runs
+rather than selecting the most favorable intermediate build.
+
+The first memory candidate inferred consecutive physical frames to save a
+second translation. It was 3.7% slower for 4096 pages across seven pairs and is
+excluded. Page-table allocations can break physical contiguity in normal
+virtual buffers, so reduced operation counts did not guarantee a useful path.
+
+Remaining priorities
+
+The separate completion-policy fixture passes 1,056 checks per BIOS and shows
+that blocking instead of polling does not explain away the streaming gap.
+Normal SpiritBoot loop times are 152.85/217.93/222.66 ms for polling APC/blocking
+APC/blocking event, versus Complex 83.62/81.93/81.24 ms. Submission rises from
+25 to 41–42 microseconds after blocking on SpiritBoot; Complex stays 9–10.
+Observable completion time includes scheduling and must not be called disk
+service time. Next: count direct-versus-worker routes and FAT mapping work,
+then measure submission stages before changing storage behavior.
+
+Continue #240 with the larger SYSVA/pinning gap to Complex, SHA compression,
+validated modular arithmetic paths, the four existing compatibility failures,
+and isolated repeats of slower final leaves. Private RSA CRT is already faster
+in the original comparison; do not optimize every synthetic exponent case as
+though it dominated games. Game validation remains separate from this suite.
+
+Evidence and reproduction
+
+../provenance/performance-improvements-20261013/ contains performance-all-leaves.csv and performance-full-fixtures.csv,
+all supplementary workloads, standalone seven-pair results, intermediate data,
+layout audit, full receipts and a portable evidence.zip with 94 native runs.
+README.txt gives exact reanalysis commands; the final analyzer requires every
+sample and verifies BIOS/XISO/emulator identity, exit, session, timing/order,
+TAP plans and semantic checksums. Portable reanalysis reproduces both final
+CSVs byte for byte. Individual design writeups explain the proofs and tests.
+Only owned/open implementation source and public API behavior were used.
