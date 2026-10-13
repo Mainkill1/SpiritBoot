@@ -1,0 +1,171 @@
+Public thread identity and lifetime prototype — qualification record
+===================================================================
+
+Scope and isolation
+-------------------
+This is an isolated prototype based on the exact async2 candidate. It does not
+modify the current candidate or parent product. Public nxdk APIs and published
+structures are the reference surface; Complex is executed only as an oracle.
+No proprietary code or disassembly is inspected.
+
+The demonstrated defect is that ObReferenceObjectByHandle returns a native
+ETHREAD while KeGetCurrentThread returns a truncated public shadow. Public
+GetExitCodeThread reads HasTerminated at 0x77 and ExitStatus at 0x120; the old
+0x80-byte shadow cannot contain the latter. The handle and current-thread
+pointers are also inconsistent. A larger allocation alone would not fix the
+pointer-taking APIs, reference counting, waits, notifications or APC paths.
+
+The prototype guarantees one registered public identity, a 0x140-byte backing
+allocation, ID before creation notification/start, terminal status before the
+native thread dispatcher signal, and identity lifetime until final object
+reference deletion. It maps pointer consumers back to the canonical native
+object before native object headers, scheduling, APC or wait operations.
+
+This is NOT a complete live Xbox KTHREAD reimplementation. Public process/APC/
+mutant/list links are not maintained as a live mirror; State/Priority/Quantum
+can be stale after native scheduling, tick, delay or boosts. Setters publish
+bounded control snapshots. Mutable creation metadata is not yet guaranteed.
+The v4 wait adapter guarantees qualified post-return caller blocks and moves
+its explicit user APC dispatch after their repair. Unrelated kernel APCs or
+observers inspecting caller blocks while linked can still see native fields.
+
+Pointer ownership and lookup
+----------------------------
+The public shadow is embedded at native KTHREAD+0x1b4. A 32-bucket exact-address
+registry uses an 8-byte native link per thread and 256 static bytes on i386.
+Registration follows complete initial publication; successful KeInit registers
+once. Failed pre-init deletion sees zero links. Final PspDeleteThread removes
+membership before native stack/CID storage is freed. Exit, handle closure and
+notification do not remove membership or consume extra references.
+
+Lookup never infers ownership from Header.Type, magic bytes, or a speculative
+read of caller memory. A monotonic low-five-bit mask is a negative filter;
+a present bit proves nothing. Native pool bodies and boot ETHREAD are aligned
+to at least eight bytes, and the view offset is 4 modulo 8, so this exact
+allocation scheme can accumulate at most four of 32 residue bits. Even if a
+future allocator increased the mask density, it would only increase exact
+lookup misses, not produce false ownership or false negatives. The bits are
+not cleared on removal.
+
+v4 caches one volatile exact public address from a successful registry match.
+The cache is cleared under interrupt exclusion before registry removal. An
+atomic pointer equality hit derives the native address from that same input;
+there is no separately loaded native pointer that could tear with replacement.
+A valid caller already holds an object reference or current-thread lifetime.
+Use after final dereference is outside the object-pointer API contract.
+
+Generic native event/file objects normally fail the residue filter inline.
+Known referenced outbound objects may safely inspect their native object type
+and return the thread shadow directly, without a generic registry search.
+Current-thread equality is also a known-lifetime fast path. Cache misses scan
+one bucket under brief UP interrupt exclusion. Synthetic 1-KiB aligned bodies
+produce maximum bucket lengths 1/1/1/2/4/8/16 for 8/16/32/64/128/256/512 threads.
+
+Memory and stack
+----------------
+Exact target compiler: KTHREAD 576 -> 776 bytes; ETHREAD 736 -> 936 bytes.
+Including the 24-byte object header and 8-byte pool header, both remain in the
+existing 1024-byte bucket. There is no per-thread external view allocation.
+The registry/filter/cache add 264 static bytes; static boot thread grows 200
+bytes. Actual page effects are checked natively, not inferred from body sizes.
+
+Caller multiwait blocks require Count*24 backup bytes and Count*4 translated
+object bytes: max 1792 bytes for 64 objects, plus ordinary function frames.
+One/two-object waits allocate proportionally; NULL blocks need no backup.
+Minimum native stack remains separately qualified by the actual thread-stack
+suite. A native 64-object user APC/reentrant oracle is part of v4 qualification.
+
+Native receipts already complete
+-------------------------------
+Initial async lifetime fixture: Complex, extent, async2 each 7833/7833, with
+1116 ordinary reads actually pending under 2 MiB/s QMP HDD throttle. Four
+concurrent issuers, cancellation/issuer exit, close/truncate/delete contenders,
+APC/IOSB/data/guards/file-position and repeated pool/page stability covered.
+See ../README.md and ../summary.json. Root also ran the same fixture on async3
+and combined async4 successfully.
+
+Thread identity probe: corrected Complex baseline 166/166, async2 118/166;
+prototype v1, v2 and v3 166/166. Initial terminal-ID-retention expectation was
+wrong: Complex clears public UniqueThread on final termination but retains it
+in the earlier exit notification. Invalid and corrected receipts are preserved.
+
+Wait oracle v2: Complex and v2 prototype 193/193, all immediate event WaitAny/
+WaitAll masks, zero timeout, alert, synchronization/notification events and
+WaitNext handoff. Failed-prefix and exact untouched winning/suffix bytes are
+asserted. This original oracle was event-only and inspected after return.
+
+Review edge oracle: Complex and v3 both 215 status/guard assertions passed,
+but diagnostic field comparisons found v3 defects. Abandoned WaitAny needs
+status-0x80 prefix normalization and abandoned WaitAll keeps the circular next
+pointer. User APC callbacks saw native Thread pointers and sentinel upper
+WaitType byte in v3; Complex exposed public identity and full SHORT WaitType.
+These observations are separate from the 215 passing assertion count.
+Receipts: wait-edge-v3-{complex,prototype}-20261013-131533-{1,2}.
+
+Metadata oracle: Complex and v3 both 166/166 existing identity assertions.
+Creation-time diagnostic: CreateTime is zero in callback then nonzero at return
+in both. Complex callback/return Quantum 60/60, SuspendCount 1/1, State 0/1;
+v3 0/0 for those. Start address, TLS and exact 16-KiB stack bounds match. These
+mutable fields are explicitly excluded; no native creation ordering, quantum
+policy or non-Ex registration change is included in v4.
+
+Cost/soak: Complex 139/139, v2 and v3 prototypes 139/139, async2 138/139 (the
+aggregate public metadata assertion is the expected failure). 32 held threads
+plus 320 create/destroy workers. After 64 warmup iterations, 256 steady workers
+leave available/pool/stack pages flat. Async2/v2/v3 have identical footprint:
+32 resident 16-KiB stacks cost 128 stack plus 8 pool pages; retired pool remains
+at its bounded peak. Complex reports no extra pool pages in that experiment.
+
+v3 ABBA removed v2's generic object reference regression; event/file costs
+fall within observed run spread. Repeated other-thread public reference pairs
+still cost about 12.05 ms/32768 vs baseline 4.47-4.49 ms. v4 exact-address cache
+addresses this measured path. v4 ABBA other-thread pointer medians are 5.138/5.125 ms vs baseline
+4.429/4.523 ms. Current thread 5.258/5.212 vs 4.506/4.510 ms. The remaining
+translation cost is roughly 20 ns per pointer pair and 40-60 ns per other-thread
+handle pair. Generic event/file paths have small residual effects/run spread;
+no zero-overhead claim. cost-summary-v4.json preserves all medians.
+
+Host evidence
+-------------
+v4 registry: actual production registry, registration tail and final deletion,
+ASan/UBSan; 138797 assertions, 512 objects and 128 repeated deletion/reuse
+rounds, arbitrary/interior negatives, cached deletion, collisions, IRQ restore.
+Adapter: actual production wrapper with controlled dispatcher results, i386
+ASan/UBSan; 448384 assertions, Count 1/2/3/64, immediate/queued, WaitAny/All,
+ordinary/abandoned/timeout/alert/userAPC, guards, exact prefix, next pointers,
+exactly one native call, WaitNext and public fields before APC dispatch.
+This harness stubs the dispatcher; native observations remain required.
+
+Existing actual-source suites rerun and passed on the v4 delta: thread-shadow,
+thread-stack, thread-wait 223, io-apc-order 63 cases, critical-section,
+object-handle-fastpath 560 matrix + 10000 close/reuse races + 100 held-reference
+final-close checks, and completion-wait source contracts; logs host-v4-*.log.
+
+Version identities
+------------------
+v3 ROM 6974ad8c3818e5157f5edf39ab76bb1c7740d1fd45e62bc15f47a9e681728e71
+v4 ROM faaa812c5262b5c67643bd4cf979ae6a4352174cad5093c4b0bfcbb9ac809a27
+v4 patch a273cb9139ce1c911b1e5bde491377ceaeb10fb1a218a6dcd6f0208a3d7c7aea
+v4 immutable source release64-v4/work-f4w78woc/source
+v4 initial edge fixture 8b7eb3c9651d84322f1006efa107d245946e0776692d38883bba3b2da5fd1b75
+v4 corrected fixture 76a73ef82857554cfb4ec7720a98c375b8347ae55b089be55c0d0dda11e33d4c
+
+v4 native exact oracle: Complex 295/295, v3 275/295, v4 295/295. Exactly 20 v3
+assertions fail: eight abandoned prefix/circle cases and twelve user APC block
+observations. Count 1/2/64, immediate and actually queued APCs, reentrant normal
+callbacks, exact order/IRQL, event matrix/WaitNext and guards are asserted.
+Both Xbox user APC routines run at PASSIVE_LEVEL. Initial fixture incorrectly
+expected APC_LEVEL for the kernel routine and incorrectly passed NULL caller
+blocks; the latter bugchecked Complex. nxdk declares WaitBlockArray required.
+Invalid receipt is preserved; NULL is only an internal host edge case now.
+Native cost qualification is complete (two v4 139/139 soak runs with flat
+footprint). Mixed held-self-thread/APC + WaitNext oracle also passes 295/295
+on Complex and v4. Final integrated owner-fix regression is parent-owned.
+
+Integration dependency
+----------------------
+Critical-section public owner identity is a separately qualified change,
+PR230 / commit 86c2048d. This prototype's async2 base predates it. Combined
+packaging must apply that independent owner patch first; this prototype does
+not duplicate or overwrite its fix. Full live dispatcher owner/list identity
+is outside this narrower thread identity/exit-status patch.
