@@ -1,0 +1,801 @@
+diff --git a/ntoskrnl/xb/obcreate.h b/ntoskrnl/xb/obcreate.h
+index 605bc6fa..2d549f85 100644
+--- a/ntoskrnl/xb/obcreate.h
++++ b/ntoskrnl/xb/obcreate.h
+@@ -18,8 +18,9 @@ BOOLEAN XobIsTitleType(PVOID Type);
+ BOOLEAN XobIsShim(PVOID Object);
+ POBJECT_TYPE XobShimObjectType(VOID);
+ 
+-/* Consumes the caller's reference on the shim and hands back the title
+- * object it stands for, referenced, once the type matches. */
++/* Consumes exactly one caller-owned native shim reference on every path.
++ * Success adds one reference on the title body and transfers it to Object;
++ * mismatch clears Object and adds no title reference. */
+ NTSTATUS XobUnwrapShim(PVOID Shim, PVOID Type, PVOID *Object);
+ 
+ VOID FASTCALL XobReferenceObject(PVOID Object);
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index c3c3f955..068908d6 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -1940,20 +1940,39 @@ XeObReferenceObjectByHandle(HANDLE Handle, POBJECT_TYPE Type, PVOID *Object)
+      * once any exist every handle may be one. */
+     if (XobHasTitleObjects())
+     {
+-        PVOID Shim;
++        PVOID Native;
++        POBJECT_TYPE Internal;
++        NTSTATUS Status;
+ 
+-        if (NT_SUCCESS(ObReferenceObjectByHandle(Handle, 0,
+-                                                 XobShimObjectType(),
+-                                                 KernelMode, &Shim, NULL)))
+-            return XobUnwrapShim(Shim, Type, Object);
++        *Object = NULL;
++        /* The native helper accepts an untyped reference for ordinary,
++         * kernel and current-process/thread handles. Hold that reference
++         * while classifying the immutable internal type. */
++        Status = ObReferenceObjectByHandle(Handle, 0, NULL, KernelMode,
++                                          &Native, NULL);
++        if (!NT_SUCCESS(Status))
++            return XobIsTitleType(Type) ? STATUS_OBJECT_TYPE_MISMATCH : Status;
++
++        /* Creation registers a title type before the first insert creates
++         * the shim type. A NULL shim type must never classify an ordinary
++         * native body as a shim. Unwrap consumes the acquired reference on
++         * both success and failure. */
++        if (XobIsShim(Native))
++            return XobUnwrapShim(Native, Type, Object);
+ 
+         /* Nothing but a title object can be of a title's type, and the
+-         * lookup below would take that pointer for one of ntoskrnl's. */
+-        if (XobIsTitleType(Type))
++         * caller owns the one native reference only after validation. */
++        Internal = XeObjectTypeToInternal(Type);
++        if (XobIsTitleType(Type) ||
++            (Internal != NULL &&
++             OBJECT_TO_OBJECT_HEADER(Native)->Type != Internal))
+         {
+-            *Object = NULL;
++            ObfDereferenceObject(Native);
+             return STATUS_OBJECT_TYPE_MISMATCH;
+         }
++
++        *Object = Native;
++        return STATUS_SUCCESS;
+     }
+     return ObReferenceObjectByHandle(Handle, 0, XeObjectTypeToInternal(Type),
+                                      KernelMode, Object, NULL);
+diff --git a/tests/host/object-handle-fastpath/check.py b/tests/host/object-handle-fastpath/check.py
+new file mode 100644
+index 00000000..5bf39f83
+--- /dev/null
++++ b/tests/host/object-handle-fastpath/check.py
+@@ -0,0 +1,134 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Compile the actual adapter, shim ownership, native reference and table bodies.
++
++Usage: check.py OUTPUT [--baseline] [--compare SOURCE] [--benchmark]
++Requires a compiler with 32-bit libc and pthread support. No production counters.
++"""
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import resource
++import statistics
++import subprocess
++
++HERE = Path(__file__).resolve().parent
++ROOT = HERE.parents[2]
++
++
++def function(text, name):
++    hit = re.search(r'\b' + name + r'\s*\([^;]*?\)\s*\{', text)
++    if not hit:
++        raise ValueError(f'missing production function {name}')
++    start = text.rfind('\n', 0, hit.start()) + 1
++    declaration = re.compile(r'(?:static\s+)?(?:NTSTATUS|POBJECT_TYPE|PHANDLE_TABLE_ENTRY|VOID|BOOLEAN|LONG_PTR)(?:\s+(?:NTAPI|FASTCALL))?|NTAPI|FASTCALL')
++    while start:
++        previous = text.rfind('\n', 0, start - 1) + 1
++        if not declaration.fullmatch(text[previous:start].strip()):
++            break
++        start = previous
++    brace = text.index('{', hit.start())
++    depth, end = 1, brace + 1
++    while depth:
++        depth += (text[end] == '{') - (text[end] == '}')
++        end += 1
++    return text[start:end] + '\n'
++
++
++def build(root, output, counted):
++    output.mkdir(parents=True, exist_ok=True)
++    paths = ['ntoskrnl/xb/xbe.c', 'ntoskrnl/xb/obcreate.c',
++             'ntoskrnl/ob/obref.c', 'ntoskrnl/ex/handle.c',
++             'ntoskrnl/xb/object-types.h']
++    source = {p: (root / p).read_text() for p in paths}
++    ob = source[paths[1]]
++    prefix = ob[ob.index('typedef struct _XB_OBJECT_HEADER'):ob.index('/*\n * Reference counting')]
++    names = ['XobReferenceObject', 'XobDereferenceObject', 'XobIsTitleType',
++             'XobRememberType', 'XobHasTitleObjects', 'XobShimDelete',
++             'XobShimClose', 'XobIsShim', 'XobShimObjectType', 'XobUnwrapShim']
++    bodies = prefix + ''.join(function(ob, n) for n in names)
++    for name in ['ExpLookupHandleTableEntry', 'ExpLockHandleTableEntry',
++                 'ExUnlockHandleTableEntry', 'ExMapHandleToPointer']:
++        body = function(source[paths[3]], name)
++        counter = {'ExpLookupHandleTableEntry': 'table_walks',
++                   'ExMapHandleToPointer': 'table_maps'}.get(name)
++        if counter:
++            body = body.replace('{', '{\n    COUNT(' + counter + ');', 1)
++        bodies += body
++    for name in ['ObfDereferenceObject', 'ObReferenceObjectByHandle']:
++        body = function(source[paths[2]], name)
++        body = body.replace('{', '{\n    COUNT(' + ('native_dereferences' if name == 'ObfDereferenceObject' else 'native_calls') + ');', 1)
++        bodies += body
++    bodies += function(source[paths[0]], 'XeObjectTypeToInternal')
++    bodies += function(source[paths[0]], 'XeObReferenceObjectByHandle')
++    (output / 'production.inc').write_text(bodies)
++    header = source[paths[4]].replace('#pragma once', '')
++    (output / 'object-types.inc').write_text(header)
++    executable = output / ('handle-counted' if counted else 'handle-timing')
++    command = ['cc', '-m32', '-std=c11', '-O2', '-g', '-pthread', '-fno-strict-aliasing', '-Wall', '-Wextra',
++               '-Werror', '-Wno-multichar', '-Wno-unused-function', '-Wno-sign-compare', '-I', str(output),
++               *(['-DCOUNTERS'] if counted else []), str(HERE / 'fixture.c'), '-o', str(executable)]
++    subprocess.run(command, check=True)
++    return executable, {'compiler': subprocess.check_output(['cc', '--version'], text=True).splitlines()[0],
++                        'command': command, 'sha256': {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in paths}}
++
++
++def run(exe, *arguments):
++    result = subprocess.run([str(exe), *arguments], capture_output=True, text=True)
++    if result.returncode:
++        raise AssertionError(f'{exe.name} {arguments}: returncode={result.returncode}\n{result.stdout}\n{result.stderr}')
++    return [json.loads(line) for line in result.stdout.splitlines()]
++
++
++def main():
++    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
++    p = argparse.ArgumentParser(description=__doc__)
++    p.add_argument('output', type=Path)
++    p.add_argument('--baseline', action='store_true', help='characterize the legacy two-call wrapper; skip corrected lazy-shim test')
++    p.add_argument('--compare', type=Path, help='compile and compare a second source tree, normally the baseline')
++    p.add_argument('--benchmark', action='store_true')
++    a = p.parse_args()
++    out = a.output.resolve()
++    exe, provenance = build(ROOT, out / 'candidate', True)
++    matrix = run(exe, 'matrix', 'baseline' if a.baseline else 'optimized')
++    races = run(exe, 'races')
++    lazy = [] if a.baseline else run(exe, 'lazy')
++    result = dict(provenance=provenance, matrix=matrix, races=races, lazy_shim=lazy)
++    if a.compare:
++        before, old_provenance = build(a.compare.resolve(), out / 'baseline', True)
++        old_matrix = run(before, 'matrix', 'baseline')
++        behavior = lambda rows: [{k: v for k, v in row.items() if k not in ('calls', 'maps', 'walks', 'references', 'dereferences')} for row in rows]
++        assert behavior(matrix) == behavior(old_matrix), 'status/output/end-ownership differs from legacy matrix'
++        result['baseline'] = dict(provenance=old_provenance, matrix=old_matrix, races=run(before, 'races'))
++        lazy_red = subprocess.run([str(before), 'lazy'], capture_output=True, text=True)
++        assert lazy_red.returncode != 0, 'legacy create-before-insert defect unexpectedly passes'
++        result['baseline_lazy_failure'] = dict(returncode=lazy_red.returncode, stdout=lazy_red.stdout, stderr=lazy_red.stderr)
++        if a.benchmark:
++            cpu = min(os.sched_getaffinity(0))
++            os.sched_setaffinity(0, {cpu})
++            timings = {}
++            old_time, _ = build(a.compare.resolve(), out / 'baseline-timing', False)
++            new_time, _ = build(ROOT, out / 'candidate-timing', False)
++            for workload in ['no-title', 'ordinary', 'shim', 'wrong-native', 'mixed']:
++                samples = {'baseline': [], 'candidate': []}
++                for pair in range(15):
++                    for name, binary in ([('baseline', old_time), ('candidate', new_time)] if pair % 2 == 0 else [('candidate', new_time), ('baseline', old_time)]):
++                        record = run(binary, 'timing', workload)[0]
++                        samples[name].append(record)
++                assert all(s['checksum'] == samples['baseline'][0]['checksum'] for rows in samples.values() for s in rows), workload
++                timings[workload] = {'samples': samples, 'median_ns_per_call': {name: statistics.median(s['ns'] / s['iterations'] for s in rows) for name, rows in samples.items()}}
++            result['host_timing'] = {'pairs': 15, 'iterations_per_sample': 1000000,
++                                     'cpu_affinity': cpu,
++                                     'order': 'alternating baseline/candidate',
++                                     'meaning': '32-bit Linux production-body host timing, not xemu throughput or a title speedup',
++                                     'workloads': timings}
++    (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
++    print(json.dumps({'status': 'passed', 'matrix_cases': len(matrix), 'race_checks': races,
++                      'lazy_checks': lazy, 'result': str(out / 'result.json')}))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/host/object-handle-fastpath/fixture.c b/tests/host/object-handle-fastpath/fixture.c
+new file mode 100644
+index 00000000..883d0eaf
+--- /dev/null
++++ b/tests/host/object-handle-fastpath/fixture.c
+@@ -0,0 +1,366 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Production bodies with 32-bit layouts. OS scheduling/APC/pool/deletion
++ * boundaries are fixtures; native table selection, walk, entry locking,
++ * type/access checks, reference acquisition and shim ownership are real.
++ */
++#define _POSIX_C_SOURCE 200809L
++#include <assert.h>
++#include <pthread.h>
++#include <sched.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++typedef void VOID, *PVOID, *HANDLE;
++typedef uint32_t ULONG, ULONG_PTR, ACCESS_MASK;
++typedef int32_t LONG, LONG_PTR, NTSTATUS, *PLONG;
++typedef size_t SIZE_T;
++typedef uint8_t UCHAR, BOOLEAN, KIRQL;
++typedef int KPROCESSOR_MODE;
++typedef pthread_mutex_t KSPIN_LOCK;
++#define NTAPI
++#define FASTCALL
++#define IN
++#define OUT
++#define OPTIONAL
++#define TRUE 1
++#define FALSE 0
++#define KernelMode 0
++#define UserMode 1
++#define APC_LEVEL 1
++#define NonPagedPool 0
++#define NT_SUCCESS(s) ((s) >= 0)
++#define STATUS_SUCCESS ((NTSTATUS)0)
++#define STATUS_INVALID_HANDLE ((NTSTATUS)0xc0000008)
++#define STATUS_OBJECT_TYPE_MISMATCH ((NTSTATUS)0xc0000024)
++#define STATUS_ACCESS_DENIED ((NTSTATUS)0xc0000022)
++#define ASSERT assert
++#define PAGED_CODE() ((void)0)
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define HandleToLong(h) ((LONG)(uintptr_t)(h))
++#define NtCurrentProcess() ((HANDLE)(uintptr_t)0xffffffff)
++#define NtCurrentThread() ((HANDLE)(uintptr_t)0xfffffffe)
++#define KERNEL_HANDLE_FLAG 0x80000000u
++#define ObKernelHandleToHandle(h) ((HANDLE)((ULONG_PTR)(h) & ~KERNEL_HANDLE_FLAG))
++#define OBJ_HANDLE_ATTRIBUTES 7u
++#define ObpGetHandleObject(e) ((POBJECT_HEADER)((ULONG_PTR)(e)->Object & ~OBJ_HANDLE_ATTRIBUTES))
++#define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p) - offsetof(t,f)))
++typedef struct _LIST_ENTRY { struct _LIST_ENTRY *Flink, *Blink; } LIST_ENTRY, *PLIST_ENTRY;
++typedef struct { uint16_t Length, MaximumLength; char *Buffer; } ANSI_STRING;
++typedef struct _OBJECT_TYPE { ULONG Id; } OBJECT_TYPE, *POBJECT_TYPE;
++typedef struct _OBJECT_HEADER {
++    LONG_PTR PointerCount;
++    union { LONG_PTR HandleCount; volatile PVOID NextToFree; };
++    POBJECT_TYPE Type;
++    UCHAR NameInfoOffset, HandleInfoOffset, QuotaInfoOffset, Flags;
++    union { PVOID ObjectCreateInfo, QuotaBlockCharged; };
++    PVOID SecurityDescriptor;
++    uint64_t Body;
++} OBJECT_HEADER, *POBJECT_HEADER;
++#define OBJECT_TO_OBJECT_HEADER(o) CONTAINING_RECORD(o, OBJECT_HEADER, Body)
++typedef struct _HANDLE_TABLE_ENTRY {
++    union { PVOID Object; ULONG_PTR ObAttributes, Value; };
++    union { ULONG GrantedAccess; LONG NextFreeTableEntry; };
++} HANDLE_TABLE_ENTRY, *PHANDLE_TABLE_ENTRY;
++typedef struct _HANDLE_TABLE {
++    ULONG_PTR TableCode, NextHandleNeedingPool;
++    ULONG HandleContentionEvent;
++} HANDLE_TABLE, *PHANDLE_TABLE;
++typedef union _EXHANDLE {
++    struct { ULONG_PTR TagBits:2, Index:29, KernelFlag:1; };
++    struct { ULONG_PTR TagBits2:2, LowIndex:9, MidIndex:10, HighIndex:10, KernelFlag2:1; };
++    HANDLE GenericHandleOverlay;
++    ULONG_PTR Value;
++} EXHANDLE;
++#define LOW_LEVEL_ENTRIES 512
++#define EXHANDLE_TABLE_ENTRY_LOCK_BIT 1
++typedef struct { ULONG HandleAttributes, GrantedAccess; } OBJECT_HANDLE_INFORMATION, *POBJECT_HANDLE_INFORMATION;
++typedef struct _PAYLOAD { PVOID Object; PHANDLE_TABLE ObjectTable; ULONG GrantedAccess; LONG CombinedApcDisable; ULONG Cookie; } PAYLOAD, *PEPROCESS, *PETHREAD;
++_Static_assert(sizeof(void *) == 4, "exercise native i386 pointer/tag layouts");
++_Static_assert(sizeof(HANDLE_TABLE_ENTRY) == 8, "native low-level entry layout");
++_Static_assert(offsetof(OBJECT_HEADER, Body) == 24, "native header body offset");
++#include "object-types.inc"
++XBOX_OBJECT_TYPE XePsThreadObjectType, XeExEventObjectType, XeExSemaphoreObjectType,
++    XeExMutantObjectType, XeExTimerObjectType, XeIoFileObjectType, XeIoDeviceObjectType,
++    XeIoCompletionObjectType, XeObDirectoryObjectType, XeObSymbolicLinkObjectType;
++static OBJECT_TYPE types[12];
++static POBJECT_TYPE PsThreadType=&types[0], ExEventObjectType=&types[1],
++    ExSemaphoreObjectType=&types[2], ExMutantObjectType=&types[3], ExTimerType=&types[4],
++    IoFileObjectType=&types[5], IoDeviceObjectType=&types[6], IoCompletionType=&types[7],
++    ObpDirectoryObjectType=&types[8], ObpSymbolicLinkObjectType=&types[9],
++    PsProcessType=&types[10];
++static PHANDLE_TABLE ObpKernelHandleTable;
++static PEPROCESS current_process;
++static PETHREAD current_thread;
++static _Thread_local LONG apc_disable;
++static _Thread_local struct { unsigned native_calls, table_maps, table_walks, native_references, native_dereferences; } counters;
++#ifdef COUNTERS
++#define COUNT(n) (++counters.n)
++#else
++#define COUNT(n) ((void)0)
++#endif
++static void KeEnterCriticalRegion(void) { --apc_disable; }
++static void KeLeaveCriticalRegion(void) { ++apc_disable; }
++static PEPROCESS PsGetCurrentProcess(void) { return current_process; }
++static PETHREAD PsGetCurrentThread(void) { return current_thread; }
++static PETHREAD KeGetCurrentThread(void) { static _Thread_local PAYLOAD t; t.CombinedApcDisable=apc_disable; return &t; }
++static KIRQL KeGetCurrentIrql(void) { return 0; }
++static BOOLEAN KeAreAllApcsDisabled(void) { return FALSE; }
++static LONG InterlockedIncrement(PLONG p) { return __atomic_add_fetch(p,1,__ATOMIC_SEQ_CST); }
++static LONG InterlockedDecrement(PLONG p) { return __atomic_sub_fetch(p,1,__ATOMIC_SEQ_CST); }
++static LONG_PTR InterlockedIncrementSizeT(LONG_PTR *p) { COUNT(native_references); return InterlockedIncrement(p); }
++static LONG_PTR InterlockedDecrementSizeT(LONG_PTR *p) { return InterlockedDecrement(p); }
++static LONG_PTR InterlockedExchangeAddSizeT(LONG_PTR *p, LONG n) { COUNT(native_references); return __atomic_fetch_add(p,n,__ATOMIC_SEQ_CST); }
++static PVOID InterlockedCompareExchangePointer(PVOID *p, PVOID n, PVOID old) { __atomic_compare_exchange_n(p,&old,n,0,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST); return old; }
++static LONG InterlockedOr(PLONG p, LONG n) { return __atomic_fetch_or(p,n,__ATOMIC_SEQ_CST); }
++static void ExfUnblockPushLock(ULONG *p, void *w) { (void)p;(void)w; }
++static void ExpBlockOnLockedHandleEntry(PHANDLE_TABLE t, PHANDLE_TABLE_ENTRY e) { (void)t;(void)e; sched_yield(); }
++static void KeAcquireSpinLock(KSPIN_LOCK *l, KIRQL *i) { *i=0; assert(pthread_mutex_lock(l)==0); }
++static void KeReleaseSpinLock(KSPIN_LOCK *l, KIRQL i) { (void)i; assert(pthread_mutex_unlock(l)==0); }
++static void InitializeListHead(PLIST_ENTRY h) { h->Flink=h->Blink=h; }
++static void InsertTailList(PLIST_ENTRY h, PLIST_ENTRY e) { e->Flink=h;e->Blink=h->Blink;h->Blink->Flink=e;h->Blink=e; }
++static PVOID ExAllocatePoolWithTag(ULONG pool, SIZE_T size, ULONG tag) { (void)pool;(void)tag; return calloc(1,size); }
++static void ExFreePool(PVOID p) { free(p); }
++static LONG native_deletes, shim_deletes, title_deletes, title_frees;
++static void ObpDeleteObject(PVOID Object, BOOLEAN b);
++static void ObpDeferObjectDeletion(POBJECT_HEADER h) { (void)h; abort(); }
++static LONG_PTR ObfDereferenceObject(PVOID Object);
++#include "production.inc"
++
++static void ObpDeleteObject(PVOID Object, BOOLEAN b) {
++    (void)b;
++    if (OBJECT_TO_OBJECT_HEADER(Object)->Type == XobShimType) {
++        InterlockedIncrement(&shim_deletes);
++        XobShimDelete(Object);
++    } else InterlockedIncrement(&native_deletes);
++    free(OBJECT_TO_OBJECT_HEADER(Object));
++}
++static void title_delete(PVOID p) { (void)p; InterlockedIncrement(&title_deletes); }
++static void title_free(PVOID p) { InterlockedIncrement(&title_frees); free(p); }
++static XBOX_OBJECT_TYPE title_types[2];
++static HANDLE_TABLE normal_table, kernel_table;
++static HANDLE_TABLE_ENTRY normal_entries[512], kernel_entries[512];
++static PAYLOAD *new_native(POBJECT_TYPE type, LONG refs, LONG handles, ULONG cookie) {
++    OBJECT_HEADER *h=calloc(1,offsetof(OBJECT_HEADER,Body)+sizeof(PAYLOAD)); assert(h);
++    h->PointerCount=refs;h->HandleCount=handles;h->Type=type;
++    PAYLOAD *p=(PAYLOAD *)&h->Body; p->GrantedAccess=0xffffffff;p->Cookie=cookie;return p;
++}
++static PVOID new_title(unsigned index, LONG refs, LONG handles) {
++    PXB_OBJECT_HEADER h=calloc(1,sizeof(*h)+sizeof(ULONG));assert(h);
++    h->PointerCount=refs;h->HandleCount=handles;h->Type=&title_types[index];
++    *(ULONG *)(h+1)=0xabc000u+index;return h+1;
++}
++static void put_entry(HANDLE_TABLE_ENTRY *entry, PVOID p) {
++    entry->GrantedAccess=0xffffffff;
++    __atomic_store_n(&entry->Value,(ULONG_PTR)OBJECT_TO_OBJECT_HEADER(p)|1,__ATOMIC_SEQ_CST);
++}
++static void setup(BOOLEAN titles, BOOLEAN ready) {
++    memset(normal_entries,0,sizeof(normal_entries));memset(kernel_entries,0,sizeof(kernel_entries));
++    normal_table.TableCode=(ULONG_PTR)normal_entries;normal_table.NextHandleNeedingPool=512*4;
++    kernel_table.TableCode=(ULONG_PTR)kernel_entries;kernel_table.NextHandleNeedingPool=512*4;
++    ObpKernelHandleTable=&kernel_table;
++    current_process=new_native(PsProcessType,1,0,90);current_process->ObjectTable=&normal_table;
++    current_thread=new_native(PsThreadType,1,0,91);
++    for(unsigned i=0;i<10;i++) put_entry(&normal_entries[i+1],new_native(&types[i],1,1,i+1));
++    put_entry(&kernel_entries[1],new_native(IoFileObjectType,1,1,80));
++    for(unsigned i=0;i<2;i++) { title_types[i].DeleteProcedure=title_delete;title_types[i].FreeProcedure=title_free; }
++    if(titles) {
++        XobRememberType(&title_types[0]);XobRememberType(&title_types[1]);
++        if(ready) {
++            XobShimType=&types[11];XobShimTypeState=2;
++            PAYLOAD *shim=new_native(XobShimType,1,1,70);shim->Object=new_title(0,1,1);
++            put_entry(&normal_entries[20],shim);
++        }
++    }
++}
++static void release_result(PVOID p, BOOLEAN title) { if(title)XobDereferenceObject(p);else ObfDereferenceObject(p); }
++static int expect_case(const char *label, HANDLE handle, PVOID requested,
++                       NTSTATUS want, PVOID body, BOOLEAN title, unsigned calls, unsigned maps) {
++    PVOID out=(PVOID)0xfeedfaceu;
++    LONG native_before=body && !title?OBJECT_TO_OBJECT_HEADER(body)->PointerCount:0;
++    LONG title_before=body && title?XbHeader(body)->PointerCount:0;
++    memset(&counters,0,sizeof(counters));
++    NTSTATUS s=XeObReferenceObjectByHandle(handle,requested,&out);
++    if(s!=want||out!=(want==STATUS_SUCCESS?body:NULL)) {
++        fprintf(stderr,"FAIL %s status=%08x expected=%08x output=%p expected=%p\n",label,(unsigned)s,(unsigned)want,out,want==STATUS_SUCCESS?body:NULL);return 1;
++    }
++    if(want==STATUS_SUCCESS) {
++        assert((title?XbHeader(out)->PointerCount:OBJECT_TO_OBJECT_HEADER(out)->PointerCount)==(title?title_before:native_before)+1);
++        release_result(out,title);
++        assert((title?XbHeader(body)->PointerCount:OBJECT_TO_OBJECT_HEADER(body)->PointerCount)==(title?title_before:native_before));
++    } else if(body) assert((title?XbHeader(body)->PointerCount:OBJECT_TO_OBJECT_HEADER(body)->PointerCount)==(title?title_before:native_before));
++    assert(apc_disable==0);
++    printf("{\"case\":\"%s\",\"status\":%u,\"output\":%u,\"ownership\":\"balanced\",\"calls\":%u,\"maps\":%u,\"walks\":%u,\"references\":%u,\"dereferences\":%u}\n",label,(unsigned)s,s==STATUS_SUCCESS?(title?70:((PAYLOAD *)out)->Cookie):0,counters.native_calls,counters.table_maps,counters.table_walks,counters.native_references,counters.native_dereferences);
++#ifdef COUNTERS
++    if(counters.native_calls!=calls||counters.table_maps!=maps) {
++        fprintf(stderr,"FAIL %s calls/maps=%u/%u expected=%u/%u\n",label,counters.native_calls,counters.table_maps,calls,maps);return 1;
++    }
++#else
++    (void)calls;(void)maps;
++#endif
++    return 0;
++}
++static void close_entry(HANDLE_TABLE *t, HANDLE handle) {
++    KeEnterCriticalRegion();
++    HANDLE_TABLE_ENTRY *entry=ExMapHandleToPointer(t,handle);assert(entry);
++    OBJECT_HEADER *h=ObpGetHandleObject(entry);
++    __atomic_store_n(&entry->Value,0,__ATOMIC_SEQ_CST);
++    InterlockedDecrement(&h->HandleCount);
++    if(h->Type==XobShimType) XobShimClose(current_process,&h->Body,0,1,1);
++    KeLeaveCriticalRegion();ObfDereferenceObject(&h->Body);
++}
++static int table_levels(BOOLEAN optimized);
++static int matrix(BOOLEAN optimized) {
++    PVOID decoys[]={&XePsThreadObjectType,&XeExEventObjectType,&XeExSemaphoreObjectType,&XeExMutantObjectType,&XeExTimerObjectType,&XeIoFileObjectType,&XeIoDeviceObjectType,&XeIoCompletionObjectType,&XeObDirectoryObjectType,&XeObSymbolicLinkObjectType};
++    for(unsigned titles=0;titles<2;titles++) {
++        setup(titles,TRUE);
++        unsigned calls=titles&&!optimized?2:1;
++        for(unsigned i=0;i<10;i++) {
++            HANDLE h=(HANDLE)(uintptr_t)((i+1)*4); PVOID body=&ObpGetHandleObject(&normal_entries[i+1])->Body;
++            PVOID requests[]={NULL,&types[i],decoys[i],&types[(i+1)%10],&title_types[0],&title_types[1]};
++            NTSTATUS wants[]={STATUS_SUCCESS,STATUS_SUCCESS,STATUS_SUCCESS,STATUS_OBJECT_TYPE_MISMATCH,STATUS_OBJECT_TYPE_MISMATCH,STATUS_OBJECT_TYPE_MISMATCH};
++            for(unsigned tag=0;tag<4;tag++)for(unsigned r=0;r<6;r++) {
++                char label[80];snprintf(label,sizeof(label),"titles%u-native%u-tag%u-request%u",titles,i,tag,r);
++                if(expect_case(label,(HANDLE)((ULONG_PTR)h+tag),requests[r],wants[r],body,FALSE,titles&&r>=4?1:calls,titles&&r>=4?1:calls))return 1;
++            }
++        }
++        for(unsigned which=0;which<2;which++) {
++            HANDLE h=which?NtCurrentThread():NtCurrentProcess();PVOID body=which?(PVOID)current_thread:(PVOID)current_process;
++            PVOID requests[]={NULL,which?PsThreadType:PsProcessType,&XePsThreadObjectType,ExEventObjectType,&title_types[0]};
++            for(unsigned r=0;r<5;r++) {
++                NTSTATUS want=r<2||(which&&r==2)?STATUS_SUCCESS:STATUS_OBJECT_TYPE_MISMATCH;
++                char label[80];snprintf(label,sizeof(label),"titles%u-pseudo%u-request%u",titles,which,r);
++                if(expect_case(label,h,requests[r],want,body,FALSE,titles&&r==4?1:calls,0))return 1;
++            }
++        }
++        for(unsigned r=0;r<4;r++) {
++            PVOID requests[]={NULL,&XeIoFileObjectType,ExEventObjectType,&title_types[0]};
++            PVOID body=&ObpGetHandleObject(&kernel_entries[1])->Body;
++            char label[80];snprintf(label,sizeof(label),"titles%u-kernel-request%u",titles,r);
++            if(expect_case(label,(HANDLE)0x80000004u,requests[r],r<2?STATUS_SUCCESS:STATUS_OBJECT_TYPE_MISMATCH,body,FALSE,titles&&r==3?1:calls,titles&&r==3?1:calls))return 1;
++        }
++        HANDLE invalid[]={NULL,(HANDLE)2,(HANDLE)0x7ffffffcu,(HANDLE)0x80000000u,(HANDLE)0xfffffffcu,(HANDLE)2048,(HANDLE)200};
++        for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);i++)for(unsigned r=0;r<3;r++) {
++            PVOID requests[]={NULL,&XeExEventObjectType,&title_types[0]};
++            char label[80];snprintf(label,sizeof(label),"titles%u-invalid%u-request%u",titles,i,r);
++            if(expect_case(label,invalid[i],requests[r],titles&&r==2?STATUS_OBJECT_TYPE_MISMATCH:STATUS_INVALID_HANDLE,NULL,FALSE,titles&&r==2?1:calls,titles&&r==2?1:calls))return 1;
++        }
++        if(titles) {
++            PAYLOAD *shim=(PAYLOAD *)&ObpGetHandleObject(&normal_entries[20])->Body;
++            PVOID requests[]={NULL,&title_types[0],&title_types[1],&XeExEventObjectType,ExEventObjectType};
++            for(unsigned r=0;r<5;r++) {
++                char label[80];snprintf(label,sizeof(label),"shim-request%u",r);
++                if(expect_case(label,(HANDLE)80,requests[r],r<2?STATUS_SUCCESS:STATUS_OBJECT_TYPE_MISMATCH,shim->Object,TRUE,1,1))return 1;
++                assert(OBJECT_TO_OBJECT_HEADER(shim)->PointerCount==1);
++            }
++            PVOID held=NULL;assert(XeObReferenceObjectByHandle((HANDLE)80,(POBJECT_TYPE)&title_types[0],&held)==0);
++            close_entry(&normal_table,(HANDLE)80);
++            assert(shim_deletes==1&&title_deletes==0&&title_frees==0&&XbHeader(held)->HandleCount==0&&XbHeader(held)->PointerCount==1);
++            XobDereferenceObject(held);assert(title_deletes==1&&title_frees==1);
++            puts("{\"case\":\"shim-close-while-referenced\",\"delete\":1,\"free\":1}");
++        }
++        PVOID held=NULL;assert(XeObReferenceObjectByHandle((HANDLE)8,(POBJECT_TYPE)&XeExEventObjectType,&held)==0);
++        LONG deleted=native_deletes;close_entry(&normal_table,(HANDLE)8);
++        assert(native_deletes==deleted&&OBJECT_TO_OBJECT_HEADER(held)->PointerCount==1);
++        ObfDereferenceObject(held);assert(native_deletes==deleted+1);
++        char label[80];snprintf(label,sizeof(label),"titles%u-closed",titles);
++        if(expect_case(label,(HANDLE)8,&XeExEventObjectType,STATUS_INVALID_HANDLE,NULL,FALSE,calls,calls))return 1;
++    }
++    return table_levels(optimized);
++}
++static int lazy(void) {
++    setup(TRUE,FALSE);PVOID body=&ObpGetHandleObject(&normal_entries[2])->Body;
++    assert(XobHasTitleObjects()&&XobShimObjectType()==NULL);
++    return expect_case("title-created-shim-not-initialized",(HANDLE)8,&XeExEventObjectType,STATUS_SUCCESS,body,FALSE,1,1);
++}
++static int table_levels(BOOLEAN optimized) {
++    HANDLE_TABLE saved=normal_table;
++    HANDLE_TABLE_ENTRY *leaf=calloc(512,sizeof(*leaf));
++    PVOID *middle=calloc(1024,sizeof(PVOID)),*top=calloc(1024,sizeof(PVOID));
++    assert(leaf&&middle&&top);
++    PVOID object=new_native(ExEventObjectType,1,1,201);put_entry(&leaf[1],object);
++    middle[1]=leaf;top[1]=middle;
++    for(unsigned level=1;level<3;level++) {
++        unsigned index=level==1?513:524801;
++        normal_table.TableCode=(ULONG_PTR)(level==1?middle:top)|level;
++        normal_table.NextHandleNeedingPool=(index+1)*4;
++        if(expect_case(level==1?"level1-grown-table":"level2-grown-table",(HANDLE)(uintptr_t)(index*4),&XeExEventObjectType,STATUS_SUCCESS,object,FALSE,optimized?1:2,optimized?1:2))return 1;
++    }
++    normal_table=saved;OBJECT_TO_OBJECT_HEADER(object)->HandleCount=0;ObfDereferenceObject(object);
++    free(leaf);free(middle);free(top);return 0;
++}
++static LONG stop_readers, reader_calls;
++static void *reader(void *ignored) {
++    (void)ignored;
++    while(!__atomic_load_n(&stop_readers,__ATOMIC_SEQ_CST)) {
++        PVOID out=(PVOID)0xfeedface;NTSTATUS s=XeObReferenceObjectByHandle((HANDLE)120,(POBJECT_TYPE)&XeExEventObjectType,&out);
++        if(s==STATUS_SUCCESS) { assert(out&&((PAYLOAD *)out)->Cookie==200);ObfDereferenceObject(out); }
++        else assert(s==STATUS_INVALID_HANDLE&&out==NULL);
++        InterlockedIncrement(&reader_calls);
++    }
++    return NULL;
++}
++static pthread_barrier_t final_close_barrier;
++static void *hold_until_closed(void *ignored) {
++    (void)ignored;
++    PVOID object=NULL;assert(XeObReferenceObjectByHandle((HANDLE)120,(POBJECT_TYPE)&XeExEventObjectType,&object)==STATUS_SUCCESS);
++    pthread_barrier_wait(&final_close_barrier);
++    pthread_barrier_wait(&final_close_barrier);
++    assert(((PAYLOAD *)object)->Cookie==200);
++    ObfDereferenceObject(object);return NULL;
++}
++static int races(void) {
++    setup(TRUE,TRUE);PVOID object=new_native(ExEventObjectType,1,0,200);
++    pthread_t threads[2];assert(pthread_create(&threads[0],NULL,reader,NULL)==0);assert(pthread_create(&threads[1],NULL,reader,NULL)==0);
++    for(unsigned i=0;i<10000;i++) {
++        InterlockedIncrement(&OBJECT_TO_OBJECT_HEADER(object)->HandleCount);
++        InterlockedIncrementSizeT(&OBJECT_TO_OBJECT_HEADER(object)->PointerCount);
++        put_entry(&normal_entries[30],object);sched_yield();close_entry(&normal_table,(HANDLE)120);
++    }
++    __atomic_store_n(&stop_readers,1,__ATOMIC_SEQ_CST);
++    assert(pthread_join(threads[0],NULL)==0&&pthread_join(threads[1],NULL)==0);
++    assert(reader_calls>0&&OBJECT_TO_OBJECT_HEADER(object)->PointerCount==1&&OBJECT_TO_OBJECT_HEADER(object)->HandleCount==0);
++    LONG deleted=native_deletes;ObfDereferenceObject(object);assert(native_deletes==deleted+1);
++    printf("{\"case\":\"two-readers-close-reuse\",\"cycles\":10000,\"reader_calls\":%d,\"delete\":1,\"ownership\":\"balanced\"}\n",reader_calls);
++    assert(pthread_barrier_init(&final_close_barrier,NULL,3)==0);
++    for(unsigned i=0;i<100;i++) {
++        object=new_native(ExEventObjectType,1,1,200);put_entry(&normal_entries[30],object);
++        deleted=native_deletes;
++        assert(pthread_create(&threads[0],NULL,hold_until_closed,NULL)==0&&pthread_create(&threads[1],NULL,hold_until_closed,NULL)==0);
++        pthread_barrier_wait(&final_close_barrier);close_entry(&normal_table,(HANDLE)120);
++        assert(native_deletes==deleted&&OBJECT_TO_OBJECT_HEADER(object)->PointerCount==2&&OBJECT_TO_OBJECT_HEADER(object)->HandleCount==0);
++        pthread_barrier_wait(&final_close_barrier);
++        assert(pthread_join(threads[0],NULL)==0&&pthread_join(threads[1],NULL)==0&&native_deletes==deleted+1);
++    }
++    assert(pthread_barrier_destroy(&final_close_barrier)==0);
++    puts("{\"case\":\"two-held-references-final-close\",\"cycles\":100,\"delete_per_cycle\":1,\"ownership\":\"balanced\"}");return 0;
++}
++static int timing(const char *workload) {
++    BOOLEAN titles=strcmp(workload,"no-title")!=0;setup(titles,TRUE);
++    const unsigned iterations=1000000;uint64_t checksum=0;struct timespec start,end;
++    for(unsigned warm=0;warm<10000;warm++) { PVOID out;assert(XeObReferenceObjectByHandle((HANDLE)8,(POBJECT_TYPE)&XeExEventObjectType,&out)==0);ObfDereferenceObject(out); }
++    clock_gettime(CLOCK_MONOTONIC,&start);
++    for(unsigned i=0;i<iterations;i++) {
++        BOOLEAN shim=!strcmp(workload,"shim")||(!strcmp(workload,"mixed")&&i%4==0);
++        BOOLEAN wrong=!strcmp(workload,"wrong-native");PVOID out=NULL;
++        NTSTATUS s=XeObReferenceObjectByHandle((HANDLE)(uintptr_t)(shim?80:8),shim?(PVOID)&title_types[0]:wrong?(PVOID)&XeIoFileObjectType:(PVOID)&XeExEventObjectType,&out);
++        checksum+=(uint32_t)s;
++        if(NT_SUCCESS(s)) { checksum+=shim?*(ULONG *)out:((PAYLOAD *)out)->Cookie; release_result(out,shim); }
++        else assert(wrong&&s==STATUS_OBJECT_TYPE_MISMATCH&&out==NULL);
++    }
++    clock_gettime(CLOCK_MONOTONIC,&end);
++    uint64_t ns=(uint64_t)(end.tv_sec-start.tv_sec)*1000000000u+end.tv_nsec-start.tv_nsec;
++    printf("{\"workload\":\"%s\",\"iterations\":%u,\"ns\":%llu,\"checksum\":%llu}\n",workload,iterations,(unsigned long long)ns,(unsigned long long)checksum);return 0;
++}
++int main(int argc,char **argv) {
++    assert(argc>=2);
++    if(!strcmp(argv[1],"matrix"))return matrix(argc<3||strcmp(argv[2],"baseline"));
++    if(!strcmp(argv[1],"lazy"))return lazy();
++    if(!strcmp(argv[1],"races"))return races();
++    if(!strcmp(argv[1],"timing"))return timing(argv[2]);
++    return 2;
++}
+diff --git a/tests/xbe/object-handle-fastpath/Makefile b/tests/xbe/object-handle-fastpath/Makefile
+new file mode 100644
+index 00000000..edff6387
+--- /dev/null
++++ b/tests/xbe/object-handle-fastpath/Makefile
+@@ -0,0 +1,8 @@
++XBE_TITLE = object-handle-fastpath
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /usr/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++ifeq ($(LEGACY_CONTROL),1)
++CFLAGS += -DLEGACY_CONTROL
++endif
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/object-handle-fastpath/main.c b/tests/xbe/object-handle-fastpath/main.c
+new file mode 100644
+index 00000000..acccd8c7
+--- /dev/null
++++ b/tests/xbe/object-handle-fastpath/main.c
+@@ -0,0 +1,201 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "../api-regression/harness.h"
++#include <stdio.h>
++#include <string.h>
++#include <stdarg.h>
++#ifndef STATUS_OBJECT_TYPE_MISMATCH
++#define STATUS_OBJECT_TYPE_MISMATCH ((NTSTATUS)0xc0000024)
++#endif
++#ifndef STATUS_INVALID_HANDLE
++#define STATUS_INVALID_HANDLE ((NTSTATUS)0xc0000008)
++#endif
++const char *g_fail_file;
++int g_fail_line;
++char g_fail_what[160];
++void test_record_failure(const char *file,int line,const char *format,...) {
++    va_list args;g_fail_file=file;g_fail_line=line;va_start(args,format);
++    vsnprintf(g_fail_what,sizeof(g_fail_what),format,args);va_end(args);
++}
++static ULONG allocations,deletes,frees;
++static PVOID title;
++static HANDLE title_handle;
++static PVOID NTAPI allocate(SIZE_T size,ULONG tag) { allocations++;return ExAllocatePoolWithTag(size,tag); }
++static VOID NTAPI free_title(PVOID base) { frees++;ExFreePool(base); }
++static VOID NTAPI delete_title(PVOID object) { if(object==title)deletes++; }
++static OBJECT_TYPE title_type={allocate,free_title,NULL,delete_title,NULL,NULL,'hSbO'};
++static OBJECT_TYPE other_type={allocate,free_title,NULL,delete_title,NULL,NULL,'xSbO'};
++static bool expect(HANDLE handle,POBJECT_TYPE type,NTSTATUS want,PVOID want_object) {
++    PVOID out=(PVOID)0xfeedface;
++    NTSTATUS status=ObReferenceObjectByHandle(handle,type,&out);
++    if(status!=want||(!NT_SUCCESS(status)&&out!=NULL)||(NT_SUCCESS(status)&&(!out||(want_object&&out!=want_object)))) {
++        if(NT_SUCCESS(status)&&out)ObfDereferenceObject(out);
++        FAIL_AND_RETURN("handle=%p type=%p status=%08x want=%08x out=%p want-out=%p",handle,type,(unsigned)status,(unsigned)want,out,want_object);
++    }
++    if(NT_SUCCESS(status))ObfDereferenceObject(out);
++    return true;
++}
++static bool measure(const char *name,HANDLE handle,POBJECT_TYPE type,PVOID expected) {
++    const ULONG iterations=50000;
++    for(ULONG i=0;i<1000;i++)if(!expect(handle,type,STATUS_SUCCESS,expected))return false;
++    for(ULONG sample=0;sample<7;sample++) {
++        ULONGLONG checksum=0,start=KeQueryPerformanceCounter();
++        for(ULONG i=0;i<iterations;i++) {
++            PVOID out=NULL;NTSTATUS status=ObReferenceObjectByHandle(handle,type,&out);
++            checksum+=(ULONG)status+(out==expected);
++            if(NT_SUCCESS(status)&&out)ObfDereferenceObject(out);
++        }
++        ULONGLONG ticks=KeQueryPerformanceCounter()-start;
++        ASSERT_EQ_U32(checksum,iterations);
++        tap_comment("HANDLE-PERF name=%s sample=%u iterations=%u ticks=%llu frequency=%llu checksum=%llu",name,(unsigned)sample,(unsigned)iterations,ticks,KeQueryPerformanceFrequency(),checksum);
++    }
++    return true;
++}
++static bool builtins(const char *timing_name) {
++    HANDLE event=NULL;PVOID body=NULL;
++    ASSERT_NTSTATUS(NtCreateEvent(&event,NULL,NotificationEvent,FALSE),STATUS_SUCCESS);
++    NTSTATUS s=ObReferenceObjectByHandle(event,&ExEventObjectType,&body);
++    bool ok=s==STATUS_SUCCESS&&body&&expect(event,NULL,STATUS_SUCCESS,body)&&
++        expect(event,&ExEventObjectType,STATUS_SUCCESS,body)&&
++        expect(event,&IoFileObjectType,STATUS_OBJECT_TYPE_MISMATCH,NULL)&&
++        expect((HANDLE)(LONG_PTR)-2,NULL,STATUS_SUCCESS,NULL)&&
++        expect((HANDLE)(LONG_PTR)-2,&PsThreadObjectType,STATUS_SUCCESS,NULL)&&
++        expect((HANDLE)(LONG_PTR)-2,&ExEventObjectType,STATUS_OBJECT_TYPE_MISMATCH,NULL)&&
++        expect((HANDLE)(LONG_PTR)-1,NULL,STATUS_SUCCESS,NULL)&&
++        expect((HANDLE)(LONG_PTR)-1,&PsThreadObjectType,STATUS_OBJECT_TYPE_MISMATCH,NULL)&&
++        expect((HANDLE)0x7ffffffc,&ExEventObjectType,STATUS_INVALID_HANDLE,NULL);
++    if(ok&&timing_name)ok=measure(timing_name,event,&ExEventObjectType,body);
++    NTSTATUS close=NtClose(event);
++    if(body)ObfDereferenceObject(body);
++    if(!ok)return false;
++    ASSERT_NTSTATUS(close,STATUS_SUCCESS);
++    return expect(event,&ExEventObjectType,STATUS_INVALID_HANDLE,NULL);
++}
++static bool builtins_before_title(void){return builtins("no-title");}
++static bool builtins_created(void){return builtins(NULL);}
++static bool builtins_inserted(void){return builtins("ordinary");}
++static bool create_first_title(void) {
++    ASSERT_NTSTATUS(ObCreateObject(&title_type,NULL,32,&title),STATUS_SUCCESS);
++    ASSERT_NOT_NULL(title);memset(title,0x5a,32);
++    ASSERT_EQ_U32(allocations,1);
++    ASSERT_EQ_U32(OBJECT_TO_OBJECT_HEADER(title)->PointerCount,1);
++    ASSERT_EQ_U32(OBJECT_TO_OBJECT_HEADER(title)->HandleCount,0);
++    return true;
++}
++static bool insert_title(void) {
++    ASSERT_NOT_NULL(title);
++    ASSERT_NTSTATUS(ObInsertObject(title,NULL,1,&title_handle),STATUS_SUCCESS);
++    ASSERT_NOT_NULL(title_handle);
++    ASSERT_EQ_U32(OBJECT_TO_OBJECT_HEADER(title)->PointerCount,2);
++    ASSERT_EQ_U32(OBJECT_TO_OBJECT_HEADER(title)->HandleCount,1);
++    return expect(title_handle,&title_type,STATUS_SUCCESS,title);
++}
++static bool title_matrix(void) {
++    PVOID second=NULL;
++    ASSERT_NTSTATUS(ObCreateObject(&other_type,NULL,4,&second),STATUS_SUCCESS);
++    ObfDereferenceObject(second); /* make another registered title type */
++    ULONG count=OBJECT_TO_OBJECT_HEADER(title)->PointerCount;
++    bool ok=expect(title_handle,NULL,STATUS_SUCCESS,title)&&
++        expect(title_handle,&title_type,STATUS_SUCCESS,title)&&
++        expect(title_handle,&other_type,STATUS_OBJECT_TYPE_MISMATCH,NULL)&&
++        expect(title_handle,&ExEventObjectType,STATUS_OBJECT_TYPE_MISMATCH,NULL);
++    if(!ok)return false;
++    ASSERT_EQ_U32(OBJECT_TO_OBJECT_HEADER(title)->PointerCount,count);
++    ASSERT_EQ_U32(deletes,0);return measure("shim",title_handle,&title_type,title);
++}
++static bool mismatch_precedence(void) {
++    HANDLE event=NULL;
++    ASSERT_NTSTATUS(NtCreateEvent(&event,NULL,NotificationEvent,FALSE),STATUS_SUCCESS);
++    bool ok=expect(event,&title_type,STATUS_OBJECT_TYPE_MISMATCH,NULL)&&
++        expect((HANDLE)0x7ffffffc,&title_type,STATUS_OBJECT_TYPE_MISMATCH,NULL);
++    NtClose(event);
++    return ok&&expect(event,&title_type,STATUS_OBJECT_TYPE_MISMATCH,NULL);
++}
++static bool title_reference_survives_close(void) {
++    PVOID held=NULL;ULONG before=frees;
++    ASSERT_NTSTATUS(ObReferenceObjectByHandle(title_handle,NULL,&held),STATUS_SUCCESS);
++    ASSERT_EQ_PTR(held,title);
++    ASSERT_NTSTATUS(NtClose(title_handle),STATUS_SUCCESS);
++    ASSERT_EQ_U32(OBJECT_TO_OBJECT_HEADER(title)->HandleCount,0);
++    ASSERT_EQ_U32(OBJECT_TO_OBJECT_HEADER(title)->PointerCount,2);
++    ASSERT_EQ_U32(deletes,0);ASSERT_EQ_U32(frees,before);
++    ASSERT_TRUE(expect(title_handle,&title_type,STATUS_OBJECT_TYPE_MISMATCH,NULL));
++    ObfDereferenceObject(held);
++    ASSERT_EQ_U32(OBJECT_TO_OBJECT_HEADER(title)->PointerCount,1);
++    ObfDereferenceObject(title);
++    ASSERT_EQ_U32(deletes,1);ASSERT_EQ_U32(frees,before+1);title=NULL;return true;
++}
++static bool native_close_reuse(void) {
++    for(unsigned i=0;i<1000;i++) {
++        HANDLE h=NULL;PVOID held=NULL;
++        ASSERT_NTSTATUS(NtCreateEvent(&h,NULL,NotificationEvent,FALSE),STATUS_SUCCESS);
++        ASSERT_NTSTATUS(ObReferenceObjectByHandle(h,&ExEventObjectType,&held),STATUS_SUCCESS);
++        ASSERT_NOT_NULL(held);ASSERT_NTSTATUS(NtClose(h),STATUS_SUCCESS);
++        ASSERT_TRUE(expect(h,&ExEventObjectType,STATUS_INVALID_HANDLE,NULL));
++        ObfDereferenceObject(held);
++    }
++    return true;
++}
++static bool native_kernel_handle(void) {
++    OBJECT_ATTRIBUTES oa={NULL,NULL,0x200 /* OBJ_KERNEL_HANDLE */};HANDLE h=NULL;
++    ASSERT_NTSTATUS(NtCreateEvent(&h,&oa,NotificationEvent,FALSE),STATUS_SUCCESS);
++    bool ok=((ULONG_PTR)h&0x80000000)!=0&&expect(h,NULL,STATUS_SUCCESS,NULL)&&
++        expect(h,&ExEventObjectType,STATUS_SUCCESS,NULL)&&
++        expect(h,&IoFileObjectType,STATUS_OBJECT_TYPE_MISMATCH,NULL)&&
++        expect(h,&title_type,STATUS_OBJECT_TYPE_MISMATCH,NULL);
++    NtClose(h);ASSERT_TRUE(ok);return true;
++}
++static bool native_table_growth(void) {
++    static HANDLE handles[1500];ULONG made=0;bool ok=true;
++    for(;made<1500;made++)if(NtCreateEvent(&handles[made],NULL,NotificationEvent,FALSE)!=STATUS_SUCCESS){ok=false;break;}
++    if(ok)for(unsigned i=0;i<1500;i+=499)if(!expect(handles[i],&ExEventObjectType,STATUS_SUCCESS,NULL)){ok=false;break;}
++    for(ULONG i=0;i<made;i++)NtClose(handles[i]);ASSERT_TRUE(ok);return true;
++}
++static HANDLE race_handle;
++static volatile LONG race_stop,race_calls,race_bad;
++static void NTAPI reader(PVOID context) {
++    (void)context;
++    while(!InterlockedCompareExchange(&race_stop,0,0)) {
++        PVOID out=(PVOID)0xfeedface;NTSTATUS s=ObReferenceObjectByHandle(race_handle,&ExEventObjectType,&out);
++        if(NT_SUCCESS(s)&&out)ObfDereferenceObject(out);
++        else if(s!=STATUS_INVALID_HANDLE||out!=NULL)InterlockedIncrement(&race_bad);
++        InterlockedIncrement(&race_calls);
++    }
++}
++static void NTAPI system_routine(PKSTART_ROUTINE start,PVOID context) { if(start)start(context);PsTerminateSystemThread(STATUS_SUCCESS); }
++static bool concurrent_close(void) {
++    HANDLE threads[2]={NULL,NULL};LARGE_INTEGER delay={.QuadPart=-100000},timeout={.QuadPart=-20000000};
++    ASSERT_NTSTATUS(NtCreateEvent(&race_handle,NULL,NotificationEvent,FALSE),STATUS_SUCCESS);
++    for(unsigned i=0;i<2;i++)ASSERT_NTSTATUS(PsCreateSystemThreadEx(&threads[i],0,0,0,NULL,reader,NULL,FALSE,FALSE,system_routine),STATUS_SUCCESS);
++    KeDelayExecutionThread(KernelMode,FALSE,&delay);NtClose(race_handle);
++    KeDelayExecutionThread(KernelMode,FALSE,&delay);InterlockedExchange(&race_stop,1);
++    for(unsigned i=0;i<2;i++){ASSERT_NTSTATUS(NtWaitForSingleObject(threads[i],FALSE,&timeout),STATUS_SUCCESS);NtClose(threads[i]);}
++    ASSERT_TRUE(race_calls>0);ASSERT_EQ_U32(race_bad,0);return true;
++}
++static const test_entry_t cases[]={
++    {"builtins-before-title",builtins_before_title,NULL},
++    {"create-first-title",create_first_title,NULL},
++#ifndef LEGACY_CONTROL
++    {"builtins-after-create-before-shim",builtins_created,NULL},
++#endif
++    {"insert-title",insert_title,NULL},
++    {"builtins-after-shim",builtins_inserted,NULL},
++    {"title-type-null-wrong-and-reference-count",title_matrix,NULL},
++    {"registered-title-mismatch-precedence",mismatch_precedence,NULL},
++    {"title-close-with-live-reference-and-single-delete",title_reference_survives_close,NULL},
++    {"native-close-reuse-with-live-reference",native_close_reuse,NULL},
++    {"native-kernel-handle",native_kernel_handle,NULL},
++    {"native-grown-table",native_table_growth,NULL},
++    {"two-readers-race-final-close",concurrent_close,NULL},
++};
++int main(void) {
++    tap_puts("== object-handle-fastpath begin ==\n");tap_version(14);tap_plan(sizeof(cases)/sizeof(cases[0]));
++    unsigned failed=0;
++    for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);i++) {
++        g_fail_file=NULL;g_fail_line=0;g_fail_what[0]=0;
++        if(cases[i].fn())tap_ok(i+1,cases[i].name);
++        else { failed++;tap_not_ok(i+1,cases[i].name);tap_diag_begin();tap_diag_kv("message","%s",g_fail_what);tap_diag_end(); }
++    }
++    tap_puts(failed?"== object-handle-fastpath end FAIL ==\n":"== object-handle-fastpath end PASS ==\n");tap_drain();
++    LARGE_INTEGER delay={.QuadPart=-5000000};KeDelayExecutionThread(KernelMode,FALSE,&delay);
++    HalWriteSMBusValue(0x20,0x02,FALSE,0x80);for(;;)__asm__ volatile("hlt");return failed?1:0;
++}
