@@ -1,0 +1,15 @@
+PASS production process adapter case=list
+PASS production process adapter case=inherit
+PASS production process adapter case=process
+PASS production process adapter case=lifecycle
+PASS production process adapter case=offset
+PASS production process adapter case=same
+PASS production process adapter case=terminal
+saturation process=9 positive=15/6 negative=2/-7
+process-host: /work/artifacts/process-host-v5-red/process-host.c:536: main: Assertion `a.Saturation==1&&b.Saturation==-1' failed.
+Traceback (most recent call last):
+  File "/work/artifacts/red-source/tests/host/process-threads/check.py", line 219, in <module>
+    subprocess.run([str(binary),mode],check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/work/artifacts/process-host-v5-red/process-host', 'saturation']' died with <Signals.SIGABRT: 6>.

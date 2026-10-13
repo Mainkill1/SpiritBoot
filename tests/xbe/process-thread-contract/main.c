@@ -33,7 +33,7 @@ static ULONG membership(PKTHREAD target,ULONG *total) {
 static VOID NTAPI notify(PETHREAD thread,HANDLE id,BOOLEAN create) {
  Case *c=NULL;
  if(create && creating>=0 && creating<CASES)c=&cases[creating];
- else for(ULONG i=0;i<CASES;i++)if(cases[i].id==id)c=&cases[i];
+ else for(ULONG i=0;i<CASES;i++)if(cases[i].id==id){c=&cases[i];break;}
  if(!c)return;
  if(create) {
   c->created=thread;c->create_base=thread->Tcb.BasePriority;c->create_priority=thread->Tcb.Priority;
@@ -80,7 +80,48 @@ static void retire(ULONG i,HANDLE h) {
  LONG terminal_increment=KeQueryBasePriorityThread(&t->Tcb);
  tap_comment("terminal_priority case=%lu process_base=%d thread_base=%d query_increment=%ld",i,process->BasePriority,t->Tcb.BasePriority,terminal_increment);
  regression_check(terminal_increment==0&&t->Tcb.BasePriority==process->BasePriority,"referenced terminated thread keeps its process-relative base query");
- NtClose(h);ObfDereferenceObject(t);
+ NtClose(h);ObfDereferenceObject(t);c->id=NULL;
+}
+static void saturation_matrix(LONG original) {
+ const LONG priorities[]={original+2,16,20,31,15,2,original+1};
+ KeSetPriorityProcess(process,original+1);
+ regression_check(KeSetBasePriorityThread(cases[0].current,16)==0,"positive saturation setter reports previous increment");
+ regression_check(KeSetBasePriorityThread(cases[1].current,-16)==0,"negative saturation setter reports previous increment");
+ regression_check(KeQueryBasePriorityThread(cases[0].current)==16,"positive saturation query before process move");
+ regression_check(KeQueryBasePriorityThread(cases[1].current)==-16,"negative saturation query before process move");
+ for(ULONG i=0;i<sizeof(priorities)/sizeof(priorities[0]);i++) {
+  LONG before=process->BasePriority,p=priorities[i],positive=p>=16?31:15,negative=p>=16?16:1;
+  LONG returned=KeSetPriorityProcess(process,p);
+  LONG positive_query=KeQueryBasePriorityThread(cases[0].current),negative_query=KeQueryBasePriorityThread(cases[1].current);
+  tap_comment("saturation process=%ld->%ld positive_base=%d query=%ld negative_base=%d query=%ld",before,p,cases[0].current->BasePriority,positive_query,cases[1].current->BasePriority,negative_query);
+  regression_check(returned==before&&process->BasePriority==p,"saturation process setter publishes new base and returns old base");
+  regression_check(cases[0].current->BasePriority==positive,"positive saturated thread stays at class maximum");
+  regression_check(cases[1].current->BasePriority==negative,"negative saturated thread stays at class minimum");
+  regression_check(positive_query==16,"process move preserves positive saturation increment");
+  regression_check(negative_query==-16,"process move preserves negative saturation increment");
+ }
+ KeSetBasePriorityThread(cases[0].current,0);KeSetBasePriorityThread(cases[1].current,0);
+}
+static void inheritance_matrix(void) {
+ const LONG priorities[]={16,31,1};
+ for(ULONG i=0;i<sizeof(priorities)/sizeof(priorities[0]);i++) {
+  LONG old=process->BasePriority;
+  regression_check(KeSetPriorityProcess(process,priorities[i])==old&&process->BasePriority==priorities[i],"inheritance matrix process setter publishes chosen base");
+  for(ULONG suspended=0;suspended<2;suspended++) {
+   memset(&cases[0],0,sizeof(cases[0]));
+   tap_comment("inheritance process=%ld suspended=%lu",priorities[i],suspended);
+   HANDLE h=spawn(0,suspended,FALSE);
+   if(suspended) {
+    PETHREAD thread=NULL;
+    regression_require(ObReferenceObjectByHandle(h,&PsThreadObjectType,(PVOID *)&thread)==0,"reference inheritance matrix suspended thread");
+    regression_check(membership(&thread->Tcb,NULL)==1,"inheritance matrix suspended thread belongs to public process");
+    regression_check(thread->Tcb.BasePriority==priorities[i]&&thread->Tcb.Priority==priorities[i],"inheritance matrix suspended thread inherits selected process base");
+    ObfDereferenceObject(thread);
+    regression_require(NtResumeThread(h,NULL)==0,"resume inheritance matrix suspended thread");
+   }
+   entered(0);retire(0,h);
+  }
+ }
 }
 int main(void) {
  regression_begin();PKTHREAD self=KeGetCurrentThread();process=self->ApcState.Process;
@@ -116,7 +157,9 @@ int main(void) {
  KeSetPriorityProcess(process,original);
  regression_check(self->BasePriority==original,"caller native base restores with process");
  KeSetPriorityProcess(process,original+1);
+ saturation_matrix(original);
  ObfDereferenceObject(suspended);retire(0,first);retire(1,second);retire(2,third);
+ inheritance_matrix();
  KeSetPriorityProcess(process,original);
  ULONG final_count=0;membership(self,&final_count);
  regression_check(final_count==initial_count,"retirement restores original public list count");
