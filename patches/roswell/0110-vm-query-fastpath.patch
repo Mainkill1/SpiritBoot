@@ -1,0 +1,880 @@
+--- a/ntoskrnl/xb/mm/vm.c
++++ b/ntoskrnl/xb/mm/vm.c
+@@ -666,22 +666,39 @@
+     RtlZeroMemory(Mbi, sizeof(*Mbi));
+     Mbi->BaseAddress = (PVOID)Va;
+ 
+-    Region = NxvFindRegion(Va);
++    /* One ordered walk finds either the containing reservation or the
++       next reservation that bounds a free run. Mutating lookups are unchanged. */
++    Region = NULL;
++    Limit = NXV_HIGHEST;
++    if (!IsListEmpty(&NxvRegionList))
++    {
++        NXV_REGION *Last = CONTAINING_RECORD(NxvRegionList.Blink,
++                                            NXV_REGION, Link);
++        /* The sorted tail proves the common free-to-top query without a
++           forward walk. No metadata is cached outside the existing mutex. */
++        if (Va < Last->Base + Last->Size)
++        {
++            PLIST_ENTRY Entry;
++            for (Entry = NxvRegionList.Flink; Entry != &NxvRegionList;
++                 Entry = Entry->Flink)
++            {
++                NXV_REGION *R = CONTAINING_RECORD(Entry, NXV_REGION, Link);
++                if (Va < R->Base)
++                {
++                    Limit = R->Base;
++                    break;
++                }
++                if (Va < R->Base + R->Size)
++                {
++                    Region = R;
++                    break;
++                }
++            }
++        }
++    }
+     if (Region == NULL)
+     {
+         /* Free: the run extends to the next region (or the top). */
+-        PLIST_ENTRY Entry;
+-        Limit = NXV_HIGHEST;
+-        for (Entry = NxvRegionList.Flink; Entry != &NxvRegionList;
+-             Entry = Entry->Flink)
+-        {
+-            NXV_REGION *R = CONTAINING_RECORD(Entry, NXV_REGION, Link);
+-            if (R->Base > Va)
+-            {
+-                Limit = R->Base;
+-                break;
+-            }
+-        }
+         Mbi->AllocationBase = NULL;
+         Mbi->AllocationProtect = 0;
+         Mbi->RegionSize = Limit - Va;
+@@ -700,11 +717,22 @@
+     State = Protect != 0 ? MEM_COMMIT : MEM_RESERVE;
+ 
+     Limit = Region->Base + Region->Size;
+-    for (Run = Va + PAGE_SIZE; Run < Limit; Run += PAGE_SIZE)
+-    {
+-        ULONG RunProtect = (NXV_PDE(Run) & NXV_PTE_P)
+-                           ? NxvPteToProtect(NXV_PTE(Run)) : 0;
+-        if (RunProtect != Protect) break;
++    Run = Va + PAGE_SIZE;
++    while (Run < Limit)
++    {
++        if (!(NXV_PDE(Run) & NXV_PTE_P))
++        {
++            ULONG_PTR NextPde;
++            if (Protect != 0) break;
++            /* An absent page table makes this entire PDE span reserved.
++               Stop at this reservation's limit, even within the same PDE. */
++            NextPde = ROUND_UP(Run + 1, 4UL * 1024 * 1024);
++            Run = min(NextPde, Limit);
++            continue;
++        }
++        /* A present software NOACCESS PTE is committed, not an absent span. */
++        if (NxvPteToProtect(NXV_PTE(Run)) != Protect) break;
++        Run += PAGE_SIZE;
+     }
+ 
+     Mbi->AllocationBase = (PVOID)Region->Base;
+--- /dev/null
++++ b/tests/host/vm-query-fastpath/baseline-query.c
+@@ -0,0 +1,109 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Frozen pre-optimization production functions for complete-result differential.
++ * Source vm.c SHA256: d8eecb9fc47cfbb9deca8b5c1e357c6219c04046faf3617b048299ce84087a59
++ */
++
++static ULONG
++NxvPteToProtect(
++    IN ULONG Pte)
++{
++    ULONG Protect;
++
++    if (Pte == 0) return 0;
++    if (!(Pte & NXV_PTE_P)) return PAGE_NOACCESS;
++
++    Protect = (Pte & NXV_PTE_RW) ? PAGE_READWRITE : PAGE_READONLY;
++    if (Pte & NXV_PTE_PCD) Protect |= PAGE_NOCACHE;
++    if (Pte & NXV_PTE_PWT) Protect |= PAGE_WRITECOMBINE;
++    return Protect;
++}
++
++static NXV_REGION *
++NxvFindRegion(
++    IN ULONG_PTR Va)
++{
++    PLIST_ENTRY Entry;
++
++    for (Entry = NxvRegionList.Flink; Entry != &NxvRegionList;
++         Entry = Entry->Flink)
++    {
++        NXV_REGION *R = CONTAINING_RECORD(Entry, NXV_REGION, Link);
++        if (Va < R->Base) break;        /* sorted */
++        if (Va < R->Base + R->Size) return R;
++    }
++    return NULL;
++}
++
++NTSTATUS
++NTAPI
++NxVmQueryVirtualMemory(
++    IN PVOID Address,
++    OUT PVOID MbiOut)
++{
++    PMEMORY_BASIC_INFORMATION Mbi = MbiOut;
++    ULONG_PTR Va, Run, Limit;
++    NXV_REGION *Region;
++    ULONG State, Protect;
++
++    NxvEnsureInit();
++
++    if (Mbi == NULL) return STATUS_INVALID_PARAMETER;
++    Va = ROUND_DOWN((ULONG_PTR)Address, PAGE_SIZE);
++    if (Va >= NXV_HIGHEST) return STATUS_INVALID_PARAMETER;
++
++    ExAcquireFastMutex(&NxvMutex);
++
++    RtlZeroMemory(Mbi, sizeof(*Mbi));
++    Mbi->BaseAddress = (PVOID)Va;
++
++    Region = NxvFindRegion(Va);
++    if (Region == NULL)
++    {
++        /* Free: the run extends to the next region (or the top). */
++        PLIST_ENTRY Entry;
++        Limit = NXV_HIGHEST;
++        for (Entry = NxvRegionList.Flink; Entry != &NxvRegionList;
++             Entry = Entry->Flink)
++        {
++            NXV_REGION *R = CONTAINING_RECORD(Entry, NXV_REGION, Link);
++            if (R->Base > Va)
++            {
++                Limit = R->Base;
++                break;
++            }
++        }
++        Mbi->AllocationBase = NULL;
++        Mbi->AllocationProtect = 0;
++        Mbi->RegionSize = Limit - Va;
++        Mbi->State = MEM_FREE;
++        Mbi->Protect = PAGE_NOACCESS;
++        Mbi->Type = 0;
++        ExReleaseFastMutex(&NxvMutex);
++        return STATUS_SUCCESS;
++    }
++
++    /* The run is the span of pages sharing this page's state+protect. */
++    if (NXV_PDE(Va) & NXV_PTE_P)
++        Protect = NxvPteToProtect(NXV_PTE(Va));
++    else
++        Protect = 0;
++    State = Protect != 0 ? MEM_COMMIT : MEM_RESERVE;
++
++    Limit = Region->Base + Region->Size;
++    for (Run = Va + PAGE_SIZE; Run < Limit; Run += PAGE_SIZE)
++    {
++        ULONG RunProtect = (NXV_PDE(Run) & NXV_PTE_P)
++                           ? NxvPteToProtect(NXV_PTE(Run)) : 0;
++        if (RunProtect != Protect) break;
++    }
++
++    Mbi->AllocationBase = (PVOID)Region->Base;
++    Mbi->AllocationProtect = Region->AllocProtect;
++    Mbi->RegionSize = Run - Va;
++    Mbi->State = State;
++    Mbi->Protect = Protect;
++    Mbi->Type = MEM_PRIVATE;
++
++    ExReleaseFastMutex(&NxvMutex);
++    return STATUS_SUCCESS;
++}
+--- /dev/null
++++ b/tests/host/vm-query-fastpath/harness.c
+@@ -0,0 +1,115 @@
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++typedef uint32_t ULONG,NTSTATUS,SIZE_T;typedef uintptr_t ULONG_PTR;typedef void *PVOID;typedef void VOID;
++#define NTAPI
++#define IN
++#define OUT
++#define PAGE_SIZE 4096u
++#define PAGE_NOACCESS 1u
++#define PAGE_READONLY 2u
++#define PAGE_READWRITE 4u
++#define PAGE_NOCACHE 0x200u
++#define PAGE_WRITECOMBINE 0x400u
++#define MEM_COMMIT 0x1000u
++#define MEM_RESERVE 0x2000u
++#define MEM_FREE 0x10000u
++#define MEM_PRIVATE 0x20000u
++#define STATUS_SUCCESS 0u
++#define STATUS_INVALID_PARAMETER 0xc000000du
++#define NXV_HIGHEST 0x7ffe0000u
++#define NXV_PTE_P 1u
++#define NXV_PTE_RW 2u
++#define NXV_PTE_PWT 8u
++#define NXV_PTE_PCD 16u
++#define ROUND_DOWN(v,n) ((v)&~((ULONG_PTR)(n)-1))
++#define ROUND_UP(v,n) ROUND_DOWN((v)+(n)-1,n)
++#define min(a,b) ((a)<(b)?(a):(b))
++#define RtlZeroMemory(p,n) memset(p,0,n)
++static unsigned checks,cases,nodes,pde_probes,pte_probes,tail_probes,lock_depth;
++#define CHECK(x) do{checks++;if(!(x)){fprintf(stderr,"failed line %u: %s\n",__LINE__,#x);exit(1);}}while(0)
++typedef struct _LIST_ENTRY{struct _LIST_ENTRY *Flink,*Blink;}LIST_ENTRY,*PLIST_ENTRY;
++#define IsListEmpty(p) ((p)->Flink==(p))
++#define CONTAINING_RECORD(p,t,m) ((t*)((char*)(p)-offsetof(t,m)))
++typedef struct _NXV_REGION{LIST_ENTRY Link;ULONG_PTR Base;SIZE_T Size;ULONG AllocProtect;}NXV_REGION;
++typedef struct _MEMORY_BASIC_INFORMATION{PVOID BaseAddress,AllocationBase;ULONG AllocationProtect;SIZE_T RegionSize;ULONG State,Protect,Type;}MEMORY_BASIC_INFORMATION,*PMEMORY_BASIC_INFORMATION;
++static LIST_ENTRY NxvRegionList;static int NxvMutex;
++static ULONG pdes[1024],ptes[1<<20];static NXV_REGION regions[256];
++static void NxvEnsureInit(void){}
++static void ExAcquireFastMutex(int *p){CHECK(p==&NxvMutex && lock_depth==0);lock_depth=1;}
++static void ExReleaseFastMutex(int *p){CHECK(p==&NxvMutex && lock_depth==1);lock_depth=0;}
++static ULONG read_pde(ULONG_PTR va){CHECK(lock_depth==1 && (va>>22)<1024);pde_probes++;return pdes[va>>22];}
++static ULONG read_pte(ULONG_PTR va){CHECK(lock_depth==1 && (va>>12)<(1<<20));pte_probes++;return ptes[va>>12];}
++#define NXV_PDE(v) read_pde(v)
++#define NXV_PTE(v) read_pte(v)
++#include "actual.inc"
++struct work{unsigned nodes,pde,pte,tail;};
++static struct work base_work,candidate_work;
++static void reset(unsigned count,ULONG_PTR start,ULONG size,ULONG stride){
++ CHECK(lock_depth==0);memset(pdes,0,sizeof(pdes));memset(ptes,0,sizeof(ptes));memset(regions,0,sizeof(regions));
++ NxvRegionList.Flink=NxvRegionList.Blink=&NxvRegionList;
++ for(unsigned i=0;i<count;i++){
++  NXV_REGION *r=&regions[i];r->Base=start+i*stride;r->Size=size;r->AllocProtect=PAGE_READWRITE;
++  r->Link.Flink=&NxvRegionList;r->Link.Blink=NxvRegionList.Blink;NxvRegionList.Blink->Flink=&r->Link;NxvRegionList.Blink=&r->Link;
++ }
++}
++static MEMORY_BASIC_INFORMATION compare(ULONG_PTR va,int null_output){
++ struct guarded{uint64_t before;MEMORY_BASIC_INFORMATION m;uint64_t after;}b,c;
++ memset(&b,0xa5,sizeof(b));memcpy(&c,&b,sizeof(c));nodes=pde_probes=pte_probes=tail_probes=0;
++ NTSTATUS bs=BaseNxVmQueryVirtualMemory((PVOID)va,null_output?NULL:&b.m);base_work=(struct work){nodes,pde_probes,pte_probes,tail_probes};CHECK(!lock_depth);
++ nodes=pde_probes=pte_probes=tail_probes=0;
++ NTSTATUS cs=CandidateNxVmQueryVirtualMemory((PVOID)va,null_output?NULL:&c.m);candidate_work=(struct work){nodes,pde_probes,pte_probes,tail_probes};CHECK(!lock_depth);
++ CHECK(bs==cs);CHECK(!memcmp(&b,&c,sizeof(b)));CHECK(b.before==UINT64_C(0xa5a5a5a5a5a5a5a5) && b.after==b.before);
++ if(null_output || va>=NXV_HIGHEST){CHECK(bs==STATUS_INVALID_PARAMETER);for(unsigned i=0;i<sizeof(b.m);i++)CHECK(((unsigned char*)&b.m)[i]==0xa5);}else CHECK(bs==STATUS_SUCCESS);
++ cases++;return c.m;
++}
++static void set_page(ULONG_PTR va,ULONG flags){pdes[va>>22]=1;ptes[va>>12]=flags;}
++int main(int argc,char **argv){
++ int fast=argc>1;(void)argv;
++ for(unsigned n=0;n<4;n++){
++  unsigned counts[]={0,1,16,256};unsigned count=counts[n];
++  for(unsigned adjacent=0;adjacent<2;adjacent++){
++   reset(count,0x10000000,0x10000,adjacent?0x10000:0x20000);
++   compare(0,0);compare(0xffff,0);compare(0x10000000-1,0);
++   for(unsigned i=0;i<count;i++){
++    ULONG_PTR b=regions[i].Base;
++    ULONG offsets[]={0,1,4095,4096,0xefff,0xffff,0x10000,0x11000,0x1ffff};
++    for(unsigned j=0;j<sizeof(offsets)/sizeof(*offsets);j++)compare(b+offsets[j],0);
++   }
++   MEMORY_BASIC_INFORMATION m=compare(0x70000000,0);CHECK(m.State==MEM_FREE && m.RegionSize==NXV_HIGHEST-0x70000000);
++   CHECK(base_work.nodes==count*2);if(fast){CHECK(candidate_work.nodes<=count);if(count && candidate_work.nodes==0)CHECK(candidate_work.tail==1);}
++   compare(NXV_HIGHEST-1,0);compare(NXV_HIGHEST,0);compare(UINT32_MAX,0);compare(0,1);
++  }
++ }
++ /* Sparse spans begin/end both inside PDEs and exactly on boundaries. */
++ const ULONG starts[]={0x20000000,0x20010000,0x203f0000};
++ const ULONG lengths[]={4096,0x10000,0x400000,0x401000,0xc03000};
++ for(unsigned a=0;a<3;a++)for(unsigned z=0;z<5;z++){
++  ULONG_PTR start=starts[a];ULONG length=lengths[z];reset(1,start,length,0);
++  MEMORY_BASIC_INFORMATION m=compare(start,0);CHECK(m.State==MEM_RESERVE && m.Protect==0 && m.RegionSize==length && m.AllocationBase==(PVOID)start && m.Type==MEM_PRIVATE);
++  if(fast && length>=0x400000)CHECK(candidate_work.pde<=6 && candidate_work.pte==0);
++  for(ULONG offset=0;offset<length;offset+=0x3f000)compare(start+offset+17,0);
++  compare(start+length-1,0);compare(start+length,0);
++ }
++ /* Mixed present page tables, software NOACCESS, cache flags and a missing PDE
++  * immediately before a present one; compare full bytes for every input page. */
++ reset(1,0x20000000,0x1001000,0);
++ const ULONG flags[]={1,3,0x800,1|8,3|16,0,1|16,3|8};
++ for(unsigned pattern=0;pattern<8;pattern++){
++  set_page(0x203ff000,flags[pattern]);set_page(0x20400000,flags[(pattern+1)%8]);
++  set_page(0x20800000,flags[(pattern+2)%8]);set_page(0x20fff000,flags[(pattern+3)%8]);
++  for(ULONG offset=0;offset<0x1001000;offset+=4096)compare(0x20000000+offset+19,0);
++ }
++ reset(256,0x30000000,0x10000,0x20000);compare(0x50000000,0);
++ printf("work free-after256 baseline_nodes=%u candidate_nodes=%u candidate_tail=%u\n",base_work.nodes,candidate_work.nodes,candidate_work.tail);
++ reset(1,0x20000000,0xc03000,0);compare(0x20000000,0);
++ printf("work sparse12MiB baseline_pde=%u candidate_pde=%u baseline_pte=%u candidate_pte=%u\n",base_work.pde,candidate_work.pde,base_work.pte,candidate_work.pte);
++ /* Present-but-empty tables cannot be treated as inaccessible; committed
++  * NOACCESS is a distinct state, and a query never crosses region boundaries. */
++ reset(2,0x7ffc0000,0x10000,0x10000);set_page(0x7ffc1000,0x800);
++ MEMORY_BASIC_INFORMATION m=compare(0x7ffc1001,0);CHECK(m.State==MEM_COMMIT && m.Protect==PAGE_NOACCESS && m.RegionSize==4096);
++ compare(0x7ffc0000,0);compare(0x7ffcf123,0);compare(0x7ffd0000,0);compare(0x7ffdffff,0);
++ printf("query actual-source differential: cases=%u checks=%u fast=%d\n",cases,checks,fast);return 0;
++}
+--- /dev/null
++++ b/tests/host/vm-query-fastpath/check.py
+@@ -0,0 +1,59 @@
++#!/usr/bin/env python3
++"""Run actual production query against the frozen prior production behavior."""
++from pathlib import Path
++import argparse
++import re
++import subprocess
++
++
++def function(text, signature):
++    start = text.index(signature)
++    end = text.index("{", start) + 1
++    depth = 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[start:end] + "\n"
++
++
++def extract(path, prefix):
++    source = path.read_text()
++    body = "\n".join(function(source, signature) for signature in (
++        "static ULONG\nNxvPteToProtect(",
++        "static NXV_REGION *\nNxvFindRegion(",
++        "NTSTATUS\nNTAPI\nNxVmQueryVirtualMemory(",
++    ))
++    body = body.replace(
++        "NXV_REGION *R = CONTAINING_RECORD(Entry, NXV_REGION, Link);",
++        "NXV_REGION *R = CONTAINING_RECORD(Entry, NXV_REGION, Link); "
++        "++nodes; CHECK(lock_depth == 1);",
++    )
++    body = re.sub(
++        r"NXV_REGION \*Last = CONTAINING_RECORD\(NxvRegionList.Blink,\s*NXV_REGION, Link\);",
++        lambda match: match[0] + " ++tail_probes; CHECK(lock_depth == 1);", body,
++    )
++    for name in ("NxvPteToProtect", "NxvFindRegion", "NxVmQueryVirtualMemory"):
++        body = re.sub(r"\b" + name + r"\b", prefix + name, body)
++    return body
++
++
++parser = argparse.ArgumentParser(description=__doc__)
++parser.add_argument("source", type=Path)
++parser.add_argument("output", type=Path)
++parser.add_argument("--allow-baseline", action="store_true",
++                    help="qualify the pre-patch semantic baseline without work limits")
++args = parser.parse_args()
++args.output.mkdir(parents=True, exist_ok=True)
++here = Path(__file__).resolve().parent
++(args.output / "actual.inc").write_text(
++    extract(here / "baseline-query.c", "Base") + "\n" +
++    extract(args.source / "ntoskrnl/xb/mm/vm.c", "Candidate")
++)
++subprocess.run([
++    "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
++    "-Wno-unused-function", "-fsanitize=address,undefined",
++    "-fno-omit-frame-pointer", "-I" + str(args.output),
++    str(here / "harness.c"), "-o", str(args.output / "query-test"),
++], check=True)
++subprocess.run([str(args.output / "query-test")] +
++               ([] if args.allow_baseline else ["fast"]), check=True)
+--- /dev/null
++++ b/tests/xbe/vm-query-fastpath/main.c
+@@ -0,0 +1,73 @@
++/* Public query boundary oracle. All reservations/commits are owned; no private
++ * structures or arbitrary output pointers. Full MBI bytes recorded for diff. */
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <string.h>
++#include "regression.h"
++#include "expected.h"
++_Static_assert(sizeof(MEMORY_BASIC_INFORMATION)==28,"Xbox MBI ABI size");
++#define BASE 0x20000000UL
++#define SPAN 0x00c03000UL
++#define FRAG 0x30000000UL
++static volatile ULONG sink;
++static unsigned query_index;
++static void query(unsigned stage,ULONG address) {
++ struct {ULONG before;MEMORY_BASIC_INFORMATION m;ULONG after;} output;
++ memset(&output,0xa5,sizeof(output));output.before=0x12345678;output.after=0xfedcba98;
++ NTSTATUS status=NtQueryVirtualMemory((PVOID)address,&output.m);
++ MEMORY_BASIC_INFORMATION *m=&output.m;
++ if(query_index>=sizeof(query_expected)/sizeof(query_expected[0]))regression_require(0,"query expectation table is bounded");
++ const struct query_expected *expected=&query_expected[query_index++];
++ regression_check(expected->stage==stage && expected->address==address && expected->status==(ULONG)status && !memcmp(expected->mbi,m,sizeof(*m)),"all 28 public MBI bytes and status match the captured reference");
++ tap_comment("query stage=%u input=%08lx status=%08lx mbi=%08lx,%08lx,%08lx,%08lx,%08lx,%08lx,%08lx",stage,address,(ULONG)status,(ULONG)m->BaseAddress,(ULONG)m->AllocationBase,m->AllocationProtect,m->RegionSize,m->State,m->Protect,m->Type);
++ regression_check(output.before==0x12345678 && output.after==0xfedcba98,"query preserves output structure guards");
++ if(address>=0x7ffe0000){int untouched=1;for(unsigned i=0;i<sizeof(*m);i++)if(((UCHAR*)m)[i]!=0xa5)untouched=0;regression_check(status==(NTSTATUS)STATUS_INVALID_PARAMETER && untouched,"invalid top address leaves all output bytes untouched");}
++ if(address<0x7ffe0000)regression_check(status==0 && (ULONG)m->BaseAddress==(address&~4095UL) && m->RegionSize && address-(ULONG)m->BaseAddress<m->RegionSize,"query describes a page-aligned run containing its valid input");
++}
++static void boundaries(unsigned stage) {
++ static const ULONG offsets[]={0,1,4095,4096,8192,0x3fe000,0x3ff000,0x400000,0x401000,0x7ff000,0x800000,0x801000,0xbff000,0xc00000,0xc01000,0xc02000,0xc02fff,0xc03000};
++ for(unsigned i=0;i<sizeof(offsets)/sizeof(offsets[0]);i++)query(stage,BASE+offsets[i]);
++}
++static void commit(ULONG offset,ULONG size,ULONG protect) {
++ PVOID at=(PVOID)(BASE+offset);SIZE_T bytes=size;
++ NTSTATUS status=NtAllocateVirtualMemory(&at,0,&bytes,MEM_COMMIT,protect);
++ tap_comment("commit offset=%08lx size=%08lx protect=%08lx status=%08lx",offset,size,protect,(ULONG)status);
++ regression_require(status==0 && (ULONG)at==BASE+offset && bytes==size,"commit exact owned boundary range");
++}
++static void cost(unsigned mode,unsigned count) {
++ ULONGLONG frequency=KeQueryPerformanceFrequency();
++ for(unsigned sample=0;sample<5;sample++) {
++  ULONG ok=0;MEMORY_BASIC_INFORMATION m;ULONGLONG start=KeQueryPerformanceCounter();
++  for(unsigned i=0;i<count;i++) {
++   ULONG address=mode==0?BASE+4096:(mode==1 || mode==5)?0x50000000UL:mode==2?FRAG+(i%256)*0x20000+0x10000:(mode==3 || mode==6)?(i%16384)*0x20000:BASE+0x400000;
++   NTSTATUS status=NtQueryVirtualMemory((PVOID)address,&m);
++   ok+=status==0;sink^=m.RegionSize;
++  }
++  ULONGLONG ticks=KeQueryPerformanceCounter()-start;
++  tap_comment("query_cost mode=%u count=%u sample=%u frequency=%llu ticks=%llu successful=%lu",mode,count,sample,frequency,ticks,ok);
++  regression_check(ok==count || ((mode==3 || mode==6) && ok==count-1),"all timed query statuses match the valid range");
++ }
++}
++int main(void) {
++ regression_begin();
++ PVOID base=(PVOID)BASE;SIZE_T size=SPAN;
++ regression_require(NtAllocateVirtualMemory(&base,0,&size,MEM_RESERVE,PAGE_READWRITE)==0 && (ULONG)base==BASE && size==SPAN,"reserve exact sparse range crossing three PDE boundaries");
++ boundaries(0);cost(0,128);
++ commit(0,8192,PAGE_READWRITE);commit(0x3ff000,8192,PAGE_READONLY);commit(0x800000,4096,PAGE_NOACCESS);commit(0xc00000,8192,PAGE_READWRITE);
++ boundaries(1);cost(4,4096);
++ MmSetAddressProtect((PVOID)BASE,4096,PAGE_READONLY);boundaries(2);
++ base=(PVOID)(BASE+0x3ff000);size=8192;
++ regression_require(NtFreeVirtualMemory(&base,&size,MEM_DECOMMIT)==0,"decommit owned pages spanning a PDE boundary");
++ boundaries(3);
++ base=(PVOID)BASE;size=0;regression_require(NtFreeVirtualMemory(&base,&size,MEM_RELEASE)==0,"release sparse reservation");
++ boundaries(4);cost(5,4096);cost(6,16384);
++ for(unsigned i=0;i<256;i++) {
++  base=(PVOID)(FRAG+i*0x20000);size=65536;
++  regression_require(NtAllocateVirtualMemory(&base,0,&size,MEM_RESERVE,PAGE_READWRITE)==0 && (ULONG)base==FRAG+i*0x20000 && size==65536,"reserve sorted fragments with exact free gaps");
++ }
++ for(unsigned i=0;i<256;i+=17){query(5,FRAG+i*0x20000);query(5,FRAG+i*0x20000+0x10000);query(5,FRAG+i*0x20000+0x11abc);}
++ query(5,FRAG-4096);query(5,FRAG+256*0x20000);cost(1,4096);cost(2,4096);cost(3,16384);
++ for(unsigned i=0;i<256;i++){base=(PVOID)(FRAG+i*0x20000);size=0;regression_require(NtFreeVirtualMemory(&base,&size,MEM_RELEASE)==0,"release owned fragment");}
++ query(6,0);query(6,0x7ffdffff);query(6,0x7ffe0000);query(6,0x7fffffff);query(6,0xffffffff);
++ regression_finish();
++}
+--- /dev/null
++++ b/tests/xbe/vm-query-fastpath/tap.c
+@@ -0,0 +1,166 @@
++/*
++ * TAP 14 emitter.  Bytes go out the LPC47M157 SuperIO's COM1 at 115200 8N1
++ * (I/O 0x3F8).  We program the UART ourselves at first call so the suite
++ * works against both nxkrnl (which already programs it for DbgPrint) and
++ * the retail kernel (which doesn't).  isa-debugcon (port 0xE9) was the
++ * historical target but the upstream xemu AppImage builds without it.
++ */
++
++#include "tap.h"
++#include <stdio.h>
++#include <stdarg.h>
++
++#define COM1     0x3F8
++#define COM1_THR (COM1 + 0)
++#define COM1_DLL (COM1 + 0)
++#define COM1_IER (COM1 + 1)
++#define COM1_DLH (COM1 + 1)
++#define COM1_LCR (COM1 + 3)
++#define COM1_MCR (COM1 + 4)
++#define COM1_LSR (COM1 + 5)
++
++#define LSR_THRE 0x20  /* transmit holding register empty */
++#define LSR_TEMT 0x40  /* transmitter empty (shift + holding both drained) */
++#define LCR_DLAB 0x80
++#define LCR_8N1  0x03
++
++static inline void outb(unsigned short port, unsigned char val)
++{
++    __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
++}
++
++static inline unsigned char inb(unsigned short port)
++{
++    unsigned char ret;
++    __asm__ __volatile__("inb %1, %0" : "=a"(ret) : "Nd"(port));
++    return ret;
++}
++
++/* Xbox is single-CPU: prevent a scheduled kernel/debug writer from entering
++ * between bytes. Restore the caller's full flags, including an already-clear
++ * IF. Formatting stays outside this span; no kernel-private lock is borrowed. */
++static inline unsigned int tap_irq_save(void)
++{
++    unsigned int flags;
++    __asm__ __volatile__("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
++    return flags;
++}
++
++static inline void tap_irq_restore(unsigned int flags)
++{
++    __asm__ __volatile__("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
++}
++
++static void com_init(void)
++{
++    static int initialized = 0;
++    if (initialized) return;
++    initialized = 1;
++    outb(COM1_IER, 0x00);             /* disable all interrupts */
++    outb(COM1_LCR, LCR_DLAB);         /* DLAB=1 to set divisor */
++    outb(COM1_DLL, 0x01);             /* 115200 baud (1.8432 MHz / 16 / 1) */
++    outb(COM1_DLH, 0x00);
++    outb(COM1_LCR, LCR_8N1);          /* DLAB=0, 8N1 */
++    /* Retain the existing FIFO mode and queued bytes. THRE polling works
++     * with either the reset/default UART or a kernel-configured FIFO; changing
++     * FIFO enable or clearing it could discard the preceding debug message. */
++    outb(COM1_MCR, 0x0B);             /* DTR + RTS + OUT2 */
++}
++
++static void com_putc(char c)
++{
++    while ((inb(COM1_LSR) & LSR_THRE) == 0) { }
++    outb(COM1_THR, (unsigned char)c);
++}
++
++void tap_drain(void)
++{
++    while ((inb(COM1_LSR) & LSR_TEMT) == 0) { }
++}
++
++static void com_puts(const char *s)
++{
++    unsigned int flags = tap_irq_save();
++    com_init();
++    while (*s) com_putc(*s++);
++    tap_irq_restore(flags);
++}
++
++static void com_vprintf(const char *fmt, va_list ap)
++{
++    char buf[256];
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_puts(buf);
++}
++
++static void com_printf(const char *fmt, ...)
++{
++    va_list ap;
++    va_start(ap, fmt);
++    com_vprintf(fmt, ap);
++    va_end(ap);
++}
++
++void tap_puts(const char *s)
++{
++    com_puts(s);
++}
++
++void tap_version(unsigned int v)
++{
++    com_printf("TAP version %u\n", v);
++}
++
++void tap_plan(unsigned int n)
++{
++    com_printf("1..%u\n", n);
++}
++
++void tap_ok(unsigned int n, const char *desc)
++{
++    com_printf("ok %u - %s\n", n, desc);
++}
++
++void tap_not_ok(unsigned int n, const char *desc)
++{
++    com_printf("not ok %u - %s\n", n, desc);
++}
++
++void tap_diag_begin(void)
++{
++    com_puts("  ---\n");
++}
++
++void tap_diag_end(void)
++{
++    com_puts("  ...\n");
++}
++
++void tap_diag_kv(const char *key, const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("  %s: %s\n", key, buf);
++}
++
++void tap_comment(const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("# %s\n", buf);
++}
+--- /dev/null
++++ b/tests/xbe/vm-query-fastpath/tap.h
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include <stdarg.h>
++#include <stdbool.h>
++
++void tap_version(unsigned int v);
++void tap_plan(unsigned int n);
++void tap_ok(unsigned int n, const char *desc);
++void tap_not_ok(unsigned int n, const char *desc);
++
++/* Open / close a YAML diagnostic block underneath a `not ok` line. */
++void tap_diag_begin(void);
++void tap_diag_end(void);
++void tap_diag_kv(const char *key, const char *fmt, ...);
++
++void tap_comment(const char *fmt, ...);
++
++/* Drop a raw string verbatim (no formatting / framing).  Used for the
++ * "== api-regression begin ==" / "== ... end ==" markers in main.c so
++ * the runner can slice the TAP block out of the surrounding kernel
++ * debug stream. */
++void tap_puts(const char *s);
++
++/* Block until the UART transmitter is fully drained.  Call before
++ * issuing an SMC shutdown so the final bytes aren't lost. */
++void tap_drain(void);
+--- /dev/null
++++ b/tests/xbe/vm-query-fastpath/regression.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include "tap.h"
++#include <xboxkrnl/xboxkrnl.h>
++
++static unsigned regression_checks, regression_failures;
++
++static void regression_begin(void)
++{
++    tap_version(14);
++}
++
++static void regression_check(int passed, const char *description)
++{
++    ++regression_checks;
++    if (passed) {
++        tap_ok(regression_checks, description);
++    } else {
++        ++regression_failures;
++        tap_not_ok(regression_checks, description);
++    }
++}
++
++static void regression_finish(void) __attribute__((noreturn));
++static void regression_finish(void)
++{
++    LARGE_INTEGER delay = { .QuadPart = -5000000 };
++    tap_comment("checks=%u failures=%u", regression_checks, regression_failures);
++    tap_plan(regression_checks);
++    tap_drain();
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    /* A failed shutdown remains a timeout, never a passing capture. */
++    for (;;) __asm__ __volatile__("hlt");
++}
++
++static inline void regression_require(int passed, const char *description)
++{
++    regression_check(passed, description);
++    if (!passed) regression_finish();
++}
+--- /dev/null
++++ b/tests/xbe/vm-query-fastpath/expected.h
+@@ -0,0 +1,150 @@
++/* Public reference results for fixed owned reservations, captured before
++ * runtime changes. No proprietary implementation bytes or private fields. */
++struct query_expected { ULONG stage,address,status,mbi[7]; };
++static const struct query_expected query_expected[] = {
++ {0,0x20000000,0x00000000,{0x20000000,0x20000000,0x00000004,0x00c03000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20000001,0x00000000,{0x20000000,0x20000000,0x00000004,0x00c03000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20000fff,0x00000000,{0x20000000,0x20000000,0x00000004,0x00c03000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20001000,0x00000000,{0x20001000,0x20000000,0x00000004,0x00c02000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20002000,0x00000000,{0x20002000,0x20000000,0x00000004,0x00c01000,0x00002000,0x00000000,0x00020000}},
++ {0,0x203fe000,0x00000000,{0x203fe000,0x20000000,0x00000004,0x00805000,0x00002000,0x00000000,0x00020000}},
++ {0,0x203ff000,0x00000000,{0x203ff000,0x20000000,0x00000004,0x00804000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20400000,0x00000000,{0x20400000,0x20000000,0x00000004,0x00803000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20401000,0x00000000,{0x20401000,0x20000000,0x00000004,0x00802000,0x00002000,0x00000000,0x00020000}},
++ {0,0x207ff000,0x00000000,{0x207ff000,0x20000000,0x00000004,0x00404000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20800000,0x00000000,{0x20800000,0x20000000,0x00000004,0x00403000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20801000,0x00000000,{0x20801000,0x20000000,0x00000004,0x00402000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20bff000,0x00000000,{0x20bff000,0x20000000,0x00000004,0x00004000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20c00000,0x00000000,{0x20c00000,0x20000000,0x00000004,0x00003000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20c01000,0x00000000,{0x20c01000,0x20000000,0x00000004,0x00002000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20c02000,0x00000000,{0x20c02000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20c02fff,0x00000000,{0x20c02000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {0,0x20c03000,0x00000000,{0x20c03000,0x00000000,0x00000000,0x5f3dd000,0x00010000,0x00000001,0x00000000}},
++ {1,0x20000000,0x00000000,{0x20000000,0x20000000,0x00000004,0x00002000,0x00001000,0x00000004,0x00020000}},
++ {1,0x20000001,0x00000000,{0x20000000,0x20000000,0x00000004,0x00002000,0x00001000,0x00000004,0x00020000}},
++ {1,0x20000fff,0x00000000,{0x20000000,0x20000000,0x00000004,0x00002000,0x00001000,0x00000004,0x00020000}},
++ {1,0x20001000,0x00000000,{0x20001000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000004,0x00020000}},
++ {1,0x20002000,0x00000000,{0x20002000,0x20000000,0x00000004,0x003fd000,0x00002000,0x00000000,0x00020000}},
++ {1,0x203fe000,0x00000000,{0x203fe000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {1,0x203ff000,0x00000000,{0x203ff000,0x20000000,0x00000004,0x00002000,0x00001000,0x00000002,0x00020000}},
++ {1,0x20400000,0x00000000,{0x20400000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000002,0x00020000}},
++ {1,0x20401000,0x00000000,{0x20401000,0x20000000,0x00000004,0x003ff000,0x00002000,0x00000000,0x00020000}},
++ {1,0x207ff000,0x00000000,{0x207ff000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {1,0x20800000,0x00000000,{0x20800000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000001,0x00020000}},
++ {1,0x20801000,0x00000000,{0x20801000,0x20000000,0x00000004,0x003ff000,0x00002000,0x00000000,0x00020000}},
++ {1,0x20bff000,0x00000000,{0x20bff000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {1,0x20c00000,0x00000000,{0x20c00000,0x20000000,0x00000004,0x00002000,0x00001000,0x00000004,0x00020000}},
++ {1,0x20c01000,0x00000000,{0x20c01000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000004,0x00020000}},
++ {1,0x20c02000,0x00000000,{0x20c02000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {1,0x20c02fff,0x00000000,{0x20c02000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {1,0x20c03000,0x00000000,{0x20c03000,0x00000000,0x00000000,0x5f3dd000,0x00010000,0x00000001,0x00000000}},
++ {2,0x20000000,0x00000000,{0x20000000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000002,0x00020000}},
++ {2,0x20000001,0x00000000,{0x20000000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000002,0x00020000}},
++ {2,0x20000fff,0x00000000,{0x20000000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000002,0x00020000}},
++ {2,0x20001000,0x00000000,{0x20001000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000004,0x00020000}},
++ {2,0x20002000,0x00000000,{0x20002000,0x20000000,0x00000004,0x003fd000,0x00002000,0x00000000,0x00020000}},
++ {2,0x203fe000,0x00000000,{0x203fe000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {2,0x203ff000,0x00000000,{0x203ff000,0x20000000,0x00000004,0x00002000,0x00001000,0x00000002,0x00020000}},
++ {2,0x20400000,0x00000000,{0x20400000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000002,0x00020000}},
++ {2,0x20401000,0x00000000,{0x20401000,0x20000000,0x00000004,0x003ff000,0x00002000,0x00000000,0x00020000}},
++ {2,0x207ff000,0x00000000,{0x207ff000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {2,0x20800000,0x00000000,{0x20800000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000001,0x00020000}},
++ {2,0x20801000,0x00000000,{0x20801000,0x20000000,0x00000004,0x003ff000,0x00002000,0x00000000,0x00020000}},
++ {2,0x20bff000,0x00000000,{0x20bff000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {2,0x20c00000,0x00000000,{0x20c00000,0x20000000,0x00000004,0x00002000,0x00001000,0x00000004,0x00020000}},
++ {2,0x20c01000,0x00000000,{0x20c01000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000004,0x00020000}},
++ {2,0x20c02000,0x00000000,{0x20c02000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {2,0x20c02fff,0x00000000,{0x20c02000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {2,0x20c03000,0x00000000,{0x20c03000,0x00000000,0x00000000,0x5f3dd000,0x00010000,0x00000001,0x00000000}},
++ {3,0x20000000,0x00000000,{0x20000000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000002,0x00020000}},
++ {3,0x20000001,0x00000000,{0x20000000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000002,0x00020000}},
++ {3,0x20000fff,0x00000000,{0x20000000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000002,0x00020000}},
++ {3,0x20001000,0x00000000,{0x20001000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000004,0x00020000}},
++ {3,0x20002000,0x00000000,{0x20002000,0x20000000,0x00000004,0x007fe000,0x00002000,0x00000000,0x00020000}},
++ {3,0x203fe000,0x00000000,{0x203fe000,0x20000000,0x00000004,0x00402000,0x00002000,0x00000000,0x00020000}},
++ {3,0x203ff000,0x00000000,{0x203ff000,0x20000000,0x00000004,0x00401000,0x00002000,0x00000000,0x00020000}},
++ {3,0x20400000,0x00000000,{0x20400000,0x20000000,0x00000004,0x00400000,0x00002000,0x00000000,0x00020000}},
++ {3,0x20401000,0x00000000,{0x20401000,0x20000000,0x00000004,0x003ff000,0x00002000,0x00000000,0x00020000}},
++ {3,0x207ff000,0x00000000,{0x207ff000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {3,0x20800000,0x00000000,{0x20800000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000001,0x00020000}},
++ {3,0x20801000,0x00000000,{0x20801000,0x20000000,0x00000004,0x003ff000,0x00002000,0x00000000,0x00020000}},
++ {3,0x20bff000,0x00000000,{0x20bff000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {3,0x20c00000,0x00000000,{0x20c00000,0x20000000,0x00000004,0x00002000,0x00001000,0x00000004,0x00020000}},
++ {3,0x20c01000,0x00000000,{0x20c01000,0x20000000,0x00000004,0x00001000,0x00001000,0x00000004,0x00020000}},
++ {3,0x20c02000,0x00000000,{0x20c02000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {3,0x20c02fff,0x00000000,{0x20c02000,0x20000000,0x00000004,0x00001000,0x00002000,0x00000000,0x00020000}},
++ {3,0x20c03000,0x00000000,{0x20c03000,0x00000000,0x00000000,0x5f3dd000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20000000,0x00000000,{0x20000000,0x00000000,0x00000000,0x5ffe0000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20000001,0x00000000,{0x20000000,0x00000000,0x00000000,0x5ffe0000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20000fff,0x00000000,{0x20000000,0x00000000,0x00000000,0x5ffe0000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20001000,0x00000000,{0x20001000,0x00000000,0x00000000,0x5ffdf000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20002000,0x00000000,{0x20002000,0x00000000,0x00000000,0x5ffde000,0x00010000,0x00000001,0x00000000}},
++ {4,0x203fe000,0x00000000,{0x203fe000,0x00000000,0x00000000,0x5fbe2000,0x00010000,0x00000001,0x00000000}},
++ {4,0x203ff000,0x00000000,{0x203ff000,0x00000000,0x00000000,0x5fbe1000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20400000,0x00000000,{0x20400000,0x00000000,0x00000000,0x5fbe0000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20401000,0x00000000,{0x20401000,0x00000000,0x00000000,0x5fbdf000,0x00010000,0x00000001,0x00000000}},
++ {4,0x207ff000,0x00000000,{0x207ff000,0x00000000,0x00000000,0x5f7e1000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20800000,0x00000000,{0x20800000,0x00000000,0x00000000,0x5f7e0000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20801000,0x00000000,{0x20801000,0x00000000,0x00000000,0x5f7df000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20bff000,0x00000000,{0x20bff000,0x00000000,0x00000000,0x5f3e1000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20c00000,0x00000000,{0x20c00000,0x00000000,0x00000000,0x5f3e0000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20c01000,0x00000000,{0x20c01000,0x00000000,0x00000000,0x5f3df000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20c02000,0x00000000,{0x20c02000,0x00000000,0x00000000,0x5f3de000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20c02fff,0x00000000,{0x20c02000,0x00000000,0x00000000,0x5f3de000,0x00010000,0x00000001,0x00000000}},
++ {4,0x20c03000,0x00000000,{0x20c03000,0x00000000,0x00000000,0x5f3dd000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30000000,0x00000000,{0x30000000,0x30000000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x30010000,0x00000000,{0x30010000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30011abc,0x00000000,{0x30011000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30220000,0x00000000,{0x30220000,0x30220000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x30230000,0x00000000,{0x30230000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30231abc,0x00000000,{0x30231000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30440000,0x00000000,{0x30440000,0x30440000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x30450000,0x00000000,{0x30450000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30451abc,0x00000000,{0x30451000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30660000,0x00000000,{0x30660000,0x30660000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x30670000,0x00000000,{0x30670000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30671abc,0x00000000,{0x30671000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30880000,0x00000000,{0x30880000,0x30880000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x30890000,0x00000000,{0x30890000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30891abc,0x00000000,{0x30891000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30aa0000,0x00000000,{0x30aa0000,0x30aa0000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x30ab0000,0x00000000,{0x30ab0000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30ab1abc,0x00000000,{0x30ab1000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30cc0000,0x00000000,{0x30cc0000,0x30cc0000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x30cd0000,0x00000000,{0x30cd0000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30cd1abc,0x00000000,{0x30cd1000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30ee0000,0x00000000,{0x30ee0000,0x30ee0000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x30ef0000,0x00000000,{0x30ef0000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x30ef1abc,0x00000000,{0x30ef1000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31100000,0x00000000,{0x31100000,0x31100000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x31110000,0x00000000,{0x31110000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31111abc,0x00000000,{0x31111000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31320000,0x00000000,{0x31320000,0x31320000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x31330000,0x00000000,{0x31330000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31331abc,0x00000000,{0x31331000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31540000,0x00000000,{0x31540000,0x31540000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x31550000,0x00000000,{0x31550000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31551abc,0x00000000,{0x31551000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31760000,0x00000000,{0x31760000,0x31760000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x31770000,0x00000000,{0x31770000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31771abc,0x00000000,{0x31771000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31980000,0x00000000,{0x31980000,0x31980000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x31990000,0x00000000,{0x31990000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31991abc,0x00000000,{0x31991000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31ba0000,0x00000000,{0x31ba0000,0x31ba0000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x31bb0000,0x00000000,{0x31bb0000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31bb1abc,0x00000000,{0x31bb1000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31dc0000,0x00000000,{0x31dc0000,0x31dc0000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x31dd0000,0x00000000,{0x31dd0000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31dd1abc,0x00000000,{0x31dd1000,0x00000000,0x00000000,0x0000f000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31fe0000,0x00000000,{0x31fe0000,0x31fe0000,0x00000004,0x00010000,0x00002000,0x00000000,0x00020000}},
++ {5,0x31ff0000,0x00000000,{0x31ff0000,0x00000000,0x00000000,0x4dff0000,0x00010000,0x00000001,0x00000000}},
++ {5,0x31ff1abc,0x00000000,{0x31ff1000,0x00000000,0x00000000,0x4dfef000,0x00010000,0x00000001,0x00000000}},
++ {5,0x2ffff000,0x00000000,{0x2ffff000,0x00000000,0x00000000,0x00001000,0x00010000,0x00000001,0x00000000}},
++ {5,0x32000000,0x00000000,{0x32000000,0x00000000,0x00000000,0x4dfe0000,0x00010000,0x00000001,0x00000000}},
++ {6,0x00000000,0x00000000,{0x00000000,0x00000000,0x00000000,0x00010000,0x00010000,0x00000001,0x00000000}},
++ {6,0x7ffdffff,0x00000000,{0x7ffdf000,0x00000000,0x00000000,0x00001000,0x00010000,0x00000001,0x00000000}},
++ {6,0x7ffe0000,0xc000000d,{0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5}},
++ {6,0x7fffffff,0xc000000d,{0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5}},
++ {6,0xffffffff,0xc000000d,{0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5,0xa5a5a5a5}},
++};
+--- /dev/null
++++ b/tests/xbe/vm-query-fastpath/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = vm-query-boundary-oracle
++GEN_XISO = query-oracle-probe.iso
++NXDK_DIR ?= ../../../../nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c
++CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+--- /dev/null
++++ b/tests/xbe/vm-query-fastpath/README.md
+@@ -0,0 +1,9 @@
++# VM query boundary and work oracle
++
++Build with `NXDK_DIR=/path/to/nxdk make`. The 989 checks use only public APIs
++and owned fixed-address reservations. All seven MEMORY_BASIC_INFORMATION fields
++are asserted against captured public reference records, including sparse/mixed/noaccess and free-region boundaries and
++invalid high-address output preservation. No arbitrary output pointers or
++private page tables are read. Timings are diagnostic batch counter deltas;
++correctness acceptance never relies on timing. The synthetic 256-fragment
++workload is not a recorded game allocation layout.
+--- /dev/null
++++ b/tests/host/vm-query-fastpath/README.md
+@@ -0,0 +1,10 @@
++# Actual-source VM query differential
++
++`python3 check.py SOURCE OUTPUT` compiles the production lookup, protection
++decoder and query against the frozen prior production functions. ASan/UBSan,
++38,061 cases, full output bytes/status/guards, mutex checks and explicit work
++budgets cover sparse and mixed PDE/PTE spans and zero/one/16/256 region lists.
++`--allow-baseline` runs the same semantic comparison before the patch; without
++that option the old implementation fails the intended one-list-walk assertion.
++Host pointer widths differ from Xbox. The public native fixture supplies the
++28-byte target-ABI check. Neither fixture reads proprietary implementation code.
