@@ -28,6 +28,8 @@ Both 64 MiB builds complete the kernel INIT-reference checks and boot-menu place
 
 ## Forza status and remaining scope
 
+Entry threads and the `PsCreateSystemThreadEx` wrapper register through `XeRegisterThread` and receive this initialization. The existing non-Ex `PsCreateSystemThread` wrapper bypasses registration and retains the process-default quantum. That separate path needs its own qualification before claiming the corrected quantum for every public thread-creation API.
+
 This scheduler mismatch was found while investigating delayed Forza scenery. A native recording from boot reproduces missing road at a stopped Civic, but **the candidate has not yet been evaluated at that Forza checkpoint**. The scheduling regression is fixed; causation for the world-loading symptom remains unproven. A matched human-driven Complex/candidate comparison is required before treating this as the Forza fix or publishing it as such.
 
 The frequently observed 2 ms-delay worker reads audio; the main title thread requests the world resources. The initial Forza recorder also misclassified unchanged, initially-zero I/O status blocks as completed reads. Those completion labels are excluded. A revised recorder separately tracks public completion-APC dispatch and has been qualified against a zero-initialized-IOSB XBE.
