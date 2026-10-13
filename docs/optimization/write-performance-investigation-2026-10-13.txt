@@ -1,0 +1,105 @@
+Write performance release investigation — 2026-10-13
+
+Status: focused fixture and strict parser ready; native measurements are owned
+by the coordinating agent. No runtime performance fix is justified yet and no
+0119 patch has been created. This file records the investigation even if the
+regression does not reproduce.
+
+Product comparisons: pre-optimization baseline 464e7ea versus final performance
+commit 8268b1cbd8371a87e4e84cdba45709a56371035a. The actual latter source is the
+staged tree 9ef0d1d0f503eccf9d966d4b6901993c7364754c under
+../perf-native-hotpaths-20261013/artifacts/performance-release64/work-t2eitw9k/source.
+Its HEAD alone does not identify applied patches.
+
+Existing evidence: final three-pair campaign reports flush_buffers_visibility
+7.747 -> 8.546 ms and overwrite_reextend_same_handle 16.925 -> 18.483 ms.
+These are complete leaf timings, not syscall latency. Other slower leaves vary
+between campaigns. This is a reason to measure focused operations, not evidence
+that a specific kernel function regressed.
+
+Frozen original fixture copies:
+  tests/xbe/write-performance/frozen/{harness.h,tap.c,tap.h,io/cc_write.c,io/createfile.c}
+These are byte-for-byte copies from the frozen API leaf performance fixture.
+Their three replay cases are flush_buffers_visibility,
+overwrite_reextend_same_handle and open_same_eof_preserves_contents.
+The first measures deterministic 64 KiB pattern generation/checking, create,
+write, flush, cross-handle open/read, closes, and delete. The latter two measure
+128 KiB generation/checking, initial create/write/close, existing-file open,
+EOF query, EOF set, second EOF query, read, close and delete. Each starts by
+removing the prior path and deletes on successful completion. Initial absence
+makes the first cleanup open fail normally; subsequent successful runs also
+start absent. The frozen flush leaf verifies returned read length and every
+byte, but does not independently query EOF. The overwrite/open controls verify
+EOF before and after extension as well as read length and every byte.
+
+Static successful original-leaf exported call counts with an absent initial
+path (not dynamic internal I/O counts):
+  flush: 4 NtCreateFile, 3 NtClose, 1 NtWriteFile, 1 NtFlushBuffersFile, 1 NtReadFile.
+  overwrite/open: 4 IoCreateFile, 3 NtClose, 1 NtWriteFile, 1 NtReadFile,
+                  2 NtQueryInformationFile, 1 NtSetInformationFile.
+Both include the unsuccessful initial deletion open. No TAP output occurs
+within a measured leaf.
+
+Six separate controls measure only one operation each: written-handle flush,
+64 KiB write, overwrite-open of an existing 128 KiB file, same-handle reextend
+to 128 KiB, parent-directory open and close of a written 64 KiB handle. Setup
+removes/recreates the same private path before every iteration. Source bytes
+are deterministically regenerated. Writes use an explicit zero offset.
+Verification and cleanup occur outside the operation timing. Every data case
+checks returned status, read count, EOF and every byte; overwrite also checks
+its disposition and the zero-length intermediate state. The parent control
+checks successful open, FILE_OPENED and the Directory attribute. A failed case
+invalidates the run, even if timing records remain present.
+
+Fixture v1 runs nine cases with nine samples each, in fixed case order. Sample
+zero means first invocation of that case in this process; samples 1..8 mean
+warmed repetitions. These are not cold-disk measurements: earlier cases,
+firmware boot, host caches and TCG translation may already warm shared code
+or data. Pair campaigns must start from the identical base HDD snapshot and
+alternate firmware order, keeping emulator build, machine configuration and
+fixture image hash identical. A first-call-only effect and a persistent warm
+operation effect have different interpretations. At least seven alternating
+pairs are recommended after qualification against baseline/current/Complex.
+The native runner owns asset hashes, snapshot and configuration provenance.
+
+Raw QPC deltas (64-bit ticks) and the frequency are emitted after timing, with
+81 ordered TAP assertions. tools/write_performance.py rejects missing/duplicate
+captures, wrong plan, wrong sequence, wrong byte count, zero ticks/frequency,
+failed correctness/TAP, missing final PASS or bad summary. It reports first
+invocation and warm median/min/max separately. It does not by itself validate
+firmware identity or assert a causal regression from timing.
+
+Source investigation: the baseline-to-final runtime patch additions cover
+explicit timer APC mode, validated pin commit, and DES rounds. There is no new
+filesystem write/flush algorithm in that delta. The validated pin commit
+removes repeated eligibility checks under the already-held PFN lock; it does
+not add a write/flush. The current VfatFlushWriteThrough still traverses the
+file and ancestor directory streams then FAT. NtFlushBuffersFile dispatches
+to VfatFlushFile/CcFlushCache, including dirty entry update. These paths can
+make total leaf cost sensitive to metadata/cache state, but this is a
+hypothesis rather than a measured cause. Normal Vfat flush DPRINT sites are
+disabled by NDEBUG; cache warnings are exceptional. No new write-path serial
+logging was found in the runtime delta. Guest QPC includes host scheduling
+and TCG translation time, so layout/cold-translation explanations also need
+first-call versus warm evidence. Neither logging nor TCG is assumed causal.
+
+Validation performed before native qualification:
+  nxdk cross-build succeeded (existing linker .edata merge warning).
+  python -m unittest discover -s tests/host: 134 tests, 3 skipped, no failures.
+  Parser negative cases cover corrupt status/size/ticks/sample/TAP/frequency,
+  failed summary, truncation, duplicate captures, and surplus timing records.
+  ISO SHA256: 4722e4048efc14a96f0c554a05b4d5c5a763ddefa0d10fc476ed881a000cbc55
+  XBE SHA256: 7ecd57b7b9a8d6a3866aaf3845565267467c40f230b4d18df29cfd36ef71e6b5
+
+Independent SHA review (separate requested release review):
+The SHA candidate changes only compression-loop organization relative to the
+actual final source. Round 15 endian conversion and rounds 16..19 schedule
+transition are correct. Five-round groups restore working variable order.
+The circular schedule writes and State load/addition order remain identical;
+public context load/store, counters, alias handling and final reset are not
+changed. Independently reran actual-source host differential/oracle test:
+13,410 checks passed, including all state and ring-buffer bytes, full-arena
+update/final aliases, synthetic counter carry, reserved bytes, reset, SHA and
+truncated-key HMAC known/independent oracles. Compression-loop evaluations were
+19 versus 81. Host 1 MiB medians were 1.110 versus 1.573 ms (not a native claim).
+Evidence: artifacts/sha-independent-review/work.json. No blocking finding.
