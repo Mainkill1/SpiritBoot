@@ -1,0 +1,84 @@
+--- a/ntoskrnl/xb/procobj.c
++++ b/ntoskrnl/xb/procobj.c
+@@ -102,6 +102,17 @@
+     PKTHREAD Thread = KeGetCurrentThread();
+     CHAR Base = (CHAR)Thread->BasePriority;
+     ULONG Threads = PsGetCurrentProcess()->ActiveThreads;
++    KIRQL OldIrql;
++
++    /* Registration marks a title thread. Use the same 60-unit quantum in
++     * the scheduler as in its public view: three clock units per millisecond
++     * give the console's 20 ms CPU turn. The inherited system-process
++     * quantum is 36 units and otherwise gives titles only 12 ms. Do not
++     * change the process quantum: it also governs kernel worker threads. */
++    OldIrql = KeRaiseIrqlToDpcLevel();
++    Thread->QuantumReset = XBE_THREAD_QUANTUM;
++    Thread->Quantum = XBE_THREAD_QUANTUM;
++    KeLowerIrql(OldIrql);
+ 
+     if (!NxkTitleProcessReady)
+         NxkInitializeTitleProcess(Base);
+--- /dev/null
++++ b/tests/xbe/thread-quantum/main.c
+@@ -0,0 +1,52 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Public behavior regression: equal-priority CPU contention after a short wait.
++ * The reference establishes the bound; this is not an FPS measurement.
++ */
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include "../regression.h"
++static volatile LONG stop_worker, started;
++static volatile ULONG sink;
++static DWORD WINAPI busy(LPVOID unused)
++{
++    ULONG value = 1;
++    (void)unused;
++    InterlockedExchange(&started, 1);
++    while (!stop_worker) {
++        for (unsigned i=0;i<256;++i) value=value*1664525+1013904223;
++        sink=value;
++    }
++    return 0;
++}
++int main(void)
++{
++    regression_begin();
++    regression_require(SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_NORMAL),"main normal base priority");
++    HANDLE worker=CreateThread(NULL,0,busy,NULL,0,NULL);
++    regression_require(worker != NULL,"create equal-priority CPU contender");
++    regression_require(SetThreadPriority(worker,THREAD_PRIORITY_NORMAL),"worker normal base priority");
++    while(!started) Sleep(1);
++    for(unsigned warm=0;warm<3;++warm) Sleep(1);
++    DWORD ms[16];ULONG us[16];NTSTATUS results[16];
++    ULONGLONG frequency=KeQueryPerformanceFrequency();
++    for(unsigned i=0;i<16;++i) {
++        LARGE_INTEGER delay={.QuadPart=-10000};
++        DWORD before=GetTickCount();ULONGLONG counter=KeQueryPerformanceCounter();
++        results[i]=KeDelayExecutionThread(UserMode,TRUE,&delay);
++        us[i]=(ULONG)((KeQueryPerformanceCounter()-counter)*1000000/frequency);
++        ms[i]=GetTickCount()-before;
++    }
++    InterlockedExchange(&stop_worker,1);
++    regression_require(WaitForSingleObject(worker,5000)==WAIT_OBJECT_0,"contender exits");
++    CloseHandle(worker);
++    unsigned reference_slices=0,completed=0;
++    for(unsigned i=0;i<16;++i) {
++        tap_comment("quantum sample=%u status=%08lx tick_ms=%lu pmt_us=%lu",i,(ULONG)results[i],ms[i],us[i]);
++        completed += results[i]==STATUS_SUCCESS;
++        /* Permit clock phase and rare interference; require most samples. */
++        reference_slices += us[i]>=18000 && us[i]<=100000;
++    }
++    regression_check(completed==16,"every short wait completes successfully");
++    regression_check(reference_slices>=14,"equal-priority contender receives reference-sized CPU turns");
++    regression_finish();
++}
+--- /dev/null
++++ b/tests/xbe/thread-quantum/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = THREAD-QUANTUM
++GEN_XISO = thread-quantum.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../.reference/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
