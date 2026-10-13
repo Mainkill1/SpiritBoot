@@ -1,0 +1,53 @@
+--- a/drivers/filesystems/vfatfs/create.c
++++ b/drivers/filesystems/vfatfs/create.c
+@@ -417,6 +417,36 @@
+ /*
+  * FUNCTION: Create or open a file
+  */
++/* FATX accepts one empty component between named components (the common
++ * save-directory + "\\filename" spelling). Three separators, or a doubled
++ * separator at the volume root, are invalid. Canonicalize before the FCB
++ * lookup so both spellings share the same file, allocation and share state.
++ * The FILE_OBJECT owns this counted buffer; caller memory is not modified. */
++static NTSTATUS
++VfatNormalizeFatxPath(PUNICODE_STRING Name)
++{
++    USHORT Count = Name->Length / sizeof(WCHAR);
++    USHORT Read, Write;
++
++    /* Validate before modifying the buffer, including the non-NUL case. */
++    for (Read = 1; Read < Count; ++Read)
++    {
++        if (Name->Buffer[Read] == L'\\' && Name->Buffer[Read - 1] == L'\\' &&
++            (Read == 1 || (Read > 1 && Name->Buffer[Read - 2] == L'\\')))
++            return STATUS_OBJECT_NAME_INVALID;
++    }
++
++    for (Read = Write = 0; Read < Count; ++Read)
++    {
++        if (Read != 0 && Name->Buffer[Read] == L'\\' &&
++            Write != 0 && Name->Buffer[Write - 1] == L'\\')
++            continue;
++        Name->Buffer[Write++] = Name->Buffer[Read];
++    }
++    Name->Length = Write * sizeof(WCHAR);
++    return STATUS_SUCCESS;
++}
++
+ static NTSTATUS
+ VfatCreateFile(
+     PDEVICE_OBJECT DeviceObject,
+@@ -544,6 +574,13 @@
+         return STATUS_OBJECT_PATH_NOT_FOUND;
+     }
+ 
++    if (vfatVolumeIsFatX(DeviceExt))
++    {
++        Status = VfatNormalizeFatxPath(&FileObject->FileName);
++        if (!NT_SUCCESS(Status))
++            return Status;
++    }
++
+     /* Check for illegal characters and illegal dot sequences in the file name */
+     PathNameU = FileObject->FileName;
+     c = PathNameU.Buffer + PathNameU.Length / sizeof(WCHAR);
