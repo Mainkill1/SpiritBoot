@@ -55,7 +55,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = d73e07d9b3a9aee3b2b437fe807b55f32640e0a8
+            test "$actual_tree" = 694b0e2461558f6a5f7a774fd34c79bd7cdc111e
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -171,7 +171,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'd73e07d9b3a9aee3b2b437fe807b55f32640e0a8', result
+          assert result['source_tree'] == '694b0e2461558f6a5f7a774fd34c79bd7cdc111e', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
