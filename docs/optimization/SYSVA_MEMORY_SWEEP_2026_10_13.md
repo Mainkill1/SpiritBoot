@@ -207,6 +207,108 @@ does not change the unrelated static KSEG0/device policy.
   those flags needs independent ABI evidence and fault tests. No temporary
   permissions/restoration claim is made.
 
+### Ranked follow-up work
+
+These are investigation priorities, not additional accepted optimizations. The
+ranking separates measured elapsed time from source work counts.
+
+1. **Profile and qualify warm, small SYSVA invalidation.** Raw `sysva-1` still
+   measures 10.7794 us versus Complex 1.7963 us (about 6.0 times), for the identical
+   allocation/write/check/free body. The first overall call can create a PT;
+   subsequent pairs reuse that retained PT. A warm allocation at the aperture base reads
+   one PDE and one PTE to find its hole, takes one data PFN, and writes one PTE.
+   Free clears one PTE and returns one PFN. The pair acquires the SYSVA lock twice,
+   acquires the PFN lock twice, and reloads CR3 twice. It performs no data zeroing.
+   A successful aperture allocation returns directly through the public wrapper,
+   without visiting the pool fallback. The unchanged benchmark has no retained
+   SYSVA allocation between pairs. These facts make a large VA scan or routine
+   pool fallback a poor explanation of this particular warm gap. They do not
+   attribute the gap between lock overhead, CR3 reloads and emulator execution.
+   First add observable per-phase counters that report the actual internal QPC
+   frequency. Then evaluate an existing-PT small-span `invlpg` path separately
+   from allocation batching, against cold/new-PT, stale mappings, PDE crossing,
+   physical pins and interleaved reuse. Full CR3 reloads may have different costs
+   on hardware; a native emulator result alone cannot select the hardware policy.
+2. **Reduce pathological failure work and separately bound shared-lock returns.**
+   The failed 66,281,472-byte request performs 16,140 PFN lock acquisitions in the
+   instrumented run, followed by the allocation-sized rollback return scope. Its
+   raw maximum is 2,988 internal ticks (2,656 us). Normal free already uses one
+   `Return` per PFN lock; this maximum does not establish a 3 ms normal-free scope.
+   The outer SYSVA spinlock remains held throughout allocation, free and rollback.
+   Merely splitting PFN returns preserves DISPATCH_LEVEL under that outer lock and
+   cannot establish a scheduler or DPC latency improvement. Domain-aware failure
+   preflight and bounded returns should be isolated experiments, preserving
+   retained PTs, title capacity, persistent frames, deferred pins, order and the
+   public pool retry. The diagnostic scope covers SYSVA; it does not time the
+   subsequent public fallback or its empty-bucket reclaim/retry. Any claim about
+   shortening the entire elevated-IRQL interval also needs a proof for the outer
+   reservation/publication lifetime.
+3. **Measure fragmented SYSVA first-fit before adding occupancy metadata.** The
+   production-helper fixture below confirms one PDE/PTE read for the warm one-page
+   case, 4,096 of each behind 4,095 occupied pages, and 16,384 of each for an
+   alternating free/occupied aperture that has no two-page hole. Entire unbacked
+   PTs already skip 1,024 VAs: a full empty aperture needs only sixteen PDE reads.
+   A word scan or occupancy summary could help fragmented, backed PTs, but must
+   preserve first-fit addresses and authoritative PTE state under the same lock.
+   No captured title fragmentation distribution justifies another resident index.
+4. **Fuse safe pin translation work before enlarging the stack cache.** A valid
+   lock of more than 64 pages calls validity once and physical translation twice
+   per page; a span up to 64 pages uses the retained PFN cache and translates only
+   once. A 4,096-page lock therefore makes 4,096 validity and 8,192 physical
+   translation calls while holding one PFN lock. Unlock can avoid the second
+   translation pass when no deferred release is needed; rejected requests and
+   aliased deferred release need their restore/replay logic. A combined checked
+   PDE/PTE walker is a candidate for independent tests. Increasing the 256-byte
+   cache to 4,096 PFNs would consume 16 KiB of kernel stack and is not a sensible
+   default. Preserve complete request validation, aliases, overflow and deferred
+   release before attempting fewer passes.
+5. **Keep default VM and page-table zeroing as a separate transaction.** The raw
+   SYSVA result cannot justify removing VM zeroing: all 52 default VM zero/reuse
+   assertions pass on Complex, baseline and raw candidate. VM fresh-page commit
+   zeroes under its per-page PFN scope, publishes an owner PTE for relocation, and
+   makes another pass to clear fresh markers; rollback drops only this call's
+   fresh pages. Moving zeroing outside that scope needs private-frame, live-alias,
+   temporary permission and publication proofs. PT pages must remain entirely
+   zero before their PDE is published. The rejected batch's reduced transition
+   count produced no throughput gain, so a similar count reduction is not enough
+   to accept a VM change.
+
+The helper read counter executes the extracted production function and wraps
+only its PDE/PTE reads. It asserts all expected addresses and counts for eight
+states. Run `evidence/sysva-bounded-20261013/count-hole-work.py SOURCE_ROOT OUT`;
+the stored [work-count receipt](evidence/sysva-bounded-20261013/hole-work.json)
+pins the unchanged helper and complete SYSVA file hashes. These are deterministic
+host work counts, not native timings or a title workload trace.
+
+### Storage and resident-memory accounting
+
+The release64 ROM layout already executes immutable kernel spans from flash and
+decompresses the prepared mutable image directly into its final RAM location;
+there is no second whole PE output copy to remove. A denser XZ payload changes
+flash size and decode work, not the mutable resident pages. Its one-shot decoder
+arena is 48 KiB inside the permanently reserved 128 KiB release64 bootstrap range.
+Those 32 pages protect persistent title contents from the next reset's early
+writes. Shrinking that range requires measured maximum loader/decoder workspace
+and cold/warm-reset persistence coverage; simply donating the arena after boot
+would violate that lifetime rule.
+
+The supply stores four bytes of links/owner state plus two bytes of physical pin
+state per PFN: 96 KiB (24 pages) at 64 MiB, 192 KiB (48 pages) at 128 MiB. Pool
+run lengths and VA bitmap add 8,704 bytes, allocated as three boot pages. Checked
+pool free-attribution adds 16,384 bytes, making that metadata seven pages. Thus
+these two boot-carved structures alone use 108/204 KiB in release64/128 and
+124/220 KiB in checked64/128, in addition to image RAM and other live structures.
+The normal pool page-state array is another 4,096 bytes already included in
+image BSS. SYSVA PTs are lazy and retained: at most sixteen pages (64 KiB) for
+the 64 MiB aperture. Reclaiming empty PTs would trade those frames against repeated
+PT zeroing and self-map/TLB lifetime work, and needs its own sparse-lifetime proof.
+
+The hot PFN fields already share free-list and owner encoding, and the full
+16-bit pin word is used by nested counts, sticky overflow and deferred return.
+General compression of this frequently mutated state is not a measured low-risk
+improvement. The image-only totals below intentionally exclude these boot-carved
+structures and demand-mapped PTs; they are not total firmware resident RAM.
+
 Selected raw+validity release64 ROM
 `d77cb49169679c6320829c5441cc95ab05450d5638855b35bfc69058eeb67c93`, source
 `1a9a1d1f6c627c430d39998b880b3bbf3fe1b6d0`, retains 14 permanent image RAM pages
