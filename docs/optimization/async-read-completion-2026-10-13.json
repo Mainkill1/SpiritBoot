@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "source_tree": "988872775745048f118272197a13ec9c6a8db3f6",
+  "flash_sha256": "0d49a1ab73140b823fc28e670e2fa9aa8421a9ba52b213a45fceebe7dff22ec6",
+  "composition": "PR232 immediate delay + IRP-owned async lease + inactive completion clock; excludes PR230 and thread-view prototype",
+  "emulator_sha256": "cd4cfd696aa9c196cf44fd35765e16cf662afc16a689e1af4584fa79398784db",
+  "memory_mib": 64,
+  "native_runs": [
+    {
+      "name": "completion-delay-stock-async-20261013-131230-1",
+      "checks": 537,
+      "fixture_sha256": "34d916d8f10cc59ecc5ad0c59d4b4f1f8bd3c8849e5a3d6930bbd84182f9745d",
+      "normal_exit": true
+    },
+    {
+      "name": "completion-v1-lease-20261013-131240-1",
+      "checks": 7833,
+      "fixture_sha256": "1f3c82bc7afd2c4b1d4dd82dce2d976c89a38028883cd13f137130a241f7647e",
+      "normal_exit": true
+    },
+    {
+      "name": "completion-seek-mutation-stock-async-20261013-131219-1",
+      "checks": 2071,
+      "fixture_sha256": "515273c199b19c21cfddc6a6b073970acf724f798294bd21053cd98690548f56",
+      "normal_exit": true
+    },
+    {
+      "name": "completion-zero-iosb-stock-async-20261013-131209-1",
+      "checks": 338,
+      "fixture_sha256": "f30cba6dc720c259251323a78b5fa3125f8441cd8ba6d33174b33b7d5a0d3477",
+      "normal_exit": true
+    }
+  ],
+  "native_assertions": 10779,
+  "evidence_archive_sha256": "12592f6a9d78ff766f7a4c163bab9e0516888a9028786430fa36172ef4509de4",
+  "host": {
+    "lease": 126,
+    "composed_scenarios": 5,
+    "storage_completion": 32,
+    "product_tests": 129,
+    "product_skipped": 3
+  },
+  "prior_qualification": {
+    "schema": 1,
+    "source_tree": "520914d4e614d185a00ca70d29b74b4d6fe58d76",
+    "flash_sha256": "368495b92eb15be75b39adfb692285d8683066ed1a7ef5fd4e4792b9b26d1803",
+    "components": [
+      {
+        "name": "direct_read_and_checkpoints",
+        "base": "async2",
+        "bios": "be85cf34dbcd25293dfe563a3c717c181c914eb0d75e91e23a0c2d15db7e09b7",
+        "pr": 231
+      },
+      {
+        "name": "irp_owned_lease",
+        "base": "async3",
+        "bios": "53fd71b2bd2bcef87bca85422ef34f7510f6824191ec8d22c88c93f20a06db27",
+        "native_lifetime_checks": 7833,
+        "performance": "mixed ABBA, no demonstrated incremental speedup"
+      },
+      {
+        "name": "inactive_completion_clock",
+        "bios": "7dad93c224cf034ae3c3ebd086c46bd923ca90359c021f53b6c6d2a13929d49a",
+        "performance": "callback saving 0.872-2.483ms/1024; untraced ABBA mixed"
+      },
+      {
+        "name": "immediate_delay_semantics",
+        "bios": "67e35e918821d85f6ae6b3c9f4563c2122b497e989aeaa0ecb6a79dba040e941",
+        "native_checks_per_run": 537,
+        "native_ABBA_runs": 4,
+        "performance": "world replay no demonstrated incremental speedup"
+      },
+      {
+        "name": "critical_section_public_owner",
+        "pr": 230,
+        "native_checks": [
+          36,
+          188
+        ]
+      }
+    ],
+    "host_checks": {
+      "async_read": 126,
+      "resident_mapping": 178,
+      "composed_mapping_read_scenarios": 5,
+      "completion": 32,
+      "immediate_delay": 6084,
+      "critical_section": "pass"
+    },
+    "native_combined_status": "all8functionalprobesand4replayrunspass",
+    "game_acceptance": false,
+    "qualified_for_release": false,
+    "native_combined_checks": {
+      "async4-broad-abi-stock-async-20261013-124340-1": 16,
+      "async4-zero-iosb-stock-async-20261013-124318-1": 338,
+      "async4-delay-stock-async-20261013-124403-1": 537,
+      "async4-owner-contention-stock-async-20261013-124355-1": 188,
+      "async4-seek-mutation-stock-async-20261013-124329-1": 2071,
+      "async4-sync-stock-async-20261013-124348-1": 36,
+      "async4-scatter-stock-async-20261013-124413-1": 21,
+      "async4-v1-lease-20261013-124426-1": 7833
+    },
+    "evidence_archive_sha256": "fe530096e12458630702c21fb6a8d69f7b651d94a340d64d1d9199e655615282",
+    "world_replay_results": "evidence/world-async4-results.json"
+  },
+  "game_acceptance": false,
+  "incremental_end_to_end_speedup_established": false
+}
