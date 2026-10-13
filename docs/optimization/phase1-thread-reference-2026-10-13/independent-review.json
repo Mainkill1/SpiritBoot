@@ -1,0 +1,48 @@
+{
+  "verdict": "No lifecycle/INIT/callback blocker identified; native boot/page and regression qualification remains separate.",
+  "source_tree": "83b47b2b73061eb31314b9f58b0fe01c8f510249",
+  "rom_sha256": "b28ae5fad49ba288c595732226d1dbaf1d3810ee734e36afa34d875bd3629aaa",
+  "sha256": {
+    "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/memory-scheduler-agent/phase1-runtime.patch": "45835106056c0289e934bd5482da9815984292884e3e15d6495e7161a9ab8db4",
+    "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/memory-scheduler-agent/phase1-release64/work-o0wr4sl0/source/ntoskrnl/ps/psmgr.c": "3b39900255f5b91a18f7d78ab829c9eb7a4343ff936b3489e0097a5fb04f95ca",
+    "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/memory-scheduler-agent/phase1-release64/work-o0wr4sl0/source/ntoskrnl/ps/thread.c": "045d5724f1d947515d9a735091a0dff0fc45e9e23f9c5441d0ccda1a9cf284ea",
+    "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/memory-scheduler-agent/phase1-release64/work-o0wr4sl0/source/ntoskrnl/ps/kill.c": "bd696e0b385d5141df7524efb6e92b4755f8b776937016721b2b620e4023c6f9",
+    "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/memory-scheduler-agent/phase1-release64/work-o0wr4sl0/source/ntoskrnl/ex/init.c": "72039a21d682ecd14ded6338257e90008e3b29b9e6b83852a2e80454fb537229",
+    "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/memory-scheduler-agent/phase1-release64/work-o0wr4sl0/source/ntoskrnl/ke/i386/kiinit.c": "eb0b620c1c83804858ecf9be7142a6034ce20314430e442724ddf9f25cac035d",
+    "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/memory-scheduler-agent/phase1-release64/work-o0wr4sl0/source/ntoskrnl/ke/thrdobj.c": "78ec5648450c2fa5739c0978a4333ca54600b6527f32b1f0bf09b177cdaf57dc",
+    "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/memory-scheduler-agent/phase1-release64/work-o0wr4sl0/source/ntoskrnl/ob/oblife.c": "8d2755b03078a2f8d7c9a1f171c88f11b45151e34d7d03a16f0a9ad6cd24b4c3",
+    "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/memory-scheduler-agent/phase1-release64/work-o0wr4sl0/source/ntoskrnl/ob/obhandle.c": "a93ae8bf01870dfa7e1625bb12b1c324cababd0f21b4374d64f713f8a8ab7376"
+  },
+  "supporting_ownership_runtime_files_unchanged": [
+    "ntoskrnl/ps/thread.c",
+    "ntoskrnl/ps/kill.c",
+    "ntoskrnl/ex/init.c",
+    "ntoskrnl/ke/i386/kiinit.c",
+    "ntoskrnl/ke/thrdobj.c",
+    "ntoskrnl/ob/oblife.c",
+    "ntoskrnl/ob/obhandle.c"
+  ],
+  "source_proof": {
+    "initial_object_ref": "oblife.c901",
+    "two_creation_keepalives": "thread.c443-444",
+    "handle_ref_and_insert_consumption": "obhandle.c3283-3307,1618-1624",
+    "creator_final_release": "thread.c608",
+    "handle_close_release": "obhandle.c780",
+    "exit_callbacks": "kill.c545",
+    "scheduler_reaper_enqueue_and_signal": "thrdobj.c1380-1453",
+    "stack_release_then_reference_release": "kill.c193-202",
+    "final_CID_and_process_cleanup": "kill.c405-466",
+    "boot_INIT_priority_order": "kiinit.c564,605,642",
+    "resident_Phase1_INIT_return_and_termination": "ex/init.c2159-2210"
+  },
+  "host_checks": {
+    "candidate": 1968,
+    "cases": 52,
+    "baseline": "Xbox+NXK fails deleted==1; other three variants pass"
+  },
+  "limits": [
+    "Actual boot tail and reaper are extracted; PsCreateSystemThread/object services and final deletion are modeled.",
+    "Source inspection independently confirms ownership ledger, final CID deletion, process reference release and callback/INIT ordering.",
+    "No native pool/page savings or game-speed claim from this host review."
+  ]
+}
