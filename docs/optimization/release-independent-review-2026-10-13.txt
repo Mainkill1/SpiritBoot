@@ -1,0 +1,90 @@
+Independent combined release review — 2026-10-13
+
+No blocking correctness, ROM integrity, permanent-image-RAM, or CI source-pin
+finding for the examined 64 MiB combined release artifact. Native performance,
+the final native regression campaign, other memory profiles and reproducible
+rebuild remain owned by the coordinating agent and are not claimed here.
+
+Reviewed image SHA256:
+  be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827
+Staged source tree:
+  694b0e2461558f6a5f7a774fd34c79bd7cdc111e
+Artifact directory:
+  .scratch/spiritboot-release-hardening-20261013/artifacts/final-release64
+Work directory:
+  work-tuql3edc
+Repository HEAD at inspection was 393e766, with final 0118, firmware lock and
+CI source-pin updates in the working tree. identities.json binds those exact
+working files to this artifact; HEAD alone does not describe the candidate.
+
+Verified independently:
+- Flash bytes hash to the recorded build SHA; image is 524,288 bytes.
+- Lock hash and all 124 patch file hashes match the build receipt.
+- git write-tree of the staged source equals the build tree.
+- Both CI source pins equal that tree, including upper-RAM profile validation.
+- Build ROM span CRCs validate against actual flash bytes. The DES 2,048-byte
+  table matches source and remains ROM backed, hash
+  668bb69e184e0c32dc3bc488001c506c87ee5a95c7e7b6b87d24c3a6dc779956.
+- Loader binary hash remains unchanged versus 62edb78f performance baseline.
+- Boot-menu placement verifier passes: 93 symbols in discardable INIT,
+  with final .rsrc flags 0x42000040.
+
+Layout versus the prior 62edb78f performance firmware:
+  image pages:                139 -> 140
+  ROM-backed pages:            92 -> 93
+  discardable pages:           33 -> 33
+  permanent image RAM pages:   14 -> 14 (56 KiB)
+  .data bytes:              2056 -> 2056
+  .bss bytes:              44824 -> 44792
+  .text bytes:            346688 -> 348540
+  compressed payload bytes:46848 -> 46900
+  payload free bytes:      79424 -> 75276
+  warm handoff stages:       177 -> 178, capacity 505
+The added image page is offset by an added ROM-backed page. This is static
+kernel image accounting, not a measurement of all runtime available RAM or
+transient allocations. Warm handoff capacity retains substantial headroom.
+
+Code review:
+0117 bypasses the generic NT write-access requirement only for Xbox flush
+calls; object handle validation, normal filesystem dispatch and lower errors
+remain. FATX negative lengths reject before narrowing/allocation, and sizes
+at least 4 GiB return STATUS_DISK_FULL. Other FAT formats retain their existing
+upper-bound status. The actual resize implementation, not a reimplementation,
+is exercised by the new boundary and allocation rollback harness.
+
+0118 keeps five-round phase loops and forces SHA1Transform out of line only
+under SARCH_XBOX. Review found no change to the round sequence, endian schedule,
+in-place circular-buffer mutation, state load/addition order, public context
+copy, count handling or final reset. The noinline declaration is attached to
+the same static function and changes compiler placement rather than semantics.
+The final built symbols place DesBit at 0x8400e5b8 and DesPermute at 0x8400e88c,
+sharing one 4 KiB page as in the prior performance baseline. SHA1Transform is
+at 0x84040cf0. This corroborates the intended layout change; the placement
+observation alone is not a native speedup claim.
+
+CI review:
+The workflow runs the production FATX boundary test and constructs a SHA
+reference by copying actual built source and reverse-applying 0118 to sha1.c.
+The reverse-patch method was reproduced successfully for the noinline source;
+its independent differential test passed. Both final source-tree pins and all
+patch hashes were checked again against the integrated artifact.
+
+Independent verification on actual integrated staged source:
+  SHA differential/oracles: 13,410 checks passed, including every state/ring
+    buffer byte, complete public-context arenas, source/output aliases,
+    unaligned contexts, synthetic counter carry, final reset, reserved bytes,
+    independent SHA/HMAC oracles. Loop evaluations: 19 versus baseline 81.
+  Production FATX cap/resize/failed-allocation rollback: Xbox and generic
+    harness builds pass with undefined-behavior sanitizer enabled.
+  ROM admission table: 21 checks, 0 failures.
+  Production ROM decompressor: 6 checks each at 64/128 MiB, 0 failures.
+  Production paging/shadow retirement: 10 checks each at 64/128 MiB, 0 failures.
+  Integrated repository host suite: 134 tests, 3 skipped, no failures.
+
+Evidence in docs/provenance/release-independent-review-20261013/:
+  identities.json plus verify-identities.py: exact input/CI binding.
+  layout.json: actual sections, ROM CRC spans, DES table, permanent RAM totals.
+  sha-work.json: actual-source SHA differential output.
+  host-tests.log: repository suite output.
+The SHA host wall-time numbers are diagnostic only; native acceptance belongs
+to the final campaign, not to this review.
