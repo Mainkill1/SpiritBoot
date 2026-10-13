@@ -1,0 +1,661 @@
+diff --git a/ntoskrnl/include/internal/xbthread.h b/ntoskrnl/include/internal/xbthread.h
+index 8f248861b0661cd26a6f0a70a6ffdb5c1878050e..fa947a7e7abb887468d56e050e9d8406490d8f9b 100644
+--- a/ntoskrnl/include/internal/xbthread.h
++++ b/ntoskrnl/include/internal/xbthread.h
+@@ -14,6 +14,11 @@ VOID NxkPublishThreadCreateTime(PETHREAD Thread);
+ VOID NxkPublishThreadTermination(PETHREAD Thread);
+ VOID NxkInitializeTitleThreadFields(PKTHREAD Thread, PKSTART_ROUTINE Start, PVOID Context);
+ PVOID NxkThreadProcessView(PKTHREAD Thread);
++VOID NxkLinkThreadProcess(PKTHREAD Thread);
++VOID NxkUnlinkThreadProcess(PKTHREAD Thread);
++VOID NxkStartThreadProcess(PKTHREAD Thread);
++CHAR NxkThreadProcessBasePriority(PKTHREAD Thread);
++BOOLEAN NxkIsTitleThread(PKTHREAD Thread);
+ 
+ NTSTATUS NTAPI
+ NxkWaitForMultipleObjectsDeferredApc(ULONG Count, PVOID Object[], WAIT_TYPE Type,
+diff --git a/ntoskrnl/ke/thrdobj.c b/ntoskrnl/ke/thrdobj.c
+index 2be6f91860d391e1a63f309e32e5aa6813e03c30..bfba8dfb8bb1259fb763dde77a85c7992891981f 100644
+--- a/ntoskrnl/ke/thrdobj.c
++++ b/ntoskrnl/ke/thrdobj.c
+@@ -68,6 +68,9 @@ KeQueryBasePriorityThread(IN PKTHREAD Thread)
+ 
+     /* Calculate the base increment */
+     BaseIncrement = Thread->BasePriority - Process->BasePriority;
++#ifdef SARCH_XBOX
++    BaseIncrement = Thread->BasePriority - NxkThreadProcessBasePriority(Thread);
++#endif
+ 
+     /* If saturation occured, return the saturation increment instead */
+     if (Thread->Saturation) BaseIncrement = (HIGH_PRIORITY + 1) / 2 *
+@@ -553,6 +556,11 @@ KeStartThread(IN OUT PKTHREAD Thread)
+     ASSERT(Process->StackCount != MAXULONG_PTR);
+     Process->StackCount++;
+ 
++#ifdef SARCH_XBOX
++    /* Title classification was established before the native start fields. */
++    NxkStartThreadProcess(Thread);
++#endif
++
+     /* Release locks and return */
+     KiReleaseDispatcherLockFromSynchLevel();
+     KiReleaseProcessLock(&LockHandle);
+@@ -1176,6 +1184,7 @@ KeSetBasePriorityThread(IN PKTHREAD Thread,
+     KPRIORITY OldBasePriority, Priority, BasePriority;
+     LONG OldIncrement;
+     PKPROCESS Process;
++    CHAR ProcessBasePriority;
+     ASSERT_THREAD(Thread);
+     ASSERT_IRQL_LESS_OR_EQUAL(DISPATCH_LEVEL);
+ 
+@@ -1189,8 +1198,12 @@ KeSetBasePriorityThread(IN PKTHREAD Thread,
+     KiAcquireThreadLock(Thread);
+ 
+     /* Save the old base priority and increment */
++    ProcessBasePriority = Process->BasePriority;
++#ifdef SARCH_XBOX
++    ProcessBasePriority = NxkThreadProcessBasePriority(Thread);
++#endif
+     OldBasePriority = Thread->BasePriority;
+-    OldIncrement = OldBasePriority - Process->BasePriority;
++    OldIncrement = OldBasePriority - ProcessBasePriority;
+ 
+     /* If priority saturation happened, use the saturated increment */
+     if (Thread->Saturation) OldIncrement = (HIGH_PRIORITY + 1) / 2 *
+@@ -1207,8 +1220,8 @@ KeSetBasePriorityThread(IN PKTHREAD Thread,
+     }
+ 
+     /* Normalize the Base Priority */
+-    BasePriority = Process->BasePriority + Increment;
+-    if (Process->BasePriority >= LOW_REALTIME_PRIORITY)
++    BasePriority = ProcessBasePriority + Increment;
++    if (ProcessBasePriority >= LOW_REALTIME_PRIORITY)
+     {
+         /* Check if it's too low */
+         if (BasePriority < LOW_REALTIME_PRIORITY)
+diff --git a/ntoskrnl/xb/procobj.c b/ntoskrnl/xb/procobj.c
+index 0c35e612858679a04c73887b238d82dac29d24dc..94fa721686b5e468e49e34b13d52f46ccb2b0799 100644
+--- a/ntoskrnl/xb/procobj.c
++++ b/ntoskrnl/xb/procobj.c
+@@ -19,11 +19,10 @@
+  * kernel.  A field written at the wrong offset is worse than one left
+  * zero, so they are pinned here and asserted where they can be.
+  *
+- * The process thread list remains an empty compatibility view. The full
+- * public thread allocation now covers its 0x104 link, but native and title
+- * threads share one EPROCESS and this adapter does not maintain a separately
+- * classified public list. PsQueryStatistics reports native ActiveThreads.
+- * Do not treat the empty public list as a live scheduler enumeration.
++ * ThreadListHead contains public links only for title threads. Native system
++ * workers keep their native priority and do not enter this list. Membership
++ * precedes create notification and lasts until termination; object deletion
++ * also unlinks a partially created thread.
+ 
+  */
+ 
+@@ -60,9 +59,11 @@ C_ASSERT(FIELD_OFFSET(XBE_KPROCESS, BasePriority) == 0x18);
+ #define XBE_KTHREAD_APCQUEUEABLE  0x4B   /* UCHAR */
+ #define XBE_KTHREAD_QUANTUM       0x6C   /* LONG */
+ #define XBE_KTHREAD_BASEPRIORITY  0x70   /* SCHAR */
++#define XBE_KTHREAD_THREADLIST    0x104  /* LIST_ENTRY */
+ 
+-/* Everything written lands inside the 0x80 shadow. */
+-C_ASSERT(XBE_KTHREAD_BASEPRIORITY < 0x80);
++/* The complete public ETHREAD includes the process membership link. */
++C_ASSERT(XBE_KTHREAD_THREADLIST + sizeof(LIST_ENTRY) <=
++         sizeof(((PKTHREAD)0)->XeXboxShadow));
+ 
+ /* The quantum a thread starts with, as the console reports it. */
+ #define XBE_THREAD_QUANTUM        60
+@@ -90,98 +91,131 @@ NxkThreadProcessView(PKTHREAD Thread)
+     return &NxkTitleProcess;
+ }
+ 
+-/*
+- * Fill the process-facing part of a thread's shadow.  Called as each
+- * title thread registers, which is also when the thread count is
+- * refreshed -- it is a snapshot rather than a running total, since
+- * there is no hook on the way out to decrement one.
+- */
+-VOID
+-NxkPublishThreadProcess(_Out_writes_bytes_(0x80) PUCHAR Shadow)
++/* The public base belongs to title threads; native workers retain their own
++ * process base. Native thread setters/queries use this at their lock boundary,
++ * so all saturation, boost and dynamic-range rules remain in one scheduler. */
++CHAR
++NxkThreadProcessBasePriority(PKTHREAD Thread)
+ {
+-    PKTHREAD Thread = KeGetCurrentThread();
+-    CHAR Base = (CHAR)Thread->BasePriority;
+-    ULONG Threads = PsGetCurrentProcess()->ActiveThreads;
+-    KIRQL OldIrql;
++    return NxkIsTitleThread(Thread) ? NxkTitleProcess.BasePriority :
++           Thread->ApcState.Process->BasePriority;
++}
+ 
+-    /* Registration marks a title thread. Use the same 60-unit quantum in
+-     * the scheduler as in its public view: three clock units per millisecond
+-     * give the console's 20 ms CPU turn. The inherited system-process
+-     * quantum is 36 units and otherwise gives titles only 12 ms. Do not
+-     * change the process quantum: it also governs kernel worker threads. */
+-    OldIrql = KeRaiseIrqlToDpcLevel();
++/* KeStartThread runs before create notification and can overwrite fields
++ * inherited at view initialization. Its caller holds the native process lock
++ * at SYNCH_LEVEL and the new thread is not schedulable yet. */
++VOID
++NxkStartThreadProcess(PKTHREAD Thread)
++{
++    PLIST_ENTRY Link = (PLIST_ENTRY)(Thread->XeXboxShadow + XBE_KTHREAD_THREADLIST);
++    if (Link->Flink == NULL || Link->Flink == Link)
++        return;
+     Thread->QuantumReset = XBE_THREAD_QUANTUM;
+     Thread->Quantum = XBE_THREAD_QUANTUM;
+-    KeLowerIrql(OldIrql);
++    if (NxkTitleProcess.BasePriority >= 1 && NxkTitleProcess.BasePriority <= 15)
++    {
++        Thread->Priority = NxkTitleProcess.BasePriority;
++        Thread->BasePriority = NxkTitleProcess.BasePriority;
++    }
++    Thread->XeXboxShadow[XBE_KTHREAD_PRIORITY] = (UCHAR)Thread->Priority;
++    Thread->XeXboxShadow[XBE_KTHREAD_BASEPRIORITY] = (UCHAR)Thread->BasePriority;
++    *(PLONG)(Thread->XeXboxShadow + XBE_KTHREAD_QUANTUM) = Thread->Quantum;
++}
+ 
+-    if (!NxkTitleProcessReady)
+-        NxkInitializeTitleProcess(Base);
++/* An exact creation-path classification, independent of TLS size. The native
++ * process also owns system workers, so neither its list nor XeXboxFs4 is a
++ * title-thread filter. XeXboxFs4 is zero for legitimate zero-TLS threads. */
++VOID
++NxkLinkThreadProcess(PKTHREAD Thread)
++{
++    PUCHAR Shadow = Thread->XeXboxShadow;
++    PLIST_ENTRY Link = (PLIST_ENTRY)(Shadow + XBE_KTHREAD_THREADLIST);
++    KIRQL OldIrql = KeRaiseIrqlToDpcLevel();
+ 
+-    NxkTitleProcess.StackCount = (Threads != 0) ? Threads : 1;
++    if (!NxkTitleProcessReady)
++        NxkInitializeTitleProcess(Thread->ApcState.Process->BasePriority);
++    if (Link->Flink == Link)
++    {
++        InsertTailList(&NxkTitleProcess.ThreadListHead, Link);
++        NxkTitleProcess.StackCount++;
++        Thread->QuantumReset = XBE_THREAD_QUANTUM;
++        Thread->Quantum = XBE_THREAD_QUANTUM;
++        if (NxkTitleProcess.BasePriority >= 1 && NxkTitleProcess.BasePriority <= 15)
++        {
++            Thread->BasePriority = NxkTitleProcess.BasePriority;
++            KeSetPriorityThread(Thread, NxkTitleProcess.BasePriority);
++        }
++    }
++    *(PVOID *)(Shadow + XBE_KTHREAD_APCPROCESS) = &NxkTitleProcess;
++    Shadow[XBE_KTHREAD_PRIORITY] = (UCHAR)Thread->Priority;
++    Shadow[XBE_KTHREAD_BASEPRIORITY] = (UCHAR)Thread->BasePriority;
++    *(PLONG)(Shadow + XBE_KTHREAD_QUANTUM) = Thread->Quantum;
++    KeLowerIrql(OldIrql);
++}
+ 
+-    /* Both APC queues start empty and point at themselves. */
+-    InitializeListHead((PLIST_ENTRY)(Shadow + XBE_KTHREAD_APCLIST0));
+-    InitializeListHead((PLIST_ENTRY)(Shadow + XBE_KTHREAD_APCLIST1));
++/* Removal precedes signal publication. The identity registry remains alive
++ * until final object deletion, allowing referenced terminated thread objects
++ * to remain valid without retaining them in the running process list. */
++VOID
++NxkUnlinkThreadProcess(PKTHREAD Thread)
++{
++    PLIST_ENTRY Link = (PLIST_ENTRY)(Thread->XeXboxShadow + XBE_KTHREAD_THREADLIST);
++    KIRQL OldIrql = KeRaiseIrqlToDpcLevel();
++    if (Link->Flink != NULL && Link->Flink != Link)
++    {
++        RemoveEntryList(Link);
++        InitializeListHead(Link);
++        NxkTitleProcess.StackCount--;
++    }
++    KeLowerIrql(OldIrql);
++}
+ 
+-    *(PVOID *)(Shadow + XBE_KTHREAD_APCPROCESS) = &NxkTitleProcess;
++/* Registration is idempotent and preserves any priority selected for a
++ * suspended thread before its first instruction. View initialization already
++ * initialized the APC queues; they may be live by the time this runs. */
++VOID
++NxkPublishThreadProcess(_Out_writes_bytes_(0x140) PUCHAR Shadow)
++{
++    PKTHREAD Thread = KeGetCurrentThread();
++    NxkLinkThreadProcess(Thread);
+     Shadow[XBE_KTHREAD_APCQUEUEABLE] = TRUE;
+-
+-    Shadow[XBE_KTHREAD_PRIORITY] = (UCHAR)Thread->Priority;
+-    Shadow[XBE_KTHREAD_BASEPRIORITY] = (UCHAR)Base;
+-    *(PLONG)(Shadow + XBE_KTHREAD_QUANTUM) = XBE_THREAD_QUANTUM;
+ }
+ 
+-/*
+- * KeSetPriorityProcess -- a partial implementation, deliberately.
+- *
+- * Probed on the console: it returns the process' previous base
+- * priority, writes the new one into the field with no validation at all
+- * (0, 16, 31 and -1 all land verbatim), and moves every thread of the
+- * title to the new priority.  Out of range the threads are clamped and
+- * the clamp does not undo, so a caller that goes outside 1..15 and comes
+- * back leaves its threads somewhere else entirely.
+- *
+- * What is done here: the return value, the field, and the calling
+- * thread.  What is not: the title's *other* threads, which stay where
+- * they were.  Moving them means walking a list of the title's threads,
+- * and there isn't one -- the console's lives in KPROCESS.ThreadListHead,
+- * which is empty here for the reason at the top of this file.  NT's own
+- * EPROCESS thread list is not a substitute without care: there is one
+- * process on this console and it carries the kernel's system threads
+- * alongside the title's, so an unfiltered walk would re-prioritise the
+- * kernel.  KTHREAD.XeXboxFs4 marks a registered title thread and is the
+- * filter that walk would need.
+- *
+- * A title that sets its process priority therefore sees the right answer
+- * back and gets the calling thread moved; the rest of its threads keep
+- * running where they were.  That is a real divergence, and the
+- * ke/procprio case that spawns a thread names it.
+- */
++/* The published process field retains the observed raw-value behavior. Only
++ * dynamic priorities 1..15 have a qualified thread-update contract. */
+ LONG NTAPI
+ KeSetPriorityProcess(PVOID Process, LONG BasePriority)
+ {
+     PXBE_KPROCESS Target = (PXBE_KPROCESS)Process;
+     LONG Old;
++    KIRQL OldIrql;
++    PLIST_ENTRY Entry, Head;
+ 
+     if (Target == NULL)
+         return 0;
+-
+-    /* The console stores whatever it is handed, so this does too. */
++    OldIrql = KeRaiseIrqlToDpcLevel();
+     Old = Target->BasePriority;
++    if (BasePriority == Old)
++    {
++        KeLowerIrql(OldIrql);
++        return Old;
++    }
+     Target->BasePriority = (CHAR)BasePriority;
+-
+-    /* Only move a thread for a value the console would not have had to
+-     * clamp -- how it clamps was never pinned down, and guessing would
+-     * be worse than leaving the thread alone. */
+-    if (BasePriority >= 1 && BasePriority <= 15)
++    if (Target == &NxkTitleProcess && BasePriority >= 1 && BasePriority <= 15)
+     {
+-        PKTHREAD Thread = KeGetCurrentThread();
+-
+-        KeSetPriorityThread(Thread, BasePriority);
+-        Thread->XeXboxShadow[XBE_KTHREAD_PRIORITY] = (UCHAR)BasePriority;
+-        Thread->XeXboxShadow[XBE_KTHREAD_BASEPRIORITY] = (UCHAR)BasePriority;
++        Head = &Target->ThreadListHead;
++        for (Entry = Head->Flink; Entry != Head; Entry = Entry->Flink)
++        {
++            PKTHREAD Thread = (PKTHREAD)((PUCHAR)Entry - XBE_KTHREAD_THREADLIST -
++                                        FIELD_OFFSET(KTHREAD, XeXboxShadow));
++            /* Keep a thread's explicit base increment when the process moves.
++             * The helper observes the new public process base at this point. */
++            KeSetBasePriorityThread(Thread, Thread->BasePriority - Old);
++            Thread->XeXboxShadow[XBE_KTHREAD_PRIORITY] = (UCHAR)Thread->Priority;
++            Thread->XeXboxShadow[XBE_KTHREAD_BASEPRIORITY] = (UCHAR)Thread->BasePriority;
++        }
+     }
+-
++    KeLowerIrql(OldIrql);
+     return Old;
+ }
+ 
+diff --git a/ntoskrnl/xb/threadview.c b/ntoskrnl/xb/threadview.c
+index 46596f7b55e5c6ca6aeb0507d6d2bc2674fac5c4..acf4301f98701e07a3ae87adb0b3e0aa12e91c5f 100644
+--- a/ntoskrnl/xb/threadview.c
++++ b/ntoskrnl/xb/threadview.c
+@@ -166,7 +166,9 @@ NxkInitializeThreadView(PKTHREAD Thread, PKSTART_ROUTINE Start, PVOID Context)
+ 
+ VOID NxkDeleteThreadView(PKTHREAD Thread)
+ {
+-    ULONG_PTR Flags = __readeflags();
++    ULONG_PTR Flags;
++    NxkUnlinkThreadProcess(Thread);
++    Flags = __readeflags();
+     _disable();
+     if (NxkThreadViewCachedPublic == (PVOID)Thread->XeXboxShadow)
+         NxkThreadViewCachedPublic = NULL;
+@@ -204,6 +206,7 @@ VOID NxkPublishThreadNotification(PETHREAD Thread, BOOLEAN Create)
+ VOID NxkPublishThreadTermination(PETHREAD Thread)
+ {
+     PUCHAR View = Thread->Tcb.XeXboxShadow;
++    NxkUnlinkThreadProcess(&Thread->Tcb);
+     *(PLARGE_INTEGER)(View + 0x118) = Thread->ExitTime;
+     *(PNTSTATUS)(View + 0x120) = Thread->ExitStatus;
+     *(PHANDLE)(View + 0x12c) = NULL;
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index 28fc39403c6413908b5588ba45b6f4ea33798772..fafa15d1c8332c2b627ed7f420af499c38dcfa5a 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -24,6 +24,7 @@
+ 
+ /* Need the full KTHREAD layout (XeXboxShadow / XeXboxFs4 sit at the end). */
+ #include <ndk/ketypes.h>
++#include <ndk/pstypes.h> /* native StartAddress retains title identity at exit */
+ #include <internal/xbthread.h>
+ 
+ #include "strace.h"
+@@ -241,7 +242,7 @@ static PCWSTR const XeTitleSearchPaths[] = {
+  */
+ 
+ /* Fills the process-facing fields of the shadow (xb/procobj.c). */
+-VOID NxkPublishThreadProcess(_Out_writes_bytes_(0x80) PUCHAR Shadow);
++VOID NxkPublishThreadProcess(_Out_writes_bytes_(0x140) PUCHAR Shadow);
+ 
+ #define XBE_KTHREAD_STACKBASE  0x1c    /* Xbox KTHREAD.StackBase offset */
+ #define XBE_KTHREAD_STACKLIMIT 0x20    /* Xbox KTHREAD.StackLimit offset */
+@@ -345,6 +346,15 @@ typedef struct _XBE_THREAD_CTX
+ 
+ static VOID NTAPI XeThreadTrampoline(PVOID Context);
+ 
++/* PspCreateThread stores this native start address before view initialization.
++ * Unlike live list membership, it survives termination and needs no extra
++ * per-thread allocation or flag. Public StartAddress still names title code. */
++BOOLEAN
++NxkIsTitleThread(PKTHREAD Thread)
++{
++    return ((PETHREAD)Thread)->StartAddress == XeThreadTrampoline;
++}
++
+ VOID
+ NxkInitializeTitleThreadFields(PKTHREAD Thread, PKSTART_ROUTINE StartRoutine,
+                               PVOID StartContext)
+@@ -355,6 +365,7 @@ NxkInitializeTitleThreadFields(PKTHREAD Thread, PKSTART_ROUTINE StartRoutine,
+         PXBE_THREAD_CTX Context = StartContext;
+         *(PVOID *)(Thread->XeXboxShadow + XBE_KTHREAD_TLSDATA) = Context->TlsData;
+         PublicStart = (PVOID)Context->StartRoutine;
++        NxkLinkThreadProcess(Thread);
+     }
+     *(PVOID *)(Thread->XeXboxShadow + 0x130) = PublicStart;
+ }
+@@ -494,16 +505,9 @@ XePsCreateSystemThread(_Out_ PHANDLE ThreadHandle,
+                         _In_ PVOID StartContext,
+                         _In_ BOOLEAN DebuggerThread)
+ {
+-    NTSTATUS status;
+-    CLIENT_ID cid;
+-
+-    UNREFERENCED_PARAMETER(DebuggerThread);
+-
+-    status = PsCreateSystemThread(ThreadHandle, THREAD_ALL_ACCESS, NULL,
+-                                  NULL, &cid, StartRoutine, StartContext);
+-    if (NT_SUCCESS(status) && ThreadId != NULL)
+-        *ThreadId = cid.UniqueThread;
+-    return status;
++    return XePsCreateSystemThreadEx(ThreadHandle, 0, 0, 0, ThreadId,
++                                    (PVOID)StartRoutine, StartContext, FALSE,
++                                    DebuggerThread, NULL);
+ }
+ 
+ /* Xbox FIRMWARE_REENTRY (nxdk hal/halfuncs.h).  Distinct enum from NT's
+diff --git a/tests/host/process-threads/check.py b/tests/host/process-threads/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..603afd2507af711dbf1c3d5770c9e8b3bd26ab40
+--- /dev/null
++++ b/tests/host/process-threads/check.py
+@@ -0,0 +1,188 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production public process adapter with 32-bit ABI storage."""
++from pathlib import Path
++import subprocess
++import sys
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++proc = (root / 'ntoskrnl/xb/procobj.c').read_text()
++proc = '\n'.join(line for line in proc.splitlines() if not line.startswith('#include'))
++view = (root / 'ntoskrnl/xb/threadview.c').read_text()
++start = view.index('VOID NxkPublishThreadTermination(')
++brace = view.index('{', start)
++depth = 1
++end = brace + 1
++while depth:
++ depth += (view[end] == '{') - (view[end] == '}')
++ end += 1
++termination = view[start:end]
++xbe = (root / 'ntoskrnl/xb/xbe.c').read_text()
++start = xbe.index('BOOLEAN\nNxkIsTitleThread(')
++end = xbe.index('\n}', start) + 2
++classification = xbe[start:end]
++
++shim = r'''
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++typedef void VOID,*PVOID; typedef uint8_t UCHAR,BOOLEAN,KIRQL,*PUCHAR; typedef int8_t CHAR,SCHAR;
++typedef uint32_t ULONG; typedef int32_t LONG,*PLONG,KPRIORITY,NTSTATUS,*PNTSTATUS;
++typedef int64_t LARGE_INTEGER,*PLARGE_INTEGER; typedef void *HANDLE; typedef HANDLE *PHANDLE; typedef uintptr_t ULONG_PTR;
++typedef struct LIST_ENTRY {struct LIST_ENTRY *Flink,*Blink;} LIST_ENTRY,*PLIST_ENTRY;
++typedef struct NATIVE_PROCESS {CHAR BasePriority;} NATIVE_PROCESS;
++typedef struct KTHREAD {
++ UCHAR XeXboxShadow[0x140]; CHAR Priority,BasePriority; LONG Quantum,QuantumReset;
++ LONG PriorityDecrement,Saturation; ULONG_PTR XeXboxFs4;
++ LONG State;
++ struct {NATIVE_PROCESS *Process;} ApcState;
++ struct {NATIVE_PROCESS *Process;} *ApcStatePointer[1];
++} KTHREAD,*PKTHREAD;
++typedef struct ETHREAD {KTHREAD Tcb;VOID (*StartAddress)(PVOID);LARGE_INTEGER ExitTime;NTSTATUS ExitStatus;} ETHREAD,*PETHREAD;
++typedef struct PROCESS {ULONG ActiveThreads;} PROCESS;
++static VOID XeThreadTrampoline(PVOID context){(void)context;}
++static PKTHREAD current;
++static PROCESS system_process={.ActiveThreads=32};
++static NATIVE_PROCESS native_process={.BasePriority=8};
++static KIRQL irql;
++#define TRUE 1
++#define FALSE 0
++#define NTAPI
++#define _In_
++#define _Out_writes_bytes_(x)
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define C_ASSERT(x) _Static_assert((x),#x)
++#define FIELD_OFFSET(T,F) offsetof(T,F)
++#define CONTAINING_RECORD(P,T,F) ((T *)((char *)(P)-offsetof(T,F)))
++static void InitializeListHead(PLIST_ENTRY e){e->Flink=e->Blink=e;}
++static int IsListEmpty(PLIST_ENTRY e){return e->Flink==e;}
++static void InsertTailList(PLIST_ENTRY h,PLIST_ENTRY e){e->Blink=h->Blink;e->Flink=h;h->Blink->Flink=e;h->Blink=e;}
++static void RemoveEntryList(PLIST_ENTRY e){e->Blink->Flink=e->Flink;e->Flink->Blink=e->Blink;}
++static PKTHREAD KeGetCurrentThread(void){return current;}
++static PROCESS *PsGetCurrentProcess(void){return &system_process;}
++static KIRQL KeRaiseIrqlToDpcLevel(void){KIRQL old=irql;assert(old<=2);irql=2;return old;}
++static void KeLowerIrql(KIRQL old){assert(irql==2);irql=old;}
++static KPRIORITY KeSetPriorityThread(PKTHREAD t,KPRIORITY value){KPRIORITY old=t->Priority;t->Priority=value;return old;}
++LONG KeSetBasePriorityThread(PKTHREAD t,LONG increment);
++'''
++native = (root / 'ntoskrnl/ke/thrdobj.c').read_text()
++def extract(name):
++ a = native.index(name + '(')
++ start = max(native.rfind('\nLONG\n', 0, a), native.rfind('\nKPRIORITY\n', 0, a)) + 1
++ brace = native.index('{', a)
++ depth, end = 1, brace + 1
++ while depth:
++  depth += (native[end] == '{') - (native[end] == '}'); end += 1
++ return native[start:end]
++base_setter = extract('KeSetBasePriorityThread')
++base_query = extract('KeQueryBasePriorityThread')
++shim += r'''
++#include <stdlib.h>
++#define SARCH_XBOX 1
++#define IN
++#define ASSERT_THREAD(x) assert(x)
++#define ASSERT_IRQL_LESS_OR_EQUAL(x) assert(irql<=x)
++#define DISPATCH_LEVEL 2
++#define HIGH_PRIORITY 31
++#define LOW_REALTIME_PRIORITY 16
++#define LOW_PRIORITY 0
++#define PKPROCESS NATIVE_PROCESS *
++#define KiAcquireThreadLock(x) (void)(x)
++#define KiReleaseThreadLock(x) (void)(x)
++#define KeRaiseIrqlToSynchLevel KeRaiseIrqlToDpcLevel
++#define KiAcquireDispatcherLock KeRaiseIrqlToDpcLevel
++#define KiReleaseDispatcherLock KeLowerIrql
++static LONG KiComputeNewPriority(PKTHREAD t,LONG increment){return t->Priority-t->PriorityDecrement-increment;}
++static void KiSetPriorityThread(PKTHREAD t,LONG priority){t->Priority=priority;}
++'''
++cases = r'''
++static void init(PKTHREAD t){memset(t,0,sizeof(*t));t->Priority=t->BasePriority=8;t->Quantum=t->QuantumReset=36;((PETHREAD)t)->StartAddress=XeThreadTrampoline;t->ApcState.Process=&native_process;t->ApcStatePointer[0]=(void *)&t->ApcState;InitializeListHead((PLIST_ENTRY)(t->XeXboxShadow+0x104));}
++static unsigned count(PKTHREAD expected){
++ PLIST_ENTRY h=&NxkTitleProcess.ThreadListHead,e=h->Flink;unsigned n=0,found=0;
++ for(;e!=h;e=e->Flink){assert(n++<512);assert(e->Flink->Blink==e&&e->Blink->Flink==e);if(e==(PLIST_ENTRY)(expected->XeXboxShadow+0x104))found++;}
++ assert(found==1);return n;
++}
++int main(int argc,char **argv){
++ assert(argc==2);ETHREAD aa={0},bb={0},ss={0};
++ #define a aa.Tcb
++ #define b bb.Tcb
++ #define system ss.Tcb
++ init(&a);init(&b);init(&system);ss.StartAddress=NULL;
++ current=&a;NxkPublishThreadProcess(a.XeXboxShadow);
++ if(!strcmp(argv[1],"list")){assert(count(&a)==1);assert(NxkTitleProcess.StackCount==1);}
++ if(!strcmp(argv[1],"inherit")){
++  assert(KeSetPriorityProcess(&NxkTitleProcess,9)==8);
++  current=&b;NxkPublishThreadProcess(b.XeXboxShadow);
++  assert(b.BasePriority==9&&b.Priority==9);
++  assert(b.XeXboxShadow[0x70]==9&&b.XeXboxShadow[0x32]==9);
++  assert(count(&b)==2);assert(system.BasePriority==8&&system.QuantumReset==36);
++ }
++ if(!strcmp(argv[1],"terminal")){
++  ETHREAD retired;memset(&retired,0,sizeof(retired));init(&retired.Tcb);current=&retired.Tcb;
++  NxkPublishThreadProcess(retired.Tcb.XeXboxShadow);
++  assert(KeSetPriorityProcess(&NxkTitleProcess,9)==8);
++  NxkPublishThreadTermination(&retired);assert(KeQueryBasePriorityThread(&retired.Tcb)==0);
++  assert(retired.Tcb.BasePriority==9&&IsListEmpty((PLIST_ENTRY)(retired.Tcb.XeXboxShadow+0x104)));
++ }
++ if(!strcmp(argv[1],"same")){
++  current=&b;NxkPublishThreadProcess(b.XeXboxShadow);current=&a;
++  assert(KeSetBasePriorityThread(&b,2)==0);b.Quantum=17;b.PriorityDecrement=1;
++  assert(KeSetPriorityProcess(&NxkTitleProcess,8)==8);
++  assert(b.BasePriority==10&&b.Quantum==17&&b.PriorityDecrement==1);
++ }
++ if(!strcmp(argv[1],"offset")){
++  current=&b;NxkPublishThreadProcess(b.XeXboxShadow);current=&a;
++  assert(KeSetPriorityProcess(&NxkTitleProcess,9)==8);
++  assert(KeSetBasePriorityThread(&b,2)==0);
++  assert(b.BasePriority==11&&b.Priority==11);
++  assert(KeQueryBasePriorityThread(&b)==2);
++  assert(KeSetPriorityProcess(&NxkTitleProcess,10)==9);
++  assert(b.BasePriority==12&&b.Priority==12&&a.BasePriority==10);
++  assert(KeSetPriorityProcess(&NxkTitleProcess,10)==10);
++  assert(b.BasePriority==12&&a.BasePriority==10);
++  assert(KeSetPriorityProcess(&NxkTitleProcess,8)==10);
++  assert(b.BasePriority==10&&a.BasePriority==8);
++  assert(system.BasePriority==8&&native_process.BasePriority==8);
++ }
++ if(!strcmp(argv[1],"lifecycle")){
++  current=&b;NxkPublishThreadProcess(b.XeXboxShadow);NxkPublishThreadProcess(b.XeXboxShadow);
++  assert(count(&b)==2&&NxkTitleProcess.StackCount==2);
++  /* Native KeStartThread overwrites priority and quantum; the production
++   * title hook must restore them before create notification. */
++  assert(KeSetPriorityProcess(&NxkTitleProcess,9)==8);
++  b.BasePriority=b.Priority=8;b.Quantum=b.QuantumReset=36;NxkStartThreadProcess(&b);
++  assert(b.BasePriority==9&&b.Priority==9&&b.QuantumReset==60&&b.XeXboxShadow[0x70]==9);
++  NxkStartThreadProcess(&system);assert(system.BasePriority==8&&system.QuantumReset==36);
++  ETHREAD retired;memset(&retired,0,sizeof(retired));init(&retired.Tcb);current=&retired.Tcb;
++  NxkPublishThreadProcess(retired.Tcb.XeXboxShadow);assert(count(&retired.Tcb)==3);
++  retired.ExitTime=0x12345678;retired.ExitStatus=0x4321;NxkPublishThreadTermination(&retired);
++  assert(count(&a)==2&&NxkTitleProcess.StackCount==2);
++  assert(IsListEmpty((PLIST_ENTRY)(retired.Tcb.XeXboxShadow+0x104)));
++  assert(*(PLONG)(retired.Tcb.XeXboxShadow+4)==1&&retired.Tcb.XeXboxShadow[0x77]==1);
++  assert(*(PNTSTATUS)(retired.Tcb.XeXboxShadow+0x120)==0x4321);
++  NxkUnlinkThreadProcess(&retired.Tcb);assert(count(&a)==2);
++  NxkUnlinkThreadProcess(&b);assert(count(&a)==1&&NxkTitleProcess.StackCount==1);
++  NxkUnlinkThreadProcess(&b);NxkUnlinkThreadProcess(&system);assert(count(&a)==1);
++  KTHREAD uninitialized={0};NxkUnlinkThreadProcess(&uninitialized);assert(count(&a)==1);
++ }
++ if(!strcmp(argv[1],"process")){
++  current=&b;NxkPublishThreadProcess(b.XeXboxShadow);current=&a;
++  assert(KeSetPriorityProcess(&NxkTitleProcess,9)==8);
++  assert(a.BasePriority==9&&b.BasePriority==9);
++  assert(a.Priority==9&&b.Priority==9);
++  assert(b.XeXboxShadow[0x70]==9&&b.XeXboxShadow[0x32]==9);
++  assert(system.BasePriority==8&&system.Priority==8&&native_process.BasePriority==8);
++  assert(KeSetPriorityProcess(&NxkTitleProcess,8)==9);
++  assert(a.BasePriority==8&&b.BasePriority==8);
++ }
++ assert(irql==0);printf("PASS production process adapter case=%s\n",argv[1]);return 0;
++}
++'''
++fixture=out/'process-host.c';fixture.write_text(shim+classification+proc+base_setter+base_query+termination+cases)
++binary=out/'process-host'
++subprocess.run(['cc','-m32','-std=c11','-O1','-g','-Wall','-Wextra','-Wno-unused-function','-fsanitize=address,undefined','-fno-omit-frame-pointer',str(fixture),'-o',str(binary)],check=True)
++for mode in ('list','inherit','process','lifecycle','offset','same','terminal'):
++ subprocess.run([str(binary),mode],check=True)
+diff --git a/tests/host/thread-view/check-registry.py b/tests/host/thread-view/check-registry.py
+index 0776ac03f1a2b2ee137345f02a7ffe42fde21229..94a39253a26f4f7d58481499bb869750f74e2bbe 100644
+--- a/tests/host/thread-view/check-registry.py
++++ b/tests/host/thread-view/check-registry.py
+@@ -26,6 +26,7 @@ typedef struct LIST_ENTRY {struct LIST_ENTRY *Flink,*Blink;} LIST_ENTRY,*PLIST_E
+ typedef struct KTHREAD {unsigned char prefix[0x1b4],XeXboxShadow[0x140];LIST_ENTRY XeThreadViewLink;} KTHREAD,*PKTHREAD;
+ #define FIELD_OFFSET(T,F) offsetof(T,F)
+ #define CONTAINING_RECORD(P,T,F) ((T *)((char *)(P)-offsetof(T,F)))
++static void NxkUnlinkThreadProcess(PKTHREAD Thread){(void)Thread;}
+ static PKTHREAD current_thread;
+ static PKTHREAD KeGetCurrentThread(void){return current_thread;}
+ static uintptr_t irq_flags=0x202;static unsigned irq_entries;
+diff --git a/tests/xbe/api-regression/ke/procprio.c b/tests/xbe/api-regression/ke/procprio.c
+index 5ef141b6693588585f631ba9cc6dfdf0f92b5955..30c018d873bd3535ef605b27862bbcdd6c6a8594 100644
+--- a/tests/xbe/api-regression/ke/procprio.c
++++ b/tests/xbe/api-regression/ke/procprio.c
+@@ -8,10 +8,9 @@
+  *
+  * Our threads are NT's, so what a title sees is an Xbox-shaped shadow
+  * that the kernel fills at the console's offsets (xb/procobj.c).  The
+- * one thing it does not fill is the process' thread list: linking into
+- * it needs a field past the end of the shadow and a hook on every way
+- * out of a thread, so it is published empty and the case that expects
+- * it non-empty stays a documented divergence rather than a fiction.
++ * public list uses each title thread's published ThreadListEntry. Creation,
++ * priority propagation and retirement are independently covered by the focused
++ * process-thread-contract guest.
+  */
+ 
+ #include "../harness.h"
+@@ -21,10 +20,6 @@
+ #define SET_FAIL(fmt, ...) \
+     (test_record_failure(__FILE__, __LINE__, fmt, ##__VA_ARGS__), false)
+ 
+-static const char *const NO_THREAD_LIST =
+-    "the process' thread list is published empty: linking into it needs "
+-    "KTHREAD.ThreadListEntry, past the end of the shadow";
+-
+ /* The thread names the process it belongs to. */
+ static bool t_the_thread_names_its_process(void)
+ {
+@@ -87,10 +82,6 @@ static bool t_the_thread_starts_at_the_process_base(void)
+  * two priorities off and failed the next case in the group.  Those
+  * shapes are written down in the handoff rather than exercised here.
+  */
+-static const char *const NO_OTHER_THREADS =
+-    "only the calling thread follows the process: there is no list of the "
+-    "title's threads to walk";
+-
+ /* It answers with the priority the process had, and takes the new one. */
+ static bool t_setting_the_priority_reports_the_old_one(void)
+ {
+@@ -224,14 +215,14 @@ static const test_entry_t ke_procprio_entries[] = {
+     { "setting_the_same_priority_is_a_no_op",
+       t_setting_the_same_priority_is_a_no_op, NULL },
+     { "a_new_thread_starts_at_the_process_priority",
+-      t_a_new_thread_starts_at_the_process_priority, NO_OTHER_THREADS },
++      t_a_new_thread_starts_at_the_process_priority, NULL },
+     { "the_thread_names_its_process", t_the_thread_names_its_process, NULL },
+     { "the_process_has_the_console_layout",
+       t_the_process_has_the_console_layout, NULL },
+     { "the_thread_starts_at_the_process_base",
+       t_the_thread_starts_at_the_process_base, NULL },
+     { "the_process_lists_its_threads", t_the_process_lists_its_threads,
+-      NO_THREAD_LIST },
++      NULL },
+ };
+ 
+ DEFINE_GROUP(ke_procprio, "ke/procprio");

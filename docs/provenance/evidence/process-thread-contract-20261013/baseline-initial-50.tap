@@ -1,0 +1,66 @@
+TAP version 14
+ok 1 - current thread names public process
+ok 2 - process and thread links use public nxdk ABI
+not ok 3 - running title thread belongs to its process
+# initial process_base=8 current_base=8 current_priority=8 thread_count=0 stack_count=7
+ok 4 - register creation and exit observer
+ok 5 - process base permits in-range priority probes
+ok 6 - process setter reports previous base
+ok 7 - create zero-TLS title thread
+# create case=0 suspended=1 simple=0 base=8 priority=8 member=0
+ok 8 - creation callback runs once
+not ok 9 - creation callback observes inherited process priority
+not ok 10 - creation callback observes public process membership
+ok 11 - reference suspended zero-TLS thread
+not ok 12 - suspended zero-TLS thread is already a process member
+not ok 13 - suspended thread inherits before it runs
+ok 14 - resume first title thread
+ok 15 - worker reaches its first title instruction
+# entry case=0 base=8 priority=8 member=0
+not ok 16 - new title thread inherits current process priority
+ok 17 - create and current pointers share public identity
+ok 18 - worker names the same process
+# priority_offset old_increment=0 worker_before=10 process_before=9 process_after=10 worker_after=10 current_after=10
+ok 19 - create zero-TLS title thread
+# create case=1 suspended=0 simple=0 base=8 priority=8 member=0
+ok 20 - creation callback runs once
+not ok 21 - creation callback observes inherited process priority
+not ok 22 - creation callback observes public process membership
+ok 23 - worker reaches its first title instruction
+# entry case=1 base=8 priority=8 member=0
+not ok 24 - new title thread inherits current process priority
+ok 25 - create and current pointers share public identity
+ok 26 - worker names the same process
+ok 27 - create zero-TLS title thread
+# create case=2 suspended=0 simple=1 base=8 priority=8 member=0
+ok 28 - creation callback runs once
+not ok 29 - creation callback observes inherited process priority
+not ok 30 - creation callback observes public process membership
+ok 31 - worker reaches its first title instruction
+# entry case=2 base=8 priority=8 member=0
+not ok 32 - new title thread inherits current process priority
+ok 33 - create and current pointers share public identity
+ok 34 - worker names the same process
+# active process_threads=0 initial=0 stack_count=9
+not ok 35 - public list adds only created title threads
+not ok 36 - process priority follows already running title threads
+ok 37 - caller native base restores with process
+ok 38 - reference retiring public thread
+ok 39 - wait for worker retirement
+# retire case=0 member=0 exit_notify_member=0 exit_count=1 links_self=1
+ok 40 - terminated referenced thread leaves process list
+ok 41 - termination callback runs once
+ok 42 - reference retiring public thread
+ok 43 - wait for worker retirement
+# retire case=1 member=0 exit_notify_member=0 exit_count=1 links_self=1
+ok 44 - terminated referenced thread leaves process list
+ok 45 - termination callback runs once
+ok 46 - reference retiring public thread
+ok 47 - wait for worker retirement
+# retire case=2 member=0 exit_notify_member=0 exit_count=1 links_self=1
+ok 48 - terminated referenced thread leaves process list
+ok 49 - termination callback runs once
+ok 50 - retirement restores original public list count
+# final process_threads=0 stack_count=9
+# checks=50 failures=14
+1..50
