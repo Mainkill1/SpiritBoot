@@ -1,0 +1,424 @@
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index 8e5a7fb8..463fe970 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -134,6 +134,7 @@ extern volatile LONG NxInitFreesDone;
+ 
+ PFN_NUMBER NTAPI NxkPageSupplyTakeTitleAny(ULONG Color);
+ PFN_NUMBER NTAPI NxkPageSupplyTakeTitleZero(ULONG Color);
++ULONG NxkPageSupplyTakeSystemBatch(PFN_NUMBER *Pages, ULONG Wanted);
+ PFN_NUMBER NTAPI NxkPageSupplyTitleAvailable(VOID);
+ 
+ /* xb/mm/contig.c -- heap-region helper called during boot init. */
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index e9e32fc7..e56b555d 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -279,6 +279,45 @@ NxkPageSupplyTakeTitleZero(ULONG Color)
+     return Pfn;
+ }
+ 
++/* SYSVA keeps these frames ownerless and private until its zero/publication
++ * transaction completes. A short batch is normal, not exhaustion: append
++ * only constant-time takes after the first existing allocator search. */
++ULONG
++NxkPageSupplyTakeSystemBatch(PFN_NUMBER *Pages, ULONG Wanted)
++{
++    PFN_NUMBER Pfn;
++    ULONG Count = 0;
++
++    MI_ASSERT_PFN_LOCK_HELD();
++    ASSERT(Wanted != 0 && Wanted <= 16);
++#if XBOX_RESERVE_UPPER_RAM
++    Pfn = NxkPageSupplyTakeTitleAny(0);
++#else
++    Pfn = NxkPageSupplyTakeAny(0);
++#endif
++    if (Pfn == 0) return 0;
++    Pages[Count++] = Pfn;
++    while (Count < Wanted)
++    {
++#if XBOX_RESERVE_UPPER_RAM
++        /* Title data cannot spill into firmware-reserved upper RAM.
++         * Preserve ascending placement, stopping before another scan. */
++        if (Pfn + 1 >= (NXK_KSEG0_RAM_SIZE >> PAGE_SHIFT) ||
++            !(NxpLinks[Pfn + 1] & NXP_FREE)) break;
++        Pfn++;
++        NxpSpillHint = Pfn;
++#else
++        /* A kernel-class take is O(1). Never aggregate title spill
++         * searches under one lock, including at the class boundary. */
++        if (NxpFreeHeadKernel == 0) break;
++        Pfn = NxpFreeHeadKernel;
++#endif
++        NxpUnlink(Pfn);
++        Pages[Count++] = Pfn;
++    }
++    return Count;
++}
++
+ PFN_NUMBER
+ NTAPI
+ NxkPageSupplyTitleAvailable(VOID)
+@@ -851,6 +890,17 @@ NxkPageSupplyTakeTitleZero(ULONG Color)
+     return NxkPageSupplyTakeZero(Color);
+ }
+ 
++ULONG
++NxkPageSupplyTakeSystemBatch(PFN_NUMBER *Pages, ULONG Wanted)
++{
++    PFN_NUMBER Pfn;
++    ASSERT(Wanted != 0 && Wanted <= 16);
++    Pfn = NxkPageSupplyTakeAny(0);
++    if (Pfn == 0) return 0;
++    Pages[0] = Pfn;
++    return 1;
++}
++
+ PFN_NUMBER
+ NTAPI
+ NxkPageSupplyTitleAvailable(VOID)
+diff --git a/ntoskrnl/xb/mm/sysva.c b/ntoskrnl/xb/mm/sysva.c
+index ef55d85f..a3528558 100644
+--- a/ntoskrnl/xb/mm/sysva.c
++++ b/ntoskrnl/xb/mm/sysva.c
+@@ -30,6 +30,9 @@
+ static KSPIN_LOCK NxSysVaLock;
+ static LONG       NxSysVaReady = 0;
+ 
++/* 64 bytes of transient PFNs; no permanent batch metadata. */
++#define NXK_SYSVA_BATCH_MAX 16
++
+ /* Page supply (xb/mm/pagesupply.c).  Both require the PFN lock. */
+ extern PFN_NUMBER NTAPI NxkPageSupplyTakeZero(ULONG Color);
+ extern VOID NTAPI NxkPageSupplyReturn(PFN_NUMBER Page);
+@@ -115,6 +118,7 @@ NxkSysVaAllocate(SIZE_T Size, ULONG Protect)
+     KIRQL OldIrql, PfnIrql;
+     ULONG_PTR Va;
+     ULONG Pages, i;
++    PFN_NUMBER Batch[NXK_SYSVA_BATCH_MAX];
+ 
+     UNREFERENCED_PARAMETER(Protect);
+     if (Size == 0) return NULL;
+@@ -151,36 +155,56 @@ NxkSysVaAllocate(SIZE_T Size, ULONG Protect)
+         Pde[i] = ((ULONG)PtPfn << PAGE_SHIFT) | NXK_PDE_PT;
+     }
+ 
+-    /* Commit the data pages.  On supply exhaustion, roll back this
+-     * call's pages (the empty PTs are harmless -- reused next time). */
+-    for (i = 0; i < Pages; i++)
++    /* Exclusive ownerless frames cannot be relocated or allocated by
++     * another caller after unlink. Keep NxSysVaLock across reservation,
++     * private initialization and publication, as before. */
++    for (i = 0; i < Pages;)
+     {
+-        PFN_NUMBER Pfn;
++        ULONG Wanted = Pages - i, Count, j;
+ 
++        if (Wanted > NXK_SYSVA_BATCH_MAX) Wanted = NXK_SYSVA_BATCH_MAX;
+         PfnIrql = MiAcquirePfnLock();
+-#if XBOX_RESERVE_UPPER_RAM
+-        Pfn = NxkPageSupplyTakeTitleZero(0);
+-#else
+-        Pfn = NxkPageSupplyTakeZero(0);
+-#endif
++        Count = NxkPageSupplyTakeSystemBatch(Batch, Wanted);
+         MiReleasePfnLock(PfnIrql);
+-        if (Pfn == 0)
++        if (Count == 0)
+         {
+-            ULONG j;
+-            PfnIrql = MiAcquirePfnLock();
+-            for (j = 0; j < i; j++)
++            /* Empty PTs stay allocated/reusable. Bound return work too;
++             * never turn a late failure into one allocation-sized stall. */
++            for (j = 0; j < i;)
+             {
+-                ULONG Idx = (ULONG)(Va >> PAGE_SHIFT) + j;
+-                NxkPageSupplyReturn(Pte[Idx] >> PAGE_SHIFT);
+-                Pte[Idx] = 0;
++                ULONG End = i - j > NXK_SYSVA_BATCH_MAX ?
++                            j + NXK_SYSVA_BATCH_MAX : i;
++                PfnIrql = MiAcquirePfnLock();
++                for (; j < End; j++)
++                {
++                    ULONG Idx = (ULONG)(Va >> PAGE_SHIFT) + j;
++                    NxkPageSupplyReturn(Pte[Idx] >> PAGE_SHIFT);
++                    Pte[Idx] = 0;
++                }
++                MiReleasePfnLock(PfnIrql);
+             }
+-            MiReleasePfnLock(PfnIrql);
+             __writecr3(__readcr3());
+             KeReleaseSpinLock(&NxSysVaLock, OldIrql);
+             return NULL;
+         }
+-        Pte[(Va >> PAGE_SHIFT) + i] =
+-            ((ULONG)Pfn << PAGE_SHIFT) | NXK_PTE_VALID;
++        /* Short batches are progress (class boundary or fragmentation).
++         * No owning PTE is registered: SYSVA data stays immovable. */
++        for (j = 0; j < Count; j++, i++)
++        {
++            ULONG_PTR PageVa = Va + ((ULONG_PTR)i << PAGE_SHIFT);
++            PVOID Alias = NxkTryGetVerifiedWbDirectAlias(Batch[j]);
++            Pte[PageVa >> PAGE_SHIFT] =
++                ((ULONG)Batch[j] << PAGE_SHIFT) | NXK_PTE_VALID;
++            if (Alias == NULL)
++            {
++                /* The private SYSVA mapping is writable WB even for
++                 * high frames. Drop stale translations before touching
++                 * it; avoid the lock-owned hyperspace zero alias. */
++                __invlpg((PVOID)PageVa);
++                Alias = (PVOID)PageVa;
++            }
++            KeZeroPages(Alias, PAGE_SIZE);
++        }
+     }
+     __writecr3(__readcr3());
+ 
+diff --git a/tests/host/system-va-batch/cases.c b/tests/host/system-va-batch/cases.c
+new file mode 100644
+index 00000000..db14b758
+--- /dev/null
++++ b/tests/host/system-va-batch/cases.c
+@@ -0,0 +1,108 @@
++static void require(int v,const char *why) {if(!v){fprintf(stderr,"FAIL: %s\n",why);exit(1);}}
++static void KeZeroPages(void *p,unsigned n) {
++    uintptr_t va=(uintptr_t)p;unsigned pfn=0;
++    require(n==PAGE_SIZE,"zero exactly one physical page");
++    if(va>=NXK_KSEG0_BASE&&va<NXK_KSEG0_BASE+NXK_KSEG0_RAM_SIZE){pfn=(va-NXK_KSEG0_BASE)/PAGE_SIZE;++direct_zero;}
++    else {unsigned idx=(va-NXK_SYSMEM_BASE)/PAGE_SIZE;require(idx<16384,"fallback zero stays in aperture");pfn=((ULONG*)NXK_PTE_BASE)[va>>12]>>12;require(invalidated[idx],"fallback translation invalidated before access");++mapped_zero;}
++    require(!NxkPageSupplyIsFree(pfn)&&NxkPageSupplyGetOwner(pfn)==0,"zeroed frames private and immovable");
++    if(lock_held)++zero_locked;
++    memset(frames[pfn],0,n);
++}
++static void MiZeroPhysicalPage(PFN_NUMBER pfn) {require(lock_held,"legacy hyperspace requires PFN lock");++zero_locked;memset(frames[pfn],0,PAGE_SIZE);}
++static void interleave(void) {
++    /* Use actual production take/return semantics during a reservation gap.
++     * Every reserved frame must reject another exact physical take. */
++    unsigned saved=hook;hook=0;KIRQL i=MiAcquirePfnLock();
++    for(unsigned p=16;p<32768;++p)if(is_taken[p]){
++        require(!NxkPageSupplyTakeSpecific(p),"private frame cannot be taken twice");
++        require(NxkPageSupplyGetOwner(p)==0,"private frame cannot be admitted for relocation");
++        ++hook_checks;
++    }
++    PFN_NUMBER p=NxkPageSupplyTakeAny(0);if(p)NxkPageSupplyReturn(p);
++    MiReleasePfnLock(i);hook=saved;
++}
++static void reset(unsigned available,unsigned low,unsigned preback,unsigned mode) {
++    memset((void*)NXK_PTE_BASE,0,4*1024*1024);memset(links_storage,0,sizeof(links_storage));
++    memset(is_taken,0,sizeof(is_taken));memset(invalidated,0,sizeof(invalidated));
++    memset(frames,0xa5,sizeof(frames));
++    MmAvailablePages=NxpFreeHeadKernel=NxpFreeHeadTitle=NxpGenericAvail=0;
++    lock_held=1;NxkPageSupplyInitialize(32767,links_storage);
++    /* A kernel class in upper RAM, plus title pages in the low domain. */
++    for(unsigned j=0;j<available;++j){unsigned p=low+j;NxkPageSupplyReturn(p);}
++    lock_held=0;
++    if(preback)for(unsigned pdi=0x340;pdi<0x350;++pdi)((ULONG*)NXK_PDE_BASE)[pdi]=3;
++    for(unsigned pdi=512;pdi<528;++pdi)((ULONG*)NXK_PDE_BASE)[pdi]=((pdi-512)<<22)|0x83;
++    NxWbDirectMapLimit=mode==0?0x84000000u:mode==1?0:0x82000000u;
++    lock_held=sys_lock=acquisitions=max_lock_work=lock_work=0;
++    lock_unlinks=lock_returns=max_unlinks=max_returns=0;
++    zero_locked=direct_zero=mapped_zero=flushes=invalidations=hook_checks=0;
++    hook=0;(void)fail_after;(void)taken;(void)returned;(void)pt_zero;
++}
++static unsigned count_mapped(void) {unsigned n=0;for(unsigned i=0xd0000;i<0xd4000;++i)if(((ULONG*)NXK_PTE_BASE)[i])++n;return n;}
++static void success(unsigned pages,unsigned low,unsigned mode,unsigned protect) {
++    reset(pages+32,low,1,mode);
++    PVOID va=NxkSysVaAllocate((SIZE_T)pages*PAGE_SIZE,protect);
++    require(va==(PVOID)(uintptr_t)NXK_SYSMEM_BASE,"first-fit VA unchanged");
++    require(count_mapped()==pages,"exact page publication count");
++    require(flushes==1,"one final CR3 after successful publication");
++    for(unsigned i=0;i<pages;++i){unsigned entry=((ULONG*)NXK_PTE_BASE)[0xd0000+i],p=entry>>12;
++        require((entry&0xfff)==NXK_PTE_VALID,"existing writable/WB PTE policy preserved for each Protect input");
++        require(p==(!XBOX_RESERVE_UPPER_RAM&&low>=0x4000?low+pages+31-i:low+i),"physical allocation order unchanged");
++        require(!NxkPageSupplyIsFree(p)&&NxkPageSupplyGetOwner(p)==0,"mapped pages remain immovable");
++        for(unsigned j=0;j<PAGE_SIZE;++j)require(frames[p][j]==0,"all returned bytes are zero");
++    }
++    require(frames[low-1][0]==0xa5,"neighboring unallocated frame unchanged");
++    if(!BASELINE){require(zero_locked==0,"SYSVA data zero must run outside PFN lock");
++        if(low>=0x4000&&!XBOX_RESERVE_UPPER_RAM&&pages>=16)require(acquisitions<pages,"multi-page kernel supply reduces lock transitions");}
++    unsigned alloc_acq=acquisitions;
++    require(NxkSysVaFree(va,(SIZE_T)pages*PAGE_SIZE)==pages,"exact free result");
++    require(count_mapped()==0&&MmAvailablePages==pages+32,"free returns all data frames exactly once");
++    printf("success upper=%d pages=%u mode=%u alloc_locks=%u free_locks=%u max_work=%u zero_locked=%u\n",XBOX_RESERVE_UPPER_RAM,pages,mode,alloc_acq,acquisitions-alloc_acq,max_lock_work,zero_locked);
++}
++static void shortage(unsigned pages,unsigned available,unsigned preback) {
++    unsigned low=XBOX_RESERVE_UPPER_RAM?0x100:0x4000;
++    reset(available,low,preback,0);
++    PVOID va=NxkSysVaAllocate((SIZE_T)pages*PAGE_SIZE,4);
++    require(!va,"shortage returns NULL");
++    require(count_mapped()==0,"shortage clears every published data PTE");
++    unsigned pts=0;for(unsigned pdi=0x340;pdi<0x350;++pdi)if(((ULONG*)NXK_PDE_BASE)[pdi])++pts;
++    require(MmAvailablePages==available-(preback?0:pts),"shortage returns each data frame once, retaining allocated page tables");
++    if(!BASELINE)require(max_returns<=16&&max_unlinks<=16,"unlinks and returns remain bounded across late failure");
++}
++static void interleaved(void) {
++    unsigned low=XBOX_RESERVE_UPPER_RAM?0x100:0x4000;
++    reset(64,low,1,1);hook=1;
++    PVOID va=NxkSysVaAllocate(17*PAGE_SIZE,4);hook=0;
++    require(va&&hook_checks>0,"competing allocations examine private batches between PFN locks");
++    require(NxkSysVaFree(va,17*PAGE_SIZE)==17&&MmAvailablePages==64,"interleaving preserves every reserved frame");
++    /* A physical pin delays frame reuse after VA teardown. */
++    va=NxkSysVaAllocate(PAGE_SIZE,4);unsigned p=((ULONG*)NXK_PTE_BASE)[0xd0000]>>12;
++    KIRQL i=MiAcquirePfnLock();NxkPageSupplyPin(p,FALSE);MiReleasePfnLock(i);
++    require(NxkSysVaFree(va,PAGE_SIZE)==1&&!NxkPageSupplyIsFree(p),"SYSVA free respects physical pin");
++    i=MiAcquirePfnLock();NxkPageSupplyPin(p,TRUE);MiReleasePfnLock(i);
++    require(NxkPageSupplyIsFree(p)&&MmAvailablePages==64,"final physical unlock returns deferred frame once");
++}
++static void boundary(void) {
++    reset(64,XBOX_RESERVE_UPPER_RAM?0x100:0x4000,1,1);
++    ULONG *pte=(ULONG*)NXK_PTE_BASE;
++    for(unsigned j=0;j<1023;++j)pte[0xd0000+j]=0xdead003;
++    pte[0xd0401]=0xbeef003;
++    PVOID va=NxkSysVaAllocate(2*PAGE_SIZE,4);
++    require(va==(void*)0xd03ff000u,"first-fit allocation crosses page-table boundary");
++    require(pte[0xd03fe]==0xdead003&&pte[0xd0401]==0xbeef003,"neighboring PTEs remain unchanged");
++    require(NxkSysVaFree(va,2*PAGE_SIZE)==2&&MmAvailablePages==64,"boundary free restores all owned data");
++}
++int main(void) {
++    require(mmap((void*)NXK_PTE_BASE,4*1024*1024,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED,-1,0)!=(void*)-1,"map host page tables");
++    unsigned sizes[]={1,2,8,9,16,17,1024,1025,4096};
++    for(unsigned m=0;m<3;++m)for(unsigned i=0;i<sizeof(sizes)/sizeof(*sizes);++i)
++        success(sizes[i],XBOX_RESERVE_UPPER_RAM?0x100:0x4000,m,4);
++    success(17,0x100,0,2);success(17,0x100,1,1);
++    success(17,0x1ff8,2,4);
++    unsigned limits[]={0,1,7,15,16,17,23,31,32};
++    for(unsigned i=0;i<sizeof(limits)/sizeof(*limits);++i)shortage(33,limits[i],1);
++    if(!XBOX_RESERVE_UPPER_RAM){shortage(17,0,0);shortage(17,1,0);shortage(1025,2,0);}
++    interleaved();boundary();
++    puts("SYSVA production zero/count/PDE-boundary/ownership/pressure/rollback PASS");
++    return 0;
++}
+diff --git a/tests/host/system-va-batch/check.py b/tests/host/system-va-batch/check.py
+new file mode 100644
+index 00000000..2cc05061
+--- /dev/null
++++ b/tests/host/system-va-batch/check.py
+@@ -0,0 +1,60 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Run actual SYSVA and page-supply bodies with host mappings and fault injection.
++
++The host replaces privileged TLB instructions and CPU locks. It retains production
++free-list bookkeeping, alias checks, hole selection, PTE publication and unwind.
++"""
++from pathlib import Path
++import argparse
++import importlib.util
++import subprocess
++import re
++
++parser = argparse.ArgumentParser()
++parser.add_argument('output', type=Path)
++parser.add_argument('--baseline', action='store_true')
++args = parser.parse_args()
++root = Path(__file__).resolve().parents[3]
++out = args.output.resolve(); out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location('extract', root/'tests/host/kernel-performance/check.py')
++extract = importlib.util.module_from_spec(spec); spec.loader.exec_module(extract)
++def function(source, name):
++    text = extract.function(source, name)
++    signature = re.search(r'(?:static\s+)?(?:PFN_NUMBER|BOOLEAN|VOID|ULONG|PVOID|ULONG_PTR)\s+(?:NTAPI\s+)?' + name + r'\s*\(', text)
++    assert signature, name
++    return text[signature.start():]
++supply = (root/'ntoskrnl/xb/mm/pagesupply.c').read_text()
++sysva = (root/'ntoskrnl/xb/mm/sysva.c').read_text()
++init = (root/'ntoskrnl/xb/mm/init.c').read_text()
++prefix = supply[supply.index('#define NXP_FREE'):supply.index('/* Called from MM init')]
++prefix = prefix.replace('    ULONG Entry = NxpLinks[Page];', '    ULONG Entry = NxpLinks[Page]; ++lock_work;')
++prefix = prefix.replace('    ULONG Entry = NxpLinks[Page]; ++lock_work;',
++                        '    ULONG Entry = NxpLinks[Page]; ++lock_work; ++lock_unlinks; is_taken[Page]=1;')
++prefix = prefix.replace('    PULONG HeadPtr = NxpHeadFor(Page);',
++                        '    PULONG HeadPtr = NxpHeadFor(Page); ++lock_returns; ++lock_work; is_taken[Page]=0;')
++names = ['NxkPageSupplyInitialize', 'NxkPageSupplyTakeAny', 'NxkPageSupplyTakeTitleAny',
++         'NxkPageSupplyTakeZero', 'NxkPageSupplyTakeTitleZero', 'NxkPageSupplyReturn',
++         'NxkPageSupplyIsFree', 'NxkPageSupplyTakeSpecific', 'NxkPageSupplySetOwner',
++         'NxkPageSupplyGetOwner', 'NxkPageSupplyCanPin', 'NxkPageSupplyIsPinned',
++         'NxkPageSupplyPin']
++if 'NxkPageSupplyTakeSystemBatch(' in supply:
++    names.append('NxkPageSupplyTakeSystemBatch')
++body = ''.join(function(supply, n) for n in names)
++body = body.replace('while (!((NxpLinks[Pfn] & NXP_FREE)))',
++                    'while (!((++lock_work, NxpLinks[Pfn]) & NXP_FREE))')
++body = body.replace('if (!(NxpLinks[Pfn] & NXP_FREE)) continue;',
++                    'if (!(++lock_work, NxpLinks[Pfn] & NXP_FREE)) continue;')
++guard = function(init, 'NxkTryGetVerifiedWbDirectAlias')
++system = sysva[sysva.index('/* APERTURE STATE'):]
++main = (Path(__file__).with_name('cases.c')).read_text()
++shim = (Path(__file__).with_name('shim.h')).read_text()
++for upper in [0, 1]:
++    target = out/f'sysva-{upper}'
++    src = target.with_suffix('.c')
++    src.write_text(shim + guard + prefix + body + system + main)
++    subprocess.run(['cc', '-std=c11', '-O2', '-g', '-Wall', '-Wextra', '-Werror',
++                    '-Wno-unused-function', '-Wno-unused-variable',
++                    f'-DXBOX_RESERVE_UPPER_RAM={upper}',
++                    f'-DBASELINE={int(args.baseline)}', str(src), '-o', str(target)], check=True)
++    subprocess.run([str(target)], check=True)
+diff --git a/tests/host/system-va-batch/shim.h b/tests/host/system-va-batch/shim.h
+new file mode 100644
+index 00000000..2738c123
+--- /dev/null
++++ b/tests/host/system-va-batch/shim.h
+@@ -0,0 +1,60 @@
++#define _GNU_SOURCE
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++#include <assert.h>
++typedef uint32_t ULONG, PFN_NUMBER, *PULONG;
++typedef uint16_t USHORT, *PUSHORT;
++typedef uintptr_t ULONG_PTR;
++typedef size_t SIZE_T;
++typedef uint8_t UCHAR, KIRQL;
++typedef int BOOLEAN, LONG, KSPIN_LOCK;
++typedef void VOID, *PVOID;
++#define IN
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define ASSERT assert
++#define PAGE_SIZE 4096u
++#define PAGE_SHIFT 12
++#define NXK_KSEG0_BASE 0x80000000u
++#define NXK_KSEG0_RAM_SIZE 0x04000000u
++#define NXK_HIGH_ZONE_BASE 0x03400000u
++#define NXK_HIGH_ZONE_LIMIT 0x03c00000u
++#define NXK_SYSMEM_BASE 0xd0000000u
++#define NXK_SYSMEM_LIMIT 0xd4000000u
++#define NXK_PDE_BASE 0xc0300000u
++#define NXK_PTE_BASE 0xc0000000u
++#define NXK_PDE_LARGE 0x83u
++#define NXK_PDE_PT 3u
++#define NXK_PTE_VALID 3u
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define DPRINT1(...) ((void)0)
++#define RtlZeroMemory(p,n) memset(p,0,n)
++static unsigned lock_held, sys_lock, acquisitions, lock_work, max_lock_work;
++static unsigned lock_unlinks, lock_returns, max_unlinks, max_returns;
++static unsigned zero_locked, direct_zero, mapped_zero, flushes, invalidations;
++static unsigned fail_after, taken, returned, hook, hook_checks, pt_zero;
++static PFN_NUMBER MmAvailablePages;
++static ULONG_PTR NxWbDirectMapLimit;
++static unsigned char frames[32768][PAGE_SIZE];
++static uint32_t links_storage[32768 + 16384];
++static unsigned char is_taken[32768], invalidated[16384];
++static void interleave(void);
++static KIRQL MiAcquirePfnLock(void) { assert(!lock_held); lock_held=1; lock_work=lock_unlinks=lock_returns=0; ++acquisitions; return 0; }
++static void MiReleasePfnLock(KIRQL i) { (void)i; assert(lock_held); if(lock_work>max_lock_work)max_lock_work=lock_work;if(lock_unlinks>max_unlinks)max_unlinks=lock_unlinks;if(lock_returns>max_returns)max_returns=lock_returns;lock_held=0;if(hook)interleave(); }
++#define MI_ASSERT_PFN_LOCK_HELD() assert(lock_held)
++static void KeAcquireSpinLock(KSPIN_LOCK *l,KIRQL *i) {(void)l;assert(!sys_lock);sys_lock=1;*i=0;}
++static void KeReleaseSpinLock(KSPIN_LOCK *l,KIRQL i) {(void)l;(void)i;assert(sys_lock&&!lock_held);sys_lock=0;}
++static void KeInitializeSpinLock(KSPIN_LOCK *l) {*l=0;}
++static LONG InterlockedCompareExchange(LONG *p,LONG v,LONG c){LONG old=*p;if(old==c)*p=v;return old;}
++static unsigned __readcr3(void) {return 1;}
++static void __writecr3(unsigned c) {(void)c; ++flushes;}
++static void __invlpg(void *p) {unsigned idx=((uintptr_t)p-NXK_SYSMEM_BASE)/PAGE_SIZE;assert(idx<16384);invalidated[idx]=1;++invalidations;}
++static BOOLEAN NxkMmRetailShapedMap(void) {return FALSE;}
++static BOOLEAN NxkMmPersistentPage(PFN_NUMBER p) {(void)p;return FALSE;}
++static PVOID NxkTryGetVerifiedWbDirectAlias(PFN_NUMBER);
++static void KeZeroPages(void *, unsigned);
++static void MiZeroPhysicalPage(PFN_NUMBER);

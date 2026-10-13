@@ -114,6 +114,8 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/fatx/check-update-entry-dirty.py" "$output/fatx-update-entry-dirty" >"$output/fatx-update-entry-dirty.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/metadata/check.py" "$output/metadata" >"$output/metadata.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/zero-reuse/check.py" "$output/zero-reuse" >"$output/zero-reuse.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/system-va-raw/check.py" "$output/system-va-raw" >"$output/system-va-raw.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/system-va-raw/check-validity.py" "$output/system-va-validity" >"$output/system-va-validity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-lifetime/check.py" "$output/dma-lifetime" >"$output/dma-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-channel/check.py" "$output/dma-channel" >"$output/dma-channel.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/interrupt-admission/check.py" "$output/interrupt-admission" >"$output/interrupt-admission.log" 2>&1
@@ -283,6 +285,8 @@ jobs:
             artifacts/kernel-performance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/pool-size-limit-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/zero-reuse-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/vm-zero-reuse-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/system-va-validity-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/thread-stack-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/thread-wait-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/xdvdfs-directory-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/

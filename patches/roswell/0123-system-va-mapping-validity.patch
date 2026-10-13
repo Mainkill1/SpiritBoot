@@ -1,0 +1,84 @@
+diff --git a/ntoskrnl/xb/mm/iospace.c b/ntoskrnl/xb/mm/iospace.c
+index d826af9b..550043b3 100644
+--- a/ntoskrnl/xb/mm/iospace.c
++++ b/ntoskrnl/xb/mm/iospace.c
+@@ -21,12 +21,8 @@
+ 
+ /* BOOLEAN MmIsAddressValid(PVOID Va).
+  *
+- * Retail returns TRUE if the page is mapped + present (i.e. a load/store
+- * would not fault).  Our address space is statically painted at boot,
+- * so the question reduces to "is this VA inside one of our windows?"
+- * Anything in the kernel image, KSEG0 alias, WC alias, UC MMIO, or the
+- * sysmem aperture is always present; anything else is treated as not
+- * mapped. */
++ * Static large-page windows are always present. Demand-mapped SYSVA,
++ * pool and title mappings must follow their live covering PDE and PTE. */
+ BOOLEAN
+ NTAPI
+ NxMmIsAddressValid(IN PVOID Va)
+@@ -37,8 +33,6 @@ NxMmIsAddressValid(IN PVOID Va)
+         return TRUE;
+     if (V >= NXK_WC_BASE && V < NXK_MMIO_LIMIT)
+         return TRUE;
+-    if (V >= NXK_SYSMEM_BASE && V < NXK_SYSMEM_LIMIT)
+-        return TRUE;
+     /* PTE-mapped VAs (pool, title commits): walk the page tables, like
+      * retail does -- mm/bigpool pins live pool TRUE / freed pool FALSE. */
+     return MmIsAddressValid(Va);
+diff --git a/tests/host/system-va-raw/check-validity.py b/tests/host/system-va-raw/check-validity.py
+new file mode 100644
+index 00000000..934d31e3
+--- /dev/null
++++ b/tests/host/system-va-raw/check-validity.py
+@@ -0,0 +1,50 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Production validity wrapper must reflect demand-mapped SYSVA PTE lifetime."""
++from pathlib import Path
++import subprocess
++import sys
++import importlib.util
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve(); out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location('extract', root/'tests/host/kernel-performance/check.py')
++module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
++body = module.function((root/'ntoskrnl/xb/mm/iospace.c').read_text(), 'NxMmIsAddressValid')
++walker = module.function((root/'ntoskrnl/mm/ARM3/mmsup.c').read_text(), 'MmIsAddressValid')
++shim = '''#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++typedef uintptr_t ULONG_PTR;
++typedef void *PVOID;
++typedef int BOOLEAN;
++#define IN
++#define NTAPI
++#define TRUE 1
++#define NXK_KSEG0_BASE 0x80000000u
++#define NXK_KSEG0_RAM_SIZE 0x04000000u
++#define NXK_WC_BASE 0xf0000000u
++#define NXK_MMIO_LIMIT 0xffc00000u
++#define NXK_SYSMEM_BASE 0xd0000000u
++#define NXK_SYSMEM_LIMIT 0xd4000000u
++#define FALSE 0
++#define _MI_PAGING_LEVELS 2
++typedef union {unsigned Long;struct {unsigned Valid:1,Other:31;} Hard;} ENTRY;
++typedef struct {ENTRY u;} MMPTE;
++static MMPTE pde,pte;
++#define MiAddressToPde(v) ((void)(v), &pde)
++#define MiAddressToPte(v) ((void)(v), &pte)
++static void require(int v,const char *why){if(!v){fprintf(stderr,"FAIL: %s\\n",why);exit(1);}}
++'''
++cases = '''int main(void){
++ void *va=(void*)0xd0000000u;
++ pde.u.Long=pte.u.Long=0;require(!NxMmIsAddressValid(va),"unbacked SYSVA aperture must be invalid");
++ pde.u.Long=3;pte.u.Long=0;require(!NxMmIsAddressValid(va),"empty SYSVA page table must be invalid");
++ pte.u.Long=0x12345003;require(NxMmIsAddressValid(va),"live SYSVA mapping must be valid");
++ pte.u.Long=0x12345002;require(!NxMmIsAddressValid(va),"non-present SYSVA PTE must be invalid");
++ pte.u.Long=0;require(!NxMmIsAddressValid(va),"freed SYSVA mapping must be invalid");
++ require(NxMmIsAddressValid((void*)0xf8000000u),"existing static device aperture preserved");
++ puts("SYSVA production mapping validity PASS");return 0;}
++'''
++(out/'validity.c').write_text(shim+walker+body+cases)
++subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror',str(out/'validity.c'),'-o',str(out/'validity')],check=True)
++subprocess.run([str(out/'validity')],check=True)
