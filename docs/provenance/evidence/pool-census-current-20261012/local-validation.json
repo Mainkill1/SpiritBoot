@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "date": "2026-10-12",
+  "scope": "current-main replay of opt-in pool census diagnostics and measurement repairs",
+  "product_base_commit": "ac1544c06384b1907a2183b3d33fb5bdf8341993",
+  "kernel_base_commit": "f852bb55d26b75008e5bcedae27ef798cf2dffcc",
+  "kernel_base_tree": "d5e5c40cb66deb63d31030668ee04e61877e3b64",
+  "kernel_candidate_commit": "0b050104253b4cdd1ecc8bc1dec939ab87ce543f",
+  "kernel_candidate_tree": "721274b868562ed4693228e88fcdf02f1174f1a7",
+  "diagnostic_patches": [
+    {
+      "path": "patches/roswell/0104-pool-census.patch",
+      "sha256": "5ec9fb58254cb6e665d153c74744b0b1bc4ab5b5acdf09c5410b2162f9c0502c"
+    },
+    {
+      "path": "patches/roswell/0105-pool-census-count-lifecycle.patch",
+      "sha256": "2888e785bed08c3669b2599619993296a5de243e2369442c6b2512ebb1a17f6b"
+    },
+    {
+      "path": "patches/roswell/0106-pool-census-bin-resolution.patch",
+      "sha256": "2cc2bc9e36dd2d497c986b383aa88ac8aba265f21e453eda5ba1f6b47b73ddc7"
+    },
+    {
+      "path": "patches/roswell/0107-pool-size-fixture-ushort.patch",
+      "sha256": "75cf107d950e9caa119ae786e24671de7feb1c7c1b0cf15b7658757bafbcbd13"
+    },
+    {
+      "path": "patches/roswell/0108-pool-census-serialized-backing.patch",
+      "sha256": "ea23779b6740d5d47515f45e87a967df6e73af26b023553d9a623126f7ec3b26"
+    },
+    {
+      "path": "patches/roswell/0109-pool-census-zero-impact-off.patch",
+      "sha256": "4e6743f4d266d4141ed6f2dfe25c6f102c6f923960fc5c33609127b7290e5f54"
+    }
+  ],
+  "local_validation": {
+    "product_host": {
+      "tests": 138,
+      "passed": 138,
+      "skipped": 3,
+      "failed": 0
+    },
+    "pool_census_counter_fixture": {
+      "reservation_off": "passed",
+      "reservation_on": "passed",
+      "disabled_symbols": "absent"
+    },
+    "pool_census_backing_fixture": {
+      "reservation_off_scenarios": 8,
+      "reservation_on_scenarios": 8,
+      "failed": 0
+    },
+    "producer_reader_abi": {
+      "reservation_off": "passed",
+      "reservation_on": "passed"
+    },
+    "pool_size_fixture": {
+      "cases": 160,
+      "result": "passed"
+    },
+    "object_handle_matrix": {
+      "cases": 560,
+      "race_checks": 2,
+      "lazy_checks": 1,
+      "result": "passed"
+    }
+  },
+  "release64_standard": {
+    "source_tree": "721274b868562ed4693228e88fcdf02f1174f1a7",
+    "flash_sha256": "484ea01114ecee7c134f0327101218e1c376769880b5a069a0322c41bd8e552e",
+    "flash_bytes": 524288,
+    "pool_census": false,
+    "rom_kernel": true,
+    "byte_identical_to_handle_only_ci_run_38330646937": true
+  },
+  "release64_diagnostic": {
+    "source_tree": "721274b868562ed4693228e88fcdf02f1174f1a7",
+    "flash_sha256": "893532a4ea62382946aeea8cb6e184d7836138d8bdecdc013f4199de1a52ac13",
+    "flash_bytes": 524288,
+    "pool_census": true,
+    "rom_kernel": true,
+    "different_from_standard": true
+  },
+  "toolchain_image_id": "sha256:ae07b0897b48d511a166e9892c223118aaac7da21cdbf1f502c36b527b7310ca",
+  "native_stop_read_resume_capture": false,
+  "representative_workload_captures": false,
+  "allocator_class_change": false,
+  "result": "local build and host qualification passed; exact-head CI and native diagnostic capture pending",
+  "zero_impact_fix": {
+    "observed_standard_release64_before_fix_sha256": "ebb13d089fad4213b0c574ae2f26b50e7cc57de9f1edbb0e52a5600ee8aa4682",
+    "cause": "diagnostic-only class-index unpacking locals and expressions remained in the census-disabled pool free/query bodies",
+    "repair_patch": "patches/roswell/0109-pool-census-zero-impact-off.patch",
+    "repair_patch_sha256": "4e6743f4d266d4141ed6f2dfe25c6f102c6f923960fc5c33609127b7290e5f54",
+    "post_fix_standard_release64_sha256": "484ea01114ecee7c134f0327101218e1c376769880b5a069a0322c41bd8e552e",
+    "expected_handle_only_release64_sha256": "484ea01114ecee7c134f0327101218e1c376769880b5a069a0322c41bd8e552e",
+    "byte_identical_after_fix": true
+  }
+}

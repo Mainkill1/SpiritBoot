@@ -4,6 +4,17 @@ The pool census is an opt-in diagnostic build for SpiritBoot issue [#213](https:
 
 It does not change the allocator's size classes or the normal release image. The diagnostic build uses fixed preallocated counters and adds work to pool allocation/free paths, so do not use it for performance comparisons.
 
+The current integration starts from SpiritBoot product commit
+`ac1544c06384b1907a2183b3d33fb5bdf8341993` and kernel commit
+`f852bb55d26b75008e5bcedae27ef798cf2dffcc` (tree
+`d5e5c40cb66deb63d31030668ee04e61877e3b64`). Diagnostic patches 104 through
+109 produce kernel commit `0b050104253b4cdd1ecc8bc1dec939ab87ce543f`,
+tree `721274b868562ed4693228e88fcdf02f1174f1a7`. This composition includes the
+saved-transition, public-interrupt, ROM-backed-kernel, and title-handle fixes.
+The earlier causal fixtures were first established on an isolated pre-v0.99.4
+tree; current-tree build and native capture results are recorded separately so
+the older evidence is not relabeled.
+
 ## Build
 
 Build the normal pinned firmware with `--pool-census`:
@@ -66,6 +77,24 @@ The record is versioned and contains its byte size and array offsets. Its sequen
 The original draft reader placed the two bucket-page totals at the end of the 30-word header. The compiled schema-3 producer places them before the lifetime fields. As a result, the original reader rejected an initialized production record with a schema-dimension error even though its synthetic reader tests passed. The reader now follows the unchanged production layout.
 
 The firmware workflow runs `tests/host/check_pool_census_abi.py` after the production census fixture. This check compiles the fixture's generated unit, containing the actual maintained kernel header and counter bodies, emits a record through `NxPoolCensusInitialize` and allocation/free/page APIs, and decodes those bytes with the product reader. It verifies page totals, bins, tags and lifetime data in both reservation configurations. Its lock/time/type shims exercise host decoding; an actual xemu stop/read/resume capture is still required before relying on workload measurements.
+
+The first current-main composition changed the normal release image even with
+the census option disabled. The cause was unconditional local class-index
+plumbing needed only to unpack diagnostic header bits. Patch 109 puts that
+plumbing entirely behind `NXK_POOL_CENSUS`; the disabled branch again contains
+the original free-list and size-query expressions. Standard-image byte identity
+with the pre-census tree is a required build gate, alongside an independently
+different diagnostic image.
+
+The current release64 standard build is byte-identical to the handle-only CI
+image, SHA-256
+`484ea01114ecee7c134f0327101218e1c376769880b5a069a0322c41bd8e552e`.
+The opt-in diagnostic image has SHA-256
+`893532a4ea62382946aeea8cb6e184d7836138d8bdecdc013f4199de1a52ac13`.
+Both are 512 KiB and reconstruct tree
+`721274b868562ed4693228e88fcdf02f1174f1a7`. The
+[local validation receipt](provenance/evidence/pool-census-current-20261012/local-validation.json)
+records the exact patch, build, fixture, and remaining native-capture limits.
 
 This fix and its test use only the maintained open kernel source and generated counter data. They do not inspect a reference BIOS, game instructions or a memory dump.
 

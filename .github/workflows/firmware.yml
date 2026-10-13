@@ -61,8 +61,14 @@ jobs:
           python3 - <<'PY'
           import json
           result = json.load(open('artifacts/firmware-pool-census-release-${{ matrix.memory_mib }}/build.json'))
+          standard = json.load(open('artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json'))
           assert result['status'] == 'built' and result['pool_census'] is True, result
           assert result['memory_mib'] == ${{ matrix.memory_mib }} and result['variant'] == 'release', result
+          assert result['source_tree'] == standard['source_tree'] == '721274b868562ed4693228e88fcdf02f1174f1a7', (result, standard)
+          assert result['flash_sha256'] != standard['flash_sha256'], (result, standard)
+          if result['memory_mib'] == 64:
+              assert standard['flash_sha256'] == '484ea01114ecee7c134f0327101218e1c376769880b5a069a0322c41bd8e552e', standard
+              assert result['flash_sha256'] == '893532a4ea62382946aeea8cb6e184d7836138d8bdecdc013f4199de1a52ac13', result
           PY
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             spiritboot-toolchain sh -ec '
@@ -82,7 +88,7 @@ jobs:
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
             echo "reconstructed source tree: $actual_tree"
-            test "$actual_tree" = c19555ecbca1554fa30c85411f1f4fae365d0c3b
+            test "$actual_tree" = 721274b868562ed4693228e88fcdf02f1174f1a7
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -178,7 +184,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'c19555ecbca1554fa30c85411f1f4fae365d0c3b', result
+          assert result['source_tree'] == '721274b868562ed4693228e88fcdf02f1174f1a7', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
