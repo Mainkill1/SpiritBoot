@@ -1,0 +1,117 @@
+--- a/ntoskrnl/xb/mm/contig.c
++++ b/ntoskrnl/xb/mm/contig.c
+@@ -85,7 +85,7 @@
+     PVOID     Alias;        /* KSEG0 pointer returned to the title (0 = free slot) */
+     ULONG_PTR Pa;           /* page-aligned PA inside our carve-out */
+     ULONG_PTR PaEnd;        /* PA past the last byte (Pa + AllocBytes) */
+-    SIZE_T    Size;         /* original request size, for MmQueryAllocationSize */
++    SIZE_T    Size;         /* occupied whole-page extent */
+ } NXK_CONTIG_ENTRY;
+ 
+ #define NXK_CONTIG_INITIAL_SLOTS  64
+@@ -395,12 +395,12 @@
+ static
+ VOID
+ NxpRecordHeapContigLocked(ULONG Slot, PVOID Alias, ULONG_PTR Pa,
+-                          SIZE_T AllocBytes, SIZE_T RequestSize)
++                          SIZE_T AllocBytes)
+ {
+     NxContigTable[Slot].Alias = Alias;
+     NxContigTable[Slot].Pa    = Pa;
+     NxContigTable[Slot].PaEnd = Pa + AllocBytes;
+-    NxContigTable[Slot].Size  = RequestSize;
++    NxContigTable[Slot].Size  = AllocBytes;
+ }
+ 
+ #ifdef NXK_MM_PHYS
+@@ -594,7 +594,7 @@
+ Got:
+     Pa = (ULONG_PTR)Base << PAGE_SHIFT;
+     Alias = (PVOID)(NXK_KSEG0_BASE | Pa);
+-    NxpRecordHeapContigLocked(Slot, Alias, Pa, AllocBytes, NumberOfBytes);
++    NxpRecordHeapContigLocked(Slot, Alias, Pa, AllocBytes);
+     KeReleaseSpinLock(&NxContigLock, OldIrql);
+ 
+     DPRINT("MmAllocContig req=%lu got=%lu KB at PA=%08lx avail=%lu\n",
+@@ -636,7 +636,7 @@
+     if (Pa != 0)
+     {
+         Alias = (PVOID)(NXK_KSEG0_BASE | Pa);
+-        NxpRecordHeapContigLocked(Slot, Alias, Pa, AllocBytes, NumberOfBytes);
++        NxpRecordHeapContigLocked(Slot, Alias, Pa, AllocBytes);
+         KeReleaseSpinLock(&NxContigLock, OldIrql);
+         DPRINT("MmAllocContig req=%lu got=%lu KB at PA=%08lx (alias %p)\n",
+                 (ULONG)NumberOfBytes, (ULONG)(AllocBytes >> 10),
+@@ -688,7 +688,7 @@
+             NxContigTable[Slot].Alias = Alias;
+             NxContigTable[Slot].Pa = 0;     /* 0 == "NT-allocator backing" */
+             NxContigTable[Slot].PaEnd = (ULONG_PTR)SystemVa;
+-            NxContigTable[Slot].Size = NumberOfBytes;
++            NxContigTable[Slot].Size = AllocBytes;
+             KeReleaseSpinLock(&NxContigLock, OldIrql);
+             DPRINT("MmAllocContig req=%lu NT-fallback PA=%08lx alias=%p "
+                     "(constrained: low=%08lx high=%08lx)\n",
+@@ -729,7 +729,7 @@
+                 BaseAddress);
+ }
+ 
+-/* The request size of a contiguous allocation, from the tracking table. */
++/* The occupied page extent of a contiguous allocation. */
+ SIZE_T
+ NTAPI
+ NxMmQueryAllocationSize(IN PVOID BaseAddress)
+@@ -805,7 +805,7 @@
+         MiReleasePfnLock(pfnIrql); KeReleaseSpinLock(&NxContigLock, irql); return FALSE;
+     }
+     NxkMmDetachRestored(pa, Size);
+-    NxpRecordHeapContigLocked(slot, Alias, pa, Size, Size);
++    NxpRecordHeapContigLocked(slot, Alias, pa, Size);
+     MiReleasePfnLock(pfnIrql); KeReleaseSpinLock(&NxContigLock, irql); return TRUE;
+ }
+ 
+--- /dev/null
++++ b/tests/xbe/contig-extent/main.c
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Requests observed through public Forza APIs, plus page-boundary controls. */
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include "../regression.h"
++int main(void)
++{
++    static const ULONG sizes[]={1,4,16,48,152,256,4095,4096,4097,4192,8191,8192,16416,77824};
++    regression_begin();
++    for(unsigned method=0;method<3;++method) {
++        for(unsigned i=0;i<sizeof(sizes)/sizeof(sizes[0]);++i) {
++            ULONG bytes=sizes[i],rounded=(bytes+4095)&~4095UL;
++            PVOID base=method==0?MmAllocateContiguousMemory(bytes):
++                MmAllocateContiguousMemoryEx(bytes,0,0x03ffffff,method==1?16384:4096,
++                    PAGE_READWRITE|(method==2?PAGE_WRITECOMBINE:0));
++            regression_require(base!=NULL,"allocate bounded contiguous request");
++            ULONG actual=MmQueryAllocationSize(base);
++            tap_comment("allocation method=%u requested=%lu rounded=%lu base=%08lx actual=%lu",
++                method,bytes,rounded,(ULONG)base,actual);
++            regression_check(actual==rounded,"query returns occupied whole-page size");
++            /* Allocation query establishes the valid owned extent before use. */
++            if(actual==rounded) {
++                volatile unsigned char *buffer=base;
++                buffer[0]=0x5a;buffer[rounded-1]=0xa5;
++                regression_check(buffer[0]==0x5a && buffer[rounded-1]==0xa5,
++                    "first and last reported bytes are accessible");
++            } else {
++                regression_check(0,"first and last reported bytes require correct extent");
++            }
++            MmFreeContiguousMemory(base);
++        }
++    }
++    regression_finish();
++}
+--- /dev/null
++++ b/tests/xbe/contig-extent/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = CONTIG-EXTENT
++GEN_XISO = contig-extent.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../.reference/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
