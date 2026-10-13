@@ -1,0 +1,58 @@
+8400e6f8 <_DesCryptBlock>:
+8400e6f8:	55                   	push   %ebp
+8400e6f9:	89 e5                	mov    %esp,%ebp
+8400e6fb:	57                   	push   %edi
+8400e6fc:	56                   	push   %esi
+8400e6fd:	53                   	push   %ebx
+8400e6fe:	89 cb                	mov    %ecx,%ebx
+8400e700:	83 ec 14             	sub    $0x14,%esp
+8400e703:	83 7d 08 01          	cmpl   $0x1,0x8(%ebp)
+8400e707:	89 45 ec             	mov    %eax,-0x14(%ebp)
+8400e70a:	8b 45 0c             	mov    0xc(%ebp),%eax
+8400e70d:	75 0b                	jne    8400e71a <_DesCryptBlock+0x22>
+8400e70f:	0f b6 c0             	movzbl %al,%eax
+8400e712:	89 04 24             	mov    %eax,(%esp)
+8400e715:	8b 45 ec             	mov    -0x14(%ebp),%eax
+8400e718:	eb 6b                	jmp    8400e785 <_DesCryptBlock+0x8d>
+8400e71a:	8d b9 00 01 00 00    	lea    0x100(%ecx),%edi
+8400e720:	8d b1 80 00 00 00    	lea    0x80(%ecx),%esi
+8400e726:	84 c0                	test   %al,%al
+8400e728:	75 2b                	jne    8400e755 <_DesCryptBlock+0x5d>
+8400e72a:	31 c9                	xor    %ecx,%ecx
+8400e72c:	8b 45 ec             	mov    -0x14(%ebp),%eax
+8400e72f:	89 0c 24             	mov    %ecx,(%esp)
+8400e732:	89 d9                	mov    %ebx,%ecx
+8400e734:	31 db                	xor    %ebx,%ebx
+8400e736:	e8 99 fe ff ff       	call   8400e5d4 <_DesBlock>
+8400e73b:	8b 55 ec             	mov    -0x14(%ebp),%edx
+8400e73e:	c7 04 24 01 00 00 00 	movl   $0x1,(%esp)
+8400e745:	89 f1                	mov    %esi,%ecx
+8400e747:	89 d0                	mov    %edx,%eax
+8400e749:	e8 86 fe ff ff       	call   8400e5d4 <_DesBlock>
+8400e74e:	89 1c 24             	mov    %ebx,(%esp)
+8400e751:	89 f9                	mov    %edi,%ecx
+8400e753:	eb 2b                	jmp    8400e780 <_DesCryptBlock+0x88>
+8400e755:	c7 04 24 01 00 00 00 	movl   $0x1,(%esp)
+8400e75c:	8b 45 ec             	mov    -0x14(%ebp),%eax
+8400e75f:	89 f9                	mov    %edi,%ecx
+8400e761:	e8 6e fe ff ff       	call   8400e5d4 <_DesBlock>
+8400e766:	31 c0                	xor    %eax,%eax
+8400e768:	8b 55 ec             	mov    -0x14(%ebp),%edx
+8400e76b:	89 f1                	mov    %esi,%ecx
+8400e76d:	89 04 24             	mov    %eax,(%esp)
+8400e770:	89 d0                	mov    %edx,%eax
+8400e772:	e8 5d fe ff ff       	call   8400e5d4 <_DesBlock>
+8400e777:	c7 04 24 01 00 00 00 	movl   $0x1,(%esp)
+8400e77e:	89 d9                	mov    %ebx,%ecx
+8400e780:	8b 55 ec             	mov    -0x14(%ebp),%edx
+8400e783:	89 d0                	mov    %edx,%eax
+8400e785:	e8 4a fe ff ff       	call   8400e5d4 <_DesBlock>
+8400e78a:	83 c4 14             	add    $0x14,%esp
+8400e78d:	5b                   	pop    %ebx
+8400e78e:	5e                   	pop    %esi
+8400e78f:	5f                   	pop    %edi
+8400e790:	5d                   	pop    %ebp
+8400e791:	c3                   	ret
+8400e792:	90                   	nop
+8400e793:	90                   	nop
+

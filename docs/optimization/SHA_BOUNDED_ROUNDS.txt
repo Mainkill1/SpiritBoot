@@ -1,5 +1,11 @@
 SHA-1 bounded compression loops — 2026-10-13
 
+Current candidate: Xbox-only noinline compression revision, flash349d5f39...
+First candidate33fc537f... is rejected for a reproducible native DES slowdown.
+The noinline revision passes host and linked-layout verification; native
+acceptance belongs to the final combined ROM qualification described separately.
+The first-candidate evidence below is retained to document the failed trial.
+
 Patch 0118-sha-bounded-rounds.patch replaces the Xbox-only 80-round dispatch
 loop with five-round groups, split by SHA phase. Fifteen initial byte-swap
 rounds run in three groups; the 15..19 boundary is explicit; each remaining
@@ -190,3 +196,47 @@ of line, restoring locality without changing the DES source.
 Reanalysis: python3 docs/optimization/evidence/sha-bounded-rounds-20261013/native/analyze.py
 Raw exported receipts and logs: native/receipts.zip; frozen contracts.json comes
 from the prior strict analyzer, not from trusting this candidate's outputs.
+
+Noinline correction — standalone build/host/layout proof
+
+The Xbox compression definition now has a static forward declaration carrying
+__attribute__((noinline)). This keeps the shared compression core out of the
+early A_SHAUpdate routine. The SHA round code, circular buffer writes, caller
+copying, counts, padding/final reset, context layout and DES code are unchanged.
+Non-Xbox builds do not receive this attribute. Each block adds a normal internal
+call/return; the algorithm still executes 19 compression-loop checks per block.
+
+Standalone candidate assembled tree:
+d8c6f0e7b74add8c4113ef8a08431f059f606c2f
+Standalone candidate flash SHA256:
+349d5f39cf13da0e3f52ac2fcd8f4d1973dd4efbccc982b57295e37735d4effe
+ROM: artifacts/sha-noinline-release64/flash.bin
+
+Actual linked A_SHAUpdate is 56 instructions; SHA1Transform is 684 instructions
+at 0x84040d1c. DesBit at 0x8400e5b8 and DesPermute at 0x8400e88c again share one
+4KiB page. Their 13/33 instruction counts and the 97/56 counts of DesBlock and
+DesCryptBlock match the baseline and first candidate. Exact owned-code excerpts
+and addresses are retained under evidence/.../noinline/. Keeping DES helpers
+within one page is corroborated independently by release_write_perf. It is
+layout evidence for the stated hypothesis, not proof of recovered performance;
+the final combined image must receive its own native screen and qualification.
+
+The standalone revision passes 13,410 SHA differential/oracle checks and all
+30,978 existing full kernel-performance oracle checks against baseline9ef0d1d0.
+Product suite:131 tests, three existing skips, no failures. The independent
+reviewer reran all13,410 SHA checks and found no correctness blocker. Instrumented
+host1MiB median is1.159ms vs1.633ms baseline; host timings are diagnostic only.
+
+Relative to baseline62ed: .text346688->348556 bytes (+1868), stripped PE
+509952->511488 (+1536), mapped image569344->573440 (+4096), ROM92->93 pages,
+permanent image RAM14->14 pages, discardable33->33 pages. Warm-stage requirement
+177->178 pages of505. Compressed prepared payload46848->46828 bytes; payload
+headroom79424->75348. Exact ROM-span CRCs and loader identity pass the layout
+audit. The final combined build's geometry may differ and needs its own audit.
+
+The native receipt analyzer additionally passes14 corruption checks: altered
+sample checksum/iteration/correctness/index/terminal, unexpected API TODO pass,
+unknown API contract, ordinary API failure, wrong BIOS, noninteractive session,
+incomplete/failed process, wrong RAM profile and changed backing metadata are
+all rejected. Original API/micro controls are accepted.
+Reproduce: python3 docs/optimization/evidence/sha-bounded-rounds-20261013/native/test-analyze.py
