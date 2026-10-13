@@ -37,7 +37,10 @@ Do not store proprietary dumps, disassembly, secret material, or copied propriet
 
 Current compatibility records include:
 
+- [Current-main performance and compatibility integration](OPEN_PR_INTEGRATION_2026-10-13.md): the exact composed 64 MiB baseline and the write-sensitive drafts excluded from save testing.
 - [Saved transition images](SAVED_TRANSITION_IMAGE.md)
 - [Public title interrupt objects](TITLE_INTERRUPT_PUBLIC_ABI.md)
 - [Halo 64 MiB memory compatibility](HALO_64MIB_MEMORY_COMPATIBILITY.md)
 - [Native handle classification](TITLE_HANDLE_CLASSIFICATION.md)
+
+- [Public thread identity and terminal status](PUBLIC_THREAD_IDENTITY.md): full backing storage, exact pointer translation, lifetime publication and qualified caller wait blocks.

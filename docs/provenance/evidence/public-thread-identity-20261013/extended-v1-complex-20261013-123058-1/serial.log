@@ -1,0 +1,194 @@
+TAP version 14
+ok 1 - reference current thread for alert wait oracle
+# waitblocks mode=0 result=00000000 current=0xd002f018 thread0=0xa5a5a5a5 thread1=0xa5a5a5a5 object0=0xa5a5a5a5 object1=0xa5a5a5a5 next0=0xa5a5a5a5 next1=0xa5a5a5a5 keys=4294944165,4294944165 t
+ok 2 - immediate timeout and alerted multiple waits return exact status
+ok 3 - multiple wait preserves block guards and caller object array
+# waitblocks mode=1 result=00000102 current=0xd002f018 thread0=0xd002f018 thread1=0xd002f018 object0=0xd0040bc8 object1=0xd0040c00 next0=0xd0040c3c next1=0xd0040c54 keys=0,1 types=0,0
+ok 4 - immediate timeout and alerted multiple waits return exact status
+ok 5 - multiple wait preserves block guards and caller object array
+# waitblocks mode=2 result=00000101 current=0xd002f018 thread0=0xd002f018 thread1=0xd002f018 object0=0xd0040bc8 object1=0xd0040c00 next0=0xd0040c3c next1=0xd0040c54 keys=0,1 types=0,0
+ok 6 - immediate timeout and alerted multiple waits return exact status
+ok 7 - multiple wait preserves block guards and caller object array
+# reference_bench pairs=65536 ticks=18572 frequency=3375000
+# public layout KTHREAD=272 ETHREAD=320 HasTerminated=119 ExitStatus=288 UniqueThread=300
+ok 8 - register public thread creation and exit observer
+ok 9 - create suspended public thread without TLS allocation
+ok 10 - obtain typed public thread reference
+ok 11 - obtain untyped public thread reference
+# thread n=0 phase=suspended ptr=0xd0008bf8 uid=00000004 ended=0 exit=00000000 header=6/68 signal=0
+ok 12 - typed and untyped handles expose one thread identity
+ok 13 - suspended public thread exposes assigned ID before startup
+ok 14 - suspended thread is not terminated
+ok 15 - creation notification exposes same public identity and ID
+ok 16 - creation callback sees initialized public header and live exit state
+ok 17 - reference public thread by pointer and type
+ok 18 - open a thread handle from its public pointer
+ok 19 - thread reference rejects an event type
+ok 20 - base-priority setter accepts public pointer
+ok 21 - priority setter accepts public pointer
+ok 22 - alert setter accepts public pointer
+ok 23 - queue kernel APC through suspended public pointer
+ok 24 - queue user APC for thread-exit rundown
+ok 25 - pointer suspend sees initial suspended count
+ok 26 - pointer resume preserves remaining suspension
+ok 27 - disable-boost setter round trips pointer
+ok 28 - handle resume starts suspended target
+ok 29 - handle resume reports previous count
+ok 30 - worker reaches live identity checkpoint
+# thread n=0 phase=live ptr=0xd0008bf8 uid=00000004 ended=0 exit=00000000 header=6/68 signal=0
+# identity n=0 create_id=00000004 current=0xd0008bf8 self=0xd0008bf8 handle=0xd0008bf8 self_status=00000000
+ok 31 - current export pseudo handle and real handle have identical public pointer
+ok 32 - current-thread public view exposes assigned ID
+ok 33 - live public wrapper reports STILL_ACTIVE
+ok 34 - pointer wait on live target times out without signaling
+ok 35 - close first handle while references retain target
+ok 36 - target is pending on synchronization event
+ok 37 - boost-event output uses the same public thread identity
+ok 38 - retained public pointer wait observes termination
+# thread n=0 phase=exited ptr=0xd0008bf8 uid=00000000 ended=1 exit=10203040 header=6/68 signal=1
+# exit n=0 expected=10203040 wrapper=10203040 query=1 notify=1 ptr=0xd0008bf8 uid=00000004 status=00000000 ended=1
+ok 39 - termination state and exact exit status publish before wait succeeds
+ok 40 - public wrapper reads exact completed exit code
+ok 41 - completed thread clears its public unique ID
+ok 42 - exit notification retains same public pointer and unique ID
+ok 43 - exit notification publishes termination before final status
+ok 44 - kernel APC executes exactly once with target public identity
+ok 45 - undelivered user APC runs down exactly once before thread signal
+ok 46 - multiple-object wait translates a thread beside an ordinary event
+ok 47 - close final handle before final references
+ok 48 - public pointer and terminal state survive closing every handle
+ok 49 - create suspended public thread without TLS allocation
+ok 50 - obtain typed public thread reference
+ok 51 - obtain untyped public thread reference
+# thread n=1 phase=suspended ptr=0xd0008bf8 uid=00000024 ended=0 exit=00000000 header=6/68 signal=0
+ok 52 - typed and untyped handles expose one thread identity
+ok 53 - suspended public thread exposes assigned ID before startup
+ok 54 - suspended thread is not terminated
+ok 55 - creation notification exposes same public identity and ID
+ok 56 - creation callback sees initialized public header and live exit state
+ok 57 - reference public thread by pointer and type
+ok 58 - open a thread handle from its public pointer
+ok 59 - thread reference rejects an event type
+ok 60 - base-priority setter accepts public pointer
+ok 61 - priority setter accepts public pointer
+ok 62 - alert setter accepts public pointer
+ok 63 - queue kernel APC through suspended public pointer
+ok 64 - queue user APC for thread-exit rundown
+ok 65 - pointer suspend sees initial suspended count
+ok 66 - pointer resume preserves remaining suspension
+ok 67 - disable-boost setter round trips pointer
+ok 68 - pointer alert-resume starts suspended target
+ok 69 - worker reaches live identity checkpoint
+# thread n=1 phase=live ptr=0xd0008bf8 uid=00000024 ended=0 exit=00000000 header=6/68 signal=0
+# identity n=1 create_id=00000024 current=0xd0008bf8 self=0xd0008bf8 handle=0xd0008bf8 self_status=00000000
+ok 70 - current export pseudo handle and real handle have identical public pointer
+ok 71 - current-thread public view exposes assigned ID
+ok 72 - live public wrapper reports STILL_ACTIVE
+ok 73 - pointer wait on live target times out without signaling
+ok 74 - close first handle while references retain target
+ok 75 - target is pending on synchronization event
+ok 76 - boost-event output uses the same public thread identity
+ok 77 - retained public pointer wait observes termination
+# thread n=1 phase=exited ptr=0xd0008bf8 uid=00000000 ended=1 exit=10203041 header=6/68 signal=1
+# exit n=1 expected=10203041 wrapper=10203041 query=1 notify=1 ptr=0xd0008bf8 uid=00000024 status=00000000 ended=1
+ok 78 - termination state and exact exit status publish before wait succeeds
+ok 79 - public wrapper reads exact completed exit code
+ok 80 - completed thread clears its public unique ID
+ok 81 - exit notification retains same public pointer and unique ID
+ok 82 - exit notification publishes termination before final status
+ok 83 - kernel APC executes exactly once with target public identity
+ok 84 - undelivered user APC runs down exactly once before thread signal
+ok 85 - multiple-object wait translates a thread beside an ordinary event
+ok 86 - close final handle before final references
+ok 87 - public pointer and terminal state survive closing every handle
+ok 88 - create suspended public thread without TLS allocation
+ok 89 - obtain typed public thread reference
+ok 90 - obtain untyped public thread reference
+# thread n=2 phase=suspended ptr=0xd0008bf8 uid=00000020 ended=0 exit=00000000 header=6/68 signal=0
+ok 91 - typed and untyped handles expose one thread identity
+ok 92 - suspended public thread exposes assigned ID before startup
+ok 93 - suspended thread is not terminated
+ok 94 - creation notification exposes same public identity and ID
+ok 95 - creation callback sees initialized public header and live exit state
+ok 96 - reference public thread by pointer and type
+ok 97 - open a thread handle from its public pointer
+ok 98 - thread reference rejects an event type
+ok 99 - base-priority setter accepts public pointer
+ok 100 - priority setter accepts public pointer
+ok 101 - alert setter accepts public pointer
+ok 102 - queue kernel APC through suspended public pointer
+ok 103 - queue user APC for thread-exit rundown
+ok 104 - pointer suspend sees initial suspended count
+ok 105 - pointer resume preserves remaining suspension
+ok 106 - disable-boost setter round trips pointer
+ok 107 - handle resume starts suspended target
+ok 108 - handle resume reports previous count
+ok 109 - worker reaches live identity checkpoint
+# thread n=2 phase=live ptr=0xd0008bf8 uid=00000020 ended=0 exit=00000000 header=6/68 signal=0
+# identity n=2 create_id=00000020 current=0xd0008bf8 self=0xd0008bf8 handle=0xd0008bf8 self_status=00000000
+ok 110 - current export pseudo handle and real handle have identical public pointer
+ok 111 - current-thread public view exposes assigned ID
+ok 112 - live public wrapper reports STILL_ACTIVE
+ok 113 - pointer wait on live target times out without signaling
+ok 114 - close first handle while references retain target
+ok 115 - target is pending on synchronization event
+ok 116 - boost-event output uses the same public thread identity
+ok 117 - retained public pointer wait observes termination
+# thread n=2 phase=exited ptr=0xd0008bf8 uid=00000000 ended=1 exit=10203042 header=6/68 signal=1
+# exit n=2 expected=10203042 wrapper=10203042 query=1 notify=1 ptr=0xd0008bf8 uid=00000020 status=00000000 ended=1
+ok 118 - termination state and exact exit status publish before wait succeeds
+ok 119 - public wrapper reads exact completed exit code
+ok 120 - completed thread clears its public unique ID
+ok 121 - exit notification retains same public pointer and unique ID
+ok 122 - exit notification publishes termination before final status
+ok 123 - kernel APC executes exactly once with target public identity
+ok 124 - undelivered user APC runs down exactly once before thread signal
+ok 125 - multiple-object wait translates a thread beside an ordinary event
+ok 126 - close final handle before final references
+ok 127 - public pointer and terminal state survive closing every handle
+ok 128 - create suspended public thread without TLS allocation
+ok 129 - obtain typed public thread reference
+ok 130 - obtain untyped public thread reference
+# thread n=3 phase=suspended ptr=0xd0008bf8 uid=00000004 ended=0 exit=00000000 header=6/68 signal=0
+ok 131 - typed and untyped handles expose one thread identity
+ok 132 - suspended public thread exposes assigned ID before startup
+ok 133 - suspended thread is not terminated
+ok 134 - creation notification exposes same public identity and ID
+ok 135 - creation callback sees initialized public header and live exit state
+ok 136 - reference public thread by pointer and type
+ok 137 - open a thread handle from its public pointer
+ok 138 - thread reference rejects an event type
+ok 139 - base-priority setter accepts public pointer
+ok 140 - priority setter accepts public pointer
+ok 141 - alert setter accepts public pointer
+ok 142 - queue kernel APC through suspended public pointer
+ok 143 - queue user APC for thread-exit rundown
+ok 144 - pointer suspend sees initial suspended count
+ok 145 - pointer resume preserves remaining suspension
+ok 146 - disable-boost setter round trips pointer
+ok 147 - pointer alert-resume starts suspended target
+ok 148 - worker reaches live identity checkpoint
+# thread n=3 phase=live ptr=0xd0008bf8 uid=00000004 ended=0 exit=00000000 header=6/68 signal=0
+# identity n=3 create_id=00000004 current=0xd0008bf8 self=0xd0008bf8 handle=0xd0008bf8 self_status=00000000
+ok 149 - current export pseudo handle and real handle have identical public pointer
+ok 150 - current-thread public view exposes assigned ID
+ok 151 - live public wrapper reports STILL_ACTIVE
+ok 152 - pointer wait on live target times out without signaling
+ok 153 - close first handle while references retain target
+ok 154 - target is pending on synchronization event
+ok 155 - boost-event output uses the same public thread identity
+ok 156 - retained public pointer wait observes termination
+# thread n=3 phase=exited ptr=0xd0008bf8 uid=00000000 ended=1 exit=10203043 header=6/68 signal=1
+# exit n=3 expected=10203043 wrapper=10203043 query=1 notify=1 ptr=0xd0008bf8 uid=00000004 status=00000000 ended=1
+ok 157 - termination state and exact exit status publish before wait succeeds
+ok 158 - public wrapper reads exact completed exit code
+ok 159 - completed thread clears its public unique ID
+ok 160 - exit notification retains same public pointer and unique ID
+ok 161 - exit notification publishes termination before final status
+ok 162 - kernel APC executes exactly once with target public identity
+ok 163 - undelivered user APC runs down exactly once before thread signal
+ok 164 - multiple-object wait translates a thread beside an ordinary event
+ok 165 - close final handle before final references
+ok 166 - public pointer and terminal state survive closing every handle
+# checks=166 failures=0
+1..166

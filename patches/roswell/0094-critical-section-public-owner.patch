@@ -1,0 +1,166 @@
+--- a/tests/host/critical-section/check.py
++++ b/tests/host/critical-section/check.py
+@@ -29,6 +29,7 @@
+ static PVOID me=(void*)1;static unsigned waits,signals;static void *current_cs;
+ static int release_on_increment;static void XeRtlLeaveCriticalSection(void*);
+ static PVOID KeGetCurrentThread(void){return me;}
++static PVOID XeKeGetCurrentThread(void){return (PVOID)((uintptr_t)me+0x1000);}
+ static LONG InterlockedIncrement(LONG*p){
+  LONG result=++*p;
+  if(release_on_increment){release_on_increment=0;PVOID saved=me;me=(void*)1;XeRtlLeaveCriticalSection(current_cs);me=saved;}
+@@ -51,25 +52,25 @@
+ main=r'''
+ int main(void){
+  XBE_CS cs;current_cs=&cs;XeRtlInitializeCriticalSection(&cs);assert(cs.LockCount==-1&&!cs.RecursionCount&&!cs.OwningThread&&cs.Type==1);
+- XeRtlEnterCriticalSection(&cs);XeRtlEnterCriticalSection(&cs);assert(cs.LockCount==1&&cs.RecursionCount==2);
++ XeRtlEnterCriticalSection(&cs);assert(cs.OwningThread==XeKeGetCurrentThread());XeRtlEnterCriticalSection(&cs);assert(cs.LockCount==1&&cs.RecursionCount==2);
+  assert(XeRtlTryEnterCriticalSection(&cs));assert(cs.LockCount==2&&cs.RecursionCount==3);
+  XeRtlLeaveCriticalSection(&cs);XeRtlLeaveCriticalSection(&cs);assert(cs.LockCount==0&&cs.RecursionCount==1);
+  me=(void*)2;assert(!XeRtlTryEnterCriticalSection(&cs));assert(cs.LockCount==0&&!waits);
+- XeRtlEnterCriticalSection(&cs);assert(waits==1&&signals==1&&cs.OwningThread==me&&cs.LockCount==0&&cs.RecursionCount==1);
++ XeRtlEnterCriticalSection(&cs);assert(waits==1&&signals==1&&cs.OwningThread==XeKeGetCurrentThread()&&cs.LockCount==0&&cs.RecursionCount==1);
+  XeRtlLeaveCriticalSection(&cs);assert(cs.LockCount==-1&&!cs.OwningThread&&!cs.RecursionCount);
+- assert(XeRtlTryEnterCriticalSection(&cs));XeRtlLeaveCriticalSection(&cs);
++ assert(XeRtlTryEnterCriticalSection(&cs));assert(cs.OwningThread==XeKeGetCurrentThread());XeRtlLeaveCriticalSection(&cs);
+  me=(void*)1;XeRtlInitializeCriticalSection(&cs);cs.Type=0;XeRtlEnterCriticalSection(&cs);
+  me=(void*)2;XeRtlEnterCriticalSection(&cs);assert(cs.Type==1&&waits==2);XeRtlLeaveCriticalSection(&cs);
+  me=(void*)1;XeRtlInitializeCriticalSection(&cs);cs.Type=0;XeRtlEnterCriticalSection(&cs);
+  me=(void*)2;release_on_increment=1;XeRtlEnterCriticalSection(&cs);
+- assert(waits==3&&cs.OwningThread==me&&cs.LockCount==0&&cs.Type==1);XeRtlLeaveCriticalSection(&cs);
++ assert(waits==3&&cs.OwningThread==XeKeGetCurrentThread()&&cs.LockCount==0&&cs.Type==1);XeRtlLeaveCriticalSection(&cs);
+  /* Two already-queued contenders: each release hands off one count. */
+  me=(void*)1;XeRtlInitializeCriticalSection(&cs);XeRtlEnterCriticalSection(&cs);
+  InterlockedIncrement(&cs.LockCount);InterlockedIncrement(&cs.LockCount);
+  XeRtlLeaveCriticalSection(&cs);assert(cs.SignalState==1&&cs.LockCount==1);
+- KeWaitForSingleObject((PKEVENT)&cs,0,0,0,NULL);me=(void*)2;cs.OwningThread=me;cs.RecursionCount=1;
++ KeWaitForSingleObject((PKEVENT)&cs,0,0,0,NULL);me=(void*)2;cs.OwningThread=XeKeGetCurrentThread();cs.RecursionCount=1;
+  XeRtlLeaveCriticalSection(&cs);assert(cs.SignalState==1&&cs.LockCount==0);
+- KeWaitForSingleObject((PKEVENT)&cs,0,0,0,NULL);me=(void*)3;cs.OwningThread=me;cs.RecursionCount=1;
++ KeWaitForSingleObject((PKEVENT)&cs,0,0,0,NULL);me=(void*)3;cs.OwningThread=XeKeGetCurrentThread();cs.RecursionCount=1;
+  XeRtlLeaveCriticalSection(&cs);assert(!cs.SignalState&&cs.LockCount==-1&&!cs.OwningThread);
+  me=(void*)1;XeRtlInitializeCriticalSection(&cs);
+  XeRtlEnterCriticalSectionAndRegion(&cs);XeRtlEnterCriticalSectionAndRegion(&cs);
+--- a/tests/xbe/critical-section-contention/main.c
++++ b/tests/xbe/critical-section-contention/main.c
+@@ -51,7 +51,7 @@
+         cs.Synchronization.Event.Type = SynchronizationEvent;
+         w->wait_status = KeWaitForSingleObject(&cs, Executive, KernelMode, FALSE, &timeout);
+         mark(w->wait_status == STATUS_SUCCESS);
+-        cs.OwningThread = (PVOID)w->native_thread;
++        cs.OwningThread = KeGetCurrentThread();
+         cs.RecursionCount = 1;
+         mark(InterlockedIncrement(&owners) == 1);
+         InterlockedIncrement(&total_entries);
+@@ -65,10 +65,10 @@
+     for (unsigned i = 0; i < w->iterations; ++i) {
+         RtlEnterCriticalSection(&cs);
+         mark(InterlockedIncrement(&owners) == 1);
+-        mark(cs.OwningThread == (PVOID)w->native_thread && cs.RecursionCount == 1);
++        mark(cs.OwningThread == KeGetCurrentThread() && cs.RecursionCount == 1);
+         mark(RtlTryEnterCriticalSection(&cs));
+         RtlEnterCriticalSection(&cs);
+-        mark(cs.RecursionCount == 3 && cs.OwningThread == (PVOID)w->native_thread);
++        mark(cs.RecursionCount == 3 && cs.OwningThread == KeGetCurrentThread());
+         RtlLeaveCriticalSection(&cs);
+         RtlLeaveCriticalSection(&cs);
+         mark(cs.RecursionCount == 1);
+@@ -178,8 +178,8 @@
+     regression_require(total_entries == (LONG)(count * iterations), "exactly all expected entries completed");
+     final_state();
+     regression_require(RtlTryEnterCriticalSection(&cs), "try-enter succeeds after all contenders finish");
+-    regression_require(cs.RecursionCount == 1 && cs.OwningThread == (PVOID)owner_thread,
+-                       "successful try-enter has the correct native owner");
++    regression_require(cs.RecursionCount == 1 && cs.OwningThread == KeGetCurrentThread(),
++                       "successful try-enter has the correct public owner");
+     RtlLeaveCriticalSection(&cs);
+     final_state();
+ }
+--- a/tests/xbe/api-regression/rtl/critsec.c
++++ b/tests/xbe/api-regression/rtl/critsec.c
+@@ -7,12 +7,9 @@
+  * acquire/release transitions and read back the public bookkeeping.
+  *
+  * We assert only what is identical on the retail kernel and ours:
+- * RecursionCount, and that OwningThread is non-NULL while held and NULL once
+- * released.  We do NOT compare OwningThread against KeGetCurrentThread():
+- * retail stores the same pointer its exported KeGetCurrentThread returns,
+- * whereas our lock records the internal KTHREAD while the exported ordinal
+- * hands titles the Xbox thread shadow -- a different address for the same
+- * thread.  LockCount's contention encoding also differs and is not checked.
++ * RecursionCount, and that OwningThread agrees with the public current-thread
++ * identity while held and is NULL once released. LockCount contention encoding
++ * is not compared between kernels here.
+  *
+  * Recursive acquire is deliberately not exercised: on the retail kernel a
+  * recursive AndRegion enters the critical region on every acquire but leaves
+@@ -32,7 +29,7 @@
+ 
+     RtlEnterCriticalSectionAndRegion(&cs);
+     ASSERT_EQ_U32((ULONG)cs.RecursionCount, 1);
+-    ASSERT_NOT_NULL(cs.OwningThread);
++    ASSERT_TRUE(cs.OwningThread == KeGetCurrentThread());
+ 
+     RtlLeaveCriticalSectionAndRegion(&cs);
+     ASSERT_EQ_U32((ULONG)cs.RecursionCount, 0);
+@@ -51,7 +48,7 @@
+     {
+         RtlEnterCriticalSectionAndRegion(&cs);
+         ASSERT_EQ_U32((ULONG)cs.RecursionCount, 1);
+-        ASSERT_NOT_NULL(cs.OwningThread);
++        ASSERT_TRUE(cs.OwningThread == KeGetCurrentThread());
+         RtlLeaveCriticalSectionAndRegion(&cs);
+         ASSERT_EQ_U32((ULONG)cs.RecursionCount, 0);
+         ASSERT_TRUE(cs.OwningThread == NULL);
+@@ -82,7 +79,7 @@
+ 
+     RtlEnterCriticalSection(&cs);
+     ASSERT_EQ_U32((ULONG)cs.RecursionCount, 1);
+-    ASSERT_NOT_NULL(cs.OwningThread);
++    ASSERT_TRUE(cs.OwningThread == KeGetCurrentThread());
+ 
+     RtlLeaveCriticalSection(&cs);
+     ASSERT_EQ_U32((ULONG)cs.RecursionCount, 0);
+@@ -100,12 +97,12 @@
+     RtlEnterCriticalSection(&cs);
+     RtlEnterCriticalSection(&cs);
+     ASSERT_EQ_U32((ULONG)cs.RecursionCount, 3);
+-    ASSERT_NOT_NULL(cs.OwningThread);
++    ASSERT_TRUE(cs.OwningThread == KeGetCurrentThread());
+ 
+     RtlLeaveCriticalSection(&cs);
+     RtlLeaveCriticalSection(&cs);
+     ASSERT_EQ_U32((ULONG)cs.RecursionCount, 1);
+-    ASSERT_NOT_NULL(cs.OwningThread);   /* still held by the outer acquire */
++    ASSERT_TRUE(cs.OwningThread == KeGetCurrentThread());   /* still held by the outer acquire */
+ 
+     RtlLeaveCriticalSection(&cs);
+     ASSERT_EQ_U32((ULONG)cs.RecursionCount, 0);
+@@ -121,7 +118,7 @@
+ 
+     ASSERT_TRUE(RtlTryEnterCriticalSection(&cs));
+     ASSERT_EQ_U32((ULONG)cs.RecursionCount, 1);
+-    ASSERT_NOT_NULL(cs.OwningThread);
++    ASSERT_TRUE(cs.OwningThread == KeGetCurrentThread());
+ 
+     RtlLeaveCriticalSection(&cs);
+     ASSERT_TRUE(cs.OwningThread == NULL);
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -3303,7 +3303,7 @@
+ VOID NTAPI XeRtlEnterCriticalSection(_Inout_ PVOID Cs)
+ {
+     XBE_CS *cs = Cs;
+-    PVOID me = KeGetCurrentThread();
++    PVOID me = XeKeGetCurrentThread();
+ 
+     if (InterlockedIncrement(&cs->LockCount) != 0)
+     {
+@@ -3339,7 +3339,7 @@
+ ULONG NTAPI XeRtlTryEnterCriticalSection(_Inout_ PVOID Cs)
+ {
+     XBE_CS *cs = Cs;
+-    PVOID me = KeGetCurrentThread();
++    PVOID me = XeKeGetCurrentThread();
+ 
+     if (InterlockedCompareExchange(&cs->LockCount, 0, -1) == -1)
+     {

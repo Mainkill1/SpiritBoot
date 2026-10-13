@@ -1,0 +1,177 @@
+--- a/drivers/storage/class/classpnp/xferpkt.c
++++ b/drivers/storage/class/classpnp/xferpkt.c
+@@ -966,6 +966,13 @@
+     HISTORYLOGRETURNEDPACKET(pkt);
+ 
+ 
++#ifdef SARCH_XBOX
++    /* Xbox does not enable the idle-I/O scheduler. Its completion timestamp
++     * has no consumer while disabled, so avoid latching the PIT for every
++     * transfer. Keep the clock update if that scheduler is enabled later. */
++    if (fdoData->IdlePrioritySupported == TRUE)
++    {
++#endif
+     completionTime = ClasspGetCurrentTime();
+ 
+     //
+@@ -987,6 +994,10 @@
+ #else
+     lastIoCompletionTime = InterlockedExchangeNoFence64((volatile LONG64*)&fdoData->LastIoCompletionTime.QuadPart,
+                                                         completionTime.QuadPart);
++#endif
++
++#ifdef SARCH_XBOX
++    }
+ #endif
+ 
+     if (fdoData->IdlePrioritySupported == TRUE) {
+--- /dev/null
++++ b/tests/host/storage-completion/check.py
+@@ -0,0 +1,147 @@
++#!/usr/bin/env python3
++"""Run the complete owned TransferPktComplete function with external I/O boundaries mocked.
++
++Timer calls, returned status, master status/length, pending propagation, resource
++lease balance, packet retirement, and active idle counters are asserted.
++"""
++from pathlib import Path
++import subprocess
++import sys
++
++source=Path(sys.argv[1])/'drivers/storage/class/classpnp/xferpkt.c';out=Path(sys.argv[2]);out.mkdir(parents=True,exist_ok=True)
++s=source.read_text();start=s.rindex('\nNTSTATUS',0,s.index('TransferPktComplete(IN'))
++end=s.index('\n\n/*',s.index('return STATUS_MORE_PROCESSING_REQUIRED;',start))
++function=s[start:end]
++shim=r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++typedef int BOOLEAN,NTSTATUS,IO_PAGING_PRIORITY,KIRQL;
++typedef uint8_t UCHAR;
++typedef uint32_t ULONG;
++typedef int32_t LONG,*PLONG;
++typedef int64_t LONG64;
++typedef uint64_t ULONGLONG,ULONG64;
++typedef void *PVOID;
++typedef union {int64_t QuadPart;} LARGE_INTEGER;
++#define TRUE 1
++#define FALSE 0
++#define IN
++#define NTAPI
++#define NT_ASSERT assert
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define NT_SUCCESS(x) ((x)>=0)
++#define STATUS_UNSUCCESSFUL (-1)
++#define STATUS_MORE_PROCESSING_REQUIRED (-2)
++#define SRB_STATUS_SUCCESS 1
++#define SRB_STATUS(x) ((x)&0x3f)
++#define SRB_STATUS_QUEUE_FROZEN 0x40
++#define SRB_FLAGS_DONT_START_NEXT_PACKET 1
++#define IRP_PAGING_IO 1
++#define IoPagingPriorityInvalid 0
++#define IoPagingPriorityHigh 1
++#define IO_DISK_INCREMENT 1
++#define DISPATCH_LEVEL 2
++#define ClassMaxInterleavePerCriticalIo 4
++#define TEST_FLAG(a,b) ((a)&(b))
++#define max(a,b) ((a)>(b)?(a):(b))
++#define DBGLOGRETURNPACKET(x) ((void)0)
++#define DBGCHECKRETURNEDPKT(x) ((void)0)
++#define HISTORYLOGRETURNEDPACKET(x) ((void)0)
++#define TracePrint(x) ((void)0)
++#define RtlZeroMemory(p,n) memset(p,0,n)
++struct Stack {struct {struct {ULONG Length;}Read;}Parameters;};
++struct Irp {ULONG Flags;int idle;struct {NTSTATUS Status;uintptr_t Information;}IoStatus;struct {struct {PVOID DriverContext[1];PVOID Thread;}Overlay;}Tail;BOOLEAN PendingReturned;struct Stack stack;};
++typedef struct Irp *PIRP;
++struct Srb {UCHAR SrbStatus;ULONG length,flags,senseLength;PVOID sense;};
++struct Data {BOOLEAN IdlePrioritySupported;LONG ActiveIdleIoCount,ActiveIoCount;LARGE_INTEGER LastIoCompletionTime,LastNonIdleIoTime;BOOLEAN LoggedTURFailureSinceLastIO;LONG MaxInterleavedNormalIo,NumHighPriorityPagingIo;int SpinLock;LARGE_INTEGER ThrottleStartTime,ThrottleStopTime;LARGE_INTEGER LongestThrottlePeriod;};
++typedef struct Data *PCLASS_PRIVATE_FDO_DATA;
++struct Driver {struct {PVOID ClassStartIo;}InitData;};
++struct Extension {struct Data *PrivateFdoData;struct {struct Driver *DriverExtension;}CommonExtension;};
++typedef struct Extension *PFUNCTIONAL_DEVICE_EXTENSION;
++struct Device {struct Extension *DeviceExtension;};
++typedef struct Device *PDEVICE_OBJECT;
++struct Packet {PDEVICE_OBJECT Fdo;struct Srb *Srb;PIRP Irp,OriginalIrp;BOOLEAN InLowMemRetry,DriverUsesStartIO,CompleteOriginalIrpWhenLastPacketCompletes,UsePartialMdl;ULONG LowMemRetry_remainingBufLen,NumRetries;PVOID RetryHistory,PartialMdl,SyncEventPtr,ContinuationContext;void(*ContinuationRoutine)(PVOID);UCHAR SrbErrorSenseData[64];};
++typedef struct Packet *PTRANSFER_PACKET;
++static unsigned clock_reads,completed,retired,idle_completed,successful;
++static int leases;
++static LARGE_INTEGER ClasspGetCurrentTime(void){clock_reads++;return (LARGE_INTEGER){.QuadPart=1234567};}
++static ULONGLONG InterlockedExchangeNoFence64(volatile LONG64 *p,LONG64 v){ULONGLONG old=*p;*p=v;return old;}
++static LONG InterlockedDecrement(PLONG p){return --*p;}
++static LONG InterlockedExchangeAdd(PLONG p,LONG v){LONG old=*p;*p+=v;return old;}
++static BOOLEAN ClasspIsIdleRequest(PIRP p){return p->idle;}
++#define SrbGetDataTransferLength(p) ((p)->length)
++#define SrbGetSenseInfoBuffer(p) ((p)->sense)
++#define SrbGetSenseInfoBufferLength(p) ((p)->senseLength)
++#define SrbSetSenseInfoBuffer(p,v) ((p)->sense=(v))
++#define SrbSetSenseInfoBufferLength(p,v) ((p)->senseLength=(v))
++#define SrbGetSrbFlags(p) ((p)->flags)
++#define PORT_ALLOCATED_SENSE_EX(e,s) 0
++#define FREE_PORT_ALLOCATED_SENSE_BUFFER_EX(e,s) ((void)0)
++#define MmPrepareMdlForReuse(m) ((void)0)
++static BOOLEAN StepLowMemRetry(PTRANSFER_PACKET p){(void)p;assert(0);return 0;}
++static BOOLEAN InterpretTransferPacketError(PTRANSFER_PACKET p){(void)p;return FALSE;}
++static BOOLEAN RetryTransferPacket(PTRANSFER_PACKET p){(void)p;assert(0);return FALSE;}
++#define ClassReleaseQueue(f) ((void)0)
++#define IoMarkIrpPending(i) ((i)->PendingReturned=TRUE)
++static void ClassAcquireRemoveLock(PDEVICE_OBJECT f,PVOID tag){(void)f;(void)tag;leases++;}
++static void ClassReleaseRemoveLock(PDEVICE_OBJECT f,PVOID tag){(void)f;(void)tag;leases--;}
++static void IoSetMasterIrpStatus(PIRP p,NTSTATUS status){if(!NT_SUCCESS(status))p->IoStatus.Status=status;}
++#define IoIsErrorUserInduced(s) FALSE
++#define IoSetHardErrorOrVerifyDevice(i,f) ((void)0)
++#define IoGetPagingIoPriority(i) IoPagingPriorityInvalid
++#define IoGetCurrentIrpStackLocation(i) (&(i)->stack)
++static void ClasspPerfIncrementSuccessfulIo(PFUNCTIONAL_DEVICE_EXTENSION e){(void)e;successful++;}
++static void ClassCompleteRequest(PDEVICE_OBJECT f,PIRP p,int increment){(void)f;(void)p;assert(increment==1);completed++;}
++#define KeAcquireSpinLock(l,o) (*(o)=0)
++#define KeReleaseSpinLock(l,o) ((void)0)
++#define KeQuerySystemTime(t) ((t)->QuadPart=0)
++static void ClasspCompleteIdleRequest(PFUNCTIONAL_DEVICE_EXTENSION e){(void)e;idle_completed++;}
++#define KeRaiseIrql(l,o) (*(o)=0)
++#define KeLowerIrql(o) ((void)0)
++#define IoStartNextPacket(f,b) ((void)0)
++#define KeSetEvent(e,i,w) ((void)0)
++static void EnqueueFreeTransferPacket(PDEVICE_OBJECT f,PTRANSFER_PACKET p){(void)f;(void)p;retired++;}
++static PIRP DequeueDeferredClientIrp(PDEVICE_OBJECT f){(void)f;return NULL;}
++static void ServiceTransferRequest(PDEVICE_OBJECT f,PIRP p,BOOLEAN d){(void)f;(void)p;(void)d;assert(0);}
++'''
++test=r'''
++int main(void){
++ unsigned checks=0;
++ for(int enabled=0;enabled<2;enabled++)for(int idle=0;idle<2;idle++)for(int error=0;error<2;error++)for(int pending=0;pending<2;pending++){
++  struct Data d={.IdlePrioritySupported=enabled,.ActiveIdleIoCount=4,.ActiveIoCount=5,.LastIoCompletionTime={44},.LastNonIdleIoTime={55}};
++  struct Driver driver={0};struct Extension ext={&d,{&driver}};struct Device device={&ext};
++  struct Irp orig={.idle=idle,.stack={.Parameters.Read.Length=4096}};
++  orig.Tail.Overlay.DriverContext[0]=(void*)(uintptr_t)1;
++  struct Irp child={.PendingReturned=pending,.IoStatus.Status=error?-7:0};
++  struct Srb srb={.SrbStatus=error?2:SRB_STATUS_SUCCESS,.length=4096,.senseLength=64};
++  struct Packet pkt={.Fdo=&device,.Srb=&srb,.Irp=&child,.OriginalIrp=&orig,.CompleteOriginalIrpWhenLastPacketCompletes=TRUE};srb.sense=pkt.SrbErrorSenseData;
++  memset(pkt.SrbErrorSenseData,0xaa,64);
++  clock_reads=completed=retired=idle_completed=successful=0;leases=1;
++  NTSTATUS status=TransferPktComplete(NULL,&child,&pkt);
++#ifdef SARCH_XBOX
++  if(clock_reads!=(unsigned)enabled){fprintf(stderr,"FAIL completion clock reads enabled=%d got=%u\n",enabled,clock_reads);return 1;}
++  assert(d.LastIoCompletionTime.QuadPart==(enabled?1234567:44));
++#else
++  assert(clock_reads==1 && d.LastIoCompletionTime.QuadPart==1234567);
++#endif
++  assert(status==STATUS_MORE_PROCESSING_REQUIRED && completed==1 && retired==1 && leases==0);
++  assert(orig.IoStatus.Status==(error?-7:0) && orig.IoStatus.Information==(error?0:4096));
++  assert(orig.Tail.Overlay.DriverContext[0]==NULL);
++  assert(orig.PendingReturned==(pending||error));
++  assert(d.ActiveIdleIoCount==4-(enabled&&idle));
++  assert(d.ActiveIoCount==5-(enabled&&!idle));
++  assert(d.LastNonIdleIoTime.QuadPart==(enabled&&!idle?1234567:55));
++  assert(idle_completed==(unsigned)(enabled&&idle) && successful==(unsigned)!error);
++  for(unsigned i=0;i<64;i++)assert(pkt.SrbErrorSenseData[i]==0);
++  checks++;
++ }
++ printf("PASS actual TransferPktComplete: %u success/error/pending/idle cases\n",checks);
++}
++'''
++c=out/'complete.c';c.write_text(shim+function+test)
++for name,defines in [('xbox',['-DSARCH_XBOX']),('generic',[])]:
++    exe=out/name
++    subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-but-set-variable','-fsanitize=undefined','-D__REACTOS__',*defines,str(c),'-o',str(exe)],check=True)
++    subprocess.run([str(exe)],check=True)

@@ -1,0 +1,1227 @@
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index 0cb67bdf..69a059cf 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -146,6 +146,7 @@ list(APPEND PCH_SKIP_SOURCE
+     xb/refurb.c
+     xb/titlekeys.c
+     xb/procobj.c
++    xb/threadview.c
+     xb/ide.c
+     xb/interrupt.c
+     xb/shutdown.c
+diff --git a/ntoskrnl/include/internal/ntoskrnl.h b/ntoskrnl/include/internal/ntoskrnl.h
+index a01a2f7c..69b8708b 100644
+--- a/ntoskrnl/include/internal/ntoskrnl.h
++++ b/ntoskrnl/include/internal/ntoskrnl.h
+@@ -142,14 +142,14 @@ C_ASSERT(FIELD_OFFSET(KTHREAD, TlsArray) == FIELD_OFFSET(KTHREAD, SuspendApc.Sys
+ C_ASSERT(FIELD_OFFSET(KTHREAD, LegoData) == FIELD_OFFSET(KTHREAD, SuspendApc.SystemArgument2));
+ C_ASSERT(FIELD_OFFSET(KTHREAD, PowerState) == FIELD_OFFSET(KTHREAD, SuspendApc.Inserted) + 1);
+ /* Upstream KTHREAD was 0x1B8 with 4 bytes of trailing pad; the appended
+- * XeXboxShadow[0x80] + XeXboxFs4 + XeStackSize fields slot into that pad and
+- * extend the struct to 0x240.  Pin XeXboxShadow + 0x28 == TlsData slot here so
++ * The complete 0x140-byte view, registry link and Xbox fields extend it
++ * to 0x308. Pin XeXboxShadow + 0x28 == TlsData slot here so
+  * a later edit that moves the shadow can't silently break the shadow layout. */
+-C_ASSERT(sizeof(KTHREAD) == 0x240);  /* XeBaseSeh fills the old trailing pad */
+-C_ASSERT(FIELD_OFFSET(KTHREAD, XeBaseSeh) == 0x23C);
++C_ASSERT(sizeof(KTHREAD) == 0x308);
++C_ASSERT(FIELD_OFFSET(KTHREAD, XeBaseSeh) == 0x304);
+ C_ASSERT(FIELD_OFFSET(KTHREAD, XeXboxShadow) == 0x1B4);
+-C_ASSERT(FIELD_OFFSET(KTHREAD, XeXboxFs4) == 0x234);
+-C_ASSERT(FIELD_OFFSET(KTHREAD, XeStackSize) == 0x238);
++C_ASSERT(FIELD_OFFSET(KTHREAD, XeXboxFs4) == 0x2FC);
++C_ASSERT(FIELD_OFFSET(KTHREAD, XeStackSize) == 0x300);
+ 
+ C_ASSERT(FIELD_OFFSET(KPROCESS, DirectoryTableBase) == KPROCESS_DIRECTORY_TABLE_BASE);
+ 
+diff --git a/ntoskrnl/include/internal/ps.h b/ntoskrnl/include/internal/ps.h
+index b8440d48..67e1747a 100644
+--- a/ntoskrnl/include/internal/ps.h
++++ b/ntoskrnl/include/internal/ps.h
+@@ -484,4 +484,8 @@ extern ULONG_PTR PsNtosImageBase;
+ //
+ // Inlined Functions
+ //
++#ifdef SARCH_XBOX
++#include "xbthread.h"
++#endif
++
+ #include "ps_x.h"
+diff --git a/ntoskrnl/include/internal/ps_x.h b/ntoskrnl/include/internal/ps_x.h
+index b3c314af..290dc6d2 100644
+--- a/ntoskrnl/include/internal/ps_x.h
++++ b/ntoskrnl/include/internal/ps_x.h
+@@ -42,6 +42,11 @@ PspRunCreateThreadNotifyRoutines(IN PETHREAD CurrentThread,
+ {
+     ULONG i;
+ 
++#ifdef SARCH_XBOX
++    /* Publication precedes title callbacks, including pre-start notification. */
++    NxkPublishThreadNotification(CurrentThread, Create);
++#endif
++
+     /* Check if we have registered routines */
+     if (PspThreadNotifyRoutineCount)
+     {
+@@ -53,7 +58,7 @@ PspRunCreateThreadNotifyRoutines(IN PETHREAD CurrentThread,
+ #ifdef SARCH_XBOX
+                          /* The console hands the callback the thread
+                           * itself where NT passes the owning process. */
+-                         CurrentThread,
++                         NxkThreadPublicPointer(&CurrentThread->Tcb),
+ #else
+                          CurrentThread->Cid.UniqueProcess,
+ #endif
+diff --git a/ntoskrnl/include/internal/xbthread.h b/ntoskrnl/include/internal/xbthread.h
+new file mode 100644
+index 00000000..7ac1fecc
+--- /dev/null
++++ b/ntoskrnl/include/internal/xbthread.h
+@@ -0,0 +1,21 @@
++/* Public Xbox thread identities, owned by the corresponding native object. */
++#pragma once
++extern ULONG NxkThreadViewLowBits;
++extern PVOID volatile NxkThreadViewCachedPublic;
++PVOID NxkThreadPublicPointer(PKTHREAD Thread);
++PKTHREAD NxkResolveThreadPointer(PVOID Pointer);
++PVOID NxkThreadNativeObject(PVOID Object);
++PVOID NxkThreadPublicObject(PVOID Object);
++VOID NxkInitializeThreadView(PKTHREAD Thread, PKSTART_ROUTINE Start, PVOID Context);
++VOID NxkDeleteThreadView(PKTHREAD Thread);
++VOID NxkPublishThreadNotification(PETHREAD Thread, BOOLEAN Create);
++VOID NxkPublishThreadCreateTime(PETHREAD Thread);
++VOID NxkPublishThreadTermination(PETHREAD Thread);
++VOID NxkInitializeTitleThreadFields(PKTHREAD Thread, PKSTART_ROUTINE Start, PVOID Context);
++PVOID NxkThreadProcessView(PKTHREAD Thread);
++
++NTSTATUS NTAPI
++NxkWaitForMultipleObjectsDeferredApc(ULONG Count, PVOID Object[], WAIT_TYPE Type,
++                                    KWAIT_REASON Reason, KPROCESSOR_MODE Mode,
++                                    BOOLEAN Alertable, PLARGE_INTEGER Timeout,
++                                    PKWAIT_BLOCK WaitBlocks);
+diff --git a/ntoskrnl/ke/thrdobj.c b/ntoskrnl/ke/thrdobj.c
+index 88d35cf8..2be6f918 100644
+--- a/ntoskrnl/ke/thrdobj.c
++++ b/ntoskrnl/ke/thrdobj.c
+@@ -891,6 +891,10 @@ KeInitThread(IN OUT PKTHREAD Thread,
+ 
+     /* Set the Thread to initialized */
+     Thread->State = Initialized;
++#ifdef SARCH_XBOX
++    if (NT_SUCCESS(Status))
++        NxkInitializeThreadView(Thread, StartRoutine, StartContext);
++#endif
+     return Status;
+ }
+ 
+@@ -1418,6 +1422,10 @@ KeTerminateThread(IN KPRIORITY Increment)
+         KiActivateWaiterQueue(Thread->Queue);
+     }
+ 
++    /* Publish terminal public state before any waiter can observe the signal. */
++#ifdef SARCH_XBOX
++    NxkPublishThreadTermination((PETHREAD)Thread);
++#endif
+     /* Signal the thread */
+     Thread->Header.SignalState = TRUE;
+     if (!IsListEmpty(&Thread->Header.WaitListHead))
+diff --git a/ntoskrnl/ke/wait.c b/ntoskrnl/ke/wait.c
+index a42b4555..caf8b20c 100644
+--- a/ntoskrnl/ke/wait.c
++++ b/ntoskrnl/ke/wait.c
+@@ -610,16 +610,17 @@ DontWait:
+ /*
+  * @implemented
+  */
+-NTSTATUS
++static NTSTATUS
+ NTAPI
+-KeWaitForMultipleObjects(IN ULONG Count,
++KiWaitForMultipleObjects(IN ULONG Count,
+                          IN PVOID Object[],
+                          IN WAIT_TYPE WaitType,
+                          IN KWAIT_REASON WaitReason,
+                          IN KPROCESSOR_MODE WaitMode,
+                          IN BOOLEAN Alertable,
+                          IN PLARGE_INTEGER Timeout OPTIONAL,
+-                         OUT PKWAIT_BLOCK WaitBlockArray OPTIONAL)
++                         OUT PKWAIT_BLOCK WaitBlockArray OPTIONAL,
++                         IN BOOLEAN DeliverUserApcs)
+ {
+     PKMUTANT CurrentObject;
+     PKWAIT_BLOCK WaitBlock;
+@@ -870,7 +871,7 @@ KeWaitForMultipleObjects(IN ULONG Count,
+             /* Check if we were executing an APC */
+             if (WaitStatus != STATUS_KERNEL_APC)
+             {
+-                KiDeliverXboxUserApcs(WaitStatus);
++                if (DeliverUserApcs) KiDeliverXboxUserApcs(WaitStatus);
+                 return WaitStatus;
+             }
+ 
+@@ -893,7 +894,7 @@ WaitStart:
+ 
+     /* We are done */
+     KiReleaseDispatcherLock(Thread->WaitIrql);
+-    KiDeliverXboxUserApcs(WaitStatus);
++    if (DeliverUserApcs) KiDeliverXboxUserApcs(WaitStatus);
+     return WaitStatus;
+ 
+ DontWait:
+@@ -905,6 +906,31 @@ DontWait:
+     return WaitStatus;
+ }
+ 
++/* Keep native callers' delivery point unchanged. The Xbox pointer adapter
++ * uses the private entry below so caller-owned blocks are public before a
++ * user APC routine can inspect them. No dispatcher state crosses that call. */
++NTSTATUS NTAPI
++KeWaitForMultipleObjects(ULONG Count, PVOID Object[], WAIT_TYPE Type,
++                         KWAIT_REASON Reason, KPROCESSOR_MODE Mode,
++                         BOOLEAN Alertable, PLARGE_INTEGER Timeout,
++                         PKWAIT_BLOCK WaitBlocks)
++{
++    return KiWaitForMultipleObjects(Count, Object, Type, Reason, Mode,
++                                    Alertable, Timeout, WaitBlocks, TRUE);
++}
++
++#ifdef SARCH_XBOX
++NTSTATUS NTAPI
++NxkWaitForMultipleObjectsDeferredApc(ULONG Count, PVOID Object[], WAIT_TYPE Type,
++                                    KWAIT_REASON Reason, KPROCESSOR_MODE Mode,
++                                    BOOLEAN Alertable, PLARGE_INTEGER Timeout,
++                                    PKWAIT_BLOCK WaitBlocks)
++{
++    return KiWaitForMultipleObjects(Count, Object, Type, Reason, Mode,
++                                    Alertable, Timeout, WaitBlocks, FALSE);
++}
++#endif
++
+ NTSTATUS
+ NTAPI
+ NtDelayExecution(IN BOOLEAN Alertable,
+diff --git a/ntoskrnl/ps/kill.c b/ntoskrnl/ps/kill.c
+index 0db31bed..2f7e861a 100644
+--- a/ntoskrnl/ps/kill.c
++++ b/ntoskrnl/ps/kill.c
+@@ -411,6 +411,10 @@ PspDeleteThread(IN PVOID ObjectBody)
+     PSREFTRACE(Thread);
+     ASSERT(Thread->Tcb.Win32Thread == NULL);
+ 
++#ifdef SARCH_XBOX
++    NxkDeleteThreadView(&Thread->Tcb);
++#endif
++
+     /* Check if we have a stack */
+     if (Thread->Tcb.InitialStack)
+     {
+diff --git a/ntoskrnl/ps/thread.c b/ntoskrnl/ps/thread.c
+index 4a0fc703..25db135e 100644
+--- a/ntoskrnl/ps/thread.c
++++ b/ntoskrnl/ps/thread.c
+@@ -532,6 +532,9 @@ PspCreateThread(OUT PHANDLE ThreadHandle,
+ 
+     /* Get the create time */
+     KeQuerySystemTime(&Thread->CreateTime);
++#ifdef SARCH_XBOX
++    NxkPublishThreadCreateTime(Thread);
++#endif
+     ASSERT(!(Thread->CreateTime.HighPart & 0xF0000000));
+ 
+     /* Make sure the thread isn't dead */
+diff --git a/ntoskrnl/xb/ordinals.map b/ntoskrnl/xb/ordinals.map
+index dca36f06..e73e532c 100644
+--- a/ntoskrnl/xb/ordinals.map
++++ b/ntoskrnl/xb/ordinals.map
+@@ -137,9 +137,9 @@
+ 89   =1                            # KdDebuggerNotPresent -- nothing attached
+ 
+ # --- Ke* (direct ntoskrnl forwards + xbe adapters) ----------------------- #
+-92   KeAlertResumeThread              # an alerting resume; signature matches NT
+-93   KeAlertThread                    # signature matches NT
+-94   KeBoostPriorityThread            # base-relative, capped below the real-time range
++92   XeKeAlertResumeThread              # an alerting resume; signature matches NT
++93   XeKeAlertThread                    # signature matches NT
++94   XeKeBoostPriorityThread            # base-relative, capped below the real-time range
+ 95   KeBugCheck
+ 96   KeBugCheckEx                     # the five words land in KiBugCheckData verbatim
+ 97   KeCancelTimer                    # KTIMER layout matches; direct
+@@ -187,24 +187,24 @@
+ 139  KeRestoreFloatingPointState
+ 141  KeRundownQueue
+ 142  KeSaveFloatingPointState
+-140  KeResumeThread                    # returns the pre-resume count
++140  XeKeResumeThread                    # returns the pre-resume count
+ 143  XeKeSetBasePriorityThread       # resolve public thread shadow before native setter
+-144  KeSetDisableBoostThread           # ThreadFlags bit 1; returns the old setting
++144  XeKeSetDisableBoostThread           # ThreadFlags bit 1; returns the old setting
+ 145  KeSetEvent
+-146  KeSetEventBoostPriority
++146  XeKeSetEventBoostPriority
+ 147  KeSetPriorityProcess            # sets the field + the calling thread; others stay put
+ 148  XeKeSetPriorityThread           # resolve public thread shadow before native setter
+ 149  KeSetTimer                       # native KDPC/KTIMER; direct
+ 150  KeSetTimerEx                     # native KDPC/KTIMER; direct
+ 151  KeStallExecutionProcessor
+-152  KeSuspendThread                   # returns the pre-suspend count
++152  XeKeSuspendThread                   # returns the pre-suspend count
+ 153  XeKeSynchronizeExecution        # title's KINTERRUPT has NULL ActualLock; route through the shadow
+ 154  KeSystemTime                     # live system-time counter; mirrors KeQuerySystemTime
+ 155  KeTestAlertThread                # reports and consumes the caller's alert
+ 156  KeTickCount                      # ntoskrnl's tick counter (low dword aliases)
+ 157  KeTimeIncrement                  # nominal 100ns clock-tick period (retail 10000 = 1ms)
+-158  KeWaitForMultipleObjects
+-159  KeWaitForSingleObject
++158  XeKeWaitForMultipleObjects
++159  XeKeWaitForSingleObject
+ 160  KfRaiseIrql
+ 161  KfLowerIrql
+ 162  KiBugCheckData                   # the live five-word record, zero until a bugcheck
+diff --git a/ntoskrnl/xb/procobj.c b/ntoskrnl/xb/procobj.c
+index feb2ca45..0c35e612 100644
+--- a/ntoskrnl/xb/procobj.c
++++ b/ntoskrnl/xb/procobj.c
+@@ -19,20 +19,12 @@
+  * kernel.  A field written at the wrong offset is worse than one left
+  * zero, so they are pinned here and asserted where they can be.
+  *
+- * NOT DONE, DELIBERATELY -- the thread list.  The console links every
+- * thread into KPROCESS.ThreadListHead through KTHREAD.ThreadListEntry,
+- * which sits at 0x104, past the end of the 0x80 shadow.  Doing it for
+- * real means growing the shadow to the console's full 0x110 (KTHREAD
+- * 0x240 -> ~0x2C4, +144 bytes a thread) and unlinking on *both* ways out
+- * of a thread -- the trampoline's return in xb/xbe.c and ordinal 258
+- * PsTerminateSystemThread, which today maps straight to ReactOS's with
+- * no wrapper of ours.  Miss either and a title walking the list reads a
+- * freed thread.  So the list is published empty, which is a true
+- * statement about a list we do not keep, and the ke/procprio case that
+- * expects it non-empty stays a documented divergence.  Nothing is known
+- * to walk it: the thread count a title can actually observe comes from
+- * PsQueryStatistics, which xb/psstats.c already answers correctly from
+- * NT's own ActiveThreads.
++ * The process thread list remains an empty compatibility view. The full
++ * public thread allocation now covers its 0x104 link, but native and title
++ * threads share one EPROCESS and this adapter does not maintain a separately
++ * classified public list. PsQueryStatistics reports native ActiveThreads.
++ * Do not treat the empty public list as a live scheduler enumeration.
++
+  */
+ 
+ #include <ntoskrnl.h>
+@@ -90,6 +82,14 @@ NxkInitializeTitleProcess(_In_ CHAR BasePriority)
+     NxkTitleProcessReady = TRUE;
+ }
+ 
++/* View initialization does not register a title or change its quantum. */
++PVOID
++NxkThreadProcessView(PKTHREAD Thread)
++{
++    UNREFERENCED_PARAMETER(Thread);
++    return &NxkTitleProcess;
++}
++
+ /*
+  * Fill the process-facing part of a thread's shadow.  Called as each
+  * title thread registers, which is also when the thread count is
+diff --git a/ntoskrnl/xb/threadview.c b/ntoskrnl/xb/threadview.c
+new file mode 100644
+index 00000000..2c155048
+--- /dev/null
++++ b/ntoskrnl/xb/threadview.c
+@@ -0,0 +1,372 @@
++/*
++ * Public thread-object view for the Xbox ABI. Native scheduling, wait lists,
++ * APC storage and object reference counts always belong to the native object.
++ * A registered public address is its identity, never a discriminator byte in
++ * caller memory. The registry lives until final object deletion, not thread
++ * termination or handle closure, and owns no reference of its own.
++ */
++#include <ntoskrnl.h>
++
++#define VIEW_BUCKETS 32
++static LIST_ENTRY NxkThreadViews[VIEW_BUCKETS];
++/* Monotonic negative filter: a missing address residue cannot be a registered
++ * view. A present bit proves nothing and always requires exact membership.
++ * Leaving bits set on deletion is safe and avoids per-residue counters. */
++ULONG NxkThreadViewLowBits;
++/* One exact identity, populated only by registry membership and invalidated
++ * before unlinking. Cache hits do not follow any caller-controlled memory.
++ * A valid pointer caller already keeps the object alive; on this single CPU
++ * an aligned pointer load cannot tear across deletion or replacement. */
++PVOID volatile NxkThreadViewCachedPublic;
++
++/* Both address classes may be heavily aligned. Mix page and object bits. */
++static ULONG
++NxkViewBucket(ULONG_PTR Address)
++{
++    return ((Address >> 5) ^ (Address >> 10) ^ (Address >> 16)) &
++           (VIEW_BUCKETS - 1);
++}
++
++/* The Xbox is uniprocessor. Brief interrupt exclusion protects only this
++ * nonpaged exact-identity list; no object operation runs with interrupts off.
++ * It also permits initialization of the boot thread before ordinary IRQL
++ * services are ready. No title address is dereferenced during lookup. */
++static PKTHREAD
++NxkFindPublicThread(PVOID Pointer)
++{
++    ULONG_PTR Flags = __readeflags();
++    PLIST_ENTRY Head, Entry;
++    PKTHREAD Found = NULL;
++    PKTHREAD Current = KeGetCurrentThread();
++    if (Pointer == NULL) return NULL;
++    if (!(NxkThreadViewLowBits & (1UL << ((ULONG_PTR)Pointer & 31))))
++        return NULL;
++    if (Pointer == NxkThreadViewCachedPublic)
++        return (PKTHREAD)((ULONG_PTR)Pointer -
++                           FIELD_OFFSET(KTHREAD, XeXboxShadow));
++    if (Current != NULL && Pointer == (PVOID)Current->XeXboxShadow)
++        return Current;
++    Head = &NxkThreadViews[NxkViewBucket((ULONG_PTR)Pointer)];
++    /* A valid public pointer is registered before exposure and remains so
++     * while its caller holds a reference. An empty bucket cannot contain it.
++     * Avoid interrupt exclusion for this common non-thread-object miss. */
++    if (Head->Flink == NULL || Head->Flink == Head) return NULL;
++    _disable();
++    if (Head->Flink != NULL)
++    {
++        for (Entry = Head->Flink; Entry != Head; Entry = Entry->Flink)
++        {
++            PKTHREAD Thread = CONTAINING_RECORD(Entry, KTHREAD, XeThreadViewLink);
++            if ((PVOID)Thread->XeXboxShadow == Pointer)
++            {
++                Found = Thread;
++                NxkThreadViewCachedPublic = Pointer;
++                break;
++            }
++        }
++    }
++    __writeeflags(Flags);
++    return Found;
++}
++
++PVOID NxkThreadPublicPointer(PKTHREAD Thread)
++{
++    return Thread ? Thread->XeXboxShadow : NULL;
++}
++
++PKTHREAD NxkResolveThreadPointer(PVOID Pointer)
++{
++    PKTHREAD Thread;
++    if (Pointer != NULL && Pointer == (PVOID)KeGetCurrentThread())
++        return KeGetCurrentThread();
++    Thread = NxkFindPublicThread(Pointer);
++    if (Thread != NULL || Pointer == NULL) return Thread;
++    /* Compatibility with known native addresses still uses exact membership. */
++    Thread = NxkFindPublicThread((PVOID)((ULONG_PTR)Pointer +
++                                        FIELD_OFFSET(KTHREAD, XeXboxShadow)));
++    return Thread == (PKTHREAD)Pointer ? Thread : NULL;
++}
++
++PVOID NxkThreadNativeObject(PVOID Object)
++{
++    PKTHREAD Thread = NxkFindPublicThread(Object);
++    return Thread ? (PVOID)Thread : Object;
++}
++
++PVOID NxkThreadPublicObject(PVOID Object)
++{
++    PKTHREAD Thread;
++    if (Object == NULL) return NULL;
++    Thread = NxkFindPublicThread((PVOID)((ULONG_PTR)Object +
++                                        FIELD_OFFSET(KTHREAD, XeXboxShadow)));
++    return Thread == (PKTHREAD)Object ? Thread->XeXboxShadow : Object;
++}
++
++/* These offsets are the public nxdk ABI, qualified by standalone title tests.
++ * The complete allocation covers KTHREAD 0x110 and ETHREAD 0x140. */
++C_ASSERT(sizeof(((PKTHREAD)0)->XeXboxShadow) == 0x140);
++C_ASSERT(sizeof(KWAIT_BLOCK) == 0x18);
++
++static VOID
++NxkPublishThreadControls(PKTHREAD Thread)
++{
++    PUCHAR View = Thread->XeXboxShadow;
++    View[0x32] = (UCHAR)Thread->Priority;
++    View[0x70] = (UCHAR)Thread->BasePriority;
++    View[0x73] = (UCHAR)Thread->DisableBoost;
++    View[0x75] = (UCHAR)Thread->SuspendCount;
++}
++
++VOID
++NxkInitializeThreadView(PKTHREAD Thread, PKSTART_ROUTINE Start, PVOID Context)
++{
++    PUCHAR View = Thread->XeXboxShadow;
++    PLIST_ENTRY Head;
++    ULONG_PTR Flags;
++    RtlZeroMemory(View, sizeof(Thread->XeXboxShadow));
++    View[0] = ThreadObject;
++    View[2] = 0x110 / sizeof(ULONG);
++    InitializeListHead((PLIST_ENTRY)(View + 0x08)); /* dispatcher wait list */
++    InitializeListHead((PLIST_ENTRY)(View + 0x10)); /* mutant list */
++    InitializeListHead((PLIST_ENTRY)(View + 0x34)); /* kernel APC list */
++    InitializeListHead((PLIST_ENTRY)(View + 0x3c)); /* user APC list */
++    InitializeListHead((PLIST_ENTRY)(View + 0x5c)); /* wait list */
++    InitializeListHead((PLIST_ENTRY)(View + 0x7c)); /* queue list */
++    InitializeListHead((PLIST_ENTRY)(View + 0x104)); /* process thread list */
++    InitializeListHead((PLIST_ENTRY)(View + 0x124)); /* active timer list */
++    InitializeListHead((PLIST_ENTRY)(View + 0x134)); /* IRP list */
++    *(PVOID *)(View + 0x1c) = Thread->StackBase;
++    *(ULONG_PTR *)(View + 0x20) = Thread->StackLimit;
++    *(PVOID *)(View + 0x24) = Thread->KernelStack;
++    *(PVOID *)(View + 0x44) = NxkThreadProcessView(Thread);
++    View[0x4b] = TRUE;
++    *(PLONG)(View + 0x6c) = Thread->Quantum;
++    *(PHANDLE)(View + 0x12c) = ((PETHREAD)Thread)->Cid.UniqueThread;
++    NxkPublishThreadControls(Thread);
++    NxkInitializeTitleThreadFields(Thread, Start, Context);
++
++    /* Publish the identity only after every initial field has been written. */
++    Flags = __readeflags();
++    _disable();
++    Head = &NxkThreadViews[NxkViewBucket((ULONG_PTR)View)];
++    if (Head->Flink == NULL) InitializeListHead(Head);
++    InsertTailList(Head, &Thread->XeThreadViewLink);
++    NxkThreadViewLowBits |= 1UL << ((ULONG_PTR)View & 31);
++    __writeeflags(Flags);
++}
++
++VOID NxkDeleteThreadView(PKTHREAD Thread)
++{
++    ULONG_PTR Flags = __readeflags();
++    _disable();
++    if (NxkThreadViewCachedPublic == (PVOID)Thread->XeXboxShadow)
++        NxkThreadViewCachedPublic = NULL;
++    /* Failed allocation may reach deletion before KeInitThread succeeded. */
++    if (Thread->XeThreadViewLink.Flink != NULL)
++    {
++        RemoveEntryList(&Thread->XeThreadViewLink);
++        Thread->XeThreadViewLink.Flink = NULL;
++        Thread->XeThreadViewLink.Blink = NULL;
++    }
++    __writeeflags(Flags);
++}
++
++VOID NxkPublishThreadCreateTime(PETHREAD Thread)
++{
++    *(PLARGE_INTEGER)(Thread->Tcb.XeXboxShadow + 0x110) = Thread->CreateTime;
++}
++
++VOID NxkPublishThreadNotification(PETHREAD Thread, BOOLEAN Create)
++{
++    PUCHAR View = Thread->Tcb.XeXboxShadow;
++    NxkPublishThreadControls(&Thread->Tcb);
++    if (Create)
++    {
++        *(PHANDLE)(View + 0x12c) = Thread->Cid.UniqueThread;
++    }
++    else
++    {
++        /* Complex exposes termination before notify, but retains the ID and
++         * old exit status during the callback. Final status precedes signal. */
++        View[0x77] = TRUE;
++    }
++}
++
++VOID NxkPublishThreadTermination(PETHREAD Thread)
++{
++    PUCHAR View = Thread->Tcb.XeXboxShadow;
++    *(PLARGE_INTEGER)(View + 0x118) = Thread->ExitTime;
++    *(PNTSTATUS)(View + 0x120) = Thread->ExitStatus;
++    *(PHANDLE)(View + 0x12c) = NULL;
++    View[0x77] = TRUE;
++    View[0x4b] = FALSE;
++    *(PLONG)(View + 4) = TRUE;
++}
++
++ULONG NTAPI XeKeSuspendThread(PVOID Pointer)
++{
++    PKTHREAD Thread = NxkResolveThreadPointer(Pointer);
++    ULONG Previous;
++    KIRQL OldIrql = KeRaiseIrqlToDpcLevel();
++    Previous = KeSuspendThread(Thread);
++    NxkPublishThreadControls(Thread);
++    KeLowerIrql(OldIrql);
++    return Previous;
++}
++
++ULONG NTAPI XeKeResumeThread(PVOID Pointer)
++{
++    PKTHREAD Thread = NxkResolveThreadPointer(Pointer);
++    ULONG Previous;
++    KIRQL OldIrql = KeRaiseIrqlToDpcLevel();
++    Previous = KeResumeThread(Thread);
++    NxkPublishThreadControls(Thread);
++    KeLowerIrql(OldIrql);
++    return Previous;
++}
++
++ULONG NTAPI XeKeAlertResumeThread(PVOID Pointer)
++{
++    PKTHREAD Thread = NxkResolveThreadPointer(Pointer);
++    ULONG Previous;
++    KIRQL OldIrql = KeRaiseIrqlToDpcLevel();
++    Previous = KeAlertResumeThread(Thread);
++    NxkPublishThreadControls(Thread);
++    KeLowerIrql(OldIrql);
++    return Previous;
++}
++
++BOOLEAN NTAPI XeKeAlertThread(PVOID Pointer, KPROCESSOR_MODE Mode)
++{
++    return KeAlertThread(NxkResolveThreadPointer(Pointer), Mode);
++}
++
++VOID NTAPI XeKeBoostPriorityThread(PVOID Pointer, KPRIORITY Increment)
++{
++    PKTHREAD Thread = NxkResolveThreadPointer(Pointer);
++    KIRQL OldIrql = KeRaiseIrqlToDpcLevel();
++    KeBoostPriorityThread(Thread, Increment);
++    NxkPublishThreadControls(Thread);
++    KeLowerIrql(OldIrql);
++}
++
++BOOLEAN NTAPI XeKeSetDisableBoostThread(PVOID Pointer, BOOLEAN Disable)
++{
++    PKTHREAD Thread = NxkResolveThreadPointer(Pointer);
++    BOOLEAN Previous;
++    KIRQL OldIrql = KeRaiseIrqlToDpcLevel();
++    Previous = KeSetDisableBoostThread(Thread, Disable);
++    NxkPublishThreadControls(Thread);
++    KeLowerIrql(OldIrql);
++    return Previous;
++}
++
++VOID NTAPI XeKeSetEventBoostPriority(PKEVENT Event, PVOID *WaitingThread)
++{
++    PKTHREAD Native = NULL;
++    KIRQL OldIrql = KeRaiseIrqlToDpcLevel();
++    KeSetEventBoostPriority(Event, WaitingThread ? &Native : NULL);
++    /* Retain the caller's output when no WaitAny waiter was selected. */
++    if (Native != NULL) *WaitingThread = NxkThreadPublicPointer(Native);
++    KeLowerIrql(OldIrql);
++}
++
++NTSTATUS NTAPI
++XeKeWaitForSingleObject(PVOID Object, KWAIT_REASON Reason,
++                       KPROCESSOR_MODE Mode, BOOLEAN Alertable,
++                       PLARGE_INTEGER Timeout)
++{
++    return KeWaitForSingleObject(NxkThreadNativeObject(Object), Reason, Mode,
++                                 Alertable, Timeout);
++}
++
++NTSTATUS NTAPI
++XeKeWaitForMultipleObjects(ULONG Count, PVOID Object[], WAIT_TYPE Type,
++                          KWAIT_REASON Reason, KPROCESSOR_MODE Mode,
++                          BOOLEAN Alertable, PLARGE_INTEGER Timeout,
++                          PKWAIT_BLOCK WaitBlocks)
++{
++    ULONG Index, PublishCount;
++    NTSTATUS Status;
++    BOOLEAN Queued = FALSE;
++    /* Preserve native validation, including the caller-supplied-block limit. */
++    if (Count > MAXIMUM_WAIT_OBJECTS)
++        return KeWaitForMultipleObjects(Count, Object, Type, Reason, Mode,
++                                        Alertable, Timeout, WaitBlocks);
++    {
++        /* Bounded by 64 objects: at most 1792 bytes. Ordinary one/two-object
++         * calls reserve only their own blocks; NULL caller blocks need no
++         * backup. No pool allocation or extra scheduling boundary is added. */
++        PVOID Native[Count ? Count : 1];
++        KWAIT_BLOCK Saved[WaitBlocks && Count ? Count : 1];
++        for (Index = 0; Index < Count; ++Index)
++            Native[Index] = NxkThreadNativeObject(Object[Index]);
++        if (WaitBlocks != NULL)
++        {
++            RtlCopyMemory(Saved, WaitBlocks, Count * sizeof(*WaitBlocks));
++            /* Native queue insertion writes both links; KiUnlinkThread and
++             * RemoveEntryList leave the removed entry's links unchanged. */
++            for (Index = 0; Index < Count; ++Index)
++            {
++                WaitBlocks[Index].WaitListEntry.Flink = NULL;
++                WaitBlocks[Index].WaitListEntry.Blink = NULL;
++            }
++        }
++        /* Native wait remains the only owner of WaitNext, alert precedence,
++         * object consumption, dispatcher locking and scheduling. */
++        Status = NxkWaitForMultipleObjectsDeferredApc(Count, Native, Type, Reason, Mode,
++                                          Alertable, Timeout, WaitBlocks);
++        if (WaitBlocks == NULL)
++        {
++            if (Status == STATUS_USER_APC) KiDeliverUserApcs();
++            return Status;
++        }
++        for (Index = 0; Index < Count; ++Index)
++            if (WaitBlocks[Index].WaitListEntry.Flink != NULL ||
++                WaitBlocks[Index].WaitListEntry.Blink != NULL)
++                Queued = TRUE;
++
++        PublishCount = Count;
++        /* Public oracle: immediate WaitAny initializes the failed prefix,
++         * leaving the winning block and suffix untouched. WaitAll initializes
++         * all blocks, even on immediate success. A prior actual wait already
++         * published every block, so none can be restored in that case. */
++        if (!Queued && Type == WaitAny &&
++            Status >= STATUS_WAIT_0 && (ULONG)Status < Count)
++            PublishCount = (ULONG)Status;
++        else if (!Queued && Type == WaitAny &&
++                 Status >= STATUS_ABANDONED_WAIT_0 &&
++                 (ULONG)(Status - STATUS_ABANDONED_WAIT_0) < Count)
++            PublishCount = (ULONG)(Status - STATUS_ABANDONED_WAIT_0);
++
++        for (Index = 0; Index < Count; ++Index)
++        {
++            if (Index >= PublishCount)
++            {
++                WaitBlocks[Index] = Saved[Index];
++                continue;
++            }
++            if (!Queued)
++            {
++                WaitBlocks[Index].WaitListEntry = Saved[Index].WaitListEntry;
++                /* Before queueing, public failed/alerted/timed-out walks
++                 * retain the next element, including one past the last.
++                 * A fully satisfied WaitAll closes the circle instead. */
++                if (!(Type == WaitAll &&
++                      (Status == STATUS_WAIT_0 ||
++                       Status == STATUS_ABANDONED_WAIT_0)))
++                    WaitBlocks[Index].NextWaitBlock = &WaitBlocks[Index + 1];
++            }
++            WaitBlocks[Index].Thread = NxkThreadPublicPointer(KeGetCurrentThread());
++            WaitBlocks[Index].Object = NxkThreadPublicObject(WaitBlocks[Index].Object);
++            /* Public WaitType is a SHORT; native uses its upper byte as
++             * padding, which must not expose the caller's old sentinel. */
++            WaitBlocks[Index].SpareByte = 0;
++        }
++    }
++    /* Native wait has unlinked every dispatcher block and restored IRQL.
++     * Deliver exactly once with caller blocks repaired, still before return.
++     * A callback may reenter a wait without sharing adapter state. */
++    if (Status == STATUS_USER_APC) KiDeliverUserApcs();
++    return Status;
++}
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index 068908d6..d5b923ac 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -24,6 +24,7 @@
+ 
+ /* Need the full KTHREAD layout (XeXboxShadow / XeXboxFs4 sit at the end). */
+ #include <ndk/ketypes.h>
++#include <internal/xbthread.h>
+ 
+ #include "strace.h"
+ #include "object-types.h"
+@@ -256,7 +257,7 @@ XeRegisterThread(_In_opt_ PVOID TlsData, _In_ ULONG_PTR Fs4)
+ {
+     PKTHREAD self = KeGetCurrentThread();
+ 
+-    RtlZeroMemory(self->XeXboxShadow, sizeof(self->XeXboxShadow));
++    /* The full view already exists before create notification. Preserve it. */
+     *(PVOID *)(self->XeXboxShadow + XBE_KTHREAD_STACKBASE) = self->StackBase;
+     *(PVOID *)(self->XeXboxShadow + XBE_KTHREAD_STACKLIMIT) = self->StackLimit;
+     *(PVOID *)(self->XeXboxShadow + XBE_KTHREAD_TLSDATA) = TlsData;
+@@ -342,6 +343,22 @@ typedef struct _XBE_THREAD_CTX
+     SIZE_T            TlsSize;
+ } XBE_THREAD_CTX, *PXBE_THREAD_CTX;
+ 
++static VOID NTAPI XeThreadTrampoline(PVOID Context);
++
++VOID
++NxkInitializeTitleThreadFields(PKTHREAD Thread, PKSTART_ROUTINE StartRoutine,
++                              PVOID StartContext)
++{
++    PVOID PublicStart = (PVOID)StartRoutine;
++    if (StartRoutine == XeThreadTrampoline && StartContext != NULL)
++    {
++        PXBE_THREAD_CTX Context = StartContext;
++        *(PVOID *)(Thread->XeXboxShadow + XBE_KTHREAD_TLSDATA) = Context->TlsData;
++        PublicStart = (PVOID)Context->StartRoutine;
++    }
++    *(PVOID *)(Thread->XeXboxShadow + 0x130) = PublicStart;
++}
++
+ static VOID NTAPI
+ XeThreadTrampoline(_In_ PVOID Context)
+ {
+@@ -1933,6 +1950,15 @@ XeObjectTypeToInternal(PVOID Type)
+     if (Type == &XeObSymbolicLinkObjectType) return ObpSymbolicLinkObjectType;
+     return (POBJECT_TYPE)Type;
+ }
++/* These outputs already hold a native object-manager reference, so its type
++ * is safe to inspect. No registry lookup is needed for non-thread handles. */
++static PVOID
++XePublicReferencedObject(PVOID Native)
++{
++    return OBJECT_TO_OBJECT_HEADER(Native)->Type == PsThreadType
++        ? NxkThreadPublicPointer((PKTHREAD)Native) : Native;
++}
++
+ NTSTATUS NTAPI
+ XeObReferenceObjectByHandle(HANDLE Handle, POBJECT_TYPE Type, PVOID *Object)
+ {
+@@ -1971,12 +1997,34 @@ XeObReferenceObjectByHandle(HANDLE Handle, POBJECT_TYPE Type, PVOID *Object)
+             return STATUS_OBJECT_TYPE_MISMATCH;
+         }
+ 
+-        *Object = Native;
++        *Object = XePublicReferencedObject(Native);
+         return STATUS_SUCCESS;
+     }
+-    return ObReferenceObjectByHandle(Handle, 0, XeObjectTypeToInternal(Type),
+-                                     KernelMode, Object, NULL);
++    {
++        NTSTATUS Status = ObReferenceObjectByHandle(Handle, 0,
++            XeObjectTypeToInternal(Type), KernelMode, Object, NULL);
++        if (NT_SUCCESS(Status)) *Object = XePublicReferencedObject(*Object);
++        return Status;
++    }
+ }
++/* Most generic objects cannot share any registered view's address residue.
++ * Keep that common miss inline and leave ownership to the exact registry.
++ * The currently executing native thread has an independently known lifetime. */
++FORCEINLINE PVOID
++XeNativeReferencedObject(PVOID Object)
++{
++    PKTHREAD Current;
++    if (!(NxkThreadViewLowBits & (1UL << ((ULONG_PTR)Object & 31))))
++        return Object;
++    if (Object != NULL && Object == NxkThreadViewCachedPublic)
++        return (PVOID)((ULONG_PTR)Object -
++                       FIELD_OFFSET(KTHREAD, XeXboxShadow));
++    Current = KeGetCurrentThread();
++    if (Object == (PVOID)Current->XeXboxShadow)
++        return Current;
++    return NxkThreadNativeObject(Object);
++}
++
+ /*
+  * The pointer-taking pair.  NT treats the requested type as advisory for
+  * a kernel-mode caller, and there is no other kind here, so the check is
+@@ -1994,6 +2042,8 @@ XeObReferenceObjectByPointer(PVOID Object, PVOID Type)
+ {
+     POBJECT_TYPE Internal;
+ 
++    Object = XeNativeReferencedObject(Object);
++
+     if (XobHasTitleObjects() && XobIsTitleObject(Object))
+     {
+         if (Type != NULL && XobObjectType(Object) != Type)
+@@ -2015,6 +2065,8 @@ XeObOpenObjectByPointer(PVOID Object, PVOID Type, PHANDLE Handle)
+ {
+     POBJECT_TYPE Internal;
+ 
++    Object = XeNativeReferencedObject(Object);
++
+     if (XobHasTitleObjects() && XobIsTitleObject(Object))
+         return XobOpenTitleObject(Object, Type, Handle);
+ 
+@@ -2035,6 +2087,7 @@ XeObOpenObjectByPointer(PVOID Object, PVOID Type, PHANDLE Handle)
+ VOID FASTCALL
+ XeObfReferenceObject(PVOID Object)
+ {
++    Object = XeNativeReferencedObject(Object);
+     if (XobHasTitleObjects() && XobIsTitleObject(Object))
+         XobReferenceObject(Object);
+     else
+@@ -2043,6 +2096,7 @@ XeObfReferenceObject(PVOID Object)
+ VOID FASTCALL
+ XeObfDereferenceObject(PVOID Object)
+ {
++    Object = XeNativeReferencedObject(Object);
+     if (XobHasTitleObjects() && XobIsTitleObject(Object))
+         XobDereferenceObject(Object);
+     else
+@@ -2051,6 +2105,7 @@ XeObfDereferenceObject(PVOID Object)
+ VOID NTAPI
+ XeObMakeTemporaryObject(PVOID Object)
+ {
++    Object = XeNativeReferencedObject(Object);
+     if (XobHasTitleObjects() && XobIsTitleObject(Object))
+         XobMakeTemporary(Object);
+     else
+@@ -2128,6 +2183,7 @@ XeObReferenceObjectByName(PANSI_STRING ObjectName, ULONG Attributes,
+         *Object = NULL;
+         status = STATUS_OBJECT_TYPE_MISMATCH;
+     }
++    if (NT_SUCCESS(status)) *Object = XePublicReferencedObject(*Object);
+     return status;
+ }
+ /*
+@@ -3047,28 +3103,11 @@ typedef struct _XBE_APC_SHADOW
+     KAPC      NtApc;
+ } XBE_APC_SHADOW, *PXBE_APC_SHADOW;
+ 
+-/* A title reaches a thread object either through KeGetCurrentThread, which
+- * hands back the Xbox-shaped shadow embedded in the KTHREAD, or through the
+- * object manager, which hands back the KTHREAD itself.  The shadow's first
+- * bytes are zeroed, so the dispatcher header tells the two apart. */
++/* Resolve only identities registered during native thread initialization. */
+ static PKTHREAD
+ XeResolveThread(_In_opt_ PVOID Thread)
+ {
+-    PKTHREAD Resolved;
+-
+-    if (Thread == NULL)
+-        return NULL;
+-
+-    if (((PKTHREAD)Thread)->Header.Type == ThreadObject)
+-        return (PKTHREAD)Thread;
+-
+-    Resolved = CONTAINING_RECORD(Thread, KTHREAD, XeXboxShadow);
+-    if (Resolved->Header.Type != ThreadObject)
+-    {
+-        XbDbg("APC: %p is neither a thread nor a thread shadow\n", Thread);
+-        return NULL;
+-    }
+-    return Resolved;
++    return NxkResolveThreadPointer(Thread);
+ }
+ 
+ /* The internal query has no declaration in the Xbox kernel headers. */
+@@ -3091,7 +3130,7 @@ XeKeQueryBasePriorityThread(PVOID Thread)
+ static VOID
+ XePublishThreadPriorities(PKTHREAD Native)
+ {
+-    if (Native->XeXboxFs4)
++    if (Native->XeThreadViewLink.Flink)
+     {
+         /* The single-CPU Xbox must not reschedule between field reads and
+          * shadow writes. Leave each native setter's scheduling unchanged. */
+diff --git a/sdk/include/ndk/ketypes.h b/sdk/include/ndk/ketypes.h
+index f2a8652e..e4e4cb6a 100644
+--- a/sdk/include/ndk/ketypes.h
++++ b/sdk/include/ndk/ketypes.h
+@@ -1778,12 +1778,10 @@ typedef struct _KTHREAD
+      * nxkrnl Xbox per-thread state, appended at the end so all upstream
+      * offsets are preserved.
+      *
+-     * XeXboxShadow:  Xbox-shaped KTHREAD the title sees through
+-     *   KeGetCurrentThread() (ordinal 104).  Only offset 0x28 (TlsData) is
+-     *   read by today's titles; we keep the rest zero so any unexpected
+-     *   field read returns NULL rather than ReactOS internals.  Sized to
+-     *   match the largest Xbox KTHREAD field offset we expect a title to
+-     *   touch (Priority/KernelTime/etc., all below 0x80).
++     * XeXboxShadow: public Xbox ETHREAD storage, including the KTHREAD
++     *   prefix returned by KeGetCurrentThread and the object-reference APIs.
++     *   Identity, ID and exit-state publication are maintained by threadview.c.
++     *   This is not a live mirror of native scheduling or intrusive lists.
+      *
+      * XeXboxFs4:  the per-thread fs:[0x04] (NtTib.StackBase) value the
+      *   title's compiled __thread access expects.  KiSwapContextExit hooks
+@@ -1792,7 +1790,8 @@ typedef struct _KTHREAD
+      *   fs:[0x04] alone" -- correct for kernel threads that aren't running
+      *   title code.
+      */
+-    UCHAR XeXboxShadow[0x80];     /* 128 bytes; offset 0x28 = TlsData */
++    UCHAR XeXboxShadow[0x140];    /* Complete public ETHREAD, including KTHREAD. */
++    LIST_ENTRY XeThreadViewLink; /* Known-identity registry; no owning reference. */
+     ULONG_PTR XeXboxFs4;          /* per-thread fs:[0x04] target value */
+     SIZE_T XeStackSize;           /* kernel-stack size (0 = KERNEL_STACK_SIZE).
+                                      * Set by KeInitThread; read by KeUninitThread
+diff --git a/tests/host/object-handle-fastpath/check.py b/tests/host/object-handle-fastpath/check.py
+index 5bf39f83..b64c304f 100644
+--- a/tests/host/object-handle-fastpath/check.py
++++ b/tests/host/object-handle-fastpath/check.py
+@@ -24,7 +24,7 @@ def function(text, name):
+     if not hit:
+         raise ValueError(f'missing production function {name}')
+     start = text.rfind('\n', 0, hit.start()) + 1
+-    declaration = re.compile(r'(?:static\s+)?(?:NTSTATUS|POBJECT_TYPE|PHANDLE_TABLE_ENTRY|VOID|BOOLEAN|LONG_PTR)(?:\s+(?:NTAPI|FASTCALL))?|NTAPI|FASTCALL')
++    declaration = re.compile(r'(?:static\s+)?(?:NTSTATUS|PVOID|POBJECT_TYPE|PHANDLE_TABLE_ENTRY|VOID|BOOLEAN|LONG_PTR)(?:\s+(?:NTAPI|FASTCALL))?|NTAPI|FASTCALL')
+     while start:
+         previous = text.rfind('\n', 0, start - 1) + 1
+         if not declaration.fullmatch(text[previous:start].strip()):
+@@ -63,6 +63,8 @@ def build(root, output, counted):
+         body = body.replace('{', '{\n    COUNT(' + ('native_dereferences' if name == 'ObfDereferenceObject' else 'native_calls') + ');', 1)
+         bodies += body
+     bodies += function(source[paths[0]], 'XeObjectTypeToInternal')
++    if 'XePublicReferencedObject' in source[paths[0]]:
++        bodies += function(source[paths[0]], 'XePublicReferencedObject')
+     bodies += function(source[paths[0]], 'XeObReferenceObjectByHandle')
+     (output / 'production.inc').write_text(bodies)
+     header = source[paths[4]].replace('#pragma once', '')
+diff --git a/tests/host/object-handle-fastpath/fixture.c b/tests/host/object-handle-fastpath/fixture.c
+index 883d0eaf..6e95c3e6 100644
+--- a/tests/host/object-handle-fastpath/fixture.c
++++ b/tests/host/object-handle-fastpath/fixture.c
+@@ -79,7 +79,10 @@ typedef union _EXHANDLE {
+ #define LOW_LEVEL_ENTRIES 512
+ #define EXHANDLE_TABLE_ENTRY_LOCK_BIT 1
+ typedef struct { ULONG HandleAttributes, GrantedAccess; } OBJECT_HANDLE_INFORMATION, *POBJECT_HANDLE_INFORMATION;
+-typedef struct _PAYLOAD { PVOID Object; PHANDLE_TABLE ObjectTable; ULONG GrantedAccess; LONG CombinedApcDisable; ULONG Cookie; } PAYLOAD, *PEPROCESS, *PETHREAD;
++typedef struct _PAYLOAD { PVOID Object; PHANDLE_TABLE ObjectTable; ULONG GrantedAccess; LONG CombinedApcDisable; ULONG Cookie; } PAYLOAD, *PEPROCESS, *PETHREAD, *PKTHREAD;
++/* Registry/public layout is qualified independently; this fixture owns
++ * object-manager references and deliberately preserves its payload identity. */
++static PVOID NxkThreadPublicPointer(PKTHREAD Thread) { return Thread; }
+ _Static_assert(sizeof(void *) == 4, "exercise native i386 pointer/tag layouts");
+ _Static_assert(sizeof(HANDLE_TABLE_ENTRY) == 8, "native low-level entry layout");
+ _Static_assert(offsetof(OBJECT_HEADER, Body) == 24, "native header body offset");
+diff --git a/tests/host/thread-shadow/check.py b/tests/host/thread-shadow/check.py
+index a7e85d16..1d66d4de 100644
+--- a/tests/host/thread-shadow/check.py
++++ b/tests/host/thread-shadow/check.py
+@@ -47,7 +47,7 @@ typedef unsigned long ULONG;
+ typedef struct _KTHREAD {
+     PVOID StackBase;
+     PVOID StackLimit;
+-    UCHAR XeXboxShadow[0x80];
++    UCHAR XeXboxShadow[0x140];
+     ULONG_PTR XeXboxFs4;
+     PVOID XeBaseSeh;
+ } KTHREAD, *PKTHREAD;
+@@ -69,6 +69,9 @@ static VOID NxkPublishThreadProcess(PUCHAR shadow)
+ cases = r'''
+ int main(void)
+ {
++    thread.XeXboxShadow[0x77] = 1;
++    thread.XeXboxShadow[0x120] = 0x45;
++    thread.XeXboxShadow[0x12c] = 0x24;
+     thread.StackBase = (PVOID)(uintptr_t)0x863de000;
+     thread.StackLimit = (PVOID)(uintptr_t)0x863db000;
+     assert(XeRegisterThread((PVOID)(uintptr_t)0x11223000, 0x11224000) ==
+@@ -80,6 +83,9 @@ int main(void)
+     assert(thread.XeXboxShadow[0x32] == 7);
+     assert(thread.XeXboxShadow[0x70] == 8);
+     assert(thread.XeXboxFs4 == 0x11224000);
++    assert(thread.XeXboxShadow[0x77] == 1);
++    assert(thread.XeXboxShadow[0x120] == 0x45);
++    assert(thread.XeXboxShadow[0x12c] == 0x24);
+     assert(thread.XeBaseSeh == (PVOID)(uintptr_t)0xfeed0000);
+ 
+     thread.StackBase = (PVOID)(uintptr_t)0x81235000;
+diff --git a/tests/host/thread-view/check-registry.py b/tests/host/thread-view/check-registry.py
+new file mode 100644
+index 00000000..0776ac03
+--- /dev/null
++++ b/tests/host/thread-view/check-registry.py
+@@ -0,0 +1,119 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Run the production registry and deletion code with host list/IRQ primitives."""
++from pathlib import Path
++import subprocess
++import sys
++root=Path(__file__).resolve().parents[3]
++here=Path(sys.argv[1]).resolve()
++here.mkdir(parents=True,exist_ok=True)
++text=(root/'ntoskrnl/xb/threadview.c').read_text()
++registry=text[text.index('#define VIEW_BUCKETS'):text.index('/* These offsets')]
++def function(name):
++ start=text.index('VOID '+name+'(');a=text.index('{',start);depth=1;b=a+1
++ while depth:
++  depth+=(text[b]=='{')-(text[b]=='}');b+=1
++ return text[start:b]
++registration=text.split('    /* Publish the identity only after every initial field has been written. */',1)[1].split('\n}',1)[0]
++pre='''#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++typedef void VOID; typedef void *PVOID; typedef uintptr_t ULONG_PTR; typedef unsigned ULONG; typedef unsigned char *PUCHAR;
++typedef struct LIST_ENTRY {struct LIST_ENTRY *Flink,*Blink;} LIST_ENTRY,*PLIST_ENTRY;
++typedef struct KTHREAD {unsigned char prefix[0x1b4],XeXboxShadow[0x140];LIST_ENTRY XeThreadViewLink;} KTHREAD,*PKTHREAD;
++#define FIELD_OFFSET(T,F) offsetof(T,F)
++#define CONTAINING_RECORD(P,T,F) ((T *)((char *)(P)-offsetof(T,F)))
++static PKTHREAD current_thread;
++static PKTHREAD KeGetCurrentThread(void){return current_thread;}
++static uintptr_t irq_flags=0x202;static unsigned irq_entries;
++static uintptr_t __readeflags(void){return irq_flags;}
++static void _disable(void){irq_flags &= ~0x200;irq_entries++;}
++static void __writeeflags(uintptr_t flags){irq_flags=flags;}
++static void InitializeListHead(PLIST_ENTRY x){x->Flink=x->Blink=x;}
++static void InsertTailList(PLIST_ENTRY h,PLIST_ENTRY x){x->Blink=h->Blink;x->Flink=h;h->Blink->Flink=x;h->Blink=x;}
++static void RemoveEntryList(PLIST_ENTRY x){x->Blink->Flink=x->Flink;x->Flink->Blink=x->Blink;}
++'''
++post='''
++static void register_thread(PKTHREAD Thread) {
++    PUCHAR View=Thread->XeXboxShadow;ULONG_PTR Flags;PLIST_ENTRY Head;
++'''+registration+'''
++}
++#define COUNT 512
++static KTHREAD threads[COUNT];
++int main(void) {
++ unsigned checks=0,max_chain=0;unsigned hist[VIEW_BUCKETS]={0};
++ assert(NxkResolveThreadPointer(NULL)==NULL);checks++;
++ assert(NxkResolveThreadPointer((PVOID)1)==NULL);checks++;
++ assert(NxkThreadNativeObject((PVOID)0xdeadbeef)==(PVOID)0xdeadbeef);checks++;
++ for(unsigned i=0;i<COUNT;i++)register_thread(&threads[i]);
++ for(unsigned i=0;i<COUNT;i++) {
++   PKTHREAD t=&threads[i];
++   assert(NxkResolveThreadPointer(t)==t);checks++;
++   assert(NxkResolveThreadPointer(t->XeXboxShadow)==t);checks++;
++   assert(NxkThreadPublicObject(t)==t->XeXboxShadow);checks++;
++   assert(NxkThreadNativeObject(t->XeXboxShadow)==t);checks++;
++   assert(NxkThreadNativeObject(t)==t);checks++;
++   assert(NxkResolveThreadPointer(t->XeXboxShadow+1)==NULL);checks++;
++   assert(irq_flags==0x202);checks++;
++   hist[NxkViewBucket((uintptr_t)t->XeXboxShadow)]++;
++ }
++ assert(__builtin_popcount(NxkThreadViewLowBits)<=4);checks++;
++ for(unsigned b=0;b<VIEW_BUCKETS;b++)if(hist[b]>max_chain)max_chain=hist[b];
++ /* Cache only successful exact identities. Hit paths require no interrupt
++  * exclusion; removal must invalidate before any address can be reused. */
++ for(unsigned i=0;i<COUNT;i++) {
++   PKTHREAD t=&threads[i];
++   assert(NxkResolveThreadPointer(t->XeXboxShadow)==t);checks++;
++   assert(NxkThreadViewCachedPublic==t->XeXboxShadow);checks++;
++   unsigned prior=irq_entries;
++   assert(NxkResolveThreadPointer(t->XeXboxShadow)==t);checks++;
++   assert(irq_entries==prior);checks++;
++   NxkDeleteThreadView(t);
++   assert(NxkThreadViewCachedPublic==NULL);checks++;
++   assert(NxkResolveThreadPointer(t->XeXboxShadow)==NULL);checks++;
++   assert(NxkThreadNativeObject(t->XeXboxShadow)==t->XeXboxShadow);checks++;
++   register_thread(t);
++   assert(NxkResolveThreadPointer(t->XeXboxShadow)==t);checks++;
++ }
++ for(unsigned round=0;round<128;round++) {
++   for(unsigned i=0;i<COUNT;i+=2)NxkDeleteThreadView(&threads[i]);
++   for(unsigned i=0;i<COUNT;i++) {
++     PKTHREAD t=&threads[i];
++     assert(NxkResolveThreadPointer(t->XeXboxShadow)==((i&1)?t:NULL));checks++;
++     assert(NxkResolveThreadPointer(t)==((i&1)?t:NULL));checks++;
++   }
++   for(unsigned i=0;i<COUNT;i+=2)register_thread(&threads[i]);
++ }
++ assert(NxkResolveThreadPointer(threads[1].XeXboxShadow)==&threads[1]);checks++;
++ NxkDeleteThreadView(&threads[0]);
++ assert(NxkThreadViewCachedPublic==threads[1].XeXboxShadow);checks++;
++ register_thread(&threads[0]);
++ current_thread=&threads[1];unsigned before=irq_entries;
++ assert(NxkResolveThreadPointer(current_thread->XeXboxShadow)==current_thread);checks++;
++ assert(NxkResolveThreadPointer(current_thread)==current_thread);checks++;
++ assert(irq_entries==before);checks++;current_thread=NULL;
++ irq_flags=2;
++ assert(NxkResolveThreadPointer(threads[1].XeXboxShadow)==&threads[1]);checks++;
++ assert(irq_flags==2);checks++;
++ for(unsigned i=0;i<COUNT;i++)NxkDeleteThreadView(&threads[i]);
++ assert(NxkThreadViewCachedPublic==NULL);checks++;
++ for(unsigned b=0;b<VIEW_BUCKETS;b++){assert(NxkThreadViews[b].Flink==&NxkThreadViews[b]);checks++;}
++ NxkDeleteThreadView(&threads[0]);assert(irq_flags==2);checks++;
++ /* Firmware pool buckets produce highly aligned body addresses. Measure
++  * collision counts for synthetic 1KiB objects without dereferencing them. */
++ for(unsigned n=8;n<=512;n*=2) {
++  memset(hist,0,sizeof(hist));max_chain=0;
++  for(unsigned i=0;i<n;i++)hist[NxkViewBucket(0xd0000018u+i*1024u+0x1b4u)]++;
++  for(unsigned b=0;b<VIEW_BUCKETS;b++)if(hist[b]>max_chain)max_chain=hist[b];
++  printf("aligned_native_objects=%u buckets=%u max_chain=%u\\n",n,VIEW_BUCKETS,max_chain);
++ }
++ printf("registry_checks=%u irq_sections=%u passed\\n",checks,irq_entries);
++ return 0;
++}
++'''
++(here/'registry-host.c').write_text(pre+registry+function('NxkDeleteThreadView')+post)
++subprocess.run(['cc','-std=c11','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',str(here/'registry-host.c'),'-o',str(here/'registry-host')],check=True)
++subprocess.run([str(here/'registry-host')],check=True)
+diff --git a/tests/host/thread-view/check-wait-adapter.py b/tests/host/thread-view/check-wait-adapter.py
+new file mode 100644
+index 00000000..eabcfc84
+--- /dev/null
++++ b/tests/host/thread-view/check-wait-adapter.py
+@@ -0,0 +1,102 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++from pathlib import Path
++import subprocess
++import sys
++root=Path(__file__).resolve().parents[3]
++here=Path(sys.argv[1]).resolve()
++here.mkdir(parents=True,exist_ok=True)
++source=(root/'ntoskrnl/xb/threadview.c').read_text();body=source[source.index('NTSTATUS NTAPI\nXeKeWaitForMultipleObjects('):]
++native=(root/'ntoskrnl/ke/wait.c').read_text()
++# The two original multiwait delivery sites are gated, while all other wait
++# entries retain their own behavior. Actual entry wrappers are compiled below.
++implementation=native[native.index('static NTSTATUS\nNTAPI\nKiWaitForMultipleObjects('):native.index('/* Keep native callers')]
++assert implementation.count('if (DeliverUserApcs) KiDeliverXboxUserApcs(WaitStatus);')==2
++wrappers=native[native.index('NTSTATUS NTAPI\nKeWaitForMultipleObjects('):native.index('\nNTSTATUS\nNTAPI\nNtDelayExecution(')]
++pre=r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++typedef void *PVOID;typedef unsigned ULONG;typedef int32_t NTSTATUS;typedef unsigned char BOOLEAN;
++typedef struct LIST_ENTRY {struct LIST_ENTRY *Flink,*Blink;} LIST_ENTRY;
++typedef struct BLOCK {LIST_ENTRY WaitListEntry;PVOID Thread,Object;struct BLOCK *NextWaitBlock;uint16_t WaitKey;unsigned char WaitType,SpareByte;} KWAIT_BLOCK,*PKWAIT_BLOCK;
++typedef int WAIT_TYPE,KWAIT_REASON,KPROCESSOR_MODE;typedef int64_t *PLARGE_INTEGER;
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define MAXIMUM_WAIT_OBJECTS 64
++#define STATUS_WAIT_0 0
++#define STATUS_ABANDONED_WAIT_0 0x80
++#define STATUS_USER_APC 0xc0
++#define WaitAll 0
++#define WaitAny 1
++#define RtlCopyMemory memcpy
++static PVOID Current=(PVOID)0x100000;
++static PVOID KeGetCurrentThread(void){return Current;}
++static PVOID NxkThreadPublicPointer(PVOID p){return (void *)((uintptr_t)p+0x1b4);}
++static PVOID NxkThreadNativeObject(PVOID p){return (void *)((uintptr_t)p-0x100);}
++static PVOID NxkThreadPublicObject(PVOID p){return (void *)((uintptr_t)p+0x100);}
++static unsigned calls,queue_it,expected_count,expected_type,expected_alert,wait_next;
++static int32_t outcome;
++static PKWAIT_BLOCK observed;static PVOID *observed_objects;static unsigned apc_calls;
++static void KiDeliverUserApcs(void){
++ apc_calls++;assert(outcome==STATUS_USER_APC);
++ if(observed)for(unsigned i=0;i<expected_count;i++)assert(observed[i].Thread==NxkThreadPublicPointer(Current)&&observed[i].Object==observed_objects[i]&&observed[i].SpareByte==0);
++}
++static int64_t *expected_timeout;
++static NTSTATUS KiWaitForMultipleObjects(ULONG n,PVOID *objects,WAIT_TYPE type,KWAIT_REASON reason,KPROCESSOR_MODE mode,BOOLEAN alert,PLARGE_INTEGER timeout,PKWAIT_BLOCK blocks,BOOLEAN DeliverUserApcs){
++ calls++;assert(n==expected_count&&type==(int)expected_type&&alert==expected_alert&&timeout==expected_timeout&&reason==6&&mode==0);
++ wait_next=0;
++ for(unsigned i=0;i<n;i++){
++  assert(objects[i]==(PVOID)(uintptr_t)(0x200000+i*0x400));
++  if(!blocks)continue;
++  blocks[i].Thread=Current;blocks[i].Object=objects[i];blocks[i].NextWaitBlock=&blocks[(i+1)%n];blocks[i].WaitKey=i;blocks[i].WaitType=type;
++  if(queue_it){blocks[i].WaitListEntry.Flink=(void *)0x700000;blocks[i].WaitListEntry.Blink=(void *)0x700004;}
++ }
++ if(DeliverUserApcs && outcome==STATUS_USER_APC)KiDeliverUserApcs();
++ return outcome;
++}
++'''
++pre += '\n#define SARCH_XBOX 1\n' + wrappers
++post=r'''
++int main(void){
++ unsigned checks=0;const unsigned sizes[]={1,2,3,64};
++ for(unsigned z=0;z<4;z++)for(unsigned type=0;type<2;type++)for(unsigned queue=0;queue<2;queue++)for(unsigned alert=0;alert<2;alert++)for(unsigned next=0;next<2;next++){
++  unsigned n=sizes[z];
++  for(unsigned result=0;result<2*n+3;result++){
++   struct {uint32_t a[4];KWAIT_BLOCK b[64];uint32_t c[4];} state,old;
++   PVOID objects[64];for(unsigned i=0;i<n;i++)objects[i]=(PVOID)(uintptr_t)(0x200100+i*0x400);
++   memset(&state,0xa5,sizeof(state));old=state;
++   int64_t timeout=0;outcome=result<n?(int32_t)result:result<2*n?(int32_t)(0x80+result-n):result==2*n?0x102:result==2*n+1?0x101:0xc0;
++   expected_count=n;expected_type=type;expected_alert=alert;expected_timeout=&timeout;calls=0;queue_it=queue;wait_next=next;apc_calls=0;observed=state.b;observed_objects=objects;
++   assert(XeKeWaitForMultipleObjects(n,objects,type,6,0,alert,&timeout,state.b)==outcome);checks++;
++   assert(calls==1 && !wait_next && apc_calls==(outcome==STATUS_USER_APC));checks++;
++   assert(memcmp(state.a,old.a,sizeof(state.a))==0&&memcmp(state.c,old.c,sizeof(state.c))==0);checks++;
++   unsigned prefix=(!queue&&type==WaitAny&&result<2*n)?result%n:n;
++   for(unsigned i=0;i<n;i++){
++    assert(objects[i]==(PVOID)(uintptr_t)(0x200100+i*0x400));checks++;
++    if(i>=prefix){assert(memcmp(&state.b[i],&old.b[i],sizeof(KWAIT_BLOCK))==0);checks++;continue;}
++    assert(state.b[i].Thread==NxkThreadPublicPointer(Current)&&state.b[i].Object==objects[i]&&state.b[i].WaitType==type&&state.b[i].SpareByte==0&&state.b[i].WaitKey==i);checks++;
++    if(!queue){assert(state.b[i].NextWaitBlock==((type==WaitAll&&(outcome==0||outcome==0x80))?&state.b[(i+1)%n]:&state.b[i+1]));checks++;assert(memcmp(&state.b[i].WaitListEntry,&old.b[i].WaitListEntry,sizeof(LIST_ENTRY))==0);checks++;}
++    else {assert(state.b[i].WaitListEntry.Flink==(void *)0x700000);checks++;}
++   }
++   assert(memcmp(&state.b[n],&old.b[n],sizeof(KWAIT_BLOCK)*(64-n))==0);checks++;
++  }
++ }
++ for(unsigned n=1;n<=2;n++)for(unsigned apc=0;apc<2;apc++) {
++  PVOID objects[]={(PVOID)0x200100,(PVOID)0x200500};int64_t timeout=0;
++  outcome=apc?STATUS_USER_APC:0x102;expected_count=n;expected_type=WaitAny;expected_alert=1;expected_timeout=&timeout;calls=0;queue_it=0;wait_next=0;apc_calls=0;observed=NULL;
++  assert(XeKeWaitForMultipleObjects(n,objects,WaitAny,6,0,1,&timeout,NULL)==outcome);checks++;
++  assert(calls==1&&apc_calls==apc);checks++;
++  calls=apc_calls=0;objects[0]=(PVOID)0x200000;objects[1]=(PVOID)0x200400;
++  assert(KeWaitForMultipleObjects(n,objects,WaitAny,6,0,1,&timeout,NULL)==outcome);checks++;
++  assert(calls==1&&apc_calls==apc);checks++;
++ }
++ puts("production wait adapter: immediate prefixes, full WaitAll/timeout/alert, queued success, guards and 64-object bound passed");
++ printf("wait_adapter_checks=%u\n",checks);return 0;
++}
++'''
++(here/'wait-adapter-host.c').write_text(pre+body+post)
++subprocess.run(['cc','-m32','-std=c11','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',str(here/'wait-adapter-host.c'),'-o',str(here/'wait-adapter-host')],check=True)
++subprocess.run([str(here/'wait-adapter-host')],check=True)

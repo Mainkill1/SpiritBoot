@@ -55,7 +55,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 85f8166e1bd3c5e970bf27db7b1b899905ba9fc3
+            test "$actual_tree" = 319a9709b8958b2eb3d0e948e6e3b3eb6afc829c
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -102,6 +102,10 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/fatx/check-mount-resources.py" "$output/fatx-mount-resources" >"$output/fatx-mount-resources.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-name-bounds.py" "$output/fatx-name-bounds" >"$output/fatx-name-bounds.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-chain-walk.py" "$output/fat-chain-walk" >"$output/fat-chain-walk.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/fatx/check-seek-checkpoints.py" "$output/fatx-seek-checkpoints" >"$output/fatx-seek-checkpoints.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/fatx/check-async-read.py" "$GUEST_SOURCE" "$output/fatx-async-read" >"$output/fatx-async-read.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/fatx/check-async-map.py" "$GUEST_SOURCE" "$output/fatx-async-map" >"$output/fatx-async-map.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/fatx/check-async-coupling.py" "$GUEST_SOURCE" "$output/fatx-async-coupling" >"$output/fatx-async-coupling.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-read-eof.py" "$output/fatx-read-eof" >"$output/fatx-read-eof.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-name-lookup.py" "$output/fatx-name-lookup" >"$output/fatx-name-lookup.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/fatx/check-findfile-upcase.py" "$output/fatx-findfile-upcase" >"$output/fatx-findfile-upcase.log" 2>&1
@@ -115,6 +119,10 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/interrupt-public-abi/check.py" "$output/interrupt-public-abi" >"$output/interrupt-public-abi.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/performance-counter/check.py" "$output/performance-counter" >"$output/performance-counter.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/vm-query-fastpath/check.py" "$GUEST_SOURCE" "$output/vm-query-fastpath" >"$output/vm-query-fastpath.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/immediate-delay/check.py" "$GUEST_SOURCE" "$output/immediate-delay" >"$output/immediate-delay.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/storage-completion/check.py" "$GUEST_SOURCE" "$output/storage-completion" >"$output/storage-completion.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/interrupt-static/check.py" "$GUEST_SOURCE" "$output/interrupt-static" >"$output/interrupt-static.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/interrupt-static/check-built.py" "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/interrupt-static-built.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/io-apc-order/check.py" "$output/io-apc-order" >"$output/io-apc-order.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/critical-section/check.py" "$output/critical-section" >"$output/critical-section.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/workqueue/check-fixed-worker-queue.py" "$output/fixed-worker-queue" >"$output/fixed-worker-queue.log" 2>&1
@@ -128,7 +136,11 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/tap-uart/check.py" "$output/tap-uart" >"$output/tap-uart.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-wait/check.py" "$output/thread-wait" >"$output/thread-wait.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-stack/check.py" "$output/thread-stack" >"$output/thread-stack.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/phase1-thread/check.py" "$output/phase1-thread" >"$output/phase1-thread.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-shadow/check.py" "$output/thread-shadow" >"$output/thread-shadow.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/thread-view/check-registry.py" "$output/thread-view-registry" >"$output/thread-view-registry.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/thread-view/check-wait-adapter.py" "$output/thread-view-wait" >"$output/thread-view-wait.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/thread-view/check-irp.py" "$output/thread-view-irp" >"$output/thread-view-irp.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dead-stack-policy/check.py" "$output/dead-stack-policy" >"$output/dead-stack-policy.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/zero-alias/check.py" "$output/zero-alias" >"$output/zero-alias.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/pool-refill/check.py" "$output/pool-refill" >"$output/pool-refill.log" 2>&1
@@ -149,7 +161,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '85f8166e1bd3c5e970bf27db7b1b899905ba9fc3', result
+          assert result['source_tree'] == '319a9709b8958b2eb3d0e948e6e3b3eb6afc829c', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
@@ -264,6 +276,7 @@ jobs:
             artifacts/xdvdfs-related-directory-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/critical-section-contention-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/io-apc-order-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/immediate-delay-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/gpu-instance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/performance-counter-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/vm-query-fastpath-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/

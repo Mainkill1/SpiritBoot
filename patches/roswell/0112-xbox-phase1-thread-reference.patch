@@ -1,0 +1,178 @@
+--- a/ntoskrnl/ps/psmgr.c
++++ b/ntoskrnl/ps/psmgr.c
+@@ -326,7 +326,9 @@
+     NTSTATUS Status;
+     OBJECT_ATTRIBUTES ObjectAttributes;
+     HANDLE SysThreadHandle;
++#if !defined(SARCH_XBOX) || !defined(NXK_MM_PHYS)
+     PETHREAD SysThread;
++#endif
+     MM_SYSTEMSIZE SystemSize;
+     UNICODE_STRING Name;
+     OBJECT_TYPE_INITIALIZER ObjectTypeInitializer;
+@@ -532,13 +534,18 @@
+                                   LoaderBlock);
+     if (!NT_SUCCESS(Status)) return FALSE;
+ 
+-    /* Create a handle to it */
++    /* The Xbox page supply lets Phase1 terminate after title launch.
++     * Its creation keep-alive protects execution through reaping; an unused
++     * boot reference would retain the terminated object and its CID forever.
++     * Preserve the original zero-page-thread lifetime on other builds. */
++#if !defined(SARCH_XBOX) || !defined(NXK_MM_PHYS)
+     ObReferenceObjectByHandle(SysThreadHandle,
+                               0,
+                               PsThreadType,
+                               KernelMode,
+                               (PVOID*)&SysThread,
+                               NULL);
++#endif
+     ObCloseHandle(SysThreadHandle, KernelMode);
+ 
+     /* Return success */
+--- /dev/null
++++ b/tests/host/phase1-thread/check.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python3
++"""Actual boot-thread creation tail and actual reaper, with object service ledger.
++
++The regression is a boot-only reference surviving completed thread reaping.
++Object-manager and scheduler primitives are replaced at their service boundary;
++reference increments, decrements, handle ownership, stack release and final
++object deletion stay observable. Native execution remains a separate check.
++"""
++from pathlib import Path
++import re, subprocess, sys, json
++root=Path(sys.argv[2]).resolve() if len(sys.argv)>2 else Path(__file__).resolve().parents[3]
++out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++manager=(root/'ntoskrnl/ps/psmgr.c').read_text()
++start=manager.index('    /* Setup the system initialization thread */')
++end=manager.index('\n}',start)
++boot=manager[start:end]
++kill=(root/'ntoskrnl/ps/kill.c').read_text()
++start=kill.index('PspReapRoutine(IN PVOID Context)');start=kill.index('{',start)
++end=start+1;depth=1
++while depth:
++ depth+=(kill[end]=='{')-(kill[end]=='}');end+=1
++reaper='static void PspReapRoutine(void *Context)\n'+kill[start:end]
++fixture=Path(__file__).with_name('fixture.c').read_text()
++source=out/'actual.c';source.write_text(fixture.replace('/* ACTUAL BOOT TAIL */',boot).replace('/* ACTUAL REAPER */',reaper))
++rows=[]
++for xbox,nxk in [(1,1),(1,0),(0,1),(0,0)]:
++ name=f'xbox{xbox}-nxk{nxk}';exe=out/name
++ cmd=['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-pie','-no-pie',f'-DTEST_XBOX={xbox}',f'-DTEST_NXK={nxk}',str(source),'-o',str(exe)]
++ if xbox:cmd.insert(1,'-DSARCH_XBOX')
++ if nxk:cmd.insert(1,'-DNXK_MM_PHYS')
++ subprocess.run(cmd,check=True)
++ r=subprocess.run([str(exe)],text=True,capture_output=True)
++ print(name,r.stdout+r.stderr,end='')
++ rows.append({'variant':name,'exit_code':r.returncode,'stdout':r.stdout,'stderr':r.stderr})
++(out/'results.json').write_text(json.dumps(rows,indent=2)+'\n')
++sys.exit(any(row['exit_code'] for row in rows))
+--- /dev/null
++++ b/tests/host/phase1-thread/fixture.c
+@@ -0,0 +1,104 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(s) ((s)>=0)
++#define THREAD_ALL_ACCESS 0x1fffffu
++#define KernelMode 0
++#define PSTRACE(...) ((void)0)
++#define PS_KILL_DEBUG 0
++#define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p)-offsetof(t,f)))
++#define ASSERT(c) CHECK(c)
++#define CHECK(c) do { checks++; if (!(c)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#c); exit(1); } } while(0)
++typedef void *PVOID;
++typedef struct Entry { struct Entry *Next; } SINGLE_LIST_ENTRY,*PSINGLE_LIST_ENTRY;
++typedef struct Thread {
++ struct { void *StackBase,*InitialStack; unsigned char LargeStack; size_t XeStackSize; } Tcb;
++ SINGLE_LIST_ENTRY ReaperLink;
++ unsigned refs;
++} ETHREAD,*PETHREAD;
++static struct { void *Flink; } PspReaperListHead;
++static unsigned checks,closed,referenced,deleted,stack_freed,created,schedule,extra_refs,fail_create;
++static ETHREAD *live,*handle_object;
++static void *PsThreadType=(void *)0x1234;
++static int ObjectAttributes;
++static void *LoaderBlock=&ObjectAttributes;
++static void PspReapRoutine(void *Context);
++static void Phase1Initialization(void *Context) { CHECK(Context==LoaderBlock); }
++static void *InterlockedExchangePointer(void **p,void *v) { void *old=*p;*p=v;return old; }
++static void *InterlockedCompareExchangePointer(void **p,void *v,void *c) { void *old=*p;if(old==c)*p=v;return old; }
++static void MmDeleteKernelStackEx(void *base,unsigned char large,size_t bytes) {
++ CHECK(live && base==live->Tcb.StackBase);CHECK(large==0);CHECK(bytes==12288);
++ CHECK(stack_freed==0);stack_freed++;
++}
++static void ObDereferenceObject(ETHREAD *thread) {
++ CHECK(thread==live);CHECK(thread->refs>0);
++ if (--thread->refs==0) {
++  CHECK(stack_freed==1);CHECK(thread->Tcb.InitialStack==NULL);
++  deleted++;live=NULL;free(thread);
++ }
++}
++static void finish_thread(void) {
++ CHECK(live && !stack_freed);PspReaperListHead.Flink=&live->ReaperLink;
++ live->ReaperLink.Next=NULL;PspReapRoutine(NULL);
++ CHECK(PspReaperListHead.Flink==NULL);
++}
++static int PsCreateSystemThread(void **handle,unsigned access,void *attrs,
++ unsigned process,void *id,void (*start)(void *),void *context) {
++ CHECK(access==THREAD_ALL_ACCESS);CHECK(attrs==&ObjectAttributes);CHECK(process==0);
++ CHECK(id==NULL);CHECK(start==Phase1Initialization);CHECK(context==LoaderBlock);
++ if(fail_create)return -1;
++ live=calloc(1,sizeof(*live));CHECK(live!=NULL);created++;
++ /* Successful create returns one handle plus one scheduler keep-alive.
++  * Extra references model independent clients, not a boot ownership need. */
++ live->refs=2+extra_refs;live->Tcb.StackBase=live;live->Tcb.InitialStack=live;
++ live->Tcb.XeStackSize=12288;handle_object=live;*handle=live;
++ if(schedule==1)finish_thread();
++ return 0;
++}
++static int __attribute__((unused)) ObReferenceObjectByHandle(void *handle,
++ unsigned access,void *type,unsigned mode,void **result,void *info) {
++ CHECK(handle==handle_object && handle_object==live);CHECK(access==0);
++ CHECK(type==PsThreadType);CHECK(mode==KernelMode);CHECK(info==NULL);
++ referenced++;live->refs++;*result=live;return 0;
++}
++static void ObCloseHandle(void *handle,unsigned mode) {
++ CHECK(handle==handle_object && handle_object==live);CHECK(mode==KernelMode);
++ closed++;if(schedule==2)finish_thread();handle_object=NULL;ObDereferenceObject(handle);
++}
++/* ACTUAL REAPER */
++static int actual_boot(void) {
++ void *SysThreadHandle;PETHREAD SysThread __attribute__((unused));int Status;
++ /* ACTUAL BOOT TAIL */
++}
++int main(void) {
++ unsigned cases=0;
++ for(schedule=0;schedule<3;schedule++)for(extra_refs=0;extra_refs<4;extra_refs++) {
++  created=closed=referenced=deleted=stack_freed=fail_create=0;
++  live=handle_object=NULL;PspReaperListHead.Flink=NULL;
++  CHECK(actual_boot()==TRUE);CHECK(created==1);CHECK(closed==1);CHECK(handle_object==NULL);
++  if(schedule==0) {
++   CHECK(live!=NULL);CHECK(stack_freed==0);
++   finish_thread();
++  }
++  CHECK(stack_freed==1);
++#if TEST_XBOX && TEST_NXK
++  if(extra_refs==0) {CHECK(deleted==1);CHECK(live==NULL);}
++  else {CHECK(deleted==0);CHECK(live && live->refs==extra_refs);}
++#else
++  CHECK(deleted==0);CHECK(live && live->refs==extra_refs+1);
++  ObDereferenceObject(live); /* Dispose deliberately preserved desktop ref. */
++#endif
++  for(unsigned i=0;i<extra_refs;i++)ObDereferenceObject(live);
++  CHECK(deleted==1);CHECK(live==NULL);cases++;
++ }
++ created=closed=referenced=deleted=stack_freed=0;fail_create=1;
++ CHECK(actual_boot()==FALSE);CHECK(created==0);CHECK(closed==0);CHECK(referenced==0);
++ CHECK(deleted==0);CHECK(stack_freed==0);CHECK(live==NULL);cases++;
++ printf("PASS %u checks across %u lifecycle cases\n",checks,cases);
++ return 0;
++}

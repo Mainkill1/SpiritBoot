@@ -1,0 +1,18 @@
+1..639
+not ok 178 - io/bad-ptr/set_eof_beyond_free_space # TODO vfat trips its FAT 4 GB size cap (C000000D) before the free-space check; retail FATX returns STATUS_DISK_FULL
+not ok 201 - io/storage/flush_volume_readonly # TODO retail flushes a read-only volume handle; nxkrnl returns ACCESS_DENIED
+not ok 319 - ke/exceptions/x87_divide_by_zero # TODO xemu TCG never raises unmasked FP exceptions
+not ok 320 - ke/exceptions/sse_divide_by_zero # TODO xemu TCG never raises unmasked FP exceptions
+ok 500 - io/createfile/unchecked_options_skip_the_validation
+ok 501 - io/createfile/directory_file_opens_the_volume_root
+ok 502 - io/createfile/relative_name_under_root_directory
+ok 503 - io/createfile/refusal_leaves_the_status_block_alone
+ok 504 - io/createfile/the_disposition_reaches_the_driver
+ok 505 - io/threadirp/fresh_packet_is_not_on_a_list
+ok 506 - io/threadirp/queue_links_the_packet
+ok 507 - io/threadirp/second_queue_goes_in_front
+ok 508 - io/threadirp/queue_touches_nothing_else
+ok 509 - ob/bypointer/the_object_s_own_type_is_accepted
+not ok 580 - ke/procprio/a_new_thread_starts_at_the_process_priority # TODO only the calling thread follows the process: there is no list of the title's threads to walk
+not ok 584 - ke/procprio/the_process_lists_its_threads # TODO the process' thread list is published empty: linking into it needs KTHREAD.ThreadListEntry, past the end of the shadow
+# tests=639 passed=639 failed=0

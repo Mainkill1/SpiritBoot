@@ -1,0 +1,547 @@
+{
+  "scope": "Public scheduler correctness, not a demonstrated Forza streaming speedup",
+  "clean_room": "Owned source and owned probes; public API behavior and documented public structure fields only for reference firmware; no proprietary instruction reads or disassembly",
+  "runtime_base_commit": "7f5e291f",
+  "source_tree": "27a34bfe0891a910eadf65dec17b4ab455b5212c",
+  "bios_sha256": "67e35e918821d85f6ae6b3c9f4563c2122b497e989aeaa0ecb6a79dba040e941",
+  "host": {
+    "immediate_delay": 6084,
+    "baseline_policy_failures": 2213,
+    "thread_wait_adapter": 223,
+    "io_apc": 63,
+    "desktop_wait_preprocessor_tokens_equal": true,
+    "explicit_yield_source_equal": true
+  },
+  "native_abba": [
+    {
+      "receipt": "delay-qualification-stock-async-20261013-123311-2",
+      "profile": "candidate",
+      "checks": 537,
+      "bios_sha256": "67E35E918821D85F6AE6B3C9F4563C2122B497E989AEAA0ECB6A79DBA040E941",
+      "fixture_sha256": "34D916D8F10CC59ECC5AD0C59D4B4F1F8BD3C8849E5A3D6930BBD84182F9745D",
+      "emulator_sha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+      "hdd_base_sha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+      "serial_sha256": "29a31d8bb5ad94db048a1e5a17934feaf3092b8b93d9dec88c763e5ac7f89184",
+      "memory_mib": 64,
+      "instrumentation": false
+    },
+    {
+      "receipt": "delay-qualification-stock-async-20261013-123311-3",
+      "profile": "candidate",
+      "checks": 537,
+      "bios_sha256": "67E35E918821D85F6AE6B3C9F4563C2122B497E989AEAA0ECB6A79DBA040E941",
+      "fixture_sha256": "34D916D8F10CC59ECC5AD0C59D4B4F1F8BD3C8849E5A3D6930BBD84182F9745D",
+      "emulator_sha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+      "hdd_base_sha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+      "serial_sha256": "c81e9eeb72b64fc3bb2dd1bce7dfd134b78fbc00f8a088053d6e1e13f7edb2ed",
+      "memory_mib": 64,
+      "instrumentation": false
+    },
+    {
+      "receipt": "delay-qualification-stock-complex-20261013-123311-1",
+      "profile": "reference",
+      "checks": 537,
+      "bios_sha256": "1DE4C87EFFE40D44F95581D204F9FA0600FBD5FE2171692316DCF97AF0F4113F",
+      "fixture_sha256": "34D916D8F10CC59ECC5AD0C59D4B4F1F8BD3C8849E5A3D6930BBD84182F9745D",
+      "emulator_sha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+      "hdd_base_sha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+      "serial_sha256": "3b95ab89ed0f7cae8d19567adfd58954be00a8b02a3441e861234a7dde6feb38",
+      "memory_mib": 64,
+      "instrumentation": false
+    },
+    {
+      "receipt": "delay-qualification-stock-complex-20261013-123311-4",
+      "profile": "reference",
+      "checks": 537,
+      "bios_sha256": "1DE4C87EFFE40D44F95581D204F9FA0600FBD5FE2171692316DCF97AF0F4113F",
+      "fixture_sha256": "34D916D8F10CC59ECC5AD0C59D4B4F1F8BD3C8849E5A3D6930BBD84182F9745D",
+      "emulator_sha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+      "hdd_base_sha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+      "serial_sha256": "5d2d656b31433004c14d591d8da6fcf7ff4591835975efa60aac4eaf3369cfa4",
+      "memory_mib": 64,
+      "instrumentation": false
+    }
+  ],
+  "world_abba": [
+    {
+      "receipt": "world-delay-stock-baseline-20261013-123903-1",
+      "profile": "baseline",
+      "checks": 19,
+      "bios_sha256": "BE85CF34DBCD25293DFE563A3C717C181C914EB0D75E91E23A0C2D15DB7E09B7",
+      "fixture_sha256": "D678CF5A013B41F3A945411A2CB09C69B36A3F0CA37DE3A9A34474B8137DE0FA",
+      "emulator_sha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+      "hdd_base_sha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+      "samples": [
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 1,
+          "pages": 14305,
+          "batch_us": 108711,
+          "pending": 1024,
+          "ready": 5
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 1,
+          "pages": 14305,
+          "batch_us": 97036,
+          "pending": 1024,
+          "ready": 3
+        },
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 4,
+          "pages": 14305,
+          "batch_us": 81983,
+          "pending": 1024,
+          "ready": 22
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 4,
+          "pages": 14305,
+          "batch_us": 79606,
+          "pending": 1024,
+          "ready": 23
+        },
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 12,
+          "pages": 14305,
+          "batch_us": 77384,
+          "pending": 1024,
+          "ready": 36
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 12,
+          "pages": 14301,
+          "batch_us": 76705,
+          "pending": 1024,
+          "ready": 28
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 1,
+          "pages": 900,
+          "batch_us": 101650,
+          "pending": 1024,
+          "ready": 4
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 1,
+          "pages": 900,
+          "batch_us": 103176,
+          "pending": 1024,
+          "ready": 6
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 4,
+          "pages": 900,
+          "batch_us": 79510,
+          "pending": 1024,
+          "ready": 22
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 4,
+          "pages": 900,
+          "batch_us": 80901,
+          "pending": 1024,
+          "ready": 15
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 12,
+          "pages": 900,
+          "batch_us": 77196,
+          "pending": 1024,
+          "ready": 19
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 12,
+          "pages": 900,
+          "batch_us": 75378,
+          "pending": 1024,
+          "ready": 23
+        }
+      ]
+    },
+    {
+      "receipt": "world-delay-stock-baseline-20261013-123903-4",
+      "profile": "baseline",
+      "checks": 19,
+      "bios_sha256": "BE85CF34DBCD25293DFE563A3C717C181C914EB0D75E91E23A0C2D15DB7E09B7",
+      "fixture_sha256": "D678CF5A013B41F3A945411A2CB09C69B36A3F0CA37DE3A9A34474B8137DE0FA",
+      "emulator_sha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+      "hdd_base_sha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+      "samples": [
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 1,
+          "pages": 14305,
+          "batch_us": 111302,
+          "pending": 1024,
+          "ready": 4
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 1,
+          "pages": 14305,
+          "batch_us": 101261,
+          "pending": 1024,
+          "ready": 1
+        },
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 4,
+          "pages": 14305,
+          "batch_us": 83541,
+          "pending": 1024,
+          "ready": 32
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 4,
+          "pages": 14305,
+          "batch_us": 83227,
+          "pending": 1024,
+          "ready": 19
+        },
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 12,
+          "pages": 14305,
+          "batch_us": 81877,
+          "pending": 1024,
+          "ready": 23
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 12,
+          "pages": 14301,
+          "batch_us": 76644,
+          "pending": 1024,
+          "ready": 36
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 1,
+          "pages": 900,
+          "batch_us": 105173,
+          "pending": 1024,
+          "ready": 1
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 1,
+          "pages": 900,
+          "batch_us": 100307,
+          "pending": 1024,
+          "ready": 6
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 4,
+          "pages": 900,
+          "batch_us": 83815,
+          "pending": 1024,
+          "ready": 24
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 4,
+          "pages": 900,
+          "batch_us": 90753,
+          "pending": 1024,
+          "ready": 44
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 12,
+          "pages": 900,
+          "batch_us": 84018,
+          "pending": 1024,
+          "ready": 33
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 12,
+          "pages": 900,
+          "batch_us": 79929,
+          "pending": 1024,
+          "ready": 30
+        }
+      ]
+    },
+    {
+      "receipt": "world-delay-stock-candidate-20261013-123903-2",
+      "profile": "candidate",
+      "checks": 19,
+      "bios_sha256": "67E35E918821D85F6AE6B3C9F4563C2122B497E989AEAA0ECB6A79DBA040E941",
+      "fixture_sha256": "D678CF5A013B41F3A945411A2CB09C69B36A3F0CA37DE3A9A34474B8137DE0FA",
+      "emulator_sha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+      "hdd_base_sha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+      "samples": [
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 1,
+          "pages": 14305,
+          "batch_us": 108512,
+          "pending": 1024,
+          "ready": 2
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 1,
+          "pages": 14305,
+          "batch_us": 94684,
+          "pending": 1024,
+          "ready": 3
+        },
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 4,
+          "pages": 14305,
+          "batch_us": 83651,
+          "pending": 1024,
+          "ready": 31
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 4,
+          "pages": 14305,
+          "batch_us": 79658,
+          "pending": 1024,
+          "ready": 21
+        },
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 12,
+          "pages": 14305,
+          "batch_us": 79584,
+          "pending": 1024,
+          "ready": 35
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 12,
+          "pages": 14301,
+          "batch_us": 75877,
+          "pending": 1024,
+          "ready": 22
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 1,
+          "pages": 900,
+          "batch_us": 105016,
+          "pending": 1024,
+          "ready": 0
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 1,
+          "pages": 900,
+          "batch_us": 95790,
+          "pending": 1024,
+          "ready": 2
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 4,
+          "pages": 900,
+          "batch_us": 84870,
+          "pending": 1024,
+          "ready": 28
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 4,
+          "pages": 900,
+          "batch_us": 77573,
+          "pending": 1024,
+          "ready": 25
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 12,
+          "pages": 900,
+          "batch_us": 79318,
+          "pending": 1024,
+          "ready": 23
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 12,
+          "pages": 900,
+          "batch_us": 75799,
+          "pending": 1024,
+          "ready": 29
+        }
+      ]
+    },
+    {
+      "receipt": "world-delay-stock-candidate-20261013-123903-3",
+      "profile": "candidate",
+      "checks": 19,
+      "bios_sha256": "67E35E918821D85F6AE6B3C9F4563C2122B497E989AEAA0ECB6A79DBA040E941",
+      "fixture_sha256": "D678CF5A013B41F3A945411A2CB09C69B36A3F0CA37DE3A9A34474B8137DE0FA",
+      "emulator_sha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+      "hdd_base_sha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+      "samples": [
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 1,
+          "pages": 14305,
+          "batch_us": 108024,
+          "pending": 1024,
+          "ready": 2
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 1,
+          "pages": 14305,
+          "batch_us": 99498,
+          "pending": 1024,
+          "ready": 5
+        },
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 4,
+          "pages": 14305,
+          "batch_us": 82469,
+          "pending": 1024,
+          "ready": 22
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 4,
+          "pages": 14305,
+          "batch_us": 81065,
+          "pending": 1024,
+          "ready": 21
+        },
+        {
+          "phase": 0,
+          "dataset": 0,
+          "depth": 12,
+          "pages": 14305,
+          "batch_us": 75451,
+          "pending": 1024,
+          "ready": 25
+        },
+        {
+          "phase": 0,
+          "dataset": 1,
+          "depth": 12,
+          "pages": 14303,
+          "batch_us": 77549,
+          "pending": 1024,
+          "ready": 23
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 1,
+          "pages": 900,
+          "batch_us": 100771,
+          "pending": 1024,
+          "ready": 0
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 1,
+          "pages": 900,
+          "batch_us": 98029,
+          "pending": 1024,
+          "ready": 4
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 4,
+          "pages": 900,
+          "batch_us": 82683,
+          "pending": 1024,
+          "ready": 22
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 4,
+          "pages": 900,
+          "batch_us": 81936,
+          "pending": 1024,
+          "ready": 27
+        },
+        {
+          "phase": 1,
+          "dataset": 0,
+          "depth": 12,
+          "pages": 900,
+          "batch_us": 77372,
+          "pending": 1024,
+          "ready": 21
+        },
+        {
+          "phase": 1,
+          "dataset": 1,
+          "depth": 12,
+          "pages": 900,
+          "batch_us": 78890,
+          "pending": 1024,
+          "ready": 29
+        }
+      ]
+    }
+  ],
+  "excluded": {
+    "first_candidate": "Rejected by reference boosted-priority corner before candidate qualification",
+    "first_rules_fixture": "Reference fatal error after base8 cases during base setter setup; corrected fixture restores dynamic priority before documented +/-2 base changes, then passes79/79"
+  }
+}

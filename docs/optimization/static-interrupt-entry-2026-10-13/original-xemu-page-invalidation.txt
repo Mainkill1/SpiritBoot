@@ -1,0 +1,166 @@
+
+.scratch/forza-api-native-20261013/storage-cost-agent/original-xemu.exe:     file format pei-x86-64
+
+
+Disassembly of section .text:
+
+00000001401ac7d0 <tb_invalidate_phys_page_range__locked>:
+   1401ac7d0:	41 57                	push   r15
+   1401ac7d2:	41 56                	push   r14
+   1401ac7d4:	41 55                	push   r13
+   1401ac7d6:	41 54                	push   r12
+   1401ac7d8:	55                   	push   rbp
+   1401ac7d9:	57                   	push   rdi
+   1401ac7da:	56                   	push   rsi
+   1401ac7db:	53                   	push   rbx
+   1401ac7dc:	48 83 ec 28          	sub    rsp,0x28
+   1401ac7e0:	48 89 cf             	mov    rdi,rcx
+   1401ac7e3:	49 89 d5             	mov    r13,rdx
+   1401ac7e6:	4c 89 c5             	mov    rbp,r8
+   1401ac7e9:	4d 89 cc             	mov    r12,r9
+   1401ac7ec:	48 83 bc 24 98 00 00 	cmp    QWORD PTR [rsp+0x98],0x0
+   1401ac7f3:	00 00 
+   1401ac7f5:	74 1d                	je     1401ac814 <tb_invalidate_phys_page_range__locked+0x44>
+   1401ac7f7:	48 85 c9             	test   rcx,rcx
+   1401ac7fa:	74 18                	je     1401ac814 <tb_invalidate_phys_page_range__locked+0x44>
+   1401ac7fc:	48 8b 81 98 00 00 00 	mov    rax,QWORD PTR [rcx+0x98]
+   1401ac803:	48 8b 80 50 01 00 00 	mov    rax,QWORD PTR [rax+0x150]
+   1401ac80a:	80 78 01 00          	cmp    BYTE PTR [rax+0x1],0x0
+   1401ac80e:	0f 85 5c 01 00 00    	jne    1401ac970 <tb_invalidate_phys_page_range__locked+0x1a0>
+   1401ac814:	31 f6                	xor    esi,esi
+   1401ac816:	4c 8b 7d 08          	mov    r15,QWORD PTR [rbp+0x8]
+   1401ac81a:	49 83 ff 01          	cmp    r15,0x1
+   1401ac81e:	0f 86 9c 00 00 00    	jbe    1401ac8c0 <tb_invalidate_phys_page_range__locked+0xf0>
+   1401ac824:	44 89 fb             	mov    ebx,r15d
+   1401ac827:	45 31 f6             	xor    r14d,r14d
+   1401ac82a:	49 83 e7 fe          	and    r15,0xfffffffffffffffe
+   1401ac82e:	83 e3 01             	and    ebx,0x1
+   1401ac831:	0f 1f 40 00          	nop    DWORD PTR [rax+0x0]
+   1401ac835:	66 66 2e 0f 1f 84 00 	data16 cs nop WORD PTR [rax+rax*1+0x0]
+   1401ac83c:	00 00 00 00 
+   1401ac840:	4c 39 fe             	cmp    rsi,r15
+   1401ac843:	74 4b                	je     1401ac890 <tb_invalidate_phys_page_range__locked+0xc0>
+   1401ac845:	4c 89 f9             	mov    rcx,r15
+   1401ac848:	ba 01 00 00 00       	mov    edx,0x1
+   1401ac84d:	e8 5e f7 ff ff       	call   1401abfb0 <do_tb_phys_invalidate.lto_priv.0>
+   1401ac852:	49 8b 44 df 38       	mov    rax,QWORD PTR [r15+rbx*8+0x38]
+   1401ac857:	89 c3                	mov    ebx,eax
+   1401ac859:	49 89 c7             	mov    r15,rax
+   1401ac85c:	83 e3 01             	and    ebx,0x1
+   1401ac85f:	49 83 e7 fe          	and    r15,0xfffffffffffffffe
+   1401ac863:	48 83 f8 01          	cmp    rax,0x1
+   1401ac867:	77 d7                	ja     1401ac840 <tb_invalidate_phys_page_range__locked+0x70>
+   1401ac869:	48 83 7d 08 00       	cmp    QWORD PTR [rbp+0x8],0x0
+   1401ac86e:	74 60                	je     1401ac8d0 <tb_invalidate_phys_page_range__locked+0x100>
+   1401ac870:	45 84 f6             	test   r14b,r14b
+   1401ac873:	0f 85 27 01 00 00    	jne    1401ac9a0 <tb_invalidate_phys_page_range__locked+0x1d0>
+   1401ac879:	48 83 c4 28          	add    rsp,0x28
+   1401ac87d:	5b                   	pop    rbx
+   1401ac87e:	5e                   	pop    rsi
+   1401ac87f:	5f                   	pop    rdi
+   1401ac880:	5d                   	pop    rbp
+   1401ac881:	41 5c                	pop    r12
+   1401ac883:	41 5d                	pop    r13
+   1401ac885:	41 5e                	pop    r14
+   1401ac887:	41 5f                	pop    r15
+   1401ac889:	c3                   	ret
+   1401ac88a:	66 0f 1f 44 00 00    	nop    WORD PTR [rax+rax*1+0x0]
+   1401ac890:	8b 46 14             	mov    eax,DWORD PTR [rsi+0x14]
+   1401ac893:	25 ff 01 00 00       	and    eax,0x1ff
+   1401ac898:	83 f8 01             	cmp    eax,0x1
+   1401ac89b:	74 a8                	je     1401ac845 <tb_invalidate_phys_page_range__locked+0x75>
+   1401ac89d:	4c 8b 84 24 98 00 00 	mov    r8,QWORD PTR [rsp+0x98]
+   1401ac8a4:	00 
+   1401ac8a5:	48 89 f2             	mov    rdx,rsi
+   1401ac8a8:	48 89 f9             	mov    rcx,rdi
+   1401ac8ab:	41 be 01 00 00 00    	mov    r14d,0x1
+   1401ac8b1:	e8 7a fe ff ff       	call   1401ac730 <cpu_restore_state_from_tb>
+   1401ac8b6:	eb 8d                	jmp    1401ac845 <tb_invalidate_phys_page_range__locked+0x75>
+   1401ac8b8:	0f 1f 84 00 00 00 00 	nop    DWORD PTR [rax+rax*1+0x0]
+   1401ac8bf:	00 
+   1401ac8c0:	4d 85 ff             	test   r15,r15
+   1401ac8c3:	75 b4                	jne    1401ac879 <tb_invalidate_phys_page_range__locked+0xa9>
+   1401ac8c5:	45 31 f6             	xor    r14d,r14d
+   1401ac8c8:	0f 1f 84 00 00 00 00 	nop    DWORD PTR [rax+rax*1+0x0]
+   1401ac8cf:	00 
+   1401ac8d0:	48 8b 05 19 c7 7c 01 	mov    rax,QWORD PTR [rip+0x17cc719]        # 141978ff0 <.refptr.target_page>
+   1401ac8d7:	8b 58 04             	mov    ebx,DWORD PTR [rax+0x4]
+   1401ac8da:	e8 41 47 26 00       	call   140411020 <get_ptr_rcu_reader>
+   1401ac8df:	8b 50 08             	mov    edx,DWORD PTR [rax+0x8]
+   1401ac8e2:	c4 c2 e3 f7 dc       	shrx   rbx,r12,rbx
+   1401ac8e7:	8d 4a 01             	lea    ecx,[rdx+0x1]
+   1401ac8ea:	89 48 08             	mov    DWORD PTR [rax+0x8],ecx
+   1401ac8ed:	85 d2                	test   edx,edx
+   1401ac8ef:	0f 84 93 00 00 00    	je     1401ac988 <tb_invalidate_phys_page_range__locked+0x1b8>
+   1401ac8f5:	48 8b 05 b4 ba 7c 01 	mov    rax,QWORD PTR [rip+0x17cbab4]        # 1419783b0 <.refptr.ram_list>
+   1401ac8fc:	48 8b 50 28          	mov    rdx,QWORD PTR [rax+0x28]
+   1401ac900:	89 d9                	mov    ecx,ebx
+   1401ac902:	48 89 d8             	mov    rax,rbx
+   1401ac905:	c1 e9 15             	shr    ecx,0x15
+   1401ac908:	25 ff ff 1f 00       	and    eax,0x1fffff
+   1401ac90d:	48 8b 4c ca 10       	mov    rcx,QWORD PTR [rdx+rcx*8+0x10]
+   1401ac912:	48 c1 e8 05          	shr    rax,0x5
+   1401ac916:	ba 01 00 00 00       	mov    edx,0x1
+   1401ac91b:	c4 e2 61 f7 d2       	shlx   edx,edx,ebx
+   1401ac920:	f0 09 14 81          	lock or DWORD PTR [rcx+rax*4],edx
+   1401ac924:	e8 f7 46 26 00       	call   140411020 <get_ptr_rcu_reader>
+   1401ac929:	48 89 c2             	mov    rdx,rax
+   1401ac92c:	8b 40 08             	mov    eax,DWORD PTR [rax+0x8]
+   1401ac92f:	85 c0                	test   eax,eax
+   1401ac931:	0f 84 d5 00 00 00    	je     1401aca0c <tb_invalidate_phys_page_range__locked+0x23c>
+   1401ac937:	83 e8 01             	sub    eax,0x1
+   1401ac93a:	89 42 08             	mov    DWORD PTR [rdx+0x8],eax
+   1401ac93d:	0f 85 2d ff ff ff    	jne    1401ac870 <tb_invalidate_phys_page_range__locked+0xa0>
+   1401ac943:	c7 02 00 00 00 00    	mov    DWORD PTR [rdx],0x0
+   1401ac949:	f0 48 83 0c 24 00    	lock or QWORD PTR [rsp],0x0
+   1401ac94f:	80 7a 04 00          	cmp    BYTE PTR [rdx+0x4],0x0
+   1401ac953:	0f 84 17 ff ff ff    	je     1401ac870 <tb_invalidate_phys_page_range__locked+0xa0>
+   1401ac959:	c6 42 04 00          	mov    BYTE PTR [rdx+0x4],0x0
+   1401ac95d:	48 8b 0d cc ba 7c 01 	mov    rcx,QWORD PTR [rip+0x17cbacc]        # 141978430 <.refptr.rcu_gp_event>
+   1401ac964:	e8 17 e5 25 00       	call   14040ae80 <qemu_event_set>
+   1401ac969:	e9 02 ff ff ff       	jmp    1401ac870 <tb_invalidate_phys_page_range__locked+0xa0>
+   1401ac96e:	66 90                	xchg   ax,ax
+   1401ac970:	48 8b 8c 24 98 00 00 	mov    rcx,QWORD PTR [rsp+0x98]
+   1401ac977:	00 
+   1401ac978:	e8 33 52 fd ff       	call   140181bb0 <tcg_tb_lookup>
+   1401ac97d:	48 89 c6             	mov    rsi,rax
+   1401ac980:	e9 91 fe ff ff       	jmp    1401ac816 <tb_invalidate_phys_page_range__locked+0x46>
+   1401ac985:	0f 1f 00             	nop    DWORD PTR [rax]
+   1401ac988:	48 8b 15 91 ba 7c 01 	mov    rdx,QWORD PTR [rip+0x17cba91]        # 141978420 <.refptr.rcu_gp_ctr>
+   1401ac98f:	8b 12                	mov    edx,DWORD PTR [rdx]
+   1401ac991:	89 10                	mov    DWORD PTR [rax],edx
+   1401ac993:	f0 48 83 0c 24 00    	lock or QWORD PTR [rsp],0x0
+   1401ac999:	e9 57 ff ff ff       	jmp    1401ac8f5 <tb_invalidate_phys_page_range__locked+0x125>
+   1401ac99e:	66 90                	xchg   ax,ax
+   1401ac9a0:	49 8b 4d 00          	mov    rcx,QWORD PTR [r13+0x0]
+   1401ac9a4:	e8 67 c3 8c 00       	call   140a78d10 <g_tree_destroy>
+   1401ac9a9:	4c 89 e9             	mov    rcx,r13
+   1401ac9ac:	e8 1f 7f 89 00       	call   140a448d0 <g_free>
+   1401ac9b1:	8b 97 e4 00 00 00    	mov    edx,DWORD PTR [rdi+0xe4]
+   1401ac9b7:	8b 87 f0 02 00 00    	mov    eax,DWORD PTR [rdi+0x2f0]
+   1401ac9bd:	85 d2                	test   edx,edx
+   1401ac9bf:	75 44                	jne    1401aca05 <tb_invalidate_phys_page_range__locked+0x235>
+   1401ac9c1:	48 8b 15 c8 9c 7c 01 	mov    rdx,QWORD PTR [rip+0x17c9cc8]        # 141976690 <.refptr.one_insn_per_tb>
+   1401ac9c8:	80 3a 00             	cmp    BYTE PTR [rdx],0x0
+   1401ac9cb:	75 31                	jne    1401ac9fe <tb_invalidate_phys_page_range__locked+0x22e>
+   1401ac9cd:	48 8b 15 dc a6 7c 01 	mov    rdx,QWORD PTR [rip+0x17ca6dc]        # 1419770b0 <.refptr.qemu_loglevel>
+   1401ac9d4:	8b 0a                	mov    ecx,DWORD PTR [rdx]
+   1401ac9d6:	89 c2                	mov    edx,eax
+   1401ac9d8:	80 ce 02             	or     dh,0x2
+   1401ac9db:	80 e5 20             	and    ch,0x20
+   1401ac9de:	0f 45 c2             	cmovne eax,edx
+   1401ac9e1:	0d 01 00 01 00       	or     eax,0x10001
+   1401ac9e6:	48 89 f9             	mov    rcx,rdi
+   1401ac9e9:	c7 87 f8 02 00 00 ff 	mov    DWORD PTR [rdi+0x2f8],0xffffffff
+   1401ac9f0:	ff ff ff 
+   1401ac9f3:	89 87 dc 00 00 00    	mov    DWORD PTR [rdi+0xdc],eax
+   1401ac9f9:	e8 f2 82 ff ff       	call   1401a4cf0 <cpu_loop_exit>
+   1401ac9fe:	0d 01 02 00 00       	or     eax,0x201
+   1401aca03:	eb dc                	jmp    1401ac9e1 <tb_invalidate_phys_page_range__locked+0x211>
+   1401aca05:	0d 01 0e 00 00       	or     eax,0xe01
+   1401aca0a:	eb d5                	jmp    1401ac9e1 <tb_invalidate_phys_page_range__locked+0x211>
+   1401aca0c:	e8 7f e9 f7 ff       	call   14012b390 <rcu_read_unlock.part.0.lto_priv.0>
+   1401aca11:	90                   	nop
+   1401aca12:	0f 1f 00             	nop    DWORD PTR [rax]
+   1401aca15:	66 66 2e 0f 1f 84 00 	data16 cs nop WORD PTR [rax+rax*1+0x0]
+   1401aca1c:	00 00 00 00 

@@ -1,0 +1,137 @@
+{
+  "schema": 1,
+  "scope": "Exact best combined static IRQ release64 firmware native qualification; separate from packaged PR236; no full-game acceptance",
+  "source_tree": "6108cf4b697353bada1f9fa9df923db9d84054a8",
+  "rom_sha256": "913293b4a86eac808313555867aa3099aba40903cc17a63c3c424b89a5c5dd77",
+  "archive_sha256": "0dbc554ada77ad639285c6ee069281cd4d18ca4956e4853f5cc017a8a7b79f0d",
+  "new_rows": [
+    {
+      "directory": "irq-static-combined-lifetime/irq-static-combined-v1-lease-20261013-150358-1",
+      "numbered_checks": 7833,
+      "passing_assertions": 7833,
+      "expected_todo_failures": [],
+      "hard_failures": [],
+      "launch": {
+        "pid": 23696,
+        "side": "lease",
+        "utc": "2026-10-13T15:03:58.3080668Z",
+        "biosSha256": "913293B4A86EAC808313555867AA3099ABA40903CC17A63C3C424B89A5C5DD77",
+        "xemuSha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+        "fixtureSha256": "1F3C82BC7AFD2C4B1D4DD82DCE2D976C89A38028883CD13F137130A241F7647E",
+        "hddBase": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\replay-v4-candidate-20261013-081616\\hdd.qcow2",
+        "recorderEnabled": false,
+        "qmp": 58972,
+        "memoryMiB": 64,
+        "readThrottleBps": 2097152
+      },
+      "result": {
+        "exited": true,
+        "exitCode": 0,
+        "utc": "2026-10-13T15:04:11.8696326Z"
+      }
+    },
+    {
+      "directory": "irq-static-combined-seek-mutation-stock-async-20261013-150347-1",
+      "numbered_checks": 2071,
+      "passing_assertions": 2071,
+      "expected_todo_failures": [],
+      "hard_failures": [],
+      "launch": {
+        "pid": 21128,
+        "side": "async",
+        "utc": "2026-10-13T15:03:47.5253329Z",
+        "biosSha256": "913293B4A86EAC808313555867AA3099ABA40903CC17A63C3C424B89A5C5DD77",
+        "xemuSha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+        "fixtureSha256": "515273C199B19C21CFDDC6A6B073970ACF724F798294BD21053CD98690548F56",
+        "hddBase": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\replay-v4-candidate-20261013-081616\\hdd.qcow2",
+        "hddBaseSha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+        "recorderEnabled": false,
+        "qmp": 58712,
+        "memoryMiB": 64
+      },
+      "result": {
+        "exited": true,
+        "exitCode": 0,
+        "utc": "2026-10-13T15:03:58.1665266Z"
+      }
+    },
+    {
+      "directory": "irq-static-combined-zero-iosb-stock-async-20261013-150336-1",
+      "numbered_checks": 338,
+      "passing_assertions": 338,
+      "expected_todo_failures": [],
+      "hard_failures": [],
+      "launch": {
+        "pid": 23072,
+        "side": "async",
+        "utc": "2026-10-13T15:03:37.3769842Z",
+        "biosSha256": "913293B4A86EAC808313555867AA3099ABA40903CC17A63C3C424B89A5C5DD77",
+        "xemuSha256": "CD4CFD696AA9C196CF44FD35765E16CF662AFC16A689E1AF4584FA79398784DB",
+        "fixtureSha256": "F30CBA6DC720C259251323A78B5FA3125F8441CD8BA6D33174B33B7D5A0D3477",
+        "hddBase": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\replay-v4-candidate-20261013-081616\\hdd.qcow2",
+        "hddBaseSha256": "358F800749BEEAE20D376EACF48DB7285FAF7D426FE5C3A72A057EF013A657E7",
+        "recorderEnabled": false,
+        "qmp": 58712,
+        "memoryMiB": 64
+      },
+      "result": {
+        "exited": true,
+        "exitCode": 0,
+        "utc": "2026-10-13T15:03:47.4277818Z"
+      }
+    }
+  ],
+  "previous_same_image_rows": [
+    {
+      "directory": "irq-static-api-stock-async-20261013-143230-1",
+      "checks": 639,
+      "passing_assertions": 633,
+      "expected_todo_failures": [
+        {
+          "number": 178,
+          "name": "io/bad-ptr/set_eof_beyond_free_space # TODO vfat trips its FAT 4 GB size cap (C000000D) before the free-space check; retail FATX returns STATUS_DISK_FULL"
+        },
+        {
+          "number": 201,
+          "name": "io/storage/flush_volume_readonly # TODO retail flushes a read-only volume handle; nxkrnl returns ACCESS_DENIED"
+        },
+        {
+          "number": 319,
+          "name": "ke/exceptions/x87_divide_by_zero # TODO xemu TCG never raises unmasked FP exceptions"
+        },
+        {
+          "number": 320,
+          "name": "ke/exceptions/sse_divide_by_zero # TODO xemu TCG never raises unmasked FP exceptions"
+        },
+        {
+          "number": 580,
+          "name": "ke/procprio/a_new_thread_starts_at_the_process_priority # TODO only the calling thread follows the process: there is no list of the title's threads to walk"
+        },
+        {
+          "number": 584,
+          "name": "ke/procprio/the_process_lists_its_threads # TODO the process' thread list is published empty: linking into it needs KTHREAD.ThreadListEntry, past the end of the shadow"
+        }
+      ],
+      "hard_failures": [],
+      "known_inherited_owner_control": false,
+      "bios_sha256": "913293b4a86eac808313555867aa3099aba40903cc17a63c3c424b89a5c5dd77",
+      "fixture_sha256": "522fb18a5d9c85b66494f4d41850762bd398cedf4da78d44f1066049cef5adec",
+      "normal_exit": true
+    },
+    {
+      "directory": "irq-static-public-stock-async-20261013-142539-2",
+      "checks": 17,
+      "passing_assertions": 17,
+      "expected_todo_failures": [],
+      "hard_failures": [],
+      "known_inherited_owner_control": false,
+      "bios_sha256": "913293b4a86eac808313555867aa3099aba40903cc17a63c3c424b89a5c5dd77",
+      "fixture_sha256": "a4a3e2849789b94202c643dd7d2ff1f04d734716b0def5f6b01c25ea8ac99dfb",
+      "normal_exit": true
+    }
+  ],
+  "numbered_checks": 10898,
+  "passing_assertions": 10892,
+  "expected_todo_failures": 6,
+  "unexpected_failures": 0
+}
