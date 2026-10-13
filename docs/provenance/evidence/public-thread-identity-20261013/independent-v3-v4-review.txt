@@ -1,0 +1,138 @@
+Independent read-only public thread-view review, 2026-10-13
+Reviewer: memory_scheduler_cost agent. No prototype source edits.
+
+Snapshot:
+  async-qualification-agent/thread-abi-design/release64-v3/work-3igvw6tu/source
+  source tree e5338be4b02b61e8db2b162e1fd1e3208fa72073
+  ROM 6974ad8c3818e5157f5edf39ab76bb1c7740d1fd45e62bc15f47a9e681728e71
+  runtime patch 9998-public-thread-view-prototype.patch
+  patch SHA256 636dd9e449849f6bbd6df8f9b89e69264e569fd7b223add180cc481ca8bd4502
+
+Status: no demonstrated new lifetime, reference-ownership, or WaitNext defect
+found in this snapshot. Two multiwait qualification gaps require disposition
+before claiming complete public wait-block behavior (see below). This is an
+identity/exit/pointer translation review, not certification of a complete live
+KTHREAD/ETHREAD ABI.
+
+Lifetime and references:
+  PspCreateThread zeroes the complete ETHREAD before any failure can invoke
+  its delete routine. KeInitThread registers the embedded view only after
+  successful native initialization. Fields precede registration, registration
+  precedes creation notification and handle exposure, and the registry owns
+  no object reference. Therefore it cannot itself create a reference leak.
+  PspDeleteThread unregisters before stack/CID teardown, not at exit or handle
+  closure. A reference held after exit continues to resolve until final delete.
+  Failed pre-init allocation safely has a null registry link. The 32 buckets
+  and monotonic low-address-bit negative filter do not dereference arbitrary
+  caller memory; a positive filter hit still needs exact address membership.
+  Registry lookup is correct under the stated Xbox UP and valid-object-lifetime
+  preconditions: interrupt exclusion protects traversal; references are held
+  by the caller or by an executing/creation/termination thread lifetime.
+
+  The native object owns reference counts, handles, type checks and deletion.
+  Successful native ObReferenceObjectByHandle/Name results are translated only
+  after a reference is acquired and immutable native type is inspected. Bare
+  public pointers are translated before object-header or title-object-shim
+  classification in ReferenceByPointer, OpenByPointer, Reference, Dereference,
+  and MakeTemporary. Type mismatches still drop acquired references. Ordinary
+  non-thread objects pass unchanged. Native compatibility resolution uses
+  exact membership rather than interpreting a header byte in title memory.
+
+Notification and termination order:
+  Creation callbacks receive the public pointer and published ID/header before
+  the title thread starts. Destruction notification marks HasTerminated while
+  retaining the ID and prior public exit value, as pinned by the owner's oracle.
+  Native PspExitThread subsequently assigns ExitStatus/ExitTime. At final
+  KeTerminateThread, while dispatcher protection prevents runnable waiters,
+  public final status/time, null ID, HasTerminated, ApcQueueable and signal state
+  are published before native signal/unwait. This prevents a waiter seeing a
+  signaled native thread with a still-live exit status shadow.
+  The callback pointer is borrowed under the existing native thread lifetime;
+  retaining it after callback still requires a normal object reference.
+
+Wait and APC routing:
+  Pointer-consuming thread control and APC initialization paths use the exact
+  resolver. Single-object waits translate the public thread to native and leave
+  APC precedence, WaitNext, alert checks and scheduling in the native function.
+  The multiwait adapter uses bounded stack arrays, translates object pointers,
+  and calls the existing native wait without lowering IRQL, consuming WaitNext,
+  inserting an allocation, or introducing a scheduling boundary before it.
+  Registry interrupt save/restore preserves the caller's interrupt flags.
+  KeSetEvent(...,Wait=TRUE) can therefore reach native wait with its dispatcher
+  contract intact. Result repair runs only after native wait has finished.
+  Queued detection relies on native InsertTailList and RemoveEntryList retaining
+  the removed wait entry's links; the native unlink implementation does so.
+  For event-only immediate waits the 193-check oracle pins native status,
+  alert/timeout precedence, synchronization-object consumption, caller array/
+  block guards, failed-prefix writes, untouched suffix, and circular WaitAll.
+  A kernel APC retry may preserve previous non-null links; treating that as an
+  actual prior queueing is appropriate because all blocks were already visited.
+
+Required qualification gaps / precise limits:
+  1. Abandoned mutants are absent from the current event-only wait oracle.
+     XeKeWaitForMultipleObjects recognizes immediate WaitAny success only when
+     status is 0..Count-1; abandoned success is STATUS_ABANDONED_WAIT_0+index.
+     Likewise the no-queue circular WaitAll rule recognizes only STATUS_WAIT_0.
+     Thus v3 definitely takes different repair branches for abandoned success.
+     Whether the resulting public bytes differ from Complex needs a reference
+     oracle for WaitAny winner 0/1 and immediate abandoned WaitAll before patching.
+     This was sent to the owner as an evidence request, not a proven runtime bug.
+  2. Caller wait blocks contain native Thread/Object pointers while inside the
+     native wait. The adapter repairs these only after the call returns. Native
+     KiDeliverXboxUserApcs can invoke a title callback before that return, so a
+     callback inspecting its caller's blocks can observe those native fields.
+     Live observation by another thread has the same limit. The current oracle
+     checks returned blocks only. This is a source-proven coverage limitation;
+     whether callback-time public bytes are a required compatibility change
+     needs a Complex-first observation. Do not claim complete live block ABI.
+
+Metadata outside the qualified guarantee:
+  Published Priority/BasePriority/DisableBoost/SuspendCount are snapshots from
+  initialization, notifications, and selected pointer setters. Native scheduler,
+  handle-based control calls and other internal mutations do not all republish.
+  Quantum, State, KernelStack, APC/list links and other scheduling fields are
+  not continuously synchronized. Stale live priority/quantum already existed;
+  this patch must not be described as fixing all public thread state.
+  Creation callback occurs before native CreateTime assignment. CreateSuspended
+  is applied after the callback and does not by itself republish SuspendCount.
+  The owner's separate metadata oracle is needed to settle callback/creation
+  return observations; the current identity/exit checks do not qualify those.
+  The public lists are initialized shape-compatible sentinels, not mirrors of
+  every native list. Public dispatcher signal is published on terminal exit.
+
+Native evidence supplied by owner (not independently rerun by this reviewer):
+  extended-v1 Complex / async2 / prototype: 166 checks, 0 / 48 / 0 failures.
+  extended-v2 prototype: 166/166.
+  wait-oracle-v2 Complex and prototype: 193/193 each.
+  cost-soak-v2 Complex / async2 / prototype: 139/139, 138/139 (expected identity/
+  exit mismatch), 139/139. 32 threads and 320 quiet cycles retain baseline pages.
+  v3 changes only negative filtering and inline generic conversion versus v2;
+  its separate cost ABBA is owned by root. No Forza speed claim from this review.
+
+Minor documentation-only issue:
+  internal/ntoskrnl.h still describes old shadow[0x80] and KTHREAD size0x240
+  immediately above the new correct 0x308/0x2fc/0x300/0x304 compile-time asserts.
+
+Owner oracle follow-up (received after immutable-v3 review):
+  CreateTime is zero during creation notification and nonzero on return on
+  Complex and v3; existing ordering is correct and no reorder is warranted.
+  Complex create callback/return Quantum is 60/60 and SuspendCount1/1; v3
+  reports0/0 for those. Complex State0/1 versus v3 0/0. These remain explicit
+  metadata scope gaps; they do not invalidate the identity/exit proof.
+  The callback-time wait-block gap is now native-confirmed: Complex user APC
+  kernel/normal callbacks see public Thread pointers and full SHORT WaitType;
+  v3 exposes native Thread and stale upper byte0xa5 until wrapper return.
+  Returned-status/guard-only tests passed215, demonstrating why exact field
+  assertions are required. Owner is testing a v4 deferred-delivery adapter.
+  Separately reviewed owner exact-address cache delta: no blocker under UP
+  valid-object-lifetime contract; populated under exact registry match, invalidated
+  before unlink, NULL excluded, no new caller-memory dereference.
+
+Owner corrected wait oracle follow-up:
+  Exact public field assertions: Complex295/295, v3275/295 (20 expected
+  abandoned-success/APC-publication failures), v4295/295. Includes immediate
+  and queued user APCs, Count1/2/64, callback order/IRQL and nested normal-callback
+  wait. Both reference user APC callbacks are PASSIVE0/0. Public NULL wait-block
+  array Count2 bugchecks Complex; nxdk marks it non-optional, so exclude it from
+  supported public oracle and retain only native/internal host edge coverage.
+  v4 runtime and cost-soak qualification remain owner/root responsibility.

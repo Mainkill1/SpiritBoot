@@ -151,7 +151,28 @@ Packaged release64 ROM on PR233:
 `38ba7640b7dd80de80b9a9d0736df6fc2ce9add3d2788b6a8c3ac518810319a8`.
 Packaged source tree: `51cb877cc33530e6e5784377d4bc10e7ff1966e4`.
 The prototype native receipts and packaged build/host receipts are distinct;
-combined owner-fix native regression is recorded separately when complete.
+the combined owner-fix receipt uses its own exact identity below.
+
+The combined async5 runtime (PR233 behavior + this v4 runtime + PR230 owner
+repair) passes **11,640 functional assertions across 11 native fixtures**:
+zero IOSB 338, seek/mutation 2,071, broad ABI 16, critical owner 36, contention
+188, immediate delay 537, scatter 21, async lifetime 7,833, thread identity 166,
+wait blocks 295 and quiet thread soak 139. Four A/B/B/A public world replays
+also pass 19 checks each. This is public workload regression, not game
+acceptance or a claimed game performance gain.
+
+Combined ROM:
+`7d190406537911e296931947b32c5c5efcfc7cecb00f6fa1b7e84d419074a4ef`.
+Combined source: `642b25b303108d3f0616a98fa5333acb9d1495ac`.
+The [combined receipt](evidence/public-thread-identity-20261013/combined-async5-qualification.json)
+and [unmodified raw archive](evidence/public-thread-identity-20261013/combined-async5-evidence.tar.gz)
+are distinct from the standalone packaged `38ba...` build. Archive SHA256 is
+`4a1c79f0008014b41566b20810437137abf0a33f8f59d2ed3dd61243f4eabbe3`.
+All 15 TAP plans/assertion sequences and per-run BIOS hashes were checked.
+The parent also reran the 138,797 registry and 448,384 adapter host assertions
+on the exact combined source. The packaged patch changes only comments and
+adds tests relative to the v4 runtime in that combined image; the comment
+comparison receipt records the three affected runtime files.
 
 ## Explicit limits
 

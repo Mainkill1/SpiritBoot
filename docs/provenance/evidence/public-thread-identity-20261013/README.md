@@ -29,3 +29,8 @@ in emulator stderr; the failed bugcheck capture also trims trailing blank lines.
 The normalization manifest
 records original and normalized SHA256 values; original captures remain retained
 in the qualification workspace. No assertion text or measurements were edited.
+
+The combined async5 archive is copied byte-exact and has its own BIOS/source
+identity. It covers PR230 owner + PR233 behavior + v4 thread runtime. Its
+11,640 functional assertions and four world replays are not relabeled as runs
+of the separately built standalone packaged ROM.
