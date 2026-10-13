@@ -1,0 +1,87 @@
+TAP version 14
+ok 1 - hold current thread object reference
+ok 2 - public packet field offsets match ABI
+ok 3 - allocate two public packets
+ok 4 - fresh packet is unlinked
+ok 5 - queue retains public thread field
+ok 6 - queue retains status sentinel
+ok 7 - queue links packet consistently
+ok 8 - queue inserts second packet at front
+ok 9 - create isolated title device
+ok 10 - public builder allocates packet
+# builder kind=0 async=0 thread=0xd002f018 self=0xd002f018 current=0xd002f018
+ok 11 - public builder exposes referenced thread identity
+ok 12 - dispatch returns expected immediate or pending status
+ok 13 - title dispatch observes unchanged public thread identity
+ok 14 - completion reaches issuer event
+ok 15 - completion writes exact issuer IOSB
+ok 16 - start cross-thread completion worker
+ok 17 - public builder allocates packet
+# builder kind=0 async=1 thread=0xd002f018 self=0xd002f018 current=0xd002f018
+ok 18 - public builder exposes referenced thread identity
+ok 19 - dispatch returns expected immediate or pending status
+ok 20 - title dispatch observes unchanged public thread identity
+ok 21 - completion reaches issuer event
+ok 22 - completion writes exact issuer IOSB
+ok 23 - other-thread completion returns
+ok 24 - completion queued to issuer from another thread
+ok 25 - completion worker terminates
+ok 26 - public builder allocates packet
+# builder kind=1 async=0 thread=0xd002f018 self=0xd002f018 current=0xd002f018
+ok 27 - public builder exposes referenced thread identity
+ok 28 - dispatch returns expected immediate or pending status
+ok 29 - title dispatch observes unchanged public thread identity
+ok 30 - completion reaches issuer event
+ok 31 - completion writes exact issuer IOSB
+ok 32 - start cross-thread completion worker
+ok 33 - public builder allocates packet
+# builder kind=1 async=1 thread=0xd002f018 self=0xd002f018 current=0xd002f018
+ok 34 - public builder exposes referenced thread identity
+ok 35 - dispatch returns expected immediate or pending status
+ok 36 - title dispatch observes unchanged public thread identity
+ok 37 - completion reaches issuer event
+ok 38 - completion writes exact issuer IOSB
+ok 39 - other-thread completion returns
+ok 40 - completion queued to issuer from another thread
+ok 41 - completion worker terminates
+ok 42 - public builder allocates packet
+# builder kind=2 async=0 thread=0xd002f018 self=0xd002f018 current=0xd002f018
+ok 43 - public builder exposes referenced thread identity
+ok 44 - dispatch returns expected immediate or pending status
+ok 45 - title dispatch observes unchanged public thread identity
+ok 46 - completion reaches issuer event
+ok 47 - completion writes exact issuer IOSB
+ok 48 - start cross-thread completion worker
+ok 49 - public builder allocates packet
+# builder kind=2 async=1 thread=0xd002f018 self=0xd002f018 current=0xd002f018
+ok 50 - public builder exposes referenced thread identity
+ok 51 - dispatch returns expected immediate or pending status
+ok 52 - title dispatch observes unchanged public thread identity
+ok 53 - completion reaches issuer event
+ok 54 - completion writes exact issuer IOSB
+ok 55 - other-thread completion returns
+ok 56 - completion queued to issuer from another thread
+ok 57 - completion worker terminates
+ok 58 - allocate StartIo packet
+ok 59 - allocate StartIo packet
+ok 60 - allocate StartIo packet
+ok 61 - StartIo starts first packet and queues following packets
+ok 62 - all StartIo entry paths preserve public thread identity
+ok 63 - allocate completion-owner packet
+ok 64 - driver completion returns after retaining packet
+ok 65 - MORE_PROCESSING_REQUIRED retains packet and public thread field
+ok 66 - caller reinitialization clears old owner and list membership
+ok 67 - allocate completion-owner packet
+ok 68 - driver completion returns after retaining packet
+ok 69 - MORE_PROCESSING_REQUIRED retains packet and public thread field
+ok 70 - caller reinitialization clears old owner and list membership
+ok 71 - open title device through native I/O manager
+ok 72 - native create publishes public thread before title dispatch
+ok 73 - create native request completion event
+# native_read status=00000000 iosb=00000000 information=32 flags=00000008 dispatches=5
+ok 74 - native request reaches title driver
+ok 75 - native request completion returns to event
+ok 76 - native to title to completion preserves thread and exact IOSB
+ok 77 - native request receives exact title driver bytes
+# checks=77 failures=0
+1..77

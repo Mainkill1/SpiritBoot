@@ -1,12 +1,12 @@
 # Public thread identity and terminal status
 
-The initial full CI matrix exposed an additional IRP thread-pointer boundary
-regression after the release-only qualification below. The follow-up IRP
-boundary fix is described in the final section. Its full checked runtime and
-corrected expanded native qualification are still pending; the draft remains
-blocked for integration until they pass.
+The thread identity repair and its IRP boundary follow-up pass the full
+release/debug 64/128-MiB CI matrix and the native qualification below. Initial
+v4 CI exposed a real IRP thread-pointer regression; v5 fixes that regression
+and retains the failing evidence. This remains a draft for review, with the
+explicit field and integration limits below.
 
-## IRP boundary follow-up (v5, native qualification pending)
+## IRP boundary follow-up (v5)
 
 PR233's exact checked64 CI run 38405100975 completed all 639 API tests,
 including `io/threadirp` 505–508. Initial PR234 run 38408986927 stopped after
@@ -36,21 +36,61 @@ after actual disassociation, native→title→native forwarding, all StartIo
 entries, freeing callbacks, MORE_PROCESSING_REQUIRED, reuse, and builder
 success/failure. All 89 workflow source checks pass; an independent review
 also reran the 69 new checks. Host dispatch/IRQL/allocation primitives are
-models, so native guest qualification is still required.
+models; the native receipts below independently qualify the public behavior.
 
 The first Complex public oracle passed 57/57. An expanded fixture passed its
 first 73 checks on Complex and v5, then used an invalid buffered read reporting
 0x1234 bytes for a 32-byte request. That fixture is excluded from qualification
-and preserved separately. The corrected case must pass Complex before rerun
-on the candidate.
+and preserved separately. A further reference-only run returned
+STATUS_ACCESS_DENIED because the minimal title create handler had not set read
+access. The final fixture uses public IoSetShareAccess, reports the actual byte
+count and passes **77/77** on Complex,
+v5 release64 and v5 checked64, with identical fixture hashes. It validates all
+queue/builder/StartIo/retained-packet paths and native I/O manager dispatch
+through the title driver to exact event/IOSB/data completion.
+
+The exact release v5 ROM additionally passes **10,537/10,537** assertions:
+async lifetime 7,833, zero IOSB 338, seek/mutation 2,071 and public wait blocks
+295. Under a test-only 2-MiB/s HDD throttle, all 1,116 reads return pending;
+1,097 still have unsignaled events on return. Close/delete/truncate contenders
+start while reads remain pending. Eight issuer-exit cases complete exact data
+and IOSBs without delivering an APC to the departed thread. Steady available
+pages and pool pages remain flat at 15,633 and 47.
+
+The [v5 CI matrix](https://github.com/Mainkill1/SpiritBoot/actions/runs/38415999040)
+passes all five jobs at `62febdc2`: host tests and release/debug 64/128-MiB
+firmware. Each profile completes all 639 API assertions (633 passes and six
+preexisting TODOs, zero hard failures), including `io/threadirp` 505–508, and
+the configured contracts, warm-reboot and performance-correctness guests.
+Both release profiles pass clean rebuild verification. The checked CI image
+has its own recorded ROM hash and the same pinned v5 source tree; it is not
+relabeled as the locally built checked64 ROM below.
+
+An uninstrumented, unthrottled A/B/B/A compares the previous packaged v4 ROM
+with packaged v5, using the same public world replay, original emulator and
+isolated HDD base. Every boot passes 19 checks and verifies SHA1 for all
+12,288 reads. Total batch time across the 12 workloads is
+986.382 / 1,008.887 / 1,014.631 / 1,014.022 ms. Candidate/control two-boot means
+are **+1.16%**, with individual workload ratios from 0.9902 to 1.0360. The
+last control overlaps the slower candidate; one short ABBA does not isolate
+small overhead from run drift. This is neither a zero-cost claim nor a game
+performance claim. The [full timings](evidence/public-thread-identity-20261013/irp-boundary-v5/world-cost-v5.json)
+retain every workload rather than only the favorable samples.
+
+The IRP follow-up adds 600 bytes of release `.text` and 40 bytes to `.bss`
+layout relative to packaged v4. Section RVAs and `SizeOfImage` (585,728 bytes)
+are unchanged, so it consumes no additional image page in this build. It adds
+no per-IRP or per-thread allocation.
 
 Exact source tree: `c5a4fb8a95538e2f976cfa933395857e38bd3d57`.
 Release64 ROM: `d542171d60701f7fdab977b047458d27d40d713f235b7251c6af3eb88a27c2f9`.
 Checked64 ROM: `77169666082d8c52d0960a6c4df094537d2a7680021d36d7aa811c8ddee6a4c5`.
 These are distinct from the original v4 and combined async5 receipts below.
-[CI failure excerpts and host receipts](evidence/public-thread-identity-20261013/irp-boundary-v5/)
-retain that distinction. Corrected native tests and the new full CI matrix are
-pending; this draft remains blocked for integration.
+[CI failure excerpts, host and native receipts](evidence/public-thread-identity-20261013/irp-boundary-v5/)
+retain that distinction, including the excluded fixtures. The standalone
+[public IRP fixture](../../tests/xbe/thread-irp-identity/README.md) is maintained
+with the other native probes. No merge or combined-runtime acceptance is
+implied by the standalone v5 receipts.
 
 ## Original thread identity implementation and qualification
 

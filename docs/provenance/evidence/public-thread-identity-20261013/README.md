@@ -34,3 +34,13 @@ The combined async5 archive is copied byte-exact and has its own BIOS/source
 identity. It covers PR230 owner + PR233 behavior + v4 thread runtime. Its
 11,640 functional assertions and four world replays are not relabeled as runs
 of the separately built standalone packaged ROM.
+
+`irp-boundary-v5/` retains the initial checked-CI regression and green base
+control, the correction's actual-source host checks, independent review,
+excluded native fixtures and final 77-check Complex/release/checked oracle.
+It also contains the exact v5 10,537-check functional runs, unthrottled world
+A/B/B/A, memory footprint and full green CI matrix receipt. The one throttled
+run is labeled in its launch record and qualifies pending-request lifetime;
+its time is not used for performance. `normalization-v5.json` separately pins
+all original and normalized native files. CI checked64 uses its own build and
+run hashes, while sharing the same source tree as the local v5 builds.
