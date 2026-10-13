@@ -18,8 +18,15 @@ is `eee7de60ad3d2047efab3161491edb17768b5482`; the resulting kernel commit is
 remain bound to their original isolated baseline. The current combined release64
 build reconstructs that tree, produces a 512 KiB ROM with SHA-256
 `484ea01114ecee7c134f0327101218e1c376769880b5a069a0322c41bd8e552e`,
-and passes all 560 production-body cases. The full profile and native guest CI
-matrix must still pass before merge.
+and passes all 560 production-body cases. Exact-head Open firmware run
+[`38330646937`](https://github.com/Mainkill1/SpiritBoot/actions/runs/38330646937)
+passes its host job and all four firmware profiles. The four retained bundles
+contain 93 successful runtime receipts. Each profile passes the focused guest
+12/12, the broad API guest 633/639 with the same six TODOs and no failures, and
+the production-body matrix with its race and lazy-shim cases. Hotpath run
+[`38330646927`](https://github.com/Mainkill1/SpiritBoot/actions/runs/38330646927)
+also passes. The downloaded bundle checks are preserved in the
+[current-composition artifact audit](object-handle-current-ci-audit.json).
 
 ## Exact source and linked behavior
 

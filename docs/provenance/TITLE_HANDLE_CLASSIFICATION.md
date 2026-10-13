@@ -49,7 +49,19 @@ classification; their final ownership and observable failure remain the same.
 
 ## Regression evidence and limits
 
-Patch `0101-object-handle-single-lookup.patch` produces source tree
+The v0.99.4-composed candidate passes exact-head Open firmware run
+[`38330646937`](https://github.com/Mainkill1/SpiritBoot/actions/runs/38330646937)
+and hotpath run
+[`38330646927`](https://github.com/Mainkill1/SpiritBoot/actions/runs/38330646927).
+Downloaded artifacts reconstruct tree
+`d5e5c40cb66deb63d31030668ee04e61877e3b64`; all four release/debug and
+64/128 MiB profiles pass the focused public guest 12/12 and the 560-case host
+matrix. Across those bundles, all 93 retained runtime guest runs pass. The broad
+API guest reports 633 passes and the same six TODOs in each profile, with zero
+failures or skips.
+
+The original isolated patch, then numbered
+`0101-object-handle-single-lookup.patch`, produces source tree
 `9c3a5cd5f226c11d917ee71abf57ce4399054c36`. The maintained host regression compiles
 the actual adapter, native reference, shim ownership and handle-table bodies;
 the maintained XBE includes the first-create/first-insert interval. Both catch
