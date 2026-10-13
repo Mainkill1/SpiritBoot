@@ -110,20 +110,26 @@ elif '--build' in sys.argv:
             [sys.executable, str(ROOT / "scripts/build-firmware.py"),
              "--source", str(self.source), "--output", str(self.output),
              "--lock", str(self.lock), "--memory-mib", "64"],
-            env=self.env, capture_output=True, text=True)
+            env=dict(self.env, FLASH_SIZE=str(512 * 1024)),
+            capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         manifest = json.loads((self.output / "build.json").read_text())
         self.assertEqual(manifest["memory_mib"], 64)
+        self.assertTrue(manifest["rom_kernel"])
+        self.assertEqual(manifest["flash_size"], 512 * 1024)
         configure = next(c for c in manifest["commands"] if "-G" in c)
         self.assertIn("-DXBOX_RAM_MIB=64", configure)
+        self.assertIn("-DNXK_ROM_KERNEL=ON", configure)
 
     def test_default_build_preserves_128_mib_capacity(self):
         result = self.build()
         self.assertEqual(result.returncode, 0, result.stderr)
         manifest = json.loads((self.output / "build.json").read_text())
         self.assertEqual(manifest["memory_mib"], 128)
+        self.assertFalse(manifest["rom_kernel"])
         configure = next(c for c in manifest["commands"] if "-G" in c)
         self.assertIn("-DXBOX_RAM_MIB=128", configure)
+        self.assertIn("-DNXK_ROM_KERNEL=OFF", configure)
 
     def test_upper_reservation_is_explicit_and_recorded(self):
         result = self.build()
