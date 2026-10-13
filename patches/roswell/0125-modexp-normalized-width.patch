@@ -1,23 +1,13 @@
 diff --git a/ntoskrnl/xb/crypto.c b/ntoskrnl/xb/crypto.c
-index 103d05a6..89d33c48 100644
+index 103d05a6..37f6f71c 100644
 --- a/ntoskrnl/xb/crypto.c
 +++ b/ntoskrnl/xb/crypto.c
-@@ -270,6 +270,9 @@ BnReduce(PULONG Result, const ULONG *Value, ULONG ValueWords,
- {
-     ULONG i;
- 
-+    /* Leading zero words carry no bits into the residue. */
-+    while (ValueWords > 0 && Value[ValueWords - 1] == 0)
-+        ValueWords--;
-     RtlZeroMemory(Result, N * sizeof(ULONG));
-     for (i = ValueWords * 32; i-- > 0;)
-         BnDoubleMod(Result, (Value[i / 32] >> (i % 32)) & 1, M, N);
-@@ -348,29 +351,30 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
+@@ -348,29 +348,34 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
      ULONG MInv = 0;
      ULONG ExpBits;
      BOOLEAN Odd;
 -    ULONG i;
-+    ULONG i, N;
++    ULONG i, N, BaseWords;
  
      if (Words == 0 || Words > BN_MAX_WORDS)
          return 0;
@@ -50,11 +40,15 @@ index 103d05a6..89d33c48 100644
  
      Odd = (BOOLEAN)(Modulus[0] & 1);
 -    BnReduce(Val, Base, Words, Modulus, Words);
-+    BnReduce(Val, Base, Words, Modulus, N);
++    /* Skip padding here, keeping the shared reducer's instruction layout. */
++    BaseWords = Words;
++    while (BaseWords > 0 && Base[BaseWords - 1] == 0)
++        BaseWords--;
++    BnReduce(Val, Base, BaseWords, Modulus, N);
  
      if (Odd)
      {
-@@ -384,20 +388,20 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
+@@ -384,20 +389,20 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
          /* Acc = 2^32N mod Modulus is the Montgomery form of one, reached
           * by doubling up from one; doubling it out again gives the
           * conversion factor that puts the base in the same form. */
@@ -85,7 +79,7 @@ index 103d05a6..89d33c48 100644
          Acc[0] = 1;
      }
  
-@@ -414,36 +418,39 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
+@@ -414,36 +419,39 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
          if ((Exponent[i / 32] >> (i % 32)) & 1)
          {
              if (Odd)

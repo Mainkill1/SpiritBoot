@@ -1,0 +1,313 @@
+diff --git a/tests/xbe/sg-performance/.gitignore b/tests/xbe/sg-performance/.gitignore
+new file mode 100644
+index 00000000..5f2408f0
+--- /dev/null
++++ b/tests/xbe/sg-performance/.gitignore
+@@ -0,0 +1,5 @@
++*.obj
++*.d
++*.iso
++bin/
++*.exe
+diff --git a/tests/xbe/sg-performance/Makefile b/tests/xbe/sg-performance/Makefile
+new file mode 100644
+index 00000000..98718955
+--- /dev/null
++++ b/tests/xbe/sg-performance/Makefile
+@@ -0,0 +1,5 @@
++XBE_TITLE = sg-performance
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /home/codex/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/sg-performance/README.md b/tests/xbe/sg-performance/README.md
+new file mode 100644
+index 00000000..b72af8d2
+--- /dev/null
++++ b/tests/xbe/sg-performance/README.md
+@@ -0,0 +1,11 @@
++# Gather write comparison
++
++Public nxdk fixture: 72 exact-byte/status/count/source-canary/EOF checks across
++five nonadjacent page lists and matched flat write controls. Seven samples per
++size include a first-use sample; subsequent six are warm. File extension and
++verification stay outside each QPC interval. Both synchronous write paths share
++the file, offset and bytes. No proprietary title data is included.
++
++Build using the locked nxdk container and `make NXDK_DIR=/usr/src/nxdk`.
++An optimization is accepted only after matched native runs retain all controls,
++including regressions. The fixture powers off after draining serial output.
+diff --git a/tests/xbe/sg-performance/main.c b/tests/xbe/sg-performance/main.c
+new file mode 100644
+index 00000000..2a7029c8
+--- /dev/null
++++ b/tests/xbe/sg-performance/main.c
+@@ -0,0 +1,64 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <xboxkrnl/xboxkrnl.h>
++#include "tap.h"
++#include <stdbool.h>
++#include <stdint.h>
++#include <string.h>
++#define MAX_PAGES 512
++#define SAMPLES 7
++static PUCHAR source,flat;
++static FILE_SEGMENT_ELEMENT segments[MAX_PAGES+1];
++static UCHAR output[32768];
++static ULONG checks,failures;
++static void check(bool value,const char *text){++checks;if(value)tap_ok(checks,text);else {tap_not_ok(checks,text);++failures;}}
++static const char path[]="\\Device\\Harddisk0\\Partition1\\spiritboot-sg-perf.tmp";
++typedef NTSTATUS (NTAPI *GATHER)(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,PIO_STATUS_BLOCK,PFILE_SEGMENT_ELEMENT,ULONG,PLARGE_INTEGER);
++static UCHAR pattern(ULONG page,ULONG offset,ULONG sample){return (UCHAR)(page*19+offset*13+sample*7);}
++static bool open_file(HANDLE *h){
++ ANSI_STRING name={(USHORT)(sizeof(path)-1),(USHORT)sizeof(path),(PCHAR)path};OBJECT_ATTRIBUTES oa={0};IO_STATUS_BLOCK io;
++ oa.ObjectName=&name;oa.Attributes=OBJ_CASE_INSENSITIVE;
++ return NtCreateFile(h,GENERIC_READ|GENERIC_WRITE|SYNCHRONIZE,&oa,&io,NULL,FILE_ATTRIBUTE_NORMAL,0,FILE_SUPERSEDE,FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE|FILE_NO_INTERMEDIATE_BUFFERING)==STATUS_SUCCESS;
++}
++static void prepare(ULONG pages,ULONG sample){
++ memset(source,0xEE,2*MAX_PAGES*PAGE_SIZE);
++ for(ULONG i=0;i<pages;i++){
++  ULONG index=(i*73)&(pages-1);PUCHAR p=source+2*index*PAGE_SIZE;
++  segments[i].Alignment=0;segments[i].Buffer=p;
++  for(ULONG j=0;j<PAGE_SIZE;j++)p[j]=pattern(i,j,sample);
++  memcpy(flat+i*PAGE_SIZE,p,PAGE_SIZE);
++ }
++ segments[pages].Alignment=0;segments[pages].Buffer=NULL;
++}
++static bool verify(HANDLE h,ULONG pages,ULONG sample){
++ IO_STATUS_BLOCK io;LARGE_INTEGER offset={0};ULONG total=pages*PAGE_SIZE;
++ for(ULONG at=0;at<total;){ULONG count=total-at;if(count>sizeof(output))count=sizeof(output);offset.QuadPart=at;
++  if(NtReadFile(h,NULL,NULL,NULL,&io,output,count,&offset)!=STATUS_SUCCESS||io.Information!=count)return false;
++  for(ULONG j=0;j<count;j++)if(output[j]!=pattern((at+j)/PAGE_SIZE,(at+j)%PAGE_SIZE,sample))return false;
++  at+=count;
++ }
++ for(ULONG i=0;i<pages;i++){PUCHAR p=segments[i].Buffer;for(ULONG j=0;j<PAGE_SIZE;j++)if(p[j]!=pattern(i,j,sample))return false;}
++ for(ULONG i=0;i<MAX_PAGES;i++)for(ULONG j=0;j<PAGE_SIZE;j++)if(source[(2*i+1)*PAGE_SIZE+j]!=0xEE)return false;
++ FILE_NETWORK_OPEN_INFORMATION info;
++ return NtQueryInformationFile(h,&io,&info,sizeof(info),FileNetworkOpenInformation)==STATUS_SUCCESS&&info.EndOfFile.QuadPart==MAX_PAGES*PAGE_SIZE;
++}
++int main(void){
++ tap_version(13);tap_plan(2+2*5*SAMPLES);bool all=true;HANDLE h=NULL;IO_STATUS_BLOCK io;
++ source=MmAllocateContiguousMemory(2*MAX_PAGES*PAGE_SIZE);flat=MmAllocateContiguousMemory(MAX_PAGES*PAGE_SIZE);
++ bool ready=source&&flat&&open_file(&h);check(ready,"allocate separated source pages and synchronous noncached file");if(!ready){tap_comment("setup failed");tap_drain();HalWriteSMBusValue(0x20,0x02,FALSE,0x80);for(;;)__asm__ __volatile__("hlt");}
++ FILE_END_OF_FILE_INFORMATION eof;eof.EndOfFile.QuadPart=MAX_PAGES*PAGE_SIZE;
++ ready=NtSetInformationFile(h,&io,&eof,sizeof(eof),FileEndOfFileInformation)==STATUS_SUCCESS;check(ready,"preallocate transfer extent outside measured calls");all&=ready;
++ ULONGLONG frequency=KeQueryPerformanceFrequency();tap_comment("SG-META version=1 frequency=%llu samples=%u max_pages=%u",(unsigned long long)frequency,SAMPLES,MAX_PAGES);
++ ULONG sizes[]={1,2,16,128,512};
++ for(ULONG mode=0;mode<2;mode++)for(ULONG k=0;k<5;k++)for(ULONG sample=0;sample<SAMPLES;sample++){
++  ULONG pages=sizes[k],bytes=pages*PAGE_SIZE;prepare(pages,sample);LARGE_INTEGER offset={0};
++  ULONGLONG start=KeQueryPerformanceCounter();
++  NTSTATUS status=mode?NtWriteFile(h,NULL,NULL,NULL,&io,flat,bytes,&offset):((GATHER)NtWriteFileGather)(h,NULL,NULL,NULL,&io,segments,bytes,&offset);
++  ULONGLONG end=KeQueryPerformanceCounter();
++  bool good=status==STATUS_SUCCESS&&io.Status==STATUS_SUCCESS&&io.Information==bytes&&verify(h,pages,sample);all&=good;
++  tap_comment("SG mode=%s pages=%lu sample=%lu bytes=%lu ticks=%llu correct=%u status=%08lx io=%08lx information=%lu",mode?"flat":"gather",pages,sample,bytes,(unsigned long long)(end-start),good,(ULONG)status,(ULONG)io.Status,(ULONG)io.Information);
++  check(good,"same bytes, source sentinels, status and EOF after synchronous write");
++ }
++ if(h)NtClose(h);if(source)MmFreeContiguousMemory(source);if(flat)MmFreeContiguousMemory(flat);
++ tap_comment("SG-SUMMARY samples=70 failures=%u",all?0:1);tap_comment("== sg-performance end %s ==",all?"PASS":"FAIL");
++ tap_drain();HalWriteSMBusValue(0x20,0x02,FALSE,0x80);for(;;)__asm__ __volatile__("hlt");
++}
+diff --git a/tests/xbe/sg-performance/tap.c b/tests/xbe/sg-performance/tap.c
+new file mode 100644
+index 00000000..009bb8a8
+--- /dev/null
++++ b/tests/xbe/sg-performance/tap.c
+@@ -0,0 +1,166 @@
++/*
++ * TAP 14 emitter.  Bytes go out the LPC47M157 SuperIO's COM1 at 115200 8N1
++ * (I/O 0x3F8).  We program the UART ourselves at first call so the suite
++ * works against both nxkrnl (which already programs it for DbgPrint) and
++ * the retail kernel (which doesn't).  isa-debugcon (port 0xE9) was the
++ * historical target but the upstream xemu AppImage builds without it.
++ */
++
++#include "tap.h"
++#include <stdio.h>
++#include <stdarg.h>
++
++#define COM1     0x3F8
++#define COM1_THR (COM1 + 0)
++#define COM1_DLL (COM1 + 0)
++#define COM1_IER (COM1 + 1)
++#define COM1_DLH (COM1 + 1)
++#define COM1_LCR (COM1 + 3)
++#define COM1_MCR (COM1 + 4)
++#define COM1_LSR (COM1 + 5)
++
++#define LSR_THRE 0x20  /* transmit holding register empty */
++#define LSR_TEMT 0x40  /* transmitter empty (shift + holding both drained) */
++#define LCR_DLAB 0x80
++#define LCR_8N1  0x03
++
++static inline void outb(unsigned short port, unsigned char val)
++{
++    __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
++}
++
++static inline unsigned char inb(unsigned short port)
++{
++    unsigned char ret;
++    __asm__ __volatile__("inb %1, %0" : "=a"(ret) : "Nd"(port));
++    return ret;
++}
++
++/* Xbox is single-CPU: prevent a scheduled kernel/debug writer from entering
++ * between bytes. Restore the caller's full flags, including an already-clear
++ * IF. Formatting stays outside this span; no kernel-private lock is borrowed. */
++static inline unsigned int tap_irq_save(void)
++{
++    unsigned int flags;
++    __asm__ __volatile__("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
++    return flags;
++}
++
++static inline void tap_irq_restore(unsigned int flags)
++{
++    __asm__ __volatile__("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
++}
++
++static void com_init(void)
++{
++    static int initialized = 0;
++    if (initialized) return;
++    initialized = 1;
++    outb(COM1_IER, 0x00);             /* disable all interrupts */
++    outb(COM1_LCR, LCR_DLAB);         /* DLAB=1 to set divisor */
++    outb(COM1_DLL, 0x01);             /* 115200 baud (1.8432 MHz / 16 / 1) */
++    outb(COM1_DLH, 0x00);
++    outb(COM1_LCR, LCR_8N1);          /* DLAB=0, 8N1 */
++    /* Retain the existing FIFO mode and queued bytes. THRE polling works
++     * with either the reset/default UART or a kernel-configured FIFO; changing
++     * FIFO enable or clearing it could discard the preceding debug message. */
++    outb(COM1_MCR, 0x0B);             /* DTR + RTS + OUT2 */
++}
++
++static void com_putc(char c)
++{
++    while ((inb(COM1_LSR) & LSR_THRE) == 0) { }
++    outb(COM1_THR, (unsigned char)c);
++}
++
++void tap_drain(void)
++{
++    while ((inb(COM1_LSR) & LSR_TEMT) == 0) { }
++}
++
++static void com_puts(const char *s)
++{
++    unsigned int flags = tap_irq_save();
++    com_init();
++    while (*s) com_putc(*s++);
++    tap_irq_restore(flags);
++}
++
++static void com_vprintf(const char *fmt, va_list ap)
++{
++    char buf[256];
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_puts(buf);
++}
++
++static void com_printf(const char *fmt, ...)
++{
++    va_list ap;
++    va_start(ap, fmt);
++    com_vprintf(fmt, ap);
++    va_end(ap);
++}
++
++void tap_puts(const char *s)
++{
++    com_puts(s);
++}
++
++void tap_version(unsigned int v)
++{
++    com_printf("TAP version %u\n", v);
++}
++
++void tap_plan(unsigned int n)
++{
++    com_printf("1..%u\n", n);
++}
++
++void tap_ok(unsigned int n, const char *desc)
++{
++    com_printf("ok %u - %s\n", n, desc);
++}
++
++void tap_not_ok(unsigned int n, const char *desc)
++{
++    com_printf("not ok %u - %s\n", n, desc);
++}
++
++void tap_diag_begin(void)
++{
++    com_puts("  ---\n");
++}
++
++void tap_diag_end(void)
++{
++    com_puts("  ...\n");
++}
++
++void tap_diag_kv(const char *key, const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("  %s: %s\n", key, buf);
++}
++
++void tap_comment(const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("# %s\n", buf);
++}
+diff --git a/tests/xbe/sg-performance/tap.h b/tests/xbe/sg-performance/tap.h
+new file mode 100644
+index 00000000..0f39d98a
+--- /dev/null
++++ b/tests/xbe/sg-performance/tap.h
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include <stdarg.h>
++#include <stdbool.h>
++
++void tap_version(unsigned int v);
++void tap_plan(unsigned int n);
++void tap_ok(unsigned int n, const char *desc);
++void tap_not_ok(unsigned int n, const char *desc);
++
++/* Open / close a YAML diagnostic block underneath a `not ok` line. */
++void tap_diag_begin(void);
++void tap_diag_end(void);
++void tap_diag_kv(const char *key, const char *fmt, ...);
++
++void tap_comment(const char *fmt, ...);
++
++/* Drop a raw string verbatim (no formatting / framing).  Used for the
++ * "== api-regression begin ==" / "== ... end ==" markers in main.c so
++ * the runner can slice the TAP block out of the surrounding kernel
++ * debug stream. */
++void tap_puts(const char *s);
++
++/* Block until the UART transmitter is fully drained.  Call before
++ * issuing an SMC shutdown so the final bytes aren't lost. */
++void tap_drain(void);

@@ -1,5 +1,5 @@
 diff --git a/ntoskrnl/xb/scattergather.c b/ntoskrnl/xb/scattergather.c
-index 4c29d19f..17f2da00 100644
+index 4c29d19f..885a78ae 100644
 --- a/ntoskrnl/xb/scattergather.c
 +++ b/ntoskrnl/xb/scattergather.c
 @@ -1,6 +1,7 @@
@@ -105,7 +105,7 @@ index 4c29d19f..17f2da00 100644
      device = IoGetRelatedDeviceObject(file);
      irp = IoAllocateIrp(device->StackSize, FALSE);
      if (!irp) { status = STATUS_INSUFFICIENT_RESOURCES; goto fail; }
-+    /* Mapping setup outweighs the copy for small writes in matched tests. */
++    /* Keep small writes on the bounce route; qualify direct mapping at 64 KiB+. */
 +    if (Write && synchronous && Length >= 16 * PAGE_SIZE) {
 +        irp->MdlAddress = XbSgDirectWriteMdl(r);
 +        r->Direct = irp->MdlAddress != NULL;
