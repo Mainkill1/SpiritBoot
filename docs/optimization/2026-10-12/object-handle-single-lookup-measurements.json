@@ -1,0 +1,4408 @@
+{
+  "schema": 1,
+  "issue": 215,
+  "product_base_commit": "b684738dd502a9172470ca7681f6147f9d16c72b",
+  "kernel_candidate_commit": "961eebde5497c8a41712bfa035be4abe93ad145d",
+  "kernel_baseline_tree": "22a477eb82ed0111f2b7ad0d94c7a33a67ab8a94",
+  "kernel_candidate_tree": "9c3a5cd5f226c11d917ee71abf57ce4399054c36",
+  "patch_path": "patches/roswell/0101-object-handle-single-lookup.patch",
+  "patch_sha256": "518eb15c271c8e2ec9cd6d35a0c61de11bd69790f0cb5c84bf8a8a6a6587a209",
+  "builds": {
+    "baseline-release64": {
+      "source_revision": "1569e2e89fb47cc72b9c704a8884f98200432bd4",
+      "source_tree": "22a477eb82ed0111f2b7ad0d94c7a33a67ab8a94",
+      "variant": "release",
+      "memory_mib": 64,
+      "source_date_epoch": "1788155396",
+      "tool_versions": {
+        "cmake": "cmake version 3.28.3",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "git": "git version 2.43.0",
+        "i686-w64-mingw32-g++": "i686-w64-mingw32-g++ (GCC) 13-win32",
+        "i686-w64-mingw32-gcc": "i686-w64-mingw32-gcc (GCC) 13-win32",
+        "ninja": "1.11.1",
+        "python3": "Python 3.12.3"
+      },
+      "status": "built",
+      "flash_sha256": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611"
+    },
+    "candidate-release64": {
+      "source_revision": "1569e2e89fb47cc72b9c704a8884f98200432bd4",
+      "source_tree": "9c3a5cd5f226c11d917ee71abf57ce4399054c36",
+      "variant": "release",
+      "memory_mib": 64,
+      "source_date_epoch": "1788155396",
+      "tool_versions": {
+        "cmake": "cmake version 3.28.3",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "git": "git version 2.43.0",
+        "i686-w64-mingw32-g++": "i686-w64-mingw32-g++ (GCC) 13-win32",
+        "i686-w64-mingw32-gcc": "i686-w64-mingw32-gcc (GCC) 13-win32",
+        "ninja": "1.11.1",
+        "python3": "Python 3.12.3"
+      },
+      "status": "built",
+      "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5"
+    },
+    "candidate-release128": {
+      "source_revision": "1569e2e89fb47cc72b9c704a8884f98200432bd4",
+      "source_tree": "9c3a5cd5f226c11d917ee71abf57ce4399054c36",
+      "variant": "release",
+      "memory_mib": 128,
+      "source_date_epoch": "1788155396",
+      "tool_versions": {
+        "cmake": "cmake version 3.28.3",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "git": "git version 2.43.0",
+        "i686-w64-mingw32-g++": "i686-w64-mingw32-g++ (GCC) 13-win32",
+        "i686-w64-mingw32-gcc": "i686-w64-mingw32-gcc (GCC) 13-win32",
+        "ninja": "1.11.1",
+        "python3": "Python 3.12.3"
+      },
+      "status": "built",
+      "flash_sha256": "73fea15c51e83c2cd0d003822ed7096934df54d375591a0712844dc1d796d5ae"
+    },
+    "candidate-debug64": {
+      "source_revision": "1569e2e89fb47cc72b9c704a8884f98200432bd4",
+      "source_tree": "9c3a5cd5f226c11d917ee71abf57ce4399054c36",
+      "variant": "debug",
+      "memory_mib": 64,
+      "source_date_epoch": "1788155396",
+      "tool_versions": {
+        "cmake": "cmake version 3.28.3",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "git": "git version 2.43.0",
+        "i686-w64-mingw32-g++": "i686-w64-mingw32-g++ (GCC) 13-win32",
+        "i686-w64-mingw32-gcc": "i686-w64-mingw32-gcc (GCC) 13-win32",
+        "ninja": "1.11.1",
+        "python3": "Python 3.12.3"
+      },
+      "status": "built",
+      "flash_sha256": "5b1bd01470afb8d6e81bc165c78524bd3dd73cce72d192d2c1fe45918e7665d6"
+    },
+    "candidate-debug128": {
+      "source_revision": "1569e2e89fb47cc72b9c704a8884f98200432bd4",
+      "source_tree": "9c3a5cd5f226c11d917ee71abf57ce4399054c36",
+      "variant": "debug",
+      "memory_mib": 128,
+      "source_date_epoch": "1788155396",
+      "tool_versions": {
+        "cmake": "cmake version 3.28.3",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "git": "git version 2.43.0",
+        "i686-w64-mingw32-g++": "i686-w64-mingw32-g++ (GCC) 13-win32",
+        "i686-w64-mingw32-gcc": "i686-w64-mingw32-gcc (GCC) 13-win32",
+        "ninja": "1.11.1",
+        "python3": "Python 3.12.3"
+      },
+      "status": "built",
+      "flash_sha256": "dfae1ef5645f2be410afbe161ff1cfc97414e629cee6cd1288631a1dc4f62330"
+    },
+    "candidate-release128-upper-reserved": {
+      "source_revision": "1569e2e89fb47cc72b9c704a8884f98200432bd4",
+      "source_tree": "9c3a5cd5f226c11d917ee71abf57ce4399054c36",
+      "variant": "release",
+      "memory_mib": 128,
+      "reserve_upper_ram": true,
+      "source_date_epoch": "1788155396",
+      "tool_versions": {
+        "cmake": "cmake version 3.28.3",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "git": "git version 2.43.0",
+        "i686-w64-mingw32-g++": "i686-w64-mingw32-g++ (GCC) 13-win32",
+        "i686-w64-mingw32-gcc": "i686-w64-mingw32-gcc (GCC) 13-win32",
+        "ninja": "1.11.1",
+        "python3": "Python 3.12.3"
+      },
+      "status": "built",
+      "flash_sha256": "7ece6fcc15e26c2bc14980c817ecef4634c4d4a7cbf9196efe050c8dce12e30b"
+    },
+    "candidate-release64-independent-clean": {
+      "source_revision": "1569e2e89fb47cc72b9c704a8884f98200432bd4",
+      "source_tree": "9c3a5cd5f226c11d917ee71abf57ce4399054c36",
+      "variant": "release",
+      "memory_mib": 64,
+      "reserve_upper_ram": false,
+      "source_date_epoch": "1788155396",
+      "tool_versions": {
+        "cmake": "cmake version 3.28.3",
+        "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        "git": "git version 2.43.0",
+        "i686-w64-mingw32-g++": "i686-w64-mingw32-g++ (GCC) 13-win32",
+        "i686-w64-mingw32-gcc": "i686-w64-mingw32-gcc (GCC) 13-win32",
+        "ninja": "1.11.1",
+        "python3": "Python 3.12.3"
+      },
+      "status": "built",
+      "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5"
+    }
+  },
+  "production_body_host": {
+    "compiler": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "compile_flags": [
+      "-m32",
+      "-std=c11",
+      "-O2",
+      "-g",
+      "-pthread",
+      "-fno-strict-aliasing",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wno-multichar",
+      "-Wno-unused-function",
+      "-Wno-sign-compare"
+    ],
+    "source_sha256": {
+      "ntoskrnl/xb/xbe.c": "e726a8e569ab41a48771ce8c8db72d880ca36b6b3b5de184d980ada07e0c5d97",
+      "ntoskrnl/xb/obcreate.c": "b531c5ebe25372a5066e666f2c7b9886152187aaec26f48c537e33a6cb45a9c1",
+      "ntoskrnl/ob/obref.c": "3adb9bcf6cd64ffd77d2955ba5cc51ec6a2208c520258575abb39bcdea73a5e7",
+      "ntoskrnl/ex/handle.c": "f691eba5012125b282e4fecbfb636b3a8bfd3c28faef1924e1c780ea87b86242",
+      "ntoskrnl/xb/object-types.h": "9aa584046df4d3d62c85f2f15fe2e065e9f0387b13de37fba554b3a6cfef693d"
+    },
+    "matrix_rows": 560,
+    "legacy_status_output_net_ownership_equal": true,
+    "operation_examples": {
+      "titles0-native0-tag0-request0": {
+        "baseline": {
+          "case": "titles0-native0-tag0-request0",
+          "status": 0,
+          "output": 1,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "titles0-native0-tag0-request0",
+          "status": 0,
+          "output": 1,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "titles1-native0-tag0-request0": {
+        "baseline": {
+          "case": "titles1-native0-tag0-request0",
+          "status": 0,
+          "output": 1,
+          "ownership": "balanced",
+          "calls": 2,
+          "maps": 2,
+          "walks": 2,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "titles1-native0-tag0-request0",
+          "status": 0,
+          "output": 1,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "titles1-native0-tag0-request3": {
+        "baseline": {
+          "case": "titles1-native0-tag0-request3",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 2,
+          "maps": 2,
+          "walks": 2,
+          "references": 0,
+          "dereferences": 0
+        },
+        "candidate": {
+          "case": "titles1-native0-tag0-request3",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "titles1-native0-tag0-request4": {
+        "baseline": {
+          "case": "titles1-native0-tag0-request4",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 0,
+          "dereferences": 0
+        },
+        "candidate": {
+          "case": "titles1-native0-tag0-request4",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "titles1-invalid0-request0": {
+        "baseline": {
+          "case": "titles1-invalid0-request0",
+          "status": 3221225480,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 2,
+          "maps": 2,
+          "walks": 0,
+          "references": 0,
+          "dereferences": 0
+        },
+        "candidate": {
+          "case": "titles1-invalid0-request0",
+          "status": 3221225480,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 0,
+          "references": 0,
+          "dereferences": 0
+        }
+      },
+      "titles1-kernel-request0": {
+        "baseline": {
+          "case": "titles1-kernel-request0",
+          "status": 0,
+          "output": 80,
+          "ownership": "balanced",
+          "calls": 2,
+          "maps": 2,
+          "walks": 2,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "titles1-kernel-request0",
+          "status": 0,
+          "output": 80,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "titles1-pseudo0-request0": {
+        "baseline": {
+          "case": "titles1-pseudo0-request0",
+          "status": 0,
+          "output": 90,
+          "ownership": "balanced",
+          "calls": 2,
+          "maps": 0,
+          "walks": 0,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "titles1-pseudo0-request0",
+          "status": 0,
+          "output": 90,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 0,
+          "walks": 0,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "titles1-pseudo1-request0": {
+        "baseline": {
+          "case": "titles1-pseudo1-request0",
+          "status": 0,
+          "output": 91,
+          "ownership": "balanced",
+          "calls": 2,
+          "maps": 0,
+          "walks": 0,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "titles1-pseudo1-request0",
+          "status": 0,
+          "output": 91,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 0,
+          "walks": 0,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "shim-request0": {
+        "baseline": {
+          "case": "shim-request0",
+          "status": 0,
+          "output": 70,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "shim-request0",
+          "status": 0,
+          "output": 70,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "shim-request1": {
+        "baseline": {
+          "case": "shim-request1",
+          "status": 0,
+          "output": 70,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "shim-request1",
+          "status": 0,
+          "output": 70,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "shim-request2": {
+        "baseline": {
+          "case": "shim-request2",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "shim-request2",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "shim-request3": {
+        "baseline": {
+          "case": "shim-request3",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "shim-request3",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "shim-request4": {
+        "baseline": {
+          "case": "shim-request4",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "shim-request4",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "shim-close-while-referenced": {
+        "baseline": {
+          "case": "shim-close-while-referenced",
+          "delete": 1,
+          "free": 1
+        },
+        "candidate": {
+          "case": "shim-close-while-referenced",
+          "delete": 1,
+          "free": 1
+        }
+      },
+      "level1-grown-table": {
+        "baseline": {
+          "case": "level1-grown-table",
+          "status": 0,
+          "output": 201,
+          "ownership": "balanced",
+          "calls": 2,
+          "maps": 2,
+          "walks": 2,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "level1-grown-table",
+          "status": 0,
+          "output": 201,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "level2-grown-table": {
+        "baseline": {
+          "case": "level2-grown-table",
+          "status": 0,
+          "output": 201,
+          "ownership": "balanced",
+          "calls": 2,
+          "maps": 2,
+          "walks": 2,
+          "references": 1,
+          "dereferences": 1
+        },
+        "candidate": {
+          "case": "level2-grown-table",
+          "status": 0,
+          "output": 201,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 1,
+          "references": 1,
+          "dereferences": 1
+        }
+      },
+      "titles1-invalid0-request2": {
+        "baseline": {
+          "case": "titles1-invalid0-request2",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 0,
+          "references": 0,
+          "dereferences": 0
+        },
+        "candidate": {
+          "case": "titles1-invalid0-request2",
+          "status": 3221225508,
+          "output": 0,
+          "ownership": "balanced",
+          "calls": 1,
+          "maps": 1,
+          "walks": 0,
+          "references": 0,
+          "dereferences": 0
+        }
+      }
+    },
+    "races": [
+      {
+        "case": "two-readers-close-reuse",
+        "cycles": 10000,
+        "reader_calls": 40592,
+        "delete": 1,
+        "ownership": "balanced"
+      },
+      {
+        "case": "two-held-references-final-close",
+        "cycles": 100,
+        "delete_per_cycle": 1,
+        "ownership": "balanced"
+      }
+    ],
+    "lazy_shim_corrected": [
+      {
+        "case": "title-created-shim-not-initialized",
+        "status": 0,
+        "output": 2,
+        "ownership": "balanced",
+        "calls": 1,
+        "maps": 1,
+        "walks": 1,
+        "references": 1,
+        "dereferences": 1
+      }
+    ],
+    "lazy_shim_baseline_failure": {
+      "returncode": -11,
+      "stdout": "",
+      "stderr": ""
+    },
+    "exploratory_host_timing": {
+      "acceptance_data": false,
+      "reason": "concurrent heavy builds; 32-bit Linux production-body timing is not xemu throughput or retail title timing"
+    }
+  },
+  "native_export_timing": {
+    "protocol": {
+      "protocol": "seven sequential cold-boot AB/BA pairs, order alternates; A=baseline, B=candidate",
+      "orders": [
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ]
+      ],
+      "memory_mib": 64,
+      "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+      "flash_sha256": {
+        "baseline": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611",
+        "candidate": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5"
+      },
+      "per_boot": "1000 warmup calls, then seven samples of 50000 calls for each workload",
+      "analysis": "normalize each tick count by its own guest frequency; median seven samples per boot; candidate/baseline change per adjacent pair; mean and Student t 95% interval over seven independent boot-pair changes (df=6)",
+      "interval_t_critical": 2.446912,
+      "acceptance": "all eleven literal TAP status rows equal across arms; all checksums equal 50000; no game-level extrapolation",
+      "platform": "Linux-6.12.101+deb13-amd64-x86_64-with-glibc2.41",
+      "started_utc": "2026-10-12T22:12:44Z",
+      "host_load_before": [
+        0.59033203125,
+        3.59814453125,
+        2.685546875
+      ],
+      "exclusive_slot": "root granted slot after vm-216 completed; root, vm-216 and pool agent avoid heavy builds"
+    },
+    "identities": {
+      "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+      "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+      "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+      "memory_mib": 64,
+      "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+      "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+      "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335"
+    },
+    "workloads": {
+      "no-title": {
+        "pairs": [
+          {
+            "pair": 1,
+            "baseline": 350.70209169509565,
+            "candidate": 337.51490596499383,
+            "change_percent": -3.7602244304738575
+          },
+          {
+            "pair": 2,
+            "candidate": 353.487699467297,
+            "baseline": 342.84904850750695,
+            "change_percent": 3.1030131208187095
+          },
+          {
+            "pair": 3,
+            "baseline": 365.827349215644,
+            "candidate": 356.25552676435655,
+            "change_percent": -2.6164862938241273
+          },
+          {
+            "pair": 4,
+            "candidate": 344.1173890676156,
+            "baseline": 345.9250707070228,
+            "change_percent": -0.5225645067333806
+          },
+          {
+            "pair": 5,
+            "baseline": 341.13026924380824,
+            "candidate": 358.95815898589655,
+            "change_percent": 5.226123668711025
+          },
+          {
+            "pair": 6,
+            "candidate": 347.00967969066716,
+            "baseline": 341.58070794739825,
+            "change_percent": 1.5893672028178374
+          },
+          {
+            "pair": 7,
+            "baseline": 356.18440486378967,
+            "candidate": 347.9994594735557,
+            "change_percent": -2.2979516448408233
+          }
+        ],
+        "mean_paired_change_percent": 0.10303958806791183,
+        "median_paired_change_percent": -0.5225645067333806,
+        "paired_change_stdev_percent": 3.314910022813322,
+        "mean_paired_change_95_percent_interval": [
+          -2.9627410390910294,
+          3.1688202152268534
+        ],
+        "baseline_median_boot_ns_per_call": 345.9250707070228,
+        "candidate_median_boot_ns_per_call": 347.9994594735557
+      },
+      "ordinary": {
+        "pairs": [
+          {
+            "pair": 1,
+            "baseline": 785.695489211993,
+            "candidate": 529.5499643205133,
+            "change_percent": -32.60111944239096
+          },
+          {
+            "pair": 2,
+            "candidate": 542.0792724703718,
+            "baseline": 801.9764776167525,
+            "change_percent": -32.40708579367835
+          },
+          {
+            "pair": 3,
+            "baseline": 818.9212704268025,
+            "candidate": 527.8489655319563,
+            "change_percent": -35.54338071389282
+          },
+          {
+            "pair": 4,
+            "candidate": 541.5695655163095,
+            "baseline": 795.2850921384221,
+            "change_percent": -31.902462290586055
+          },
+          {
+            "pair": 5,
+            "baseline": 806.0007918238263,
+            "candidate": 519.3973130145965,
+            "change_percent": -35.55870933584329
+          },
+          {
+            "pair": 6,
+            "candidate": 535.601252693742,
+            "baseline": 808.5493265941382,
+            "change_percent": -33.75775168227998
+          },
+          {
+            "pair": 7,
+            "baseline": 824.9607051499369,
+            "candidate": 530.7590366301496,
+            "change_percent": -35.662506914958584
+          }
+        ],
+        "mean_paired_change_percent": -33.91900231051858,
+        "median_paired_change_percent": -33.75775168227998,
+        "paired_change_stdev_percent": 1.6574174115697162,
+        "mean_paired_change_95_percent_interval": [
+          -35.4518578500466,
+          -32.38614677099056
+        ],
+        "baseline_median_boot_ns_per_call": 806.0007918238263,
+        "candidate_median_boot_ns_per_call": 530.7590366301496
+      },
+      "shim": {
+        "pairs": [
+          {
+            "pair": 1,
+            "baseline": 470.0031530709251,
+            "candidate": 473.00805336987423,
+            "change_percent": 0.6393362000479241
+          },
+          {
+            "pair": 2,
+            "candidate": 461.69374435469916,
+            "baseline": 476.1433438198625,
+            "change_percent": -3.0347162577641695
+          },
+          {
+            "pair": 3,
+            "baseline": 477.75544023271084,
+            "candidate": 466.5833750186695,
+            "change_percent": -2.3384485603344385
+          },
+          {
+            "pair": 4,
+            "candidate": 464.5208399022311,
+            "baseline": 463.8866696221767,
+            "change_percent": 0.13670801977796465
+          },
+          {
+            "pair": 5,
+            "baseline": 470.9099573031524,
+            "candidate": 461.9960124321082,
+            "change_percent": -1.8929191733581763
+          },
+          {
+            "pair": 6,
+            "candidate": 476.71231902439723,
+            "baseline": 467.98803255486456,
+            "change_percent": 1.8642114461569825
+          },
+          {
+            "pair": 7,
+            "baseline": 469.76608006903564,
+            "candidate": 474.48383280663614,
+            "change_percent": 1.0042770088694253
+          }
+        ],
+        "mean_paired_change_percent": -0.5173644738006411,
+        "median_paired_change_percent": 0.13670801977796465,
+        "paired_change_stdev_percent": 1.8840834166763085,
+        "mean_paired_change_95_percent_interval": [
+          -2.2598511171923907,
+          1.2251221695911085
+        ],
+        "baseline_median_boot_ns_per_call": 470.0031530709251,
+        "candidate_median_boot_ns_per_call": 466.5833750186695
+      }
+    },
+    "host_load_after": [
+      8.4990234375,
+      5.4375,
+      3.396484375
+    ],
+    "finished_utc": "2026-10-12T22:13:56Z"
+  },
+  "native_raw_runs": [
+    {
+      "pair": 1,
+      "arm": "baseline",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 64427,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 381.847557318325
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 59172,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 350.70209169509565
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 60350,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 357.68389160074065
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 56523,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 335.0019321449654
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 57391,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 340.14641628596695
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 60008,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 355.65691743458564
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 55864,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 331.0961544388364
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 133204,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 789.4768035921301
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 132566,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 785.695489211993
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 131659,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 780.3198588941492
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 131912,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 781.8193456311002
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 133365,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 790.4310224247353
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 132173,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 783.366246968429
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 136236,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 807.4469371353521
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 77171,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 457.37901572031075
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 78099,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 462.87910936414653
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 82055,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 486.32562925101524
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 84606,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 501.4449599465163
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 80206,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 475.36692973867446
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 79301,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 470.0031530709251
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 77609,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 459.9749650910005
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.126,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 1,
+      "arm": "candidate",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 57946,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 343.4358041871834
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 55733,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 330.3197403576483
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 56852,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 336.9518575855063
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 55474,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 328.784692670414
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 57063,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 338.2024176704732
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 57444,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 340.46053801347045
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 56947,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 337.51490596499383
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 89348,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 529.5499643205133
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 87246,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 517.0917780712215
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 86606,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 513.2986100409898
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 88618,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 525.2233820360303
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 89868,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 532.6319133450763
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 90827,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 538.3157385653764
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 91985,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 545.1790019700767
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 82498,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 488.95121274694117
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 79808,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 473.00805336987423
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 83752,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 496.3834513561761
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 77945,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 461.966378306872
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 78161,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 463.24657251707515
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 80758,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 478.63853716474915
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 79392,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 470.54249415022366
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.026,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 2,
+      "arm": "candidate",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 61912,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 366.94159232452455
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 60833,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 360.54654809855595
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 64678,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 383.3351904051815
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 58924,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 349.23223908338093
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 59642,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 353.487699467297
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 58775,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 348.3491421513426
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 58252,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 345.2494126516378
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 102079,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 605.0043739968849
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 91462,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 542.0792724703718
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 90351,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 535.4945698428917
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 94821,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 561.9874778040402
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 88876,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 526.7525028982175
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 89616,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 531.1383534331727
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 95946,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 568.6551559821816
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 78204,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 463.5014259941064
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 80437,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 476.73602632458613
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 77899,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 461.69374435469916
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 77017,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 456.46628466303633
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 77424,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 458.8785024572617
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 76580,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 453.8762621173938
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 78697,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 466.4233507423941
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.078,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 2,
+      "arm": "baseline",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 57847,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 342.84904850750695
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 57516,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 340.8872694168715
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 57665,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 341.7703663489098
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 57765,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 342.3630488536335
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 59959,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 355.366503007271
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 58610,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 347.3712160185486
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 58670,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 347.72682552138275
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 135313,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 801.9764776167525
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 131776,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 781.013297424676
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 136365,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 808.2114975664456
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 132945,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 787.9417559048958
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 135384,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 802.3972821951063
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 132651,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 786.1992693410082
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 141111,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 836.3402092406315
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 80449,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 476.80714822515296
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 80337,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 476.1433438198625
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 77492,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 459.28152656047376
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 77381,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 458.6236489802305
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 77907,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 461.741158955077
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 82774,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 490.58701645997854
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 84743,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 502.2569349779878
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.176,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 3,
+      "arm": "baseline",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 66720,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 395.43776715163904
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 61724,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 365.827349215644
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 58279,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 345.4094369279132
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 58902,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 349.1018489323417
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 59286,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 351.37774975048063
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 64483,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 382.1794595209703
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 62867,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 372.6017102446356
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 138617,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 821.5587075728229
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 134687,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 798.2662851371823
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 134498,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 797.1461152032546
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 135687,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 804.1931101844192
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 141938,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 841.2416935546963
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 144769,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 858.0205352634237
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 138172,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 818.9212704268025
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 80304,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 475.94775859330366
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 80609,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 477.75544023271084
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 80130,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 474.91649103508445
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 83919,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 497.37323113906467
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 79376,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 470.4476649494679
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 83035,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 492.1339177973073
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 85799,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 508.5156622278698
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.175,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 3,
+      "arm": "candidate",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 60924,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 361.0858891778545
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 61344,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 363.57515569769396
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 59448,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 352.337895408133
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 59734,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 354.0329673716427
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 60109,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 356.25552676435655
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 59356,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 351.79262750378723
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 61503,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 364.51752088020464
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 89061,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 527.8489655319563
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 93432,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 553.7551178134282
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 91148,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 540.2182494055395
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 89925,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 532.9697423727688
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 88119,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 522.2658963374591
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 84785,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 502.5058616299717
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 88647,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 525.3952599624002
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 81817,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 484.9150448897729
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 84910,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 503.2467147608763
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 79594,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 471.7397128097655
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 78084,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 462.79020698843794
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 78724,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 466.5833750186695
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 78459,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 465.0127663811518
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 77971,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 462.1204757581002
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.074,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 4,
+      "arm": "candidate",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 59223,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 351.0043597725047
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 56972,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 337.66307659117473
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 58269,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 345.3501686774408
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 60554,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 358.892963910377
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 58061,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 344.1173890676156
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 57679,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 341.85334189957115
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 57626,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 341.5392201720676
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 89349,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 529.5558911455604
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 95585,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 566.5155721401292
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 91376,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 541.5695655163095
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 93199,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 552.3741675774221
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 89588,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 530.97240233185
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 93328,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 553.1387280085157
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 88348,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 523.6231392732764
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 77418,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 458.84294150697826
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 77488,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 459.2578192602848
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 79174,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 469.250446289926
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 78376,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 464.5208399022311
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 78257,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 463.8155477216099
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 78662,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 466.2159118657408
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 80450,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 476.8130750502002
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.078,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 4,
+      "arm": "baseline",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 62592,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 370.9718333566455
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 59517,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 352.74684633639237
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 57484,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 340.69761101536
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 58366,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 345.9250707070228
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 57566,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 341.18361066923336
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 57359,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 339.9567578844553
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 60720,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 359.87681686821827
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 136847,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 811.0682272392137
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 134174,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 795.2258238879499
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 133967,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 793.9989711031718
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 136594,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 809.5687405022628
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 134440,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 796.8023593505148
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 134184,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 795.2850921384221
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 132644,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 786.1577815656775
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 77816,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 461.20181787577843
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 78269,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 463.8866696221767
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 79038,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 468.4443980835018
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 76709,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 454.64082254848734
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 77205,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 457.5805277719168
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 84474,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 500.66261904028113
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 80374,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 476.3626363466102
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.124,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 5,
+      "arm": "baseline",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 60842,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 360.5998895239811
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 57557,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 341.13026924380824
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 57238,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 339.23961205373973
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 58723,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 348.04094724888637
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 57470,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 340.61463546469867
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 56512,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 334.9367370694458
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 58945,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 349.35670240937293
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 140076,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 830.2059453167413
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 143080,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 848.0101277586407
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 133225,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 789.6012669181221
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 134950,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 799.8250401246056
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 134827,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 799.0960406437954
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 135992,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 806.0007918238263
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 136279,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 807.7017906123833
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 80684,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 478.1999521112536
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 79454,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 470.9099573031524
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 80019,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 474.25861345484117
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 78308,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 464.11781579901896
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 79578,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 471.64488360900975
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 78447,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 464.94164448058496
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 79401,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 470.59583557564883
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.121,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 5,
+      "arm": "candidate",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 59697,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 353.813674844895
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 60979,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 361.41186455545255
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 60565,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 358.95815898589655
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 57400,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 340.19975771139207
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 60687,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 359.68123164165945
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 58212,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 345.01233964974836
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 63353,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 375.48214721759274
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 87635,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 519.3973130145965
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 86986,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 515.55080355894
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 87558,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 518.9409474859593
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 89452,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 530.1663541254259
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 88585,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 525.0277968094715
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 87530,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 518.7749963846367
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 91304,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 541.1428341129084
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 81268,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 481.66121793883997
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 77849,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 461.39740310233725
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 77950,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 461.9960124321082
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 78083,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 462.7842801633907
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 77712,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 460.5854280708659
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 78015,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 462.3812560601786
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 77623,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 460.0579406416618
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.026,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 6,
+      "arm": "candidate",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 64549,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 382.5706299740879
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 56702,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 336.06283382842076
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 57099,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 338.41578337217373
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 60203,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 356.81264831879685
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 57530,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 340.97024496753284
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 58549,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 347.00967969066716
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 61629,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 365.26430083615645
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 92542,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 548.4802435213876
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 96696,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 573.1002747676091
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 89414,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 529.9411347736309
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 91979,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 545.1434410197933
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 90354,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 535.5123503180334
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 89265,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 529.0580378415926
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 90369,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 535.601252693742
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 78603,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 465.8662291879538
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 78918,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 467.7331790778334
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 81400,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 482.44355884507513
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 83724,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 496.21750025485346
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 84634,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 501.61091104783895
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 79939,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 473.7844674510622
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 80433,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 476.71231902439723
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.022,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 6,
+      "arm": "baseline",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 59654,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 353.5588213678638
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 59481,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 352.53348063469184
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 59428,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 352.21935890718834
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 57633,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 341.58070794739825
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 56652,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 335.76649257605897
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 57004,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 337.8527349926863
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 57037,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 338.0483202192451
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 135222,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 801.437136537454
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 139775,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 828.4219709775232
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 136422,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 808.5493265941382
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 138623,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 821.5942685231063
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 132865,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 787.4676099011168
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 134804,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 798.9597236677089
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 141038,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 835.9075510121831
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 78961,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 467.98803255486456
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 77863,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 461.4803786529986
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 82043,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 486.2545073504484
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 80576,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 477.559855006152
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 79997,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 474.1282233038019
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 78713,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 466.5181799431499
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 78182,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 463.37103584306715
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.126,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 7,
+      "arm": "baseline",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 61593,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 365.0509351344559
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 61195,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 362.6920587656557
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 60097,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 356.18440486378967
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 60093,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 356.16069756360076
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 57579,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 341.26065939484744
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 59061,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 350.0442141148524
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 64236,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 380.7155337343028
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 137995,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 817.8722223934417
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 137605,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 815.5607606250193
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 139057,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 824.1665105936071
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 144937,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 859.0162418713595
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 157913,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 935.9227236843041
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 142886,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 846.8603236994767
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 139191,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 824.9607051499369
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 78062,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 462.6598168373987
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 80297,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 475.90627081797294
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 79261,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 469.76608006903564
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 75920,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 449.9645575862175
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 77573,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 459.7615993893
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 83796,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 496.6442316582545
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 81127,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 480.8255356071796
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.124,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    },
+    {
+      "pair": 7,
+      "arm": "candidate",
+      "status_rows": [
+        "ok 1 - builtins-before-title",
+        "ok 2 - create-first-title",
+        "ok 3 - insert-title",
+        "ok 4 - builtins-after-shim",
+        "ok 5 - title-type-null-wrong-and-reference-count",
+        "ok 6 - registered-title-mismatch-precedence",
+        "ok 7 - title-close-with-live-reference-and-single-delete",
+        "ok 8 - native-close-reuse-with-live-reference",
+        "ok 9 - native-kernel-handle",
+        "ok 10 - native-grown-table",
+        "ok 11 - two-readers-race-final-close"
+      ],
+      "samples": [
+        {
+          "name": "no-title",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 61026,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 361.69042533267265
+        },
+        {
+          "name": "no-title",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 60849,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 360.6413772993118
+        },
+        {
+          "name": "no-title",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 58313,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 345.6109489795192
+        },
+        {
+          "name": "no-title",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 58716,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 347.9994594735557
+        },
+        {
+          "name": "no-title",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 57630,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 341.5629274722565
+        },
+        {
+          "name": "no-title",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 58136,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 344.56190094615835
+        },
+        {
+          "name": "no-title",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 59710,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 353.890723570509
+        },
+        {
+          "name": "ordinary",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 86839,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 514.6795602769961
+        },
+        {
+          "name": "ordinary",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 87687,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 519.7055079170528
+        },
+        {
+          "name": "ordinary",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 90555,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 536.703642152528
+        },
+        {
+          "name": "ordinary",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 89471,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 530.2789638013234
+        },
+        {
+          "name": "ordinary",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 91365,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 541.5043704407898
+        },
+        {
+          "name": "ordinary",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 92244,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 546.714049657311
+        },
+        {
+          "name": "ordinary",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 89552,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 530.7590366301496
+        },
+        {
+          "name": "shim",
+          "sample": 0,
+          "iterations": 50000,
+          "ticks": 80173,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 475.17134451211564
+        },
+        {
+          "name": "shim",
+          "sample": 1,
+          "iterations": 50000,
+          "ticks": 79160,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 469.16747073926473
+        },
+        {
+          "name": "shim",
+          "sample": 2,
+          "iterations": 50000,
+          "ticks": 80057,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 474.48383280663614
+        },
+        {
+          "name": "shim",
+          "sample": 3,
+          "iterations": 50000,
+          "ticks": 77626,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 460.0757211168035
+        },
+        {
+          "name": "shim",
+          "sample": 4,
+          "iterations": 50000,
+          "ticks": 77906,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 461.7352321300298
+        },
+        {
+          "name": "shim",
+          "sample": 5,
+          "iterations": 50000,
+          "ticks": 82999,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 491.92055209560675
+        },
+        {
+          "name": "shim",
+          "sample": 6,
+          "iterations": 50000,
+          "ticks": 80748,
+          "frequency": 3374488,
+          "checksum": 50000,
+          "ns_per_call": 478.5792689142768
+        }
+      ],
+      "runtime": {
+        "memory_mib": 64,
+        "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5",
+        "guest_sha256": "c2f2dbfed8156bb373ff38bc17ce8847b4c9a0101ddb1273818d03607053f056",
+        "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+        "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+        "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+        "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+        "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+        "timed_out": false,
+        "exit_code": 0,
+        "seconds": 5.073,
+        "tap": {
+          "passed": true,
+          "plan": 11,
+          "ran": 11,
+          "errors": [],
+          "ok": 11,
+          "failed": 0,
+          "todo": 0,
+          "skipped": 0
+        },
+        "complete": true
+      }
+    }
+  ],
+  "full_guests": {
+    "baseline-lazy-red": {
+      "memory_mib": 64,
+      "flash_sha256": "3dc3010a237fcf50bef2ecbe59c81115eabf9684e7a3ceb9caec19a16cb49611",
+      "guest_sha256": "912039872aab0141712bc27830d918f97cf09c02c8de7ac11d926197cf5e4c3f",
+      "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+      "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+      "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+      "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+      "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+      "timed_out": false,
+      "exit_code": 0,
+      "seconds": 5.172,
+      "tap": {
+        "passed": false,
+        "plan": 12,
+        "ran": 12,
+        "errors": [],
+        "ok": 11,
+        "failed": 1,
+        "todo": 0,
+        "skipped": 0
+      }
+    },
+    "candidate-release64": {
+      "memory_mib": 64,
+      "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5",
+      "guest_sha256": "912039872aab0141712bc27830d918f97cf09c02c8de7ac11d926197cf5e4c3f",
+      "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+      "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+      "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+      "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+      "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+      "timed_out": false,
+      "exit_code": 0,
+      "seconds": 5.071,
+      "tap": {
+        "passed": true,
+        "plan": 12,
+        "ran": 12,
+        "errors": [],
+        "ok": 12,
+        "failed": 0,
+        "todo": 0,
+        "skipped": 0
+      }
+    },
+    "candidate-release128": {
+      "memory_mib": 128,
+      "flash_sha256": "73fea15c51e83c2cd0d003822ed7096934df54d375591a0712844dc1d796d5ae",
+      "guest_sha256": "912039872aab0141712bc27830d918f97cf09c02c8de7ac11d926197cf5e4c3f",
+      "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+      "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+      "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+      "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+      "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+      "timed_out": false,
+      "exit_code": 0,
+      "seconds": 5.174,
+      "tap": {
+        "passed": true,
+        "plan": 12,
+        "ran": 12,
+        "errors": [],
+        "ok": 12,
+        "failed": 0,
+        "todo": 0,
+        "skipped": 0
+      }
+    },
+    "candidate-debug64": {
+      "memory_mib": 64,
+      "flash_sha256": "5b1bd01470afb8d6e81bc165c78524bd3dd73cce72d192d2c1fe45918e7665d6",
+      "guest_sha256": "912039872aab0141712bc27830d918f97cf09c02c8de7ac11d926197cf5e4c3f",
+      "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+      "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+      "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+      "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+      "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+      "timed_out": false,
+      "exit_code": 0,
+      "seconds": 5.117,
+      "tap": {
+        "passed": true,
+        "plan": 12,
+        "ran": 12,
+        "errors": [],
+        "ok": 12,
+        "failed": 0,
+        "todo": 0,
+        "skipped": 0
+      }
+    },
+    "candidate-debug128": {
+      "memory_mib": 128,
+      "flash_sha256": "dfae1ef5645f2be410afbe161ff1cfc97414e629cee6cd1288631a1dc4f62330",
+      "guest_sha256": "912039872aab0141712bc27830d918f97cf09c02c8de7ac11d926197cf5e4c3f",
+      "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+      "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+      "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+      "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+      "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+      "timed_out": false,
+      "exit_code": 0,
+      "seconds": 5.227,
+      "tap": {
+        "passed": true,
+        "plan": 12,
+        "ran": 12,
+        "errors": [],
+        "ok": 12,
+        "failed": 0,
+        "todo": 0,
+        "skipped": 0
+      }
+    },
+    "candidate-api-release64": {
+      "memory_mib": 64,
+      "flash_sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5",
+      "guest_sha256": "0cd1695909a217b87bc5da319c9ee7bb5120c3ef30e0c37ac459c42d5158515d",
+      "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+      "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+      "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+      "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+      "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+      "timed_out": false,
+      "exit_code": 0,
+      "seconds": 17.111,
+      "tap": {
+        "passed": true,
+        "plan": 639,
+        "ran": 639,
+        "errors": [],
+        "ok": 633,
+        "failed": 0,
+        "todo": 6,
+        "skipped": 0
+      },
+      "end_marker_pass": true
+    },
+    "candidate-release128-upper-reserved": {
+      "memory_mib": 128,
+      "flash_sha256": "7ece6fcc15e26c2bc14980c817ecef4634c4d4a7cbf9196efe050c8dce12e30b",
+      "guest_sha256": "912039872aab0141712bc27830d918f97cf09c02c8de7ac11d926197cf5e4c3f",
+      "xemu_sha256": "2db2f3fd0f3e18e2850d792847be3b1b213e71900716cf7a2cbffa2e2919f9c9",
+      "xemu_source": "63f53af93c2d84f5ce1a11e277138cbaf5cca7aa",
+      "hdd_input_sha256": "2cc376a12ff71021fda4172ea00de553d81c711092615ae4dc58d4718f5d8e5c",
+      "eeprom_input_sha256": "dca01d9c2f8093b600cc20ee02141db4813cf6fef83bc4c763695806d055805b",
+      "mcpx_sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+      "timed_out": false,
+      "exit_code": 0,
+      "seconds": 5.073,
+      "tap": {
+        "passed": true,
+        "plan": 12,
+        "ran": 12,
+        "errors": [],
+        "ok": 12,
+        "failed": 0,
+        "todo": 0,
+        "skipped": 0
+      },
+      "complete": true
+    }
+  },
+  "kernel_footprint": {
+    "baseline": {
+      "sha256": "7a65edc0c387fc0aa9b9b5b55c790a7746227b6b85fd918807c5712519a874d6",
+      "bytes": 500736,
+      "size_of_image": 561152,
+      "sections": [
+        {
+          "name": ".text",
+          "virtual_size": 338580,
+          "virtual_address": 4096,
+          "raw_size": 338944,
+          "flags": "0x68000020"
+        },
+        {
+          "name": ".data",
+          "virtual_size": 2056,
+          "virtual_address": 344064,
+          "raw_size": 2560,
+          "flags": "0xc8000040"
+        },
+        {
+          "name": ".rdata",
+          "virtual_size": 26196,
+          "virtual_address": 348160,
+          "raw_size": 26624,
+          "flags": "0x48000040"
+        },
+        {
+          "name": ".bss",
+          "virtual_size": 44208,
+          "virtual_address": 376832,
+          "raw_size": 0,
+          "flags": "0xc8000080"
+        },
+        {
+          "name": "PAGE",
+          "virtual_size": 2468,
+          "virtual_address": 421888,
+          "raw_size": 2560,
+          "flags": "0x60000020"
+        },
+        {
+          "name": "INIT",
+          "virtual_size": 94496,
+          "virtual_address": 425984,
+          "raw_size": 94720,
+          "flags": "0xe2000020"
+        },
+        {
+          "name": ".rsrc",
+          "virtual_size": 33848,
+          "virtual_address": 524288,
+          "raw_size": 34304,
+          "flags": "0x42000040"
+        }
+      ]
+    },
+    "candidate": {
+      "sha256": "0336b7664c98b8f5bcaa1fbf63316f802984ffa276bb8918f0be48a3de925d08",
+      "bytes": 500736,
+      "size_of_image": 561152,
+      "sections": [
+        {
+          "name": ".text",
+          "virtual_size": 338652,
+          "virtual_address": 4096,
+          "raw_size": 338944,
+          "flags": "0x68000020"
+        },
+        {
+          "name": ".data",
+          "virtual_size": 2056,
+          "virtual_address": 344064,
+          "raw_size": 2560,
+          "flags": "0xc8000040"
+        },
+        {
+          "name": ".rdata",
+          "virtual_size": 26196,
+          "virtual_address": 348160,
+          "raw_size": 26624,
+          "flags": "0x48000040"
+        },
+        {
+          "name": ".bss",
+          "virtual_size": 44208,
+          "virtual_address": 376832,
+          "raw_size": 0,
+          "flags": "0xc8000080"
+        },
+        {
+          "name": "PAGE",
+          "virtual_size": 2468,
+          "virtual_address": 421888,
+          "raw_size": 2560,
+          "flags": "0x60000020"
+        },
+        {
+          "name": "INIT",
+          "virtual_size": 94496,
+          "virtual_address": 425984,
+          "raw_size": 94720,
+          "flags": "0xe2000020"
+        },
+        {
+          "name": ".rsrc",
+          "virtual_size": 33848,
+          "virtual_address": 524288,
+          "raw_size": 34304,
+          "flags": "0x42000040"
+        }
+      ]
+    }
+  },
+  "coverage_limits": [
+    "Synthetic repeated export workloads, not a retail-title phase or game-level speedup.",
+    "No-title and shim confidence intervals do not establish exact-zero overhead.",
+    "Guest timing uses root-approved xemu source63f53af9, different from product xemu lock458730bf.",
+    "Concurrent OS schedule/deletion/APC/pool boundaries are fixtures in host tests; real linked native object-manager and table bodies execute.",
+    "Baseline create-before-first-insert is an intentional correction, excluded from the legacy-equivalence and matched timing control.",
+    "Broad API suite was run on release64; focused twelve-check suite ran on all four firmware variants.",
+    "Existing API guest has six documented TODO cases; product host suite has three environment skips.",
+    "Clean release64 repeat was byte-identical; additional CI clean release128 repeat was not run locally.",
+    "No hardware or retail-title validation is claimed."
+  ],
+  "raw_artifact_sha256": {
+    "host-green-pinned/result.json": "059b200d41c872a1a26612e51dccfe2be0d34d59f42bce18bfd97f3cc7b08d39",
+    "host-red.log": "e467289720cf69efbd5634839e6e776ceea4a630319255609fb218eb75a67ce2",
+    "host-lazy-red.json": "6428e0764a6f94cec7a59b16f12c34db5e3f14f662d2b1ec862488c5ae073b06",
+    "guest-baseline-lazy-crash/serial.log": "fdcfac4246bb09c8669c2216c778819a9215fbf268149ac40bf04a49850c52fa",
+    "native-timing-final/plan.json": "0ea4f55cd36b34d86f64dea3875b5e89b700bcdec44c03e18e0c84564c2ae8bc",
+    "native-timing-final/runs.json": "20da509ccb33ff0821af4abe824d27a1af755d4a2af55c39544343eec32d8c79",
+    "native-timing-final/summary.json": "8d366eaa72c9c5e60942e1c5d4b6aebdbba313dc15022d28ec0c776da6cb3f4b",
+    "baseline-kernel-wrapper.s": "3d2e92a44d72f2d216c05de51f6edeb0aa13a848df9ccf124ff851225bda07af",
+    "candidate-kernel-wrapper.s": "af70ab38de3295ec40befcb8052bd0041e67a75c1b25ca9a677712e5cfb54b4c",
+    "product-host-final.log": "a70a035c05e165820eaec96e195a0c98288d822c6350ff40baac5d0e72a48fd5",
+    "firmware-upper-reserve/build.json": "b19277d88a17aad624467b254c6dafb904dd622140da57a73218a9012bbc38e0",
+    "firmware-release64-clean/build.json": "4655e6a0f300ef906155f5f801b041303a756600337eef3f1f8c5dd01595d50b",
+    "guest-upper-reserve/serial.log": "e22ab3a01e85aa4f366a5b546fcc2e0c9d021acf42a07731c0ce8e752811890c"
+  },
+  "nxdk_container": "ghcr.io/xboxdev/nxdk@sha256:bab707b7ed2544e9956d51e7b411a4575ab66120bd608b3237698495203d15f7",
+  "clean_release64_rebuild": {
+    "byte_identical": true,
+    "sha256": "7e42f9a2f9da1548e2afd55dc4278139c2c1c2e122c6ec8c80079b526278c8c5"
+  },
+  "current_main_composition": {
+    "product_base_commit": "ebd0b06f29431d9bacc488851c5698b532f53156",
+    "kernel_base_tree": "eee7de60ad3d2047efab3161491edb17768b5482",
+    "kernel_candidate_commit": "f852bb55d26b75008e5bcedae27ef798cf2dffcc",
+    "kernel_candidate_tree": "d5e5c40cb66deb63d31030668ee04e61877e3b64",
+    "patch_path": "patches/roswell/0103-object-handle-single-lookup.patch",
+    "patch_sha256": "518eb15c271c8e2ec9cd6d35a0c61de11bd69790f0cb5c84bf8a8a6a6587a209",
+    "patch_bytes_equal_measured_candidate": true,
+    "combined_build_qualification": "release64 built; 560 production-body cases pass; full CI pending",
+    "release64_flash_sha256": "484ea01114ecee7c134f0327101218e1c376769880b5a069a0322c41bd8e552e",
+    "release64_flash_bytes": 524288
+  }
+}

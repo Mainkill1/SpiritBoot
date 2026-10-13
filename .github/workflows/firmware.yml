@@ -55,7 +55,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = eee7de60ad3d2047efab3161491edb17768b5482
+            test "$actual_tree" = d5e5c40cb66deb63d31030668ee04e61877e3b64
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -87,6 +87,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/rom-kernel/check-table.py" "$output/rom-kernel-table" >"$output/rom-kernel-table.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/rom-kernel/check-loader.py" "$output/rom-kernel-loader" >"$output/rom-kernel-loader.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/rom-kernel/check-boot.py" "$output/rom-kernel-boot" >"$output/rom-kernel-boot.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/object-handle-fastpath/check.py" "$output/object-handle-fastpath" >"$output/object-handle-fastpath.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-capacity.py" "$output/relocation-capacity" >"$output/relocation-capacity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/relocation/check-destinations.py" "$output/relocation-destinations" >"$output/relocation-destinations.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/cache/check-pin-unwind.py" "$output/cache-pin-unwind" >"$output/cache-pin-unwind.log" 2>&1
@@ -147,7 +148,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'eee7de60ad3d2047efab3161491edb17768b5482', result
+          assert result['source_tree'] == 'd5e5c40cb66deb63d31030668ee04e61877e3b64', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
@@ -252,6 +253,7 @@ jobs:
             artifacts/rom-shadow-persistence-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/saved-image-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/interrupt-public-abi-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/object-handle-fastpath-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/kernel-performance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/pool-size-limit-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/zero-reuse-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/

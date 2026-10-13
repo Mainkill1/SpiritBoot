@@ -34,3 +34,10 @@ Which test proves the behavior and catches future breakage?
 ```
 
 Do not store proprietary dumps, disassembly, secret material, or copied proprietary source here.
+
+Current compatibility records include:
+
+- [Saved transition images](SAVED_TRANSITION_IMAGE.md)
+- [Public title interrupt objects](TITLE_INTERRUPT_PUBLIC_ABI.md)
+- [Halo 64 MiB memory compatibility](HALO_64MIB_MEMORY_COMPATIBILITY.md)
+- [Native handle classification](TITLE_HANDLE_CLASSIFICATION.md)
