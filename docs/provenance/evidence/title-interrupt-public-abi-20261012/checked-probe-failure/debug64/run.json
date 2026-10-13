@@ -1,0 +1,57 @@
+{
+  "assets": {
+    "dvd": {
+      "path": "/work/artifacts/firmware-debug-64mib/work-yyml6esc/source/tests/xbe/interrupt-public-abi/interrupt-identity-probe.iso",
+      "sha256": "c211f001eb7bd906865838b25a9c8625555b1a3a41eeaab4217b8fcfa380bc4d",
+      "size": 655360
+    },
+    "flash": {
+      "path": "/work/artifacts/firmware-debug-64mib/flash.bin",
+      "sha256": "8fa6adb3a094735b2819f83c9c44f43a3b6c3803d2236ec82335c302feabda5e",
+      "size": 524288
+    },
+    "hdd": {
+      "path": "/work/artifacts/xbox_hdd.qcow2",
+      "sha256": "00d7df7a2bc235f8801764f00b7f40e194d1e392f7a9619d6b2396c89770f6dd",
+      "size": 1638400
+    },
+    "xemu": {
+      "path": "/work/artifacts/squashfs-root/usr/bin/xemu",
+      "sha256": "3790019a2ccab47df1f67982e05856b2a345ec8ce5393967d1ed2187528aada2",
+      "size": 25548144
+    }
+  },
+  "boot_mode": "open-direct",
+  "command": [
+    "/work/artifacts/squashfs-root/usr/bin/xemu",
+    "-config_path",
+    "/work/artifacts/interrupt-public-abi-debug-64mib/xemu.toml",
+    "-snapshot",
+    "-device",
+    "lpc47m157",
+    "-serial",
+    "file:/work/artifacts/interrupt-public-abi-debug-64mib/serial.log"
+  ],
+  "elapsed_seconds": 240.115,
+  "expect_tap": true,
+  "memory_mib": 64,
+  "returncode": 0,
+  "schema": 1,
+  "snapshot": true,
+  "started_utc": "2026-10-12T23:38:02Z",
+  "status": "timeout",
+  "tap": {
+    "errors": [
+      "expected one nonempty test plan",
+      "test numbers do not match complete plan"
+    ],
+    "failed": 0,
+    "ok": 11,
+    "passed": false,
+    "plan": 0,
+    "ran": 11,
+    "skipped": 0,
+    "todo": 0
+  },
+  "timeout_seconds": 240.0
+}

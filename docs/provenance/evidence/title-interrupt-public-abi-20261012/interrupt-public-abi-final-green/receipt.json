@@ -1,0 +1,47 @@
+{
+  "source_ref": "16130e5e",
+  "source_commit": "16130e5edda5494803dd8a45dd43cf490b4a9ca4",
+  "source_tree": "87486d2eb062924316cbde63928982637b962a6b",
+  "production_input_sha256": {
+    "ntoskrnl/ke/i386/irqobj.c": "8de18ba7e812898f730db3165fdfa804d3f8c4f9641aa3e8aa07373e7a21b9eb",
+    "ntoskrnl/xb/interrupt.c": "81c35015bc8b5659c7b0a86ceaedb8e4ff14b2eba4d914001707d66da11c1fc7"
+  },
+  "native_function_sha256": {
+    "KeInitializeInterrupt": "85c055911084ee8ef4c84642ac472def08025302fc4848ed08a74e921113d456",
+    "KiInterruptDispatch": "14cd942dc49c66fb776749d908ca494d21d07762ff3d8d4d774998580e4b91a6",
+    "KiChainedDispatch": "5530d76698ddda69dd90074fcc635a5d8af22238d230ce2fefdfd2acb3e042ea",
+    "KeConnectInterrupt": "a925cb6dafad47c5ca92f03f334b229e07d641541197ff19d7727eb2a96575bf",
+    "KeDisconnectInterrupt": "ea2d19254ad5f07e90440e2300b9cbdfb2e51c431d17188909b662f923ada061",
+    "KeSynchronizeExecution": "f3266c771884d3a68ad5c8faba540724f093e7fddc706c0aa260912ec719b50d"
+  },
+  "fixture_input_sha256": {
+    "shim.c": "f9f659bdb4bc6b01a5fd5d0c48e1822dd94f3c0186b3934b06afaadbd597fd1f",
+    "cases.c": "aab47961f8451ce22ea0a2c82ff649d3e7ef80a30cbb7823274eac500355ff64",
+    "check.py": "15c4eadb0bf53422d2f480e2a6a5f796003a82e0c76c159ad89b5c99a443d02e"
+  },
+  "production_unit_sha256": "210777a2c6e16c08c1675d01af233fbced43cf9fe90fdb3f498ef57cac26fdc7",
+  "mutant": null,
+  "compile_command": [
+    "cc",
+    "-m32",
+    "-std=c11",
+    "-DSARCH_XBOX",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wno-unused-parameter",
+    "-fno-strict-aliasing",
+    "-fno-pie",
+    "-no-pie",
+    "-fsanitize=undefined",
+    "-fno-sanitize-recover=all",
+    "/work/.scratch/spiritboot-halo-20261012/interrupt-public-abi-final-green/production.c",
+    "-o",
+    "/work/.scratch/spiritboot-halo-20261012/interrupt-public-abi-final-green/fixture"
+  ],
+  "compiler": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "qualification": "i386 actual-body host semantics; hardware and trap exit shimmed; no native timing claim",
+  "compile_exit": 0,
+  "run_exit": 0,
+  "executable_sha256": "a80f170a7c103669986320e0b8c5e6d8b3b61fd94d8e19d78ce3e0c3e61d6f64"
+}

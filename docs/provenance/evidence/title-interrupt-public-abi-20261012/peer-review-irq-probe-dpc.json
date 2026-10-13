@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "reviewer": "review_saved_transition",
+  "reviewed_utc": "2026-10-12T23:55:36Z",
+  "mode": "Read-only source/diff, owned kernel contract and downloaded CI receipt review. Only this review metadata was written; no builds, tests, native launches or production edits were performed.",
+  "reviewed_product_head": "b5ac516c359403c4d9327b9adfa920fa01fdf77f",
+  "reviewed_kernel_head": "b6342bebeb1d6a54e4e2b9affaa08c8a430991ce",
+  "reviewed_working_source": {
+    "sha256": "4df7bed9d8df6b4a1e59f95fded5971262357ba7e7a9fc6f19ebad8493d55e2b",
+    "bytes": 6021,
+    "byte_identical_copies": [
+      "kernel/tests/xbe/interrupt-public-abi/main.c",
+      "product/tests/xbe/interrupt-public-abi/main.c",
+      "irq-probe-v3/main.c"
+    ],
+    "check_calls": 17
+  },
+  "frozen_v2_source": {
+    "path": "product/docs/provenance/evidence/title-interrupt-public-abi-20261012/probe/main.c",
+    "sha256": "10766b6d95cf4ef8ab76ea07a6d1a4bc56b7449803097d4df79c95f5f143b19e",
+    "bytes": 5252,
+    "matches_existing_manifest": true,
+    "all_six_frozen_manifest_files_size_and_sha256_verified": true
+  },
+  "observed_failure": {
+    "ci_run": 38322563496,
+    "profile": "debug64",
+    "source_tree": "80adbcb0b86010f31280e42d27a6689efdfc46b3",
+    "flash_sha256": "8fa6adb3a094735b2819f83c9c44f43a3b6c3803d2236ec82335c302feabda5e",
+    "dvd_sha256": "c211f001eb7bd906865838b25a9c8625555b1a3a41eeaab4217b8fcfa380bc4d",
+    "status": "timeout",
+    "elapsed_seconds": 240.115,
+    "tap_ok": 11,
+    "tap_plan": 0,
+    "tap_passed": false,
+    "diagnosis": "UART line100 records IRQ3 vector51 at IRQL24. Lines111-112 record checks10-11. Lines114-115 record the owned eventobj.c:168 assertion, followed by BUGCHECK1E at line120. The old probe calls KeSetEvent directly from its ISR; the direct public export asserts IRQL<=DISPATCH_LEVEL.",
+    "receipt_hashes": {
+      "ci-push-debug64/artifacts/interrupt-public-abi-debug-64mib/serial.log": "a262c1ee6740b12d69dae15752c58be292ab8d2e7beb2e2e59da80491cf32380",
+      "ci-push-debug64/artifacts/interrupt-public-abi-debug-64mib/run.json": "a03ca5c9207f964261d94f9857593c1ef5d3dac79944112dd4b7c3064f84d8d8",
+      "ci-push-debug64/artifacts/interrupt-public-abi-debug-64mib/emulator.log": "940cc197cc9fce897b34d7e40d568e031157f021785ffd0e37efac618c9662aa",
+      "ci-push-debug64/artifacts/firmware-debug-64mib/build.json": "69a3b67665789f28dcb132e660c7260e931ae7932ac33bd655066fad607a2b33"
+    }
+  },
+  "reviewed_boundaries": [
+    "main.c:20,37-45,92-93: static owned KDPC/event storage and NTAPI four-argument deferred routine are initialized before interrupt connection. DeferredContext is the exact initialized event address.",
+    "main.c:48-58: ISR retains acknowledgement, original public object/context capture and callback count, replacing direct event signaling with KeInsertQueueDpc. A false insert result can mean the same DPC is already queued and does not itself establish failed delivery.",
+    "main.c:43-45,140-142: DPC records its IRQL/count before signaling; the existing liveness check now requires a successful bounded wait, ISR delivery, DPC delivery and DISPATCH_LEVEL. The two-second timeout and all17 public object/guard/lifecycle checks are retained.",
+    "main.c:131-136: hardware vblank is masked, pending vblank acknowledged, owned interrupt disconnected, and queued notification removed before PCRTC enable restoration. No static callback storage is freed or reused. On the target uniprocessor, passive main cannot overlap an executing DISPATCH DPC; disconnect stops future ISR queueing on success.",
+    "ntoskrnl/xb/ordinals.map:155,167,185,193: public DPC initialize/queue/remove and event signal map directly to owned kernel bodies. sdk/include/xdk/ketypes.h:751-764 matches the public28-byte KDPC layout.",
+    "ntoskrnl/ke/dpc.c:738-774,925-942: Xbox queue insertion serializes at HIGH_LEVEL and restores the caller DIRQL; removal excludes interrupts. dpc.c:616-646 clears Inserted before invoking the deferred routine and verifies return at DISPATCH_LEVEL.",
+    "No production event assertion, interrupt priority mapping, broker or interrupt object lifecycle implementation changed in the reviewed probe diff."
+  ],
+  "public_contract_context": {
+    "owned_event_contract": "ntoskrnl/ke/eventobj.c:168 requires IRQL<=DISPATCH_LEVEL before even the signaled notification-event fast path.",
+    "public_nxdk_example": "Pinned .scratch/spiritboot-transition-20261012/research/nxdk-video.c:150-181 queues an owned DPC from the vblank ISR and performs event notification from its deferred routine.",
+    "nt_documentation": "https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-kesetevent",
+    "xbox_header": "https://raw.githubusercontent.com/XboxDev/nxdk/29638d0b001f179b73c3513489af10ddc2986216/lib/xboxkrnl/xboxkrnl.h",
+    "limit": "The Microsoft contract documents the NT limit; the Xbox public header supplies the signature/layout without an explicit wider IRQL permission. Observed reference release success does not prove a supported checked-build DIRQL extension."
+  },
+  "source_findings": [],
+  "declined_to_judge": [
+    "Reference BIOS checked-build KeSetEvent permissiveness: no checked reference implementation or authoritative Xbox DIRQL contract was inspected.",
+    "Halo/Halo2 causality or gameplay: this source review covers the independent interrupt probe only.",
+    "Debug128/release CI runtime results: their raw artifacts were not available in the reviewed local download.",
+    "Corrected probe compilation/runtime success: no builds or native runs were performed during the exclusive SG timing slot.",
+    "General SMP DPC rundown: the cleanup reasoning is specific to the owned uniprocessor Xbox target and static probe storage."
+  ],
+  "required_qualification": [
+    "Build the corrected maintained source and preserve new XBE/ISO hashes separately from the frozen v2 payload.",
+    "Require complete17-check TAP and the completion marker with DPC count>0 and DPC IRQL2 on every supported release/debug profile; checked logs must contain no event IRQL assertion.",
+    "Refresh patch/source lock, source tree gates and corrected probe provenance without attributing old payload runtime results to the new bytes."
+  ],
+  "disposition": "No source blocker found. Ready for the probe-only repair to proceed to build and runtime qualification; this review is not a passing runtime or merge receipt.",
+  "runtime_qualified": false
+}
