@@ -1,0 +1,150 @@
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -910,11 +910,6 @@
+ }
+ 
+ #ifdef SARCH_XBOX
+-typedef struct _VFAT_ASYNC_READ
+-{
+-    PERESOURCE Resource;
+-} VFAT_ASYNC_READ, *PVFAT_ASYNC_READ;
+-
+ static
+ NTSTATUS
+ NTAPI
+@@ -923,19 +918,18 @@
+     PIRP Irp,
+     PVOID Context)
+ {
+-    PVFAT_ASYNC_READ Read = Context;
++    PERESOURCE Resource = Context;
+ 
+     UNREFERENCED_PARAMETER(DeviceObject);
+     if (Irp->PendingReturned)
+         IoMarkIrpPending(Irp);
+-    ExReleaseResourceForThreadLite(Read->Resource,
+-                                   (ERESOURCE_THREAD)((ULONG_PTR)Read | 3));
+-    ExFreePoolWithTag(Read, TAG_IRP);
++    ExReleaseResourceForThreadLite(Resource,
++                                   (ERESOURCE_THREAD)((ULONG_PTR)Irp | 3));
+     return STATUS_SUCCESS;
+ }
+ 
+ /* Forward only complete, resident, contiguous reads. The dispatcher context
+- * can disappear as soon as this returns; completion owns a separate lease.
++ * can disappear as soon as this returns; completion owns the IRP-tagged lease.
+  * Cancellation does not release that lease until the lower IRP completes. */
+ static
+ BOOLEAN
+@@ -949,7 +943,6 @@
+     ULONG Length = IrpContext->Stack->Parameters.Read.Length;
+     LARGE_INTEGER End, DiskOffset;
+     ULONG First, RelativeOffset, ReadCluster, HintCluster = 0, HintOffset = 0;
+-    PVFAT_ASYNC_READ Read;
+     PVOID Buffer;
+     PIO_STACK_LOCATION Lower;
+ 
+@@ -1005,32 +998,27 @@
+                        Length - 1) / IrpContext->DeviceExt->FatInfo.BytesPerCluster);
+     ExReleaseFastMutex(&Fcb->LastMutex);
+ 
+-    Read = ExAllocatePoolWithTag(NonPagedPool, sizeof(*Read), TAG_IRP);
+-    if (Read == NULL)
++    if (!NT_SUCCESS(VfatLockUserBuffer(Irp, Length, IoWriteAccess)))
+     {
+         ExReleaseResourceLite(Resource);
+         return FALSE;
+     }
+-    if (!NT_SUCCESS(VfatLockUserBuffer(Irp, Length, IoWriteAccess)))
+-    {
+-        ExFreePoolWithTag(Read, TAG_IRP);
+-        ExReleaseResourceLite(Resource);
+-        return FALSE;
+-    }
+ 
+     vfatAddToStat(IrpContext->DeviceExt, Fat.NonCachedReads, 1);
+     vfatAddToStat(IrpContext->DeviceExt, Fat.NonCachedReadBytes, Length);
+-    Read->Resource = Resource;
+-    ExSetResourceOwnerPointer(Resource, (PVOID)((ULONG_PTR)Read | 3));
++    /* The parent IRP is unique and remains alive through this completion.
++     * Use it as the tagged lease owner, avoiding a separate pool allocation. */
++    ASSERT(((ULONG_PTR)Irp & 3) == 0);
++    ExSetResourceOwnerPointer(Resource, (PVOID)((ULONG_PTR)Irp | 3));
+     IoCopyCurrentIrpStackLocationToNext(Irp);
+     Lower = IoGetNextIrpStackLocation(Irp);
+     Lower->Parameters.Read.ByteOffset = DiskOffset;
+     Lower->FileObject = NULL;
+-    IoSetCompletionRoutine(Irp, VfatAsyncReadComplete, Read, TRUE, TRUE, TRUE);
++    IoSetCompletionRoutine(Irp, VfatAsyncReadComplete, Resource, TRUE, TRUE, TRUE);
+     IoMarkIrpPending(Irp);
+     IrpContext->Flags &= ~IRPCONTEXT_COMPLETE;
+     IoCallDriver(IrpContext->DeviceExt->StorageDevice, Irp);
+-    /* The lower driver is allowed to have completed and freed Read already. */
++    /* The lower driver may already have completed and released the lease. */
+     return TRUE;
+ }
+ #endif
+--- a/tests/host/fatx/check-async-read.py
++++ b/tests/host/fatx/check-async-read.py
+@@ -15,8 +15,9 @@
+ s = (root/'drivers/filesystems/vfatfs/rw.c').read_text()
+ body = extract.function(s, 'VfatComputeRequestEnd')
+ if 'VfatTryAsyncRead(' in s:
+-    body += s[s.index('typedef struct _VFAT_ASYNC_READ'):s.index('static\nNTSTATUS\nNTAPI\nVfatAsyncReadComplete')]
+-    body += extract.function(s, 'VfatAsyncReadComplete')
++    if 'typedef struct _VFAT_ASYNC_READ' in s:
++        body += s[s.index('typedef struct _VFAT_ASYNC_READ'):s.index('static\nNTSTATUS\nNTAPI\nVfatAsyncReadComplete')]
++    body += extract.function(s, 'VfatAsyncReadComplete').replace('#ifdef SARCH_XBOX\n', '')
+     body += extract.function(s, 'VfatTryAsyncRead')
+ body += extract.function(s, 'VfatRead')
+ shim = r'''
+@@ -123,7 +124,7 @@
+   CONTEXT c={&irp,&file,&stack,&de,&dev,IRPCONTEXT_COMPLETE,0};
+   submitted=queued=freed=allocated=completed=lock_calls=stats_calls=stats_sum=0;active=NULL;current=0x1000;
+   immediate=allocation_fail=lock_fail=mapping_fail=0;checkpoint=scenario==19;backend=0;stack_size=0x4000;
+-  int eligible=scenario<6 || scenario==19;
++  int eligible=scenario<6 || scenario==12 || scenario==19;
+   if(scenario==1)immediate=1;
+   if(scenario==2){immediate=1;backend=STATUS_INVALID_PARAMETER;}
+   if(scenario==3)backend=STATUS_CANCELLED;
+@@ -146,6 +147,8 @@
+    check(result==STATUS_PENDING,"eligible read preserves asynchronous return");
+    check(submitted==1&&queued==0,"eligible resident read reaches storage without worker");
+    if(!submitted)continue;
++   check(allocated==0,"eligible read needs no per-request pool allocation");
++   check(f.MainResource.count==0 || f.MainResource.owner==((uintptr_t)&irp|3),"pending lease is keyed by stable parent IRP");
+    check(stats_calls==2&&stats_sum==513,"noncached read statistics preserved");
+    check(!(c.Flags&IRPCONTEXT_COMPLETE),"dispatcher relinquishes completion ownership");
+    check(irp.MdlAddress==irp.UserBuffer,"parent MDL stays owned by I/O manager");
+@@ -154,7 +157,7 @@
+     irp.Cancel=scenario==3;current=0x9000; /* issuer can disappear */
+     memset(&c,0xa5,sizeof(c));finish(&irp);
+    }
+-   check(completed==1&&freed==1&&!f.MainResource.count,"actual completion releases exactly once independent of issuer/context");
++   check(completed==1&&freed==0&&!f.MainResource.count,"actual completion releases exactly once independent of issuer/context");
+    check(irp.IoStatus.Status==backend&&irp.IoStatus.Information==(backend?0:512),"lower status and byte count survive completion");
+   }else{
+    check(!submitted,"ineligible read preserves worker fallback");
+@@ -163,7 +166,7 @@
+    check(f.MainResource.count==(scenario==7?1u:0u),"fallback preserves preexisting resource ownership");
+   }
+  }
+- printf("%u async dispatcher checks, %u failures\n",checks,failures);return failures?1:0;
++ printf("%u allocation-free async checks, %u failures\n",checks,failures);return failures?1:0;
+ }
+ '''
+ if 'VfatLookupSeekCheckpoint(Fcb, Offset.u.LowPart' in s:
+--- a/tests/host/fatx/check-async-coupling.py
++++ b/tests/host/fatx/check-async-coupling.py
+@@ -37,8 +37,9 @@
+ rw=(root/'drivers/filesystems/vfatfs/rw.c').read_text();fat=(root/'drivers/filesystems/vfatfs/fat.c').read_text()
+ body=''.join(extract.function(fat,n).replace('#ifdef SARCH_XBOX','') for n in ['FAT32IsEndOfChain','ClusterToSector','VfatTryMapRead'])
+ body+=''.join(extract.function(rw,n) for n in ['VfatComputeRequestEnd','VfatPrepareSeekCache','VfatLookupSeekCheckpoint','VfatRememberSeekCheckpoint','VfatInvalidateSeekCheckpoints'])
+-body+=rw[rw.index('typedef struct _VFAT_ASYNC_READ'):rw.index('static\nNTSTATUS\nNTAPI\nVfatAsyncReadComplete')]
+-body+=''.join(extract.function(rw,n) for n in ['VfatAsyncReadComplete','VfatTryAsyncRead','VfatRead'])
++if 'typedef struct _VFAT_ASYNC_READ' in rw:
++    body+=rw[rw.index('typedef struct _VFAT_ASYNC_READ'):rw.index('static\nNTSTATUS\nNTAPI\nVfatAsyncReadComplete')]
++body+=''.join(extract.function(rw,n).replace('#ifdef SARCH_XBOX\n', '') if n=='VfatAsyncReadComplete' else extract.function(rw,n) for n in ['VfatAsyncReadComplete','VfatTryAsyncRead','VfatRead'])
+ tests=r'''
+ static void run(FCB*f,DEVICE_EXTENSION*de,ULONG off,ULONG n,int64_t diskoff,ULONG hintoff,ULONG hintcluster){
+  FILE_OBJECT file={.FsContext=f,.FsContext2=f};IRP irp={.Flags=IRP_NOCACHE,.UserBuffer=(void*)0x200000};
