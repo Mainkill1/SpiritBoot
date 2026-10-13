@@ -1,0 +1,102 @@
+SHA-1 bounded compression loops — 2026-10-13
+
+Patch 0118-sha-bounded-rounds.patch replaces the Xbox-only 80-round dispatch
+loop with five-round groups, split by SHA phase. Fifteen initial byte-swap
+rounds run in three groups; the 15..19 boundary is explicit; each remaining
+20-round phase runs in four groups. Five rounds restore a,b,c,d,e's names to
+their original logical roles. The non-Xbox implementation is unchanged.
+
+This removes per-round phase and schedule-kind selection while retaining the
+same 16-word in-place schedule. Update, count arithmetic, context translation,
+copying, final padding/reset and crypto vector dispatch are unchanged. In
+particular, no compression call points directly at caller input: compression
+continues mutating the existing working buffer. No tables or heap allocations
+are added, and DES/RSA implementations are untouched.
+
+Baseline product: 8268b1cbd8371a87e4e84cdba45709a56371035a
+Baseline assembled tree: 9ef0d1d0f503eccf9d966d4b6901993c7364754c
+Candidate assembled tree: d73e07d9b3a9aee3b2b437fe807b55f32640e0a8
+Baseline flash SHA256:
+62edb78f3ac8dd5739c2b6b9d1a838a4447f3c7662db4e4166e3c795081db027
+Candidate flash SHA256:
+33fc537ff03946fe5a48bd27e40a4e51928a9e23244d9d8f6609c9aa9c244f71
+Local candidate: artifacts/sha-release64/flash.bin
+
+Host verification
+
+The new actual-source sha-rounds.py was written and run before implementation.
+It compiled exact staged baseline SHA and crypto bodies and passed the behavior
+checks, then failed the compression loop budget: 81 evaluated conditions vs a
+maximum 24 per block. The candidate passes with 19. Counters exist only in the
+extracted host translation unit, never firmware. This is an executed-work
+bound, not a wall-time threshold or a source-string assertion.
+
+13,410 checks cover 4,096 arbitrary state/block transforms, including all 512
+input bits individually; both the five state words and all 64 mutated schedule
+bytes must match. Update/final differential checks compare entire backing
+allocations across unaligned public contexts, caller input/context aliases,
+digest/context aliases, boundary lengths, synthetic count carry, and reset.
+Independent hashlib SHA-1 and hmac oracles include empty/abc/million-a and
+1MiB inputs, streamed chunks and key lengths 0/1/20/64/65/80. HMAC uses the
+existing console key-truncation contract. Tests operate on owned source; no
+binary reference implementation is introduced.
+
+Existing kernel-performance/check.py --optimized --compare also passes all
+30,978 checks (SHA/DES complete state hashes equal; RSA oracle checks included).
+Product unittest discovery passes 131 tests, with three existing skips.
+CI reconstructs the prior SHA source by reverse-applying only the SHA source
+hunk, then runs the new differential and bounded-work test on assembled code.
+The exact same CI reconstruction command was verified locally.
+
+Instrumented host 1MiB medians (9 samples): baseline 1.637ms, candidate 1.162ms
+(29.0% lower). A repeat through the CI baseline path measured 1.594/1.131ms.
+These are host diagnostics; native timing qualification belongs to the parent
+integration work and is required before claiming an Xbox/xemu speedup.
+
+Release64 image audit
+
+Metric                            Baseline       Candidate       Delta
+Flash bytes                        524288          524288             0
+Stripped kernel PE bytes           509952          511488         +1536
+Mapped image bytes                 569344          573440         +4096
+.text virtual bytes                346688          348536         +1848
+.text mapped pages                     85              86            +1
+ROM backed pages                       92              93            +1
+Permanent image RAM pages              14              14             0
+Discardable image pages                33              33             0
+Compressed prepared bytes           46848           46824           -24
+Payload slot free bytes              79424           75352         -4072
+Warm-stage required pages              177             178            +1
+Warm-stage capacity pages              505             505             0
+
+This is a bounded partial unroll: executable growth is below 2KiB, vs the old
+source comment's roughly 3.8KiB saving from fully rolling the core. The text
+crosses a page boundary; following section RVAs move by one page. Permanent
+RAM remains 14 pages: one header, one retained text, one data, eleven BSS.
+The extra mapped page is ROM backed. Small -32 byte rdata/BSS alignment changes
+are measured output effects, not new global-state savings claimed by the patch.
+Loader binary is identical. tools/des_layout_audit.py verified exact build
+identities, PE geometry, every ROM-span CRC and unchanged DES table bytes.
+The permanent backing audit does not replace a runtime free-memory observation.
+
+Independent review
+
+release_write_perf independently reviewed the staged candidate and ran its
+SHA harness: no blocking correctness finding; 13,410 checks passed, 19/81 loop
+conditions. Review confirmed the 15..19 transition, five-round variable order,
+and preserved circular schedule mutation and wrapper behavior. Independent
+host medians were 1.110/1.573ms; again these are not native timing claims.
+
+Reproduce
+
+python3 CANDIDATE_SOURCE/tests/host/kernel-performance/sha-rounds.py \
+  CANDIDATE_SOURCE BASELINE_SOURCE OUTPUT --optimized
+python3 CANDIDATE_SOURCE/tests/host/kernel-performance/check.py \
+  CANDIDATE_SOURCE OUTPUT --optimized --compare BASELINE_SOURCE
+python3 -m unittest discover -s tests/host
+python3 tools/des_layout_audit.py --baseline BASELINE_BUILD_DIRECTORY \
+  --candidate artifacts/sha-release64 --output OUTPUT.json
+
+Evidence: docs/optimization/evidence/sha-bounded-rounds-20261013/
+Builds use the existing spiritboot-toolchain Docker image, isolated /work,
+pristine source mounted read-only at /source, release variant, memory 64MiB.

@@ -1,0 +1,192 @@
+diff --git a/sdk/lib/cryptlib/sha1.c b/sdk/lib/cryptlib/sha1.c
+index e76a196..3304340 100644
+--- a/sdk/lib/cryptlib/sha1.c
++++ b/sdk/lib/cryptlib/sha1.c
+@@ -54,21 +54,32 @@ static void SHA1Transform(ULONG State[5], UCHAR Buffer[64])
+    e = State[4];
+ 
+ #ifdef SARCH_XBOX
+-   /* Rolled SHA-1 core: bit-identical to the unrolled form below (same
+-    * circular 16-word schedule + same f/K per 20-round group), trading the
+-    * unroll's speed for ~3.8 KB of resident .text.  SHA-1 is not a hot path
+-    * on Xbox -- boot XBE digest verify + save-game HMAC only. */
++   /* Five rounds restore the working-variable order. Keep phase selection
++    * outside the loops while bounding resident code below the full unroll.
++    * blk0/blk1 still update the caller's same circular 16-word buffer. */
+    {
+-      ULONG i, t, f, k;
+-      for (i = 0; i < 80; i++)
++      ULONG i;
++      for (i = 0; i < 15; i += 5)
+       {
+-         ULONG w = (i < 16) ? blk0(i) : blk1(i);
+-         if (i < 20)      { f = f1(b, c, d); k = 0x5A827999; }
+-         else if (i < 40) { f = f2(b, c, d); k = 0x6ED9EBA1; }
+-         else if (i < 60) { f = f3(b, c, d); k = 0x8F1BBCDC; }
+-         else             { f = f4(b, c, d); k = 0xCA62C1D6; }
+-         t = rol(a, 5) + f + e + k + w;
+-         e = d; d = c; c = rol(b, 30); b = a; a = t;
++         R0(a,b,c,d,e,i);   R0(e,a,b,c,d,(i+1)); R0(d,e,a,b,c,(i+2));
++         R0(c,d,e,a,b,(i+3)); R0(b,c,d,e,a,(i+4));
++      }
++      R0(a,b,c,d,e,15); R1(e,a,b,c,d,16); R1(d,e,a,b,c,17);
++      R1(c,d,e,a,b,18); R1(b,c,d,e,a,19);
++      for (i = 20; i < 40; i += 5)
++      {
++         R2(a,b,c,d,e,i);   R2(e,a,b,c,d,(i+1)); R2(d,e,a,b,c,(i+2));
++         R2(c,d,e,a,b,(i+3)); R2(b,c,d,e,a,(i+4));
++      }
++      for (i = 40; i < 60; i += 5)
++      {
++         R3(a,b,c,d,e,i);   R3(e,a,b,c,d,(i+1)); R3(d,e,a,b,c,(i+2));
++         R3(c,d,e,a,b,(i+3)); R3(b,c,d,e,a,(i+4));
++      }
++      for (i = 60; i < 80; i += 5)
++      {
++         R4(a,b,c,d,e,i);   R4(e,a,b,c,d,(i+1)); R4(d,e,a,b,c,(i+2));
++         R4(c,d,e,a,b,(i+3)); R4(b,c,d,e,a,(i+4));
+       }
+    }
+ #else
+diff --git a/tests/host/kernel-performance/sha-rounds.py b/tests/host/kernel-performance/sha-rounds.py
+new file mode 100644
+index 0000000..14b1bc5
+--- /dev/null
++++ b/tests/host/kernel-performance/sha-rounds.py
+@@ -0,0 +1,136 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Actual-source SHA differential, independent digest/HMAC oracle and loop budget.
++
++Catches round/schedule mistakes and changes to count, reset, buffer mutation or
++alias behavior; the loop budget catches regression to per-round dispatch.
++Instrumentation is confined to the host translation unit.
++"""
++import argparse
++import ctypes as C
++import hashlib
++import hmac
++import importlib.util
++import json
++from pathlib import Path
++import random
++import re
++import statistics
++import subprocess
++import time
++
++spec = importlib.util.spec_from_file_location('checks', Path(__file__).with_name('check.py'))
++checks = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(checks)
++
++
++def build(root, output):
++    output.mkdir(parents=True, exist_ok=True)
++    sha = (root / 'sdk/lib/cryptlib/sha1.c').read_text().replace('#include "sha1.h"', '')
++    # Count evaluated compression-loop conditions, including final exits. This
++    # measures executed work, independently of wall time or compiler unrolling.
++    sha = re.sub(r'for \(i = (\d+); i < (\d+);',
++                 r'for (i = \1; (++counters[0], i < \2);', sha)
++    crypto = (root / 'ntoskrnl/xb/crypto.c').read_text()
++    prefix = crypto[crypto.index('typedef struct _XC_SHA_CONTEXT'):crypto.index('/* RC4 key schedule.')]
++    prefix += checks.function(crypto, 'XcpHMAC')
++    names = ['XcpSHAInit', 'XcpSHAUpdate', 'XcpSHAFinal', 'XcpHMAC']
++    exports = '\n'.join('extern __typeof__(' + n + ') host_' + n + ' __attribute__((alias("' + n + '")));' for n in names)
++    src = output / 'sha.c'
++    src.write_text(checks.SHIM + '\ntypedef struct { UCHAR Buffer[64]; ULONG State[5],Count[2]; } SHA_CTX, *PSHA_CTX;\n' + sha + prefix + exports + '\nvoid host_transform(ULONG *s,UCHAR *b) { SHA1Transform(s,b); }\n')
++    so = output / 'sha.so'
++    subprocess.run(['cc', '-O2', '-std=c11', '-DSARCH_XBOX', '-Wall', '-Wextra', '-Wno-unused-function', '-shared', '-fPIC', str(src), '-o', str(so)], check=True)
++    lib = C.CDLL(str(so.resolve()))
++    lib.counters = (C.c_uint64 * 16).in_dll(lib, 'counters')
++    for n in names + ['transform']:
++        getattr(lib, 'host_' + n).restype = None
++    return lib
++
++
++def run(candidate, baseline, optimized):
++    rng = random.Random(0x5A180)
++    tests = 0
++    # Arbitrary states and all block bits catch schedule endian and ring-write
++    # bugs even if a wrapper does not expose the inactive block bytes.
++    for i in range(4096):
++        block = (1 << i).to_bytes(64, 'little') if i < 512 else rng.randbytes(64)
++        state = rng.randbytes(20)
++        results = []
++        for lib in [candidate, baseline]:
++            s = C.create_string_buffer(state)
++            b = C.create_string_buffer(block)
++            lib.reset_counters()
++            lib.host_transform(s, b)
++            results.append((s.raw, b.raw))
++        assert results[0] == results[1], ('transform state and ring buffer', i)
++        tests += 1
++    work = dict(candidate=candidate.counters[0], baseline=baseline.counters[0])
++    # Compare every byte after each update and final, including synthetic count
++    # carry and source/output aliases into the opaque public context.
++    for i in range(1024):
++        offset = i % 4
++        data = rng.randbytes(1024)
++        arenas = [C.create_string_buffer(data), C.create_string_buffer(data)]
++        for lib, arena in zip([candidate, baseline], arenas):
++            lib.host_XcpSHAInit(C.byref(arena, offset))
++        for step in range(8):
++            length = [0,1,55,56,63,64,65,129][(i+step) % 8]
++            at = [0,24,44,52,68,200][(i//4+step) % 6] + offset
++            if step == 4:
++                for arena in arenas:
++                    C.memmove(C.byref(arena, offset+48), b'\xf0\xff\xff\xff', 4)
++            for lib, arena in zip([candidate, baseline], arenas):
++                lib.host_XcpSHAUpdate(C.byref(arena, offset), C.byref(arena, at), length)
++            assert arenas[0].raw == arenas[1].raw, ('update full arena', i, step)
++            tests += 1
++        for lib, arena in zip([candidate, baseline], arenas):
++            lib.host_XcpSHAFinal(C.byref(arena, offset), C.byref(arena, offset+[0,24,44,52,96,300][i%6]))
++        assert arenas[0].raw == arenas[1].raw, ('final alias/reset', i)
++        tests += 1
++    for message in [b'', b'abc', b'a'*1000000] + [rng.randbytes(n) for n in [1,55,56,63,64,65,127,128,129,4096,1048576]]:
++        arena = C.create_string_buffer(b'\xcc'*120)
++        digest = C.create_string_buffer(20)
++        candidate.host_XcpSHAInit(arena)
++        at = 0
++        while at < len(message):
++            end = min(len(message), at+rng.randrange(1,8193))
++            candidate.host_XcpSHAUpdate(arena, message[at:end], end-at)
++            at = end
++        candidate.host_XcpSHAFinal(arena, digest)
++        assert digest.raw == hashlib.sha1(message).digest(), ('independent SHA oracle', len(message))
++        assert arena.raw[:24] == b'\xcc'*24 and arena.raw[52:116] == bytes(64)
++        tests += 1
++        for n in [0,1,20,64,65,80]:
++            key = rng.randbytes(n)
++            split = len(message)//2
++            candidate.host_XcpHMAC(key, n, message[:split], split, message[split:], len(message)-split, digest)
++            # Console's exported key contract truncates keys to 64 bytes.
++            assert digest.raw == hmac.digest(key[:64], message, 'sha1'), ('HMAC oracle', n, len(message))
++            tests += 1
++    times = {}
++    message = b'x' * 1048576
++    for name, lib in [('baseline',baseline), ('candidate',candidate)]:
++        samples = []
++        for _ in range(9):
++            arena = C.create_string_buffer(116)
++            lib.host_XcpSHAInit(arena)
++            start = time.perf_counter_ns()
++            lib.host_XcpSHAUpdate(arena, message, len(message))
++            samples.append((time.perf_counter_ns()-start)/1e6)
++        times[name] = statistics.median(samples)
++    result = dict(checks=tests, compression_loop_evaluations=work, host_1mib_median_ms=times)
++    print(json.dumps(result, indent=2), flush=True)
++    if optimized:
++        assert work['candidate'] <= 24, ('compression loop budget exceeded', work)
++    return result
++
++
++if __name__ == '__main__':
++    p = argparse.ArgumentParser()
++    p.add_argument('candidate', type=Path)
++    p.add_argument('baseline', type=Path)
++    p.add_argument('output', type=Path)
++    p.add_argument('--optimized', action='store_true')
++    a = p.parse_args()
++    result = run(build(a.candidate, a.output/'candidate'), build(a.baseline, a.output/'baseline'), a.optimized)
++    (a.output/'work.json').write_text(json.dumps(result, indent=2)+'\n')
