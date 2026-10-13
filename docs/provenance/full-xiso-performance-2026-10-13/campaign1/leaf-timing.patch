@@ -1,0 +1,59 @@
+--- api-regression/main.c
++++ api-leaf-performance/main.c
+@@ -241,6 +241,16 @@
+     return n;
+ }
+ 
++static const char *disabled_leaf(const char *name)
++{
++    if (!strcmp(name, "io/finfo/rename_dos_root")) return "Complex rejects the DOS-root rename contract asserted by this fixture";
++    if (!strcmp(name, "hal/av/guess_field")) return "Complex bugchecks on this fixture optional NULL result query";
++    if (!strcmp(name, "io/dismount/a_device_with_no_volume_still_succeeds")) return "Complex rejects the raw-device success contract asserted by this fixture";
++    if (!strcmp(name, "ke/exceptions/x87_divide_by_zero")) return "xemu TCG does not deliver the unmasked FP exception expected by this fixture";
++    if (!strcmp(name, "ke/exceptions/sse_divide_by_zero")) return "xemu TCG does not deliver the unmasked FP exception expected by this fixture";
++    return NULL;
++}
++
+ int main(void)
+ {
+     /* Bracket the TAP stream so the runner can find start/end inside
+@@ -253,6 +263,9 @@
+     unsigned int idx = 0;
+     unsigned int passed = 0;
+     unsigned int failed = 0;
++    unsigned int skipped = 0;
++    ULONGLONG frequency = KeQueryPerformanceFrequency();
++    tap_comment("LEAF-META version=1 frequency=%llu planned=%u", frequency, total_tests());
+ 
+     for (unsigned int g = 0; g < NGROUPS; g++) {
+         const test_group_t *grp = GROUPS[g];
+@@ -266,7 +279,20 @@
+             g_fail_line = 0;
+             g_fail_what[0] = 0;
+ 
++            const char *skip = disabled_leaf(desc);
++            if (skip) {
++                char message[320];
++                snprintf(message, sizeof(message), "%s # SKIP %s", desc, skip);
++                tap_ok(idx, message);
++                ++skipped;
++                continue;
++            }
++            ULONGLONG leaf_start = KeQueryPerformanceCounter();
+             bool ok = grp->entries[t].fn();
++            ULONGLONG leaf_end = KeQueryPerformanceCounter();
++            tap_comment("LEAF name=%s ticks=%llu ok=%u todo=%u", desc,
++                        leaf_end-leaf_start, ok ? 1 : 0,
++                        grp->entries[t].todo != NULL ? 1 : 0);
+             const char *todo = grp->entries[t].todo;
+             if (todo != NULL) {
+                 /* Known gap: report, never fail the suite.  An
+@@ -297,7 +323,7 @@
+         }
+     }
+ 
+-    tap_comment("tests=%u passed=%u failed=%u", idx, passed, failed);
++    tap_comment("tests=%u passed=%u failed=%u skipped=%u", idx, passed, failed, skipped);
+     tap_puts(failed == 0 ? "== api-regression end PASS ==\n"
+                          : "== api-regression end FAIL ==\n");
+     tap_drain();
