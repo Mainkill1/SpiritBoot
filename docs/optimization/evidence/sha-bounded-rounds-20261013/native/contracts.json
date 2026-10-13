@@ -1,0 +1,1125 @@
+{
+  "TODOS": [
+    "io/bad-ptr/set_eof_beyond_free_space",
+    "io/storage/flush_volume_readonly",
+    "ke/procprio/a_new_thread_starts_at_the_process_priority",
+    "ke/procprio/the_process_lists_its_threads"
+  ],
+  "EXPECTED_LEAVES": [
+    "rtl/status/success",
+    "rtl/status/file_not_found",
+    "rtl/status/file_exists",
+    "rtl/status/no_such_file",
+    "rtl/status/path_not_found",
+    "rtl/status/end_of_file",
+    "rtl/status/access_denied",
+    "rtl/status/invalid_handle",
+    "rtl/status/invalid_parameter",
+    "rtl/status/disk_full",
+    "rtl/status/sharing_violation",
+    "rtl/status/buffer_too_small",
+    "rtl/string/init_ansi",
+    "rtl/string/init_unicode",
+    "rtl/string/equal_ansi",
+    "rtl/string/equal_ansi_case",
+    "rtl/string/equal_unicode",
+    "rtl/string/compare_unicode",
+    "rtl/string/ansi_to_unicode",
+    "rtl/string/compare_memory_ulong",
+    "rtl/string/init_ansi_null",
+    "rtl/time/known_epoch",
+    "rtl/time/roundtrip",
+    "rtl/time/invalid",
+    "rtl/memory/zero_fills",
+    "rtl/memory/zero_length_noop",
+    "rtl/memory/zero_bounds",
+    "rtl/memory/fill_pattern",
+    "rtl/memory/fill_ulong",
+    "rtl/memory/move_overlap",
+    "rtl/memory/compare_memory",
+    "rtl/memory/compare_ulong",
+    "rtl/strconv/upper_char",
+    "rtl/strconv/copy_unicode",
+    "rtl/strconv/upcase_unicode_inplace",
+    "rtl/strconv/upcase_unicode_alloc",
+    "rtl/strconv/create_unicode",
+    "rtl/strconv/append_unicode_to_string",
+    "rtl/strconv/append_unicode_string_to_string",
+    "rtl/strconv/multibyte_to_unicode",
+    "rtl/strconv/unicode_to_multibyte",
+    "rtl/strconv/map_generic_mask",
+    "rtl/intconv/char_to_integer",
+    "rtl/intconv/unicode_string_to_integer",
+    "rtl/intconv/integer_to_char",
+    "rtl/intconv/integer_to_unicode_string",
+    "rtl/intconv/compare_string",
+    "rtl/intconv/copy_string",
+    "rtl/intconv/upper_string",
+    "rtl/intconv/append_string_to_string",
+    "rtl/intconv/free_ansi_string",
+    "rtl/intconv/extended_integer_multiply",
+    "rtl/intconv/extended_large_integer_divide",
+    "rtl/intconv/extended_magic_divide",
+    "rtl/nlscase/upcase_unicode_char",
+    "rtl/nlscase/downcase_unicode_char",
+    "rtl/nlscase/lower_char",
+    "rtl/nlscase/downcase_unicode_string",
+    "rtl/nlscase/multibyte_to_unicode_size",
+    "rtl/nlscase/unicode_to_multibyte_size",
+    "rtl/nlscase/upcase_unicode_to_multibyte",
+    "rtl/printf/sprintf",
+    "rtl/printf/snprintf_fits",
+    "rtl/printf/snprintf_truncates",
+    "rtl/printf/vsprintf",
+    "rtl/printf/vsnprintf",
+    "rtl/critsec/and_region_roundtrip",
+    "rtl/critsec/and_region_reuse",
+    "rtl/critsec/plain_init_state",
+    "rtl/critsec/plain_roundtrip",
+    "rtl/critsec/plain_recursion",
+    "rtl/critsec/try_enter_free",
+    "rtl/critsec/try_enter_recursive",
+    "rtl/byteswap/ushort_byte_swap",
+    "rtl/byteswap/ulong_byte_swap",
+    "rtl/framewalk/walk_frame_chain",
+    "rtl/framewalk/capture_stack_backtrace",
+    "rtl/framewalk/capture_backtrace_hash",
+    "rtl/framewalk/get_callers_address",
+    "ke/event/init_notification_not_signaled",
+    "ke/event/init_notification_signaled",
+    "ke/event/set_then_wait",
+    "ke/event/reset",
+    "ke/event/synchronization_auto_resets",
+    "ke/semaphore/init_zero",
+    "ke/semaphore/init_two",
+    "ke/semaphore/release_increments",
+    "ke/time/query_system_time_nonzero",
+    "ke/time/perf_frequency_xbox",
+    "ke/time/perf_counter_monotonic",
+    "ke/time/tick_count_advances",
+    "ke/time/delay_returns_after_interval",
+    "ke/time/delay_long_cumulative",
+    "ke/time/stall_returns",
+    "ke/time/set_system_time_roundtrip",
+    "ke/timebase/time_increment",
+    "ke/timebase/interrupt_time_advances",
+    "ke/timebase/interrupt_time_matches_query",
+    "ke/timebase/system_time_matches_query",
+    "ex/pool/alloc_small",
+    "ex/pool/alloc_repeated",
+    "ex/pool/alloc_page_sized",
+    "ex/pool/alloc_large",
+    "ex/raise/raise_status",
+    "ex/raise/raise_exception",
+    "ex/rwlock/init_fields",
+    "ex/rwlock/exclusive_roundtrip",
+    "ex/rwlock/shared_roundtrip",
+    "ex/rwlock/nested_readers",
+    "ex/rwlock/sequential_reuse",
+    "ex/interlocked/add_large_integer",
+    "ex/interlocked/add_large_statistic",
+    "ex/interlocked/compare_exchange64",
+    "ex/interlocked/compare_exchange",
+    "ex/interlocked/exchange_add",
+    "ex/list/insert_head",
+    "ex/list/insert_tail",
+    "ex/list/remove_head",
+    "mm/contig/phys_map_probe",
+    "mm/contig/low_floor_probe",
+    "mm/contig/system_memory",
+    "mm/contig/region_probe",
+    "mm/contig/placement_probe",
+    "mm/contig/alloc_one_page",
+    "mm/contig/alloc_aligned",
+    "mm/contig/physical_in_range",
+    "mm/contig/query_statistics",
+    "io/file/open_missing",
+    "io/file/create_then_open",
+    "io/file/write_read_4kb",
+    "io/file/delete_on_close",
+    "io/dvd/open_root",
+    "io/dvd/open_self",
+    "io/dvd/list_root",
+    "io/dvd/query_self_info",
+    "io/dvd/write_rejected",
+    "hal/data/disk_model_number",
+    "hal/data/disk_serial_number",
+    "hal/data/disk_cache_partition_count",
+    "hal/data/xbox_hardware_info_size",
+    "hal/data/xbox_krnl_version",
+    "hal/data/boot_smc_video_mode",
+    "hal/portio/read_buffer_ulong",
+    "hal/portio/read_buffer_ushort",
+    "hal/portio/read_buffer_uchar",
+    "hal/portio/write_buffer_ulong",
+    "hal/portio/write_buffer_uchar",
+    "hal/portio/write_buffer_ushort",
+    "ob/types/thread",
+    "ob/types/event",
+    "ob/types/semaphore",
+    "ob/types/mutant",
+    "ob/types/timer",
+    "ob/types/file",
+    "ob/types/device",
+    "ob/types/symlink",
+    "ob/types/symlink_type_guards_a_reference",
+    "ps/thread/create_default",
+    "ps/thread/create_suspended",
+    "ps/thread/create_with_explicit_stack",
+    "ke/wait-apc/sleep_zero_usermode",
+    "ke/wait-apc/io_apc_delivered_around_alertable_userwait",
+    "ke/wait-apc/apc_delivered_after_nonalertable_userwait",
+    "ke/wait-apc/critical_region_pairs_are_balanced",
+    "mm/virtual/decommit_then_recommit",
+    "mm/virtual/partial_decommit",
+    "mm/virtual/query_after_decommit",
+    "mm/virtual/recommit_changes_protection",
+    "io/dirmask/heavy_star_mask",
+    "io/dirmask/dos_wildcards_literal",
+    "ob/named/named_mutant_shared",
+    "ob/named/named_event_shared",
+    "ob/named/pulse_after_close_reuse",
+    "ob/named/pulse_after_duplicate_close_reuse",
+    "io/bad-ptr/wait_garbage_handle",
+    "io/bad-ptr/read_zero_length_garbage_buffer",
+    "io/bad-ptr/write_zero_length_garbage_buffer",
+    "io/bad-ptr/set_eof_beyond_free_space",
+    "mm/bigpool/bigpool_alignment",
+    "mm/bigpool/bigpool_churn",
+    "mm/bigpool/bigpool_recycle",
+    "mm/bigpool/bigpool_freed_unmapped",
+    "mm/bigpool/pool_query_sizes",
+    "mm/bigpool/pool_freed_small_still_mapped",
+    "io/cc-write/flush_buffers_visibility",
+    "io/cc-write/cross_handle_no_flush",
+    "io/cc-write/write_heavy_no_deadlock",
+    "io/cc-write/many_files_flush_on_close",
+    "io/cc-write/extend_preserves_data",
+    "io/cc-write/small_file_reopen",
+    "io/cc-write/subdir_small_reopen",
+    "io/cc-write/gap_write_extends",
+    "io/cc-write/allocsize_matches_eof",
+    "io/cc-write/attributes_match_retail",
+    "io/cc-write/prealloc_create_eof",
+    "io/cc-write/prealloc_write_partial",
+    "io/cc-write/prealloc_write_full",
+    "io/cc-write/prealloc_setinfo_write_full",
+    "io/storage/flush_hdd_file",
+    "io/storage/flush_volume_handle",
+    "io/storage/flush_volume_readonly",
+    "io/storage/dvd_check_verify",
+    "io/storage/dvd_check_verify2",
+    "io/storage/dvd_check_verify_count",
+    "io/storage/dvd_check_verify_small_buffer",
+    "io/complete/event_async_write_read",
+    "xe/section/find_section",
+    "xe/section/boot_state",
+    "xe/section/reload_restores_content",
+    "xe/section/refcount_nesting",
+    "xe/section/shared_page_counters",
+    "mm/vmcontract/reserve_commit_regions",
+    "mm/vmcontract/size_rounding",
+    "mm/vmcontract/free_status_codes",
+    "mm/vmcontract/protect_roundtrip",
+    "mm/vmcontract/statistics_track_commit",
+    "mm/vmcontract/top_down",
+    "mm/vmcontract/release_middle_splits",
+    "mm/vmcontract/noaccess_commit",
+    "mm/vmcontract/nozero_commit",
+    "mm/vmcontract/statistics_committed_probe",
+    "mm/cache/eviction_two_files",
+    "mm/cache/read_churn",
+    "mm/cache/truncate_shrinks",
+    "mm/cache/truncate_purges_dirty",
+    "mm/cache/fsc_cache_size",
+    "mm/cache/full_overwrite_roundtrip",
+    "mm/cache/parallel_cold_read",
+    "io/mdl/unbuffered_512k",
+    "io/mdl/buffered_1m",
+    "io/mdl/dvd_large_read",
+    "io/fileobj/head_fields",
+    "io/fileobj/current_byte_offset",
+    "io/fileobj/access_bits",
+    "io/fileobj/published_flags",
+    "io/fileobj/published_flags_survive_write",
+    "io/shareaccess/set_records_the_open",
+    "io/shareaccess/set_read_write_shared",
+    "io/shareaccess/set_no_access_resets",
+    "io/shareaccess/check_grants_compatible",
+    "io/shareaccess/check_without_update",
+    "io/shareaccess/check_denies_conflicting",
+    "io/shareaccess/remove_unwinds_the_open",
+    "io/shareaccess/remove_one_of_two",
+    "io/irplayout/create_device",
+    "io/irplayout/device_initial_fields",
+    "io/irplayout/device_initial_flags",
+    "io/irplayout/untouched_device_is_unreachable",
+    "io/irplayout/open_dispatches_create",
+    "io/irplayout/ioctl_major_index",
+    "io/irplayout/ioctl_control_code_offset",
+    "io/irplayout/ioctl_buffer_lengths",
+    "io/irplayout/ioctl_input_buffer",
+    "io/irplayout/stack_device_object",
+    "io/irplayout/irp_user_buffer",
+    "io/irplayout/iostatus_writeback",
+    "io/irplayout/stack_within_irp",
+    "io/fsdreq/build_returns_irp",
+    "io/fsdreq/read_major_is_two",
+    "io/fsdreq/write_major_is_three",
+    "io/fsdreq/stack_parameters",
+    "io/fsdreq/buffer_passed_through",
+    "io/fsdreq/call_driver_returns_status",
+    "io/fsdreq/completion_signals_and_reports",
+    "io/fsdreq/ioctl_build_and_dispatch",
+    "io/fsdreq/ioctl_build_parameters",
+    "io/syncreq/fsd_request_round_trip",
+    "io/syncreq/fsd_request_parameters",
+    "io/syncreq/ioctl_request_round_trip",
+    "io/syncreq/ioctl_request_parameters",
+    "io/syncreq/ioctl_returns_length",
+    "io/syncreq/driver_failure_surfaces",
+    "ke/waitmulti/any_picks_lowest_signaled",
+    "ke/waitmulti/all_drains_every_object",
+    "ke/waitmulti/all_unsatisfied_takes_nothing",
+    "ke/waitmulti/five_objects_with_block_array",
+    "ke/waitmulti/timeout_expires",
+    "ke/waitmulti/nt_any_over_handles",
+    "ke/waitmulti/nt_all_timeout",
+    "ke/waitmulti/nt_signal_and_wait",
+    "ke/waitmulti/nt_signal_and_wait_timeout",
+    "ob/symlink/create_open_query_delete",
+    "ob/symlink/query_short_buffer",
+    "ob/symlink/query_directory_object",
+    "ob/symlink/duplicate_keeps_object_alive",
+    "ob/symlink/duplicate_close_source",
+    "ob/symlink/make_temporary_unnames",
+    "io/finfo/position_info_roundtrip",
+    "io/finfo/basic_info_query_set",
+    "io/finfo/allocation_info_extend",
+    "io/finfo/rename_same_directory",
+    "io/finfo/disposition_deletes",
+    "io/finfo/volume_info_queries",
+    "io/finfo/delete_nonempty_dir_rejected",
+    "io/rawfs/dasd_open_mounts_raw",
+    "io/rawfs/sector_read",
+    "io/rawfs/fs_size_query",
+    "ke/exceptions/raise_exception_roundtrip",
+    "ke/exceptions/raise_status",
+    "ke/exceptions/read_access_violation",
+    "ke/exceptions/write_access_violation",
+    "ke/exceptions/integer_divide_by_zero",
+    "ke/exceptions/illegal_instruction",
+    "ke/exceptions/general_protection",
+    "ke/exceptions/single_step",
+    "ke/exceptions/integer_overflow",
+    "ke/exceptions/bound_range",
+    "ke/exceptions/dbg_break_point",
+    "ke/exceptions/dbg_break_point_with_status",
+    "ke/exceptions/rtl_assert",
+    "ke/exceptions/rtl_rip",
+    "ke/exceptions/breakpoint",
+    "ke/exceptions/continue_after_commit",
+    "ke/exceptions/search_order_and_unwind",
+    "ke/exceptions/context_read_layout",
+    "ke/exceptions/skip_instruction_continue",
+    "ke/exceptions/capture_context",
+    "io/fatx16/write_read_multicluster",
+    "io/fatx16/delete_returns_clusters",
+    "ob/handles/table_growth",
+    "ob/handles/slots_recycle",
+    "xc/parity/all_bytes_odd_parity",
+    "xc/parity/already_odd_unchanged",
+    "xc/parity/known_vectors",
+    "xc/parity/zero_length_noop",
+    "xc/crypto/sha1_abc",
+    "xc/crypto/sha1_empty",
+    "xc/crypto/sha1_incremental",
+    "xc/crypto/rc4_key_plaintext",
+    "xc/crypto/rc4_roundtrip",
+    "xc/crypto/hmac_jefe",
+    "xc/crypto/hmac_two_segments",
+    "xc/crypto/sha_context_layout",
+    "xc/crypto/sha_context_counts_bytes",
+    "xc/crypto/sha_final_reinitialises",
+    "xc/crypto/rc4_key_struct",
+    "xc/crypto/hmac_digest_width",
+    "xc/rsa/modexp_small",
+    "xc/rsa/modexp_reduces_base",
+    "xc/rsa/modexp_even_modulus",
+    "xc/rsa/modexp_identities",
+    "xc/rsa/modexp_rsa_block",
+    "xc/rsa/keylen",
+    "xc/rsa/keylen_is_not_derived",
+    "xc/rsa/verify_signature",
+    "xc/rsa/verify_wrong_digest",
+    "xc/rsa/verify_wrong_signature",
+    "xc/rsa/verify_smaller_key",
+    "xc/rsa/encpublic",
+    "xc/rsa/encpublic_is_verify_step",
+    "xc/rsa/encpublic_out_of_range",
+    "xc/rsa/encpublic_reads_past_the_modulus",
+    "xc/rsa/encpublic_wants_the_public_magic",
+    "xc/rsa/verify_wants_the_public_magic",
+    "xc/rsa/keylen_ignores_the_magic",
+    "xc/cipher/des_key_table",
+    "xc/cipher/des_key_table_extent",
+    "xc/cipher/triple_key_table",
+    "xc/cipher/any_cipher_but_zero_is_triple",
+    "xc/cipher/cbc_encrypt",
+    "xc/cipher/cbc_decrypt",
+    "xc/cipher/cbc_chains_across_calls",
+    "xc/cipher/cbc_without_a_whole_block",
+    "xc/cipher/triple_cbc",
+    "xc/cipher/cbc_in_place",
+    "xc/cipher/block_ecb",
+    "xc/cipher/block_operation_codes",
+    "xc/cipher/block_triple",
+    "xc/cipher/crypt_service",
+    "xc/vector/an_export_is_a_thunk",
+    "xc/vector/an_update_diverts_the_exports",
+    "xc/vector/the_out_parameter_is_the_rom_vector",
+    "xc/vector/an_empty_slot_keeps_what_is_installed",
+    "xc/vector/hashing_survives_a_round_trip",
+    "io/delete/delete_existing",
+    "io/delete/delete_missing",
+    "io/delete/delete_twice",
+    "io/delete/delete_while_open",
+    "ob/refname/directory_by_name",
+    "ob/refname/null_type_accepts_any",
+    "ob/refname/type_mismatch",
+    "ob/refname/missing_name",
+    "ob/refname/reference_is_counted",
+    "ob/refname/fast_reference_pairs",
+    "ke/devqueue/initialize",
+    "ke/devqueue/insert_remove",
+    "ke/devqueue/busy_flag_position",
+    "ke/devqueue/insert_by_key_orders",
+    "ke/devqueue/remove_by_key",
+    "ke/devqueue/remove_entry",
+    "ke/devqueue/device_object_queue",
+    "ke/devqueue/device_lock_follows_queue",
+    "ke/devqueue/a_passive_level_caller_is_taken",
+    "ke/queue/initialize",
+    "ke/queue/initialize_explicit_count",
+    "ke/queue/insert_signals",
+    "ke/queue/remove_is_fifo",
+    "ke/queue/insert_head_jumps_the_line",
+    "ke/queue/remove_empty_times_out",
+    "ke/queue/remove_associates_the_thread",
+    "ke/queue/rundown_returns_entries",
+    "io/irpalloc/allocate_one_stack",
+    "io/irpalloc/allocate_grows_with_stack",
+    "io/irpalloc/reuse_after_free",
+    "io/irpalloc/initialize_caller_memory",
+    "io/devlife/delete_unopened",
+    "io/devlife/delete_with_handle_open",
+    "io/devlife/delete_leaves_the_driver_object_alone",
+    "io/asyncreq/build_read",
+    "io/asyncreq/build_write",
+    "io/asyncreq/no_iosb_is_accepted",
+    "io/asyncreq/dispatch_reaches_the_driver",
+    "io/scatter/scatter_reads_into_each_page",
+    "io/scatter/scatter_reads_from_an_offset",
+    "io/scatter/gather_writes_from_each_page",
+    "io/scatter/sub_page_length_transfers_that_much",
+    "io/scatter/segment_low_bits_are_ignored",
+    "io/scatter/buffered_handle_is_rejected",
+    "io/scatter/straddling_eof_is_a_short_read",
+    "io/scatter/read_past_eof_is_end_of_file",
+    "io/scatter/asynchronous_handle_signals_its_event",
+    "io/scatter/completion_apc_reports_the_whole_transfer",
+    "io/scatter/concurrent_async_requests_are_independent",
+    "io/scatter/leaves_no_scratch_file",
+    "io/iocomp/create_and_query_empty",
+    "io/iocomp/count_is_the_queue_maximum",
+    "io/iocomp/zero_count_is_one_per_processor",
+    "io/iocomp/set_then_remove_round_trips",
+    "io/iocomp/remove_from_empty_times_out",
+    "io/iocomp/packets_come_back_in_order",
+    "io/iocomp/io_setter_takes_the_object",
+    "io/iocomp/object_type_tag",
+    "io/iocomp/access_mask_is_not_enforced",
+    "io/iocomp/named_port_is_shared",
+    "io/iocomp/wrong_object_type_is_refused",
+    "mm/protect/readonly_then_back",
+    "mm/protect/base_and_size_are_rounded",
+    "mm/protect/writing_a_readonly_page_faults",
+    "mm/protect/uncommitted_and_unreserved_are_refused",
+    "mm/protect/noaccess_and_cacheability_apply",
+    "mm/protect/reading_a_noaccess_page_faults",
+    "ob/query/event_reports_type_and_state",
+    "ob/query/event_reports_the_synchronization_type",
+    "ob/query/mutant_reports_ownership",
+    "ob/query/semaphore_reports_both_counts",
+    "ob/query/wrong_object_type_is_refused",
+    "ob/query/writes_only_its_structure",
+    "ke/apc/the_wait_is_the_delivery_point",
+    "ke/apc/one_wait_drains_them_all_in_order",
+    "ke/apc/another_thread_receives_it",
+    "ke/apc/a_blocked_wait_runs_the_routine_before_returning",
+    "ke/apc/only_a_user_alertable_wait_delivers",
+    "ke/threadstate/nt_suspend_and_resume_report_the_previous_count",
+    "ke/threadstate/a_suspended_thread_makes_no_progress",
+    "ke/threadstate/ke_suspend_and_resume_return_the_previous_count",
+    "ke/threadstate/suspending_a_terminated_thread_is_refused",
+    "ke/threadstate/disable_boost_returns_the_previous_setting",
+    "ke/threadstate/alerting_reports_the_previous_state",
+    "ke/threadstate/an_alerting_resume_returns_the_suspend_count",
+    "ke/threadstate/testing_an_alert_consumes_it",
+    "ke/apcinit/console_layout",
+    "ke/apcinit/leaves_the_tail_alone",
+    "ke/apcinit/null_normal_routine_forces_kernel_mode",
+    "ke/apcinit/reinitialise_overwrites",
+    "ke/apcqueue/a_kernel_apc_runs_before_the_insert_returns",
+    "ke/apcqueue/the_normal_routine_runs_after_the_kernel_one",
+    "ke/apcqueue/the_kernel_routine_can_cancel_the_normal_one",
+    "ke/apcqueue/a_user_apc_waits_for_an_alertable_wait",
+    "ke/apcqueue/a_second_insert_is_refused",
+    "ke/apcqueue/it_runs_on_the_target_thread",
+    "ke/apcqueue/an_undelivered_apc_is_run_down",
+    "io/ioquery/only_three_classes_are_answered",
+    "io/ioquery/position_follows_the_file_object",
+    "io/ioquery/network_open_information",
+    "io/ioquery/internal_information_names_the_file",
+    "io/ioquery/the_length_argument_is_ignored",
+    "io/volquery/only_four_classes_are_answered",
+    "io/volquery/volume_information",
+    "io/volquery/size_information",
+    "io/volquery/device_information",
+    "io/volquery/attribute_information_truncates",
+    "io/startio/the_first_packet_starts_the_device",
+    "io/startio/by_key_sweeps_forward",
+    "io/startio/start_packet_raises_and_next_does_not",
+    "io/createfile/create_reports_created",
+    "io/createfile/open_reports_opened",
+    "io/createfile/overwrite_if_reports_overwritten",
+    "io/createfile/overwrite_reextend_same_handle",
+    "io/createfile/overwrite_reextend_reopened_zero",
+    "io/createfile/open_same_eof_preserves_contents",
+    "io/createfile/supersede_reports_overwritten",
+    "io/createfile/create_on_existing_collides",
+    "io/createfile/checked_bad_disposition_is_refused",
+    "io/createfile/checked_bad_share_access_is_refused",
+    "io/createfile/checked_delete_on_close_needs_delete",
+    "io/createfile/checked_synchronous_needs_synchronize",
+    "io/createfile/unchecked_options_skip_the_validation",
+    "io/createfile/directory_file_opens_the_volume_root",
+    "io/createfile/relative_name_under_root_directory",
+    "io/createfile/refusal_leaves_the_status_block_alone",
+    "io/createfile/the_disposition_reaches_the_driver",
+    "io/threadirp/fresh_packet_is_not_on_a_list",
+    "io/threadirp/queue_links_the_packet",
+    "io/threadirp/second_queue_goes_in_front",
+    "io/threadirp/queue_touches_nothing_else",
+    "ob/bypointer/the_object_s_own_type_is_accepted",
+    "ob/bypointer/another_type_is_refused",
+    "ob/bypointer/the_reference_outlives_the_handle",
+    "ob/bypointer/a_pointer_opens_a_handle",
+    "ob/bypointer/the_opened_handle_outlives_the_first",
+    "ob/bypointer/a_refused_open_returns_no_handle",
+    "ke/pulse/the_previous_state_comes_back",
+    "ke/pulse/the_event_is_left_clear",
+    "ke/pulse/a_synchronization_event_pulses_the_same_way",
+    "ke/pulse/a_blocked_waiter_is_released",
+    "ke/pulse/a_pulse_with_nobody_waiting_is_lost",
+    "ke/boost/the_boost_is_measured_from_the_base_priority",
+    "ke/boost/a_boost_below_the_current_priority_does_nothing",
+    "ke/boost/a_boost_stops_below_the_real_time_range",
+    "ke/boost/a_real_time_thread_is_left_alone",
+    "ke/boost/the_boost_disable_flag_does_not_hold_it_back",
+    "ob/directory/a_directory_comes_back_as_a_handle",
+    "ob/directory/a_name_under_it_resolves_to_one_object",
+    "ob/directory/the_same_name_in_two_directories_is_two_objects",
+    "ob/directory/a_second_create_of_one_name_collides",
+    "ob/directory/the_directory_enumerates_its_entries",
+    "ps/notify/a_routine_is_accepted",
+    "ps/notify/the_create_side_reports_the_new_thread",
+    "ps/notify/the_destroy_side_reports_it_too",
+    "ps/notify/the_routine_stays_registered",
+    "ps/statistics/the_counts_come_back",
+    "ps/statistics/a_wrong_length_is_refused",
+    "ps/statistics/running_threads_are_counted",
+    "ps/statistics/open_handles_are_counted",
+    "ob/create/an_unnamed_object_comes_back_with_its_header",
+    "ob/create/the_allocate_procedure_sizes_the_header",
+    "ob/create/the_procedures_run_on_the_last_dereference",
+    "ob/create/a_named_object_reserves_room_for_its_name",
+    "ob/create/a_name_with_no_element_is_refused",
+    "ob/create/only_the_last_element_of_the_name_is_kept",
+    "ob/create/an_empty_element_inside_the_path_is_refused",
+    "ob/create/an_unnamed_insert_hands_back_a_handle",
+    "ob/create/the_pointer_bias_outlives_the_handle",
+    "ob/create/a_named_object_is_reachable_by_its_name",
+    "ob/create/a_second_insert_of_the_name_collides",
+    "ob/create/openif_returns_the_object_already_there",
+    "ob/create/a_handle_of_another_type_is_refused",
+    "ke/dispatcher/it_lowers_to_the_irql_it_was_given",
+    "ke/dispatcher/it_leaves_the_irql_alone_when_told_to_stay",
+    "ke/dispatcher/a_kernel_apc_queued_under_it_runs_on_the_way_out",
+    "ke/dispatcher/an_apc_waits_while_it_stays_at_dispatch",
+    "hal/softint/a_cleared_request_holds_an_apc_back",
+    "hal/softint/a_request_above_the_current_irql_waits",
+    "hal/softint/a_request_with_nothing_queued_is_harmless",
+    "xc/privkey/decrypts_the_public_operation",
+    "xc/privkey/the_answer_carries_eight_zero_bytes",
+    "xc/privkey/the_modulus_and_private_exponent_are_not_read",
+    "xc/privkey/a_zero_prime_is_refused",
+    "xc/privkey/the_primes_are_not_interchangeable",
+    "xc/privkey/only_the_private_magic_is_accepted",
+    "xc/privkey/the_value_is_not_range_checked",
+    "xc/privkey/the_value_is_one_word_wider",
+    "hal/sysint/the_mask_bit_follows_the_call",
+    "hal/sysint/the_calls_are_idempotent",
+    "hal/sysint/either_mode_opens_the_line",
+    "hal/sysint/a_level_past_the_last_line_is_ignored",
+    "hal/sysint/the_other_lines_are_untouched",
+    "ke/bugcheck/the_record_is_the_arrays_own_address",
+    "ke/bugcheck/the_record_is_zero_at_rest",
+    "hal/smc/the_byte_written_reads_back",
+    "hal/smc/only_the_low_byte_reaches_the_smc",
+    "hal/smc/it_is_the_smbus_write",
+    "hal/smc/secure_tray_eject_disturbs_nothing",
+    "ke/procprio/setting_the_priority_reports_the_old_one",
+    "ke/procprio/the_calling_thread_follows_the_process",
+    "ke/procprio/setting_the_same_priority_is_a_no_op",
+    "ke/procprio/a_new_thread_starts_at_the_process_priority",
+    "ke/procprio/the_thread_names_its_process",
+    "ke/procprio/the_process_has_the_console_layout",
+    "ke/procprio/the_thread_starts_at_the_process_base",
+    "ke/procprio/the_process_lists_its_threads",
+    "ex/eeprom/the_refurb_record_round_trips",
+    "ex/eeprom/a_refurb_length_that_is_not_the_records_is_refused",
+    "ex/eeprom/a_saved_setting_reaches_the_part",
+    "ex/eeprom/a_short_value_clears_the_rest",
+    "ex/eeprom/the_saved_type_is_not_kept",
+    "ex/eeprom/only_the_user_section_can_be_written",
+    "ex/eeprom/a_value_longer_than_the_setting_is_refused",
+    "ex/eeprom/the_user_checksum_follows_the_section",
+    "ex/eeprom/the_hd_key_is_the_sealed_one",
+    "ex/eeprom/the_time_zone_comes_from_the_user_section",
+    "ex/eeprom/the_user_settings_come_from_the_user_section",
+    "ex/eeprom/the_network_settings_come_from_the_user_section",
+    "ex/eeprom/the_factory_settings_are_where_they_were_written",
+    "ex/eeprom/the_game_region_answers",
+    "ex/eeprom/a_short_buffer_is_refused_without_a_length",
+    "ex/eeprom/an_index_that_is_not_a_setting_is_refused",
+    "ex/eeprom/the_sections_are_runs_of_the_part",
+    "ex/eeprom/only_the_whole_part_reports_its_length",
+    "ex/eeprom/reading_twice_gives_the_same_answer",
+    "xbe/titlekeys/the_lan_and_signature_keys_follow_the_certificate",
+    "xbe/titlekeys/the_alternate_keys_follow_the_certificate",
+    "xbe/titlekeys/the_keys_do_not_move",
+    "xbe/sizeddata/the_public_key_has_room_for_a_key",
+    "xbe/sizeddata/the_ide_channel_object_has_room_for_a_hook",
+    "xbe/sizeddata/the_two_do_not_overlap",
+    "xbe/sizeddata/a_titles_hook_offsets_are_inside_the_object",
+    "xbe/sizeddata/no_sized_export_overlaps_another",
+    "ex/timer/a_notification_timer_stays_signalled",
+    "ex/timer/a_synchronization_timer_auto_resets",
+    "ex/timer/a_periodic_timer_keeps_firing",
+    "ex/timer/a_cancelled_timer_never_fires",
+    "ex/timer/query_reports_the_time_remaining",
+    "ex/timer/cancel_reports_the_signal_state",
+    "ex/timer/rearming_reports_the_previous_signal_state",
+    "ex/timer/a_kernel_mode_apc_runs_on_expiry",
+    "ex/timer/a_user_mode_apc_runs_on_expiry",
+    "kd/flags/debugger_enabled",
+    "kd/flags/debugger_not_present",
+    "hal/av/get_settings",
+    "hal/av/filter_options_accepted",
+    "hal/av/set_display_mode",
+    "mm/pressure/commit_ramp_under_pin",
+    "mm/pressure/ramp_with_file_io",
+    "mm/pressure/repin_after_release",
+    "mm/pressure/exhaustion_recovers",
+    "io/dismount/a_name_that_resolves_to_nothing",
+    "io/dismount/a_mounted_volume_comes_back",
+    "io/dismount/an_open_handle_does_not_refuse_it",
+    "io/dismount/a_device_object_takes_its_volume_down",
+    "io/dismount/a_raw_device_object_still_succeeds",
+    "io/dismount/the_owning_driver_answers",
+    "xc/align/aligned_input_is_read_only",
+    "xc/align/misaligned_input"
+  ],
+  "SKIPS": {
+    "io/finfo/rename_dos_root": "Complex rejects the DOS-root rename contract asserted by this fixture",
+    "hal/av/guess_field": "Complex bugchecks on this fixture optional NULL result query",
+    "io/dismount/a_device_with_no_volume_still_succeeds": "Complex rejects the raw-device success contract asserted by this fixture",
+    "ke/exceptions/x87_divide_by_zero": "xemu TCG does not deliver the unmasked FP exception expected by this fixture",
+    "ke/exceptions/sse_divide_by_zero": "xemu TCG does not deliver the unmasked FP exception expected by this fixture"
+  },
+  "EXPECTED_MICRO": {
+    "empty/0": [
+      1000,
+      "811c9dc5"
+    ],
+    "empty/1": [
+      1000,
+      "811c9dc5"
+    ],
+    "empty/2": [
+      1000,
+      "811c9dc5"
+    ],
+    "pin-1/0": [
+      1000,
+      "001f0ae5"
+    ],
+    "pin-1/1": [
+      1000,
+      "001f0ae5"
+    ],
+    "pin-1/2": [
+      1000,
+      "001f0ae5"
+    ],
+    "pin-16/0": [
+      500,
+      "64683dd5"
+    ],
+    "pin-16/1": [
+      500,
+      "64683dd5"
+    ],
+    "pin-16/2": [
+      500,
+      "64683dd5"
+    ],
+    "pin-64/0": [
+      100,
+      "47064095"
+    ],
+    "pin-64/1": [
+      100,
+      "47064095"
+    ],
+    "pin-64/2": [
+      100,
+      "47064095"
+    ],
+    "pin-65/0": [
+      100,
+      "87328095"
+    ],
+    "pin-65/1": [
+      100,
+      "87328095"
+    ],
+    "pin-65/2": [
+      100,
+      "87328095"
+    ],
+    "pin-256/0": [
+      32,
+      "3dcae445"
+    ],
+    "pin-256/1": [
+      32,
+      "3dcae445"
+    ],
+    "pin-256/2": [
+      32,
+      "3dcae445"
+    ],
+    "pin-4096/0": [
+      4,
+      "8995f515"
+    ],
+    "pin-4096/1": [
+      4,
+      "8995f515"
+    ],
+    "pin-4096/2": [
+      4,
+      "8995f515"
+    ],
+    "pin-reject-0/0": [
+      500,
+      "fa823dd5"
+    ],
+    "pin-reject-0/1": [
+      500,
+      "fa823dd5"
+    ],
+    "pin-reject-0/2": [
+      500,
+      "fa823dd5"
+    ],
+    "pin-reject-32/0": [
+      100,
+      "d6d598d5"
+    ],
+    "pin-reject-32/1": [
+      100,
+      "d6d598d5"
+    ],
+    "pin-reject-32/2": [
+      100,
+      "d6d598d5"
+    ],
+    "pin-reject-64/0": [
+      100,
+      "05406a95"
+    ],
+    "pin-reject-64/1": [
+      100,
+      "05406a95"
+    ],
+    "pin-reject-64/2": [
+      100,
+      "05406a95"
+    ],
+    "pin-reject-65/0": [
+      100,
+      "5e9252d9"
+    ],
+    "pin-reject-65/1": [
+      100,
+      "5e9252d9"
+    ],
+    "pin-reject-65/2": [
+      100,
+      "5e9252d9"
+    ],
+    "pool-1/0": [
+      64,
+      "94b82d05"
+    ],
+    "pool-1/1": [
+      64,
+      "94b82d05"
+    ],
+    "pool-1/2": [
+      64,
+      "94b82d05"
+    ],
+    "pool-16/0": [
+      16,
+      "e42fe4b5"
+    ],
+    "pool-16/1": [
+      16,
+      "e42fe4b5"
+    ],
+    "pool-16/2": [
+      16,
+      "e42fe4b5"
+    ],
+    "pool-256/0": [
+      4,
+      "71edb609"
+    ],
+    "pool-256/1": [
+      4,
+      "71edb609"
+    ],
+    "pool-256/2": [
+      4,
+      "71edb609"
+    ],
+    "pool-1024/0": [
+      1,
+      "9c0bb7d4"
+    ],
+    "pool-1024/1": [
+      1,
+      "9c0bb7d4"
+    ],
+    "pool-1024/2": [
+      1,
+      "9c0bb7d4"
+    ],
+    "sysva-1/0": [
+      32,
+      "d59e4cc5"
+    ],
+    "sysva-1/1": [
+      32,
+      "d59e4cc5"
+    ],
+    "sysva-1/2": [
+      32,
+      "d59e4cc5"
+    ],
+    "sysva-16/0": [
+      8,
+      "c3aaac85"
+    ],
+    "sysva-16/1": [
+      8,
+      "c3aaac85"
+    ],
+    "sysva-16/2": [
+      8,
+      "c3aaac85"
+    ],
+    "sysva-1024/0": [
+      1,
+      "a10bbfb3"
+    ],
+    "sysva-1024/1": [
+      1,
+      "a10bbfb3"
+    ],
+    "sysva-1024/2": [
+      1,
+      "a10bbfb3"
+    ],
+    "sysva-1025/0": [
+      1,
+      "a10bbfb3"
+    ],
+    "sysva-1025/1": [
+      1,
+      "a10bbfb3"
+    ],
+    "sysva-1025/2": [
+      1,
+      "a10bbfb3"
+    ],
+    "sysva-4096/0": [
+      1,
+      "a10bbfb3"
+    ],
+    "sysva-4096/1": [
+      1,
+      "a10bbfb3"
+    ],
+    "sysva-4096/2": [
+      1,
+      "a10bbfb3"
+    ],
+    "object-cold-64/0": [
+      1,
+      "5b4102c5"
+    ],
+    "object-warm-1/0": [
+      1000,
+      "bb222565"
+    ],
+    "object-warm-1/1": [
+      1000,
+      "bb222565"
+    ],
+    "object-warm-1/2": [
+      1000,
+      "bb222565"
+    ],
+    "object-warm-8/0": [
+      128,
+      "1f6f2dc5"
+    ],
+    "object-warm-8/1": [
+      128,
+      "1f6f2dc5"
+    ],
+    "object-warm-8/2": [
+      128,
+      "1f6f2dc5"
+    ],
+    "object-warm-64/0": [
+      16,
+      "1f6f2dc5"
+    ],
+    "object-warm-64/1": [
+      16,
+      "1f6f2dc5"
+    ],
+    "object-warm-64/2": [
+      16,
+      "1f6f2dc5"
+    ],
+    "modexp-1-e1-odd/0": [
+      64,
+      "f1f76b05"
+    ],
+    "modexp-1-e1-odd/1": [
+      64,
+      "f1f76b05"
+    ],
+    "modexp-1-e1-odd/2": [
+      64,
+      "f1f76b05"
+    ],
+    "modexp-1-e65537-odd/0": [
+      32,
+      "44f81c65"
+    ],
+    "modexp-1-e65537-odd/1": [
+      32,
+      "44f81c65"
+    ],
+    "modexp-1-e65537-odd/2": [
+      32,
+      "44f81c65"
+    ],
+    "modexp-2-e3-even/0": [
+      8,
+      "66c37b0d"
+    ],
+    "modexp-2-e3-even/1": [
+      8,
+      "66c37b0d"
+    ],
+    "modexp-2-e3-even/2": [
+      8,
+      "66c37b0d"
+    ],
+    "modexp-32-e3-odd/0": [
+      2,
+      "cb71ac6d"
+    ],
+    "modexp-32-e3-odd/1": [
+      2,
+      "cb71ac6d"
+    ],
+    "modexp-32-e3-odd/2": [
+      2,
+      "cb71ac6d"
+    ],
+    "modexp-64-e65537-odd/0": [
+      1,
+      "000c5540"
+    ],
+    "modexp-64-e65537-odd/1": [
+      1,
+      "000c5540"
+    ],
+    "modexp-64-e65537-odd/2": [
+      1,
+      "000c5540"
+    ],
+    "modexp-512-e1-odd/0": [
+      1,
+      "000c5540"
+    ],
+    "modexp-512-e1-odd/1": [
+      1,
+      "000c5540"
+    ],
+    "modexp-512-e1-odd/2": [
+      1,
+      "000c5540"
+    ],
+    "sha-0/0": [
+      512,
+      "e2534dc5"
+    ],
+    "sha-0/1": [
+      512,
+      "e2534dc5"
+    ],
+    "sha-0/2": [
+      512,
+      "e2534dc5"
+    ],
+    "sha-1/0": [
+      512,
+      "c637ddc5"
+    ],
+    "sha-1/1": [
+      512,
+      "c637ddc5"
+    ],
+    "sha-1/2": [
+      512,
+      "c637ddc5"
+    ],
+    "sha-63/0": [
+      256,
+      "13e74dc5"
+    ],
+    "sha-63/1": [
+      256,
+      "13e74dc5"
+    ],
+    "sha-63/2": [
+      256,
+      "13e74dc5"
+    ],
+    "sha-65/0": [
+      256,
+      "6a9f6dc5"
+    ],
+    "sha-65/1": [
+      256,
+      "6a9f6dc5"
+    ],
+    "sha-65/2": [
+      256,
+      "6a9f6dc5"
+    ],
+    "sha-4096/0": [
+      8,
+      "ffbbb025"
+    ],
+    "sha-4096/1": [
+      8,
+      "ffbbb025"
+    ],
+    "sha-4096/2": [
+      8,
+      "ffbbb025"
+    ],
+    "sha-1MiB/0": [
+      1,
+      "70d531fa"
+    ],
+    "sha-1MiB/1": [
+      1,
+      "70d531fa"
+    ],
+    "sha-1MiB/2": [
+      1,
+      "70d531fa"
+    ],
+    "des-block/0": [
+      128,
+      "1ecc1ac5"
+    ],
+    "des-block/1": [
+      128,
+      "1ecc1ac5"
+    ],
+    "des-block/2": [
+      128,
+      "1ecc1ac5"
+    ],
+    "des3-block/0": [
+      64,
+      "097b5b45"
+    ],
+    "des3-block/1": [
+      64,
+      "097b5b45"
+    ],
+    "des3-block/2": [
+      64,
+      "097b5b45"
+    ],
+    "des-cbc-4096/0": [
+      2,
+      "5478e751"
+    ],
+    "des-cbc-4096/1": [
+      2,
+      "5478e751"
+    ],
+    "des-cbc-4096/2": [
+      2,
+      "5478e751"
+    ],
+    "des3-cbc-4096/0": [
+      1,
+      "5d7864c7"
+    ],
+    "des3-cbc-4096/1": [
+      1,
+      "5d7864c7"
+    ],
+    "des3-cbc-4096/2": [
+      1,
+      "5d7864c7"
+    ]
+  }
+}

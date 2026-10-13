@@ -50,8 +50,8 @@ The exact same CI reconstruction command was verified locally.
 
 Instrumented host 1MiB medians (9 samples): baseline 1.637ms, candidate 1.162ms
 (29.0% lower). A repeat through the CI baseline path measured 1.594/1.131ms.
-These are host diagnostics; native timing qualification belongs to the parent
-integration work and is required before claiming an Xbox/xemu speedup.
+These are host diagnostics. The native qualification below found an unrelated
+DES performance regression and prevents accepting this first candidate.
 
 Release64 image audit
 
@@ -100,3 +100,93 @@ python3 tools/des_layout_audit.py --baseline BASELINE_BUILD_DIRECTORY \
 Evidence: docs/optimization/evidence/sha-bounded-rounds-20261013/
 Builds use the existing spiritboot-toolchain Docker image, isolated /work,
 pristine source mounted read-only at /source, release variant, memory 64MiB.
+
+Native qualification of first candidate (33fc537f...) — HOLD
+
+All 21 microbenchmark runs in seven sequential triplets completed with exit zero,
+41/41 TAP checks, 40 workloads and all 118 exact ordered samples per run (2,478
+total). Sample indices, iterations, correct=1 and checksums match the previously
+frozen fixture contract across all three kernels. Trial order alternates
+baseline/SHA/Complex and Complex/SHA/baseline. Each workload uses its per-boot
+sample median, divided by guest frequency and iteration count; the table below
+reports medians of seven boots. One cold-object sample is emitted per boot.
+Ranges are descriptive; no confidence interval or game performance is claimed.
+
+The candidate full API suite completes all 639 rows: 630 ordinary passes,
+four pre-existing TODO failures, five explicit skips, zero unexpected failures.
+The guest summary's 634 includes the four TODO failures; it is not 634 true passes.
+SHA/HMAC and public crypto output checks pass. Exact TODO/SKIP names are in
+native/report.json. No storage fix is included in this standalone SHA image.
+
+Receipts verify BIOS, ISO and executable hashes, interactive session, exit state,
+64MiB memory, EEPROM identity, invariant HDD backing metadata, nonoverlapping
+runs and alternating order. The archived runner creates a new QCOW2 overlay per
+run. Full remote config/HDD bytes and executable/Complex bytes were not exported,
+so those hashes/backing identities remain receipt attestations; this analysis
+does not claim a fresh local hash of unavailable remote files.
+
+Workload                         Baseline us    SHA us       Complex us   Change
+empty                                  0.196       0.202       0.209    +3.0%
+pin-1                                  1.030       1.020       0.619    -0.9%
+pin-16                                 6.876       6.748       0.798    -1.9%
+pin-64                                25.287      25.068       1.313    -0.9%
+pin-65                                30.719      30.381       1.307    -1.1%
+pin-256                              117.953     117.434       3.380    -0.4%
+pin-4096                            1903.622    1865.394      45.111    -2.0%
+pin-reject-0                           0.511       0.506       0.470    -1.2%
+pin-reject-32                          6.277       6.262       0.613    -0.2%
+pin-reject-64                         12.135      11.999       0.785    -1.1%
+pin-reject-65                         12.245      12.203       0.782    -0.3%
+pool-1                                 2.880       2.987       2.389    +3.7%
+pool-16                               14.965      15.539       9.481    +3.8%
+pool-256                             170.767     173.211      99.630    +1.4%
+pool-1024                            653.432     670.620     387.556    +2.6%
+sysva-1                               13.724      13.243       2.213    -3.5%
+sysva-16                              55.786      54.342       9.815    -2.6%
+sysva-1024                          2810.500    2828.281     607.111    +0.6%
+sysva-1025                          2853.174    2799.832     592.296    -1.9%
+sysva-4096                         11566.792   11417.732    2827.259    -1.3%
+object-cold-64                       433.844     403.913     119.407    -6.9%
+object-warm-1                          1.254       1.199       0.896    -4.4%
+object-warm-8                          7.638       7.251       4.470    -5.1%
+object-warm-64                        83.290      81.494      33.167    -2.2%
+modexp-1-e1-odd                       54.355      54.592      47.014    +0.4%
+modexp-1-e65537-odd                   60.148      59.111      52.954    -1.7%
+modexp-2-e3-even                      81.864      88.532      49.148    +8.1%
+modexp-32-e3-odd                    1674.476    1708.555      49.037    +2.0%
+modexp-64-e65537-odd                7550.182    7520.252      57.481    -0.4%
+modexp-512-e1-odd                 350779.733  347672.595      83.259    -0.9%
+sha-0                                  8.866       8.206       4.349    -7.4%
+sha-1                                  8.728       8.195       4.446    -6.1%
+sha-63                                13.144      11.381       6.117   -13.4%
+sha-65                                12.645      11.215       5.889   -11.3%
+sha-4096                             255.631     198.030      94.185   -22.5%
+sha-1MiB                           62743.741   49289.255   23544.000   -21.4%
+des-block                             10.085      14.956       1.491   +48.3%
+des3-block                            27.810      43.081       2.514   +54.9%
+des-cbc-4096                        3704.562    5216.495     412.741   +40.8%
+des3-cbc-4096                      10636.280   15151.336    1016.296   +42.4%
+
+SHA-1MiB improves 62.744 -> 49.289ms (-21.4%) and remains 2.09x Complex's
+23.544ms. SHA-4096 improves 22.5%; all six SHA medians improve. However DES-block,
+3DES-block, DES-CBC-4096 and 3DES-CBC-4096 regress 48.3%, 54.9%, 40.8% and 42.4%.
+Every one of their seven pairs is slower (minimum paired increase 33.3%, 49.4%,
+33.6%, 39.0% respectively). This candidate must not be accepted as a net
+performance fix. Other observations include pool-1024 +2.6% (all seven slower),
+modexp-32-e3 +2.0% (all seven slower), and modexp-2-e3 +8.1% with overlapping
+paired directions (-16.1%..+11.3%). All 40 workloads, pair values and ranges are
+recorded in native/workloads.csv and native/report.json, including improvements
+outside SHA that are not attributed to this source change.
+
+Owned-kernel assembly investigation shows identical DES instruction counts and
+call structure: DesBlock 97, DesCryptBlock 56, DesPermute 33, DesBit 13. Baseline
+DesPermute at 0x8400e998 calls DesBit at 0x8400e6c4 within one 4KiB page; candidate
+DesPermute at 0x8400f0c0 calls DesBit at 0x8400edec across a page. SHA compression
+was inlined into early A_SHAUpdate, growing it from 151 to 767 instructions and
+moving the DES helpers. Cross-page execution is a testable layout hypothesis,
+not yet a proven cause. The next bounded experiment keeps SHA compression out
+of line, restoring locality without changing the DES source.
+
+Reanalysis: python3 docs/optimization/evidence/sha-bounded-rounds-20261013/native/analyze.py
+Raw exported receipts and logs: native/receipts.zip; frozen contracts.json comes
+from the prior strict analyzer, not from trusting this candidate's outputs.
