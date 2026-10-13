@@ -1,0 +1,11 @@
+regression release-wrap abi=64 earlier=00001000/2000f000 tail=20000000/00001000
+differential abi=64 scenario=release-wrap va=20002000 baseline_status=00000000 candidate_status=00000000 baseline_state=00002000 candidate_state=00010000 baseline_size=0000e000 candidate_size=5ffde000
+failed abi=64 scenario=release-wrap line 69: !memcmp(&b,&c,sizeof(b))
+Traceback (most recent call last):
+  File "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/pr235-main-release64/work-1etnwmgw/source/tests/host/vm-query-fastpath/check.py", line 65, in <module>
+    subprocess.run([str(executable),
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/pr235-wrap-fix/tail-invariant/red-release64/query-test-64', 'fast', 'release-wrap']' returned non-zero exit status 1.
+
+exit=1

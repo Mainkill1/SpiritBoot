@@ -545,12 +545,13 @@
   "historical_qualification": "Original PR233-based stack; preserved measurements and artifacts.",
   "main_integration": {
     "base_product": "e250e9924fc738ffd2502264a6f5559ca534ec43",
-    "source_tree": "6e48b91d281158eaa260666598b718ca4438f535",
-    "rom_sha256": "f11b41250d92f81daa5dad7cfffad8e015691ee38a7208f631d4e656d98da70d",
-    "patch_sha256": "fd3efb3840e24c5b3b8d02812f869ca2583ebcc24e3f101bd9827708089355d9",
+    "source_tree": "85f8166e1bd3c5e970bf27db7b1b899905ba9fc3",
+    "rom_sha256": "e8279c3bcfae48fe99e854038c9923331adee4647aa95117703d50608451f0bd",
+    "patch_sha256": "e46254d7232795914ca199e84f6025780576745830747d39ca3ec3193eab8d9a",
     "product_tests": {
       "tests": 129,
-      "existing_skips": 2
+      "existing_skips": 2,
+      "receipt": "evidence/vm-query-main-20261013/product-host-tests.log"
     },
     "ci_gate": {
       "source_tree_pinned": true,
@@ -560,9 +561,49 @@
         "debug64",
         "debug128"
       ],
-      "query_checks_per_profile": 989
+      "query_checks_per_profile": 994,
+      "status": "pending on final committed head"
     },
     "no_unmerged_stack_dependencies": true,
-    "does_not_replace_irq_gameplay_candidate": true
+    "does_not_replace_irq_gameplay_candidate": true,
+    "superseded_candidate": {
+      "product_commit": "3f3f43053392c2088f9068ed3f525bf67031806e",
+      "source_tree": "6e48b91d281158eaa260666598b718ca4438f535",
+      "rom_sha256": "f11b41250d92f81daa5dad7cfffad8e015691ee38a7208f631d4e656d98da70d",
+      "patch_sha256": "fd3efb3840e24c5b3b8d02812f869ca2583ebcc24e3f101bd9827708089355d9",
+      "reason": "Accepted wrapped allocation and release states invalidate the tail shortcut; final-PDE rounding can also cycle."
+    },
+    "query_algorithm": {
+      "region_lookup": "one ordered walk",
+      "tail_shortcut": false,
+      "absent_pde_span_skip": true,
+      "wrapped_pde_boundary": "prior one-page forward step",
+      "mutating_semantics_changed": false
+    },
+    "host_validation": {
+      "abis": [
+        32,
+        64
+      ],
+      "cases_per_abi": 38160,
+      "new_compatibility_cases": 99,
+      "checks_by_abi": {
+        "32": 211247430,
+        "64": 211227954
+      },
+      "sanitizers": [
+        "address",
+        "undefined"
+      ],
+      "full_status_mbi_guards_mutex_comparison": true
+    },
+    "native_oracle": {
+      "captured_full_records": 145,
+      "historical_checks": 989,
+      "main_compatibility_checks": 5,
+      "final_checks": 994
+    },
+    "evidence": "evidence/vm-query-main-20261013/validation.json",
+    "performance_scope": "Historical one-walk timings are retained; superseded tail-shortcut gains do not describe the final candidate. No fresh matched timing or game-level benefit claim."
   }
 }

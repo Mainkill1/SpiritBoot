@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "scope": "Final PR235 integration directly on main",
+  "base_product": "e250e9924fc738ffd2502264a6f5559ca534ec43",
+  "source_tree": "85f8166e1bd3c5e970bf27db7b1b899905ba9fc3",
+  "release64_rom_sha256": "e8279c3bcfae48fe99e854038c9923331adee4647aa95117703d50608451f0bd",
+  "patch_sha256": "e46254d7232795914ca199e84f6025780576745830747d39ca3ec3193eab8d9a",
+  "algorithm": {
+    "reservation_lookup": "one ordered walk",
+    "tail_shortcut": false,
+    "absent_pde_span_skip": true,
+    "nonadvancing_pde_boundary": "one-page fallback",
+    "mutating_semantics_changed": false
+  },
+  "host_differential": {
+    "abis": [32, 64],
+    "cases_per_abi": 38160,
+    "new_compatibility_cases": 99,
+    "checks_32": 211247430,
+    "checks_64": 211227954,
+    "sanitizers": ["address", "undefined"],
+    "result": "pass",
+    "receipt": "final-onewalk-host.log"
+  },
+  "product_tests": {
+    "tests": 129,
+    "existing_optional_skips": 2,
+    "result": "pass",
+    "receipt": "product-host-tests.log"
+  },
+  "native_gate": {
+    "captured_full_mbi_status_records": 145,
+    "main_compatibility_checks": 5,
+    "checks_per_profile": 994,
+    "profiles": ["release64", "release128", "debug64", "debug128"],
+    "status": "pending fresh exact-head CI"
+  },
+  "review": {
+    "open_critical": 0,
+    "open_important": 0,
+    "open_minor": 0,
+    "receipt": "independent-review.json"
+  },
+  "superseded_head": "3f3f43053392c2088f9068ed3f525bf67031806e",
+  "limits": [
+    "Historical tail-shortcut timings do not describe the final integration.",
+    "No game-level performance claim is made."
+  ]
+}

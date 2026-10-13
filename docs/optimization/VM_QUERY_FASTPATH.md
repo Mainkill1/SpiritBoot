@@ -1,11 +1,19 @@
-> Main integration: this PR is now prepared directly on `main` at
-> `e250e9924fc738ffd2502264a6f5559ca534ec43`. Only patch 0110 is added to
-> main's firmware lock; none of the earlier unmerged optimization stack is
-> included. The original stacked measurements below remain historical evidence.
-> Exact new source/artifact identities and validation are recorded in the
-> main integration section below.
+> Final main integration starts directly from `main` at
+> `e250e9924fc738ffd2502264a6f5559ca534ec43` and adds only patch 0110.
+> The final query uses one ordered walk and absent-PDE span skipping, with a
+> page-step fallback at a wrapped PDE boundary. The tail shortcut was removed
+> after accepted allocation/release states disproved its end-order assumption.
+> Historical stacked measurements and identities below remain evidence for
+> that earlier implementation, separate from the final integration.
 
 # Bounded virtual-memory query work
+
+## Historical stacked qualification
+
+The implementation description, measurements, CI and artifact identities in this
+section describe the original stacked PR235 implementation, including its tail
+shortcut. Main compatibility review superseded that implementation. The final
+behavior and validation are recorded in the standalone integration section.
 
 `NtQueryVirtualMemory` used to walk the reservation list twice for free addresses
 and inspect each 4 KiB page of an absent page table. It now finds the containing
@@ -19,7 +27,10 @@ checks, output initialization, protection decoding, and mutating callers of
 `NxvFindRegion` remain unchanged. A present software `PAGE_NOACCESS` PTE still
 reports committed memory. A committed run stops at an absent PDE; a reserved
 run skips only to the earlier of its reservation end and the next 4 MiB boundary.
-The valid address limit keeps the boundary arithmetic within 32 bits.
+The original qualification assumed that the valid query-address limit bounded
+this arithmetic. Main review later found accepted oversized reservations that
+extend beyond it; final integration preserves a forward page step when PDE
+rounding wraps.
 
 This addresses [issue 216](https://github.com/Mainkill1/SpiritBoot/issues/216).
 The captured Forza startup pass on Spirit made 16,329 queries, of which 16,326
@@ -41,7 +52,7 @@ inputs, absent PDEs ending inside reservations, multiple PDE boundaries,
 present empty page tables, software noaccess pages, protection/cache flags,
 and invalid top addresses with untouched output.
 
-| Input | Earlier work | Final work |
+| Input | Earlier work | Historical tail-candidate work |
 | --- | ---: | ---: |
 | Free address beyond 256 reservations | 512 forward node visits | 0 forward visits, 1 tail observation |
 | Reserved 12 MiB + 12 KiB with absent tables | 3,075 PDE reads | 5 PDE reads |
@@ -122,7 +133,7 @@ not establish individual sub-tick latency. The isolated final change adds 60
 `.text` bytes, 24 of them from the tail shortcut, with no change to rounded
 section sizes, writable sizes, mapped image size, or resident-page count.
 
-Independent root review found no source blocker in the mutex/list-tail proof,
+The original independent root review found no source blocker in the mutex/list-tail proof,
 reservation-bounded skip, noaccess handling, or high-address arithmetic and
 independently reran all 38,061 cases on the one-walk built source. The later
 tail addition received a separate source review; the packaged host run covers
@@ -134,27 +145,61 @@ receipt identities; source tests and public fixtures are maintained in patch
 
 The merge candidate starts directly from main product commit
 `e250e9924fc738ffd2502264a6f5559ca534ec43`. Its firmware lock adds only
-`0110-vm-query-fastpath.patch` after main's `0103` patch. The runtime patch bytes
-are unchanged from the previously qualified implementation. The quantum,
-extent, critical-section, asynchronous-read, immediate-delay, completion,
-public-thread and static-IRQ branches are not pulled into this PR.
+`0110-vm-query-fastpath.patch` after main's `0103` patch. No earlier unmerged
+optimization branch is included. The first standalone candidate,
+`3f3f43053392c2088f9068ed3f525bf67031806e`, is superseded by these corrections;
+its source tree `6e48b91d281158eaa260666598b718ca4438f535` and release64 ROM
+`f11b41250d92f81daa5dad7cfffad8e015691ee38a7208f631d4e656d98da70d` are historical.
 
-| Artifact | Identity |
+Main review reproduced three compatibility failures. An accepted reserve-only
+high tail can wrap and hide an earlier valid reservation. An absent-PDE skip
+can round backward at the final 4 MiB span. An accepted wrapped release can
+leave an earlier overlapping region extending beyond a nonwrapped list tail.
+The final query always performs one ordered walk and falls back to the prior
+one-page step whenever the next PDE boundary does not advance. Allocation,
+release, protection and other mutating semantics are unchanged. The existing
+mutex covers the query, with no new cache or metadata.
+
+| Final artifact | Identity |
 | --- | --- |
-| Main-based assembled kernel tree | `6e48b91d281158eaa260666598b718ca4438f535` |
-| Local supported-toolchain release64 ROM SHA-256 | `f11b41250d92f81daa5dad7cfffad8e015691ee38a7208f631d4e656d98da70d` |
-| Unchanged runtime/test patch SHA-256 | `fd3efb3840e24c5b3b8d02812f869ca2583ebcc24e3f101bd9827708089355d9` |
+| Main-based assembled kernel tree | `85f8166e1bd3c5e970bf27db7b1b899905ba9fc3` |
+| Supported-toolchain release64 ROM SHA-256 | `e8279c3bcfae48fe99e854038c9923331adee4647aa95117703d50608451f0bd` |
+| Runtime/test patch SHA-256 | `e46254d7232795914ca199e84f6025780576745830747d39ca3ec3193eab8d9a` |
 
-The supported Docker toolchain builds the standalone release64 image and its
-placement checks successfully. The full product suite passes 129 numbered
-cases with two existing optional skips. The workflow pins the new assembled
-source tree in normal and upper-RAM builds, runs the actual-source differential
-on all four profiles, and requires all 989 public query checks on every native
-profile. Its ordinary API and remaining native regressions are retained.
-The exact-head PR check rollup records the final integration gate; the earlier
-CI/tree/ROM records above are explicitly the historical stacked qualification.
-No Windows game session is launched for this integration: the user's current
-Forza test continues on the previously supplied IRQ candidate.
+The new supported Docker Release64 build succeeds with placement checks and
+produces a 524,288-byte ROM. The maintained actual-source differential passes
+38,160 cases per ABI under ASan/UBSan: real `-m32` arithmetic and 28-byte MBI,
+plus the `-m64` host model. Its 99 new compatibility cases include the earlier
+82 allocation/PDE-wrap cases and 17 wrapped-release topology cases, with
+adjacent ends, address bounds, complete status/MBI/guards and mutex comparisons.
+Each wrap regression failed before its correction. A bounded PDE-probe budget
+prevents the cycle regression from running indefinitely.
 
-This PR addresses the query implementation and closes issue #216. It does not
-claim a Forza scenery-loading improvement or replace the user's current BIOS.
+| Input | Prior query | Final query |
+| --- | ---: | ---: |
+| Free address beyond 256 reservations | 512 node visits | 256 node visits |
+| Reserved 12 MiB + 12 KiB with absent tables | 3,075 PDE reads | 5 PDE reads |
+| Modeled oversized reserved run to `0xffff0000`, real 32-bit | 983,024 PDE reads | 1,968 PDE reads |
+
+The final candidate retains the one-walk and sparse-span algorithms. Historical
+one-walk controls measured 2.751–2.846 microseconds for free-after-256 and
+0.252–0.255 microseconds for the sparse reservation. The later tail-shortcut
+measurements describe the superseded implementation and do not establish the
+final candidate's timing. Fresh CI timing records are diagnostic; no new
+matched game or API timing comparison is claimed.
+
+The product host suite passes 129 tests with its two existing optional plugin
+skips in the supported Docker toolchain. The native fixture retains the 145
+captured full public MBI/status oracle cases within its original 989 checks,
+then adds five separate main compatibility checks, for a target of 994 checks.
+The workflow pins the final assembled source in normal and upper-RAM builds,
+runs both ABI host differentials, and requires 994 native checks in each
+release/debug 64/128 MiB profile. Ordinary API and other native regressions,
+upper-RAM validation and clean release rebuild checks remain required.
+At this local packaging stage, the final committed head's CI matrix is pending;
+the historical stacked CI success above does not qualify this new patch.
+
+[Supporting receipts](evidence/vm-query-main-20261013/validation.json) record
+red/green evidence, exact build identity, product tests and source validation.
+This PR addresses the query implementation and issue #216. No game-level
+loading or scenery improvement is claimed.
