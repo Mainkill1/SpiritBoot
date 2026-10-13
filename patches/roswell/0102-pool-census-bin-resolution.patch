@@ -1,0 +1,168 @@
+diff --git a/ntoskrnl/xb/mm/pool-census.h b/ntoskrnl/xb/mm/pool-census.h
+index b02faf3f..4c1ba483 100644
+--- a/ntoskrnl/xb/mm/pool-census.h
++++ b/ntoskrnl/xb/mm/pool-census.h
+@@ -2,8 +2,10 @@
+ #pragma once
+ 
+ #define NXP_POOL_CENSUS_MAGIC 0x4E435031UL /* NCP1 */
+-#define NXP_POOL_CENSUS_SCHEMA 2UL
+-#define NXP_POOL_CENSUS_BIN_OVERFLOW 4097U
++#define NXP_POOL_CENSUS_SCHEMA 3UL
++#define NXP_POOL_CENSUS_SMALL_MAX 2040U
++#define NXP_POOL_CENSUS_LARGE_BIN_BASE 256U
++#define NXP_POOL_CENSUS_BIN_OVERFLOW 4225U
+ #define NXP_POOL_CENSUS_BIN_SLOTS (NXP_POOL_CENSUS_BIN_OVERFLOW + 1U)
+ #define NXP_POOL_CENSUS_KEY_SLOTS 1024U
+ #define NXP_POOL_CENSUS_LARGE_SLOTS 1024U
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index 245b1f37..38683ba7 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -80,7 +80,8 @@ static const USHORT NxpClassSize[] = {
+ #endif
+ #define NXP_SMALL_MAX     2040    /* user bytes; above = whole pages */
+ #ifdef NXK_POOL_CENSUS
+-C_ASSERT(((NXP_SMALL_MAX + 15) / 16) <=
++C_ASSERT(NXP_SMALL_MAX == NXP_POOL_CENSUS_SMALL_MAX);
++C_ASSERT(((NXP_SMALL_MAX + 7) / 8) <=
+          (NXP_POOL_CENSUS_BIN_MASK >> NXP_POOL_CENSUS_BIN_SHIFT));
+ #endif
+ 
+diff --git a/ntoskrnl/xb/mm/poolcensus.c b/ntoskrnl/xb/mm/poolcensus.c
+index 5dfab7ec..d8b7dd1d 100644
+--- a/ntoskrnl/xb/mm/poolcensus.c
++++ b/ntoskrnl/xb/mm/poolcensus.c
+@@ -247,9 +247,13 @@ NxPoolCensusInitialize(VOID)
+ USHORT
+ NxPoolCensusBinForSize(SIZE_T NumberOfBytes)
+ {
+-    SIZE_T Bin = NumberOfBytes / 16;
+-    if ((NumberOfBytes & 15) != 0) Bin++;
+-    if (Bin > NXP_POOL_CENSUS_BIN_OVERFLOW)
++    SIZE_T Bin;
++    if (NumberOfBytes <= NXP_POOL_CENSUS_SMALL_MAX)
++        Bin = (NumberOfBytes + 7) / 8;
++    else if (NumberOfBytes <= 65536)
++        Bin = NXP_POOL_CENSUS_LARGE_BIN_BASE +
++              (NumberOfBytes - NXP_POOL_CENSUS_SMALL_MAX - 1) / 16;
++    else
+         Bin = NXP_POOL_CENSUS_BIN_OVERFLOW;
+     return (USHORT)Bin;
+ }
+diff --git a/tests/host/pool-census/check.py b/tests/host/pool-census/check.py
+index 596aecf5..53f46e8a 100644
+--- a/tests/host/pool-census/check.py
++++ b/tests/host/pool-census/check.py
+@@ -73,18 +73,27 @@ static NXP_POOL_CENSUS_ENTRY *entry_for(ULONG Tag, USHORT Bin, UCHAR Domain) {
+ 
+ int main(void) {
+     int a, b, title, large, sampled;
++    USHORT Bin64 = NxPoolCensusBinForSize(64);
++    USHORT Bin80 = NxPoolCensusBinForSize(80);
++    USHORT Bin8192 = NxPoolCensusBinForSize(8192);
+     PVOID collision_a = (PVOID)(uintptr_t)0x10000;
+     PVOID collision_b = (PVOID)(uintptr_t)0x14000;
+     NXP_POOL_CENSUS_ENTRY *E;
+ 
+     assert(NxPoolCensusBinForSize(0) == 0);
+-    assert(NxPoolCensusBinForSize(16) == 1);
+-    assert(NxPoolCensusBinForSize(17) == 2);
+-    assert(NxPoolCensusBinForSize(65520) == 4095);
+-    assert(NxPoolCensusBinForSize(65521) == 4096);
+-    assert(NxPoolCensusBinForSize(65536) == 4096);
++    assert(NxPoolCensusBinForSize(8) == 1);
++    assert(NxPoolCensusBinForSize(9) == 2);
++    assert(NxPoolCensusBinForSize(24) == 3);
++    assert(NxPoolCensusBinForSize(25) == 4);
++    assert(NxPoolCensusBinForSize(2040) == 255);
++    assert(NxPoolCensusBinForSize(2041) == 256);
++    assert(NxPoolCensusBinForSize(2056) == 256);
++    assert(NxPoolCensusBinForSize(2057) == 257);
++    assert(NxPoolCensusBinForSize(65520) == 4223);
++    assert(NxPoolCensusBinForSize(65529) == 4224);
++    assert(NxPoolCensusBinForSize(65536) == 4224);
+     assert(NxPoolCensusBinForSize(65537) == NXP_POOL_CENSUS_BIN_OVERFLOW);
+-    assert(NXP_POOL_CENSUS_BIN_SLOTS == 4098);
++    assert(NXP_POOL_CENSUS_BIN_SLOTS == 4226);
+     USHORT Packed = NXP_POOL_CENSUS_PACK_CLASS(12, 128,
+                                                 NXP_POOL_CENSUS_DOMAIN_TITLE, TRUE);
+     assert(NXP_POOL_CENSUS_GET_CLASS(Packed) == 12);
+@@ -105,25 +114,25 @@ int main(void) {
+ 
+     NxPoolCensusAllocate(&a, 0x41424344, 64, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
+     NxPoolCensusAllocate(&b, 0x41424344, 64, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
+-    E = entry_for(0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    E = entry_for(0x41424344, Bin64, NXP_POOL_CENSUS_DOMAIN_KERNEL);
+     assert(E && E->Allocations == 2 && E->Live == 2 && E->Peak == 2);
+-    assert(NxpPoolCensusData.BinAllocations[4] == 2);
+-    assert(NxpPoolCensusData.BinLive[4] == 2 && NxpPoolCensusData.BinPeak[4] == 2);
+-    NxPoolCensusFree(&a, 0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
++    assert(NxpPoolCensusData.BinAllocations[Bin64] == 2);
++    assert(NxpPoolCensusData.BinLive[Bin64] == 2 && NxpPoolCensusData.BinPeak[Bin64] == 2);
++    NxPoolCensusFree(&a, 0x41424344, Bin64, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
+     assert(E->Frees == 1 && E->Live == 1);
+-    assert(NxpPoolCensusData.BinLive[4] == 1);
++    assert(NxpPoolCensusData.BinLive[Bin64] == 1);
+ 
+     NxPoolCensusAllocate(&title, 0x41424344, 64, NXP_POOL_CENSUS_DOMAIN_TITLE, FALSE);
+-    assert(entry_for(0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_TITLE) != E);
+-    assert(entry_for(0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_TITLE)->Live == 1);
+-    NxPoolCensusFree(&b, 0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
+-    NxPoolCensusFree(&title, 0x41424344, 4, NXP_POOL_CENSUS_DOMAIN_TITLE, FALSE);
++    assert(entry_for(0x41424344, Bin64, NXP_POOL_CENSUS_DOMAIN_TITLE) != E);
++    assert(entry_for(0x41424344, Bin64, NXP_POOL_CENSUS_DOMAIN_TITLE)->Live == 1);
++    NxPoolCensusFree(&b, 0x41424344, Bin64, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
++    NxPoolCensusFree(&title, 0x41424344, Bin64, NXP_POOL_CENSUS_DOMAIN_TITLE, FALSE);
+     assert(E->Live == 0 && E->Peak == 2);
+-    assert(NxpPoolCensusData.BinLive[4] == 0 && NxpPoolCensusData.BinPeak[4] == 2);
++    assert(NxpPoolCensusData.BinLive[Bin64] == 0 && NxpPoolCensusData.BinPeak[Bin64] == 2);
+ 
+     NxPoolCensusAllocate(&large, 0x4c415247, 8192, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
+-    assert(NxpPoolCensusData.BinAllocations[512] == 1);
+-    E = entry_for(0x4c415247, 512, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    assert(NxpPoolCensusData.BinAllocations[Bin8192] == 1);
++    E = entry_for(0x4c415247, Bin8192, NXP_POOL_CENSUS_DOMAIN_KERNEL);
+     assert(E && E->Live == 1);
+     NxPoolCensusFreeLarge(&large);
+     assert(E->Frees == 1 && E->Live == 0);
+@@ -143,23 +152,23 @@ int main(void) {
+     NxpPoolCensusData.AllocationSequence = 63;
+     assert(NxPoolCensusAllocate(&sampled, 0x53484f52, 80, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE));
+     FakeInterruptTime += 5000000;
+-    NxPoolCensusFree(&sampled, 0x53484f52, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
+-    E = entry_for(0x53484f52, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    NxPoolCensusFree(&sampled, 0x53484f52, Bin80, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
++    E = entry_for(0x53484f52, Bin80, NXP_POOL_CENSUS_DOMAIN_KERNEL);
+     assert(E && E->LifeShort == 1 && E->LifeMedium == 0 && E->LifeRetained == 0);
+     assert(NxpPoolCensusData.LifetimeActive == 0);
+ 
+     NxpPoolCensusData.AllocationSequence = 63;
+     assert(NxPoolCensusAllocate(&sampled, 0x4d454449, 80, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE));
+     FakeInterruptTime += 20000000;
+-    NxPoolCensusFree(&sampled, 0x4d454449, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
+-    E = entry_for(0x4d454449, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    NxPoolCensusFree(&sampled, 0x4d454449, Bin80, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
++    E = entry_for(0x4d454449, Bin80, NXP_POOL_CENSUS_DOMAIN_KERNEL);
+     assert(E && E->LifeMedium == 1);
+ 
+     NxpPoolCensusData.AllocationSequence = 63;
+     assert(NxPoolCensusAllocate(&sampled, 0x52455441, 80, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE));
+     FakeInterruptTime += 400000000;
+-    NxPoolCensusFree(&sampled, 0x52455441, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
+-    E = entry_for(0x52455441, 5, NXP_POOL_CENSUS_DOMAIN_KERNEL);
++    NxPoolCensusFree(&sampled, 0x52455441, Bin80, NXP_POOL_CENSUS_DOMAIN_KERNEL, TRUE);
++    E = entry_for(0x52455441, Bin80, NXP_POOL_CENSUS_DOMAIN_KERNEL);
+     assert(E && E->LifeRetained == 1);
+     assert(NxpPoolCensusData.LifetimeActive == 0);
+ 
+@@ -192,7 +201,8 @@ int main(void) {
+         NxPoolCensusAllocate((PVOID)(uintptr_t)(0x1000u + 16u * i), i + 1,
+                              16, NXP_POOL_CENSUS_DOMAIN_KERNEL, FALSE);
+     assert(NxpPoolCensusData.KeyOverflows == 1);
+-    assert(NxpPoolCensusData.BinAllocations[1] == NXP_POOL_CENSUS_KEY_SLOTS + 1);
++    assert(NxpPoolCensusData.BinAllocations[NxPoolCensusBinForSize(16)] ==
++           NXP_POOL_CENSUS_KEY_SLOTS + 1);
+     assert((NxpPoolCensusData.Sequence & 1) == 0);
+     assert(!LockHeld);
+     puts("pool census: bin/tag/domain live and peak, large frees, lifetime samples, page reuse and overflow PASS");

@@ -51,14 +51,14 @@ The reader briefly stops the guest, verifies that the census update sequence is 
 
 ## Reading the output
 
-- **Bins** count requested bytes in 16-byte ranges, with live and peak live counts. Requests over 65,536 bytes share the overflow bin; the small-object layout decision uses the exact bins below that limit.
+- **Bins** count requests in exact 8-byte ranges through the small-allocation limit of 2,040 bytes. Above that, they use 16-byte ranges through 65,536 bytes; larger requests share an overflow bin. The 8-byte small bins align with current and proposed class boundaries, which fall at usable capacities ending in 8.
 - **Tags** provide allocation, free, live, peak-live, and sampled lifetime totals by request bin and kernel/title domain.
 - **Pages** report fresh refills, empty-page reuse, detached pages, active pages, and retained empty pages by class/domain. The class size includes the allocator's 8-byte block header.
 - **Bucket page totals** report the current and global peak number of physical pages backing small-object buckets. Reclassifying an empty page does not change the physical total; a page leaves the total only after the page allocator returns it. During detach/reuse or detach/free, the global count can briefly differ from the per-class/domain rows, so the reader marks that capture incomplete. Use only complete captures at settled checkpoints.
 - **Lifetimes** are sampled at one allocation in 64 and placed in `<1 s`, `1–30 s`, and `>=30 s` buckets. Live samples are right-censored and counted separately.
 - **Integrity counters** identify table overflow, missed frees, counter saturation, and page-accounting underflow. Any nonzero integrity counter sets `incomplete: true`; do not use that capture to choose classes.
 
-The record is versioned and contains its byte size and array offsets. Its sequence field is odd only while a census update is in progress. The reader retries if a stop occurs during an update. The opt-in fixed record occupies about 102 KiB of 32-bit static RAM; that diagnostic-only footprint is absent from standard builds and must be accounted for when interpreting memory-availability measurements. Counters are guest diagnostic state, not a stable title ABI.
+The record is versioned and contains its byte size and array offsets. Its sequence field is odd only while a census update is in progress. The reader retries if a stop occurs during an update. The opt-in fixed record occupies about 103 KiB of 32-bit static RAM; that diagnostic-only footprint is absent from standard builds and must be accounted for when interpreting memory-availability measurements. Counters are guest diagnostic state, not a stable title ABI.
 
 ## Scope and limitations
 

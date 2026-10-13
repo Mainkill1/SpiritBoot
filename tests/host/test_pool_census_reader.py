@@ -16,7 +16,7 @@ SPEC.loader.exec_module(READER)
 
 def census_fixture(sequence=8):
     header_bytes = READER.HEADER.size
-    bin_slots, domains, classes = 4098, 3, 7
+    bin_slots, domains, classes = READER.BIN_SLOTS, 3, 7
     allocations = header_bytes
     live = allocations + bin_slots * 4
     peak = live + bin_slots * 4
@@ -34,8 +34,8 @@ def census_fixture(sequence=8):
     struct.pack_into("<I", data, allocations + 4, 11)
     struct.pack_into("<I", data, live + 4, 3)
     struct.pack_into("<I", data, peak + 4, 6)
-    struct.pack_into("<I", data, allocations + 4096 * 4, 1)
-    struct.pack_into("<I", data, allocations + 4097 * 4, 2)
+    struct.pack_into("<I", data, allocations + 256 * 4, 1)
+    struct.pack_into("<I", data, allocations + READER.BIN_OVERFLOW * 4, 2)
     page_offset = pages + (1 * classes + 2) * READER.PAGE_STATS.size
     READER.PAGE_STATS.pack_into(data, page_offset, 4, 1, 1, 2, 3, 2, 4)
     entry_offset = entries + 2 * READER.ENTRY.size
@@ -50,11 +50,21 @@ def packet(payload):
 
 
 class PoolCensusReaderTests(unittest.TestCase):
+    def test_request_ranges_preserve_allocator_class_boundaries(self):
+        for bin_number, expected in ((3, "17-24"), (4, "25-32"),
+                                     (255, "2033-2040"),
+                                     (256, "2041-2056"),
+                                     (4223, "65513-65528"),
+                                     (4224, "65529-65536"),
+                                     (4225, ">65536")):
+            with self.subTest(bin_number=bin_number):
+                self.assertEqual(READER.request_range(bin_number), expected)
+
     def test_decode_reports_nonzero_bins_pages_tags_and_integrity(self):
         result = READER.decode_census(census_fixture(), address=0x80123400)
         self.assertFalse(result["incomplete"])
         self.assertEqual(result["address"], "0x80123400")
-        self.assertEqual(result["bins"][0], {"bin": 1, "request_bytes": "1-16",
+        self.assertEqual(result["bins"][0], {"bin": 1, "request_bytes": "1-8",
                                              "allocations": 11, "live": 3, "peak_live": 6})
         self.assertEqual(result["pages"][0]["domain"], "title")
         self.assertEqual(result["pages"][0]["block_bytes_including_header"], 128)
@@ -63,7 +73,7 @@ class PoolCensusReaderTests(unittest.TestCase):
         self.assertEqual(result["bucket_pages"], {"current": 4, "peak": 5,
                                                    "class_domain_current_sum": 4,
                                                    "current_mismatch": False})
-        self.assertEqual(result["bins"][1]["request_bytes"], "65521-65536")
+        self.assertEqual(result["bins"][1]["request_bytes"], "2041-2056")
         self.assertEqual(result["bins"][2]["request_bytes"], ">65536")
 
     def test_decode_rejects_odd_sequence_and_bad_offsets(self):

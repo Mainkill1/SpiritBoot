@@ -13,12 +13,29 @@ import time
 
 
 MAGIC = 0x4E435031
-SCHEMA = 2
+SCHEMA = 3
 HEADER = struct.Struct("<30I")
 ENTRY = struct.Struct("<IHBB7I")
 PAGE_STATS = struct.Struct("<7I")
 DOMAIN_NAMES = ("kernel", "title", "shared")
 CLASS_BLOCK_BYTES = (32, 64, 128, 256, 512, 1024, 2048)
+SMALL_REQUEST_MAX = 2040
+LARGE_BIN_BASE = 256
+BIN_OVERFLOW = 4225
+BIN_SLOTS = BIN_OVERFLOW + 1
+
+
+def request_range(bin_number):
+    if bin_number == 0:
+        return "0"
+    if bin_number < LARGE_BIN_BASE:
+        low = (bin_number - 1) * 8 + 1
+        return f"{low}-{bin_number * 8}"
+    if bin_number < BIN_OVERFLOW:
+        low = SMALL_REQUEST_MAX + 1 + (bin_number - LARGE_BIN_BASE) * 16
+        high = min(low + 15, 65536)
+        return f"{low}-{high}"
+    return ">65536"
 
 
 class CensusError(ValueError):
@@ -153,8 +170,8 @@ def decode_census(data, address=0):
         raise CensusError(f"census size mismatch: header={byte_count}, read={len(data)}")
     if sequence & 1:
         raise CensusError("census update was interrupted; retry while xemu is running")
-    if bin_slots != 4098 or domain_count != len(DOMAIN_NAMES) or class_count != len(CLASS_BLOCK_BYTES):
-        raise CensusError("census array dimensions do not match schema 2")
+    if bin_slots != BIN_SLOTS or domain_count != len(DOMAIN_NAMES) or class_count != len(CLASS_BLOCK_BYTES):
+        raise CensusError("census array dimensions do not match schema 3")
     if page_stats_bytes != PAGE_STATS.size or entry_bytes != ENTRY.size:
         raise CensusError("census record element sizes do not match schema 2")
 
@@ -175,8 +192,7 @@ def decode_census(data, address=0):
         if not (count or live or peak):
             continue
         bins.append({"bin": number,
-                     "request_bytes": "0" if number == 0 else
-                         f"{(number - 1) * 16 + 1}-{number * 16}" if number < 4097 else ">65536",
+                     "request_bytes": request_range(number),
                      "allocations": count, "live": live, "peak_live": peak})
 
     pages = []
