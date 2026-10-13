@@ -1,0 +1,108 @@
+{
+  "reviewer": "independent read-only PR235 main integration review",
+  "status": "source ready; final regenerated package identity and fresh exact-head CI remain merge gates",
+  "reviewed_product_commit": "3f3f43053392c2088f9068ed3f525bf67031806e",
+  "base_main": "e250e9924fc738ffd2502264a6f5559ca534ec43",
+  "reviewed_source_tree_before_correction": "6e48b91d281158eaa260666598b718ca4438f535",
+  "critical": [],
+  "minor": [],
+  "verified": [
+    "Actual-source host differential on exact standalone assembly:38061cases,111194662checks,ASan/UBSan pass.",
+    "Frozen baseline find/protect/query bodies exactly match main before0110.",
+    "Main prior source passes the same semantic cases and fails optimization work limits as intended.",
+    "Main lock prefix and other repositories/fixtures are unchanged; only0110 appended, no0104\u20130108 unmerged stack.",
+    "Build lock SHA matches product lock and release64 ROM bytes match recorded f11b41250d92f81daa5dad7cfffad8e015691ee38a7208f631d4e656d98da70d.",
+    "Runtime modifications limited to query, using existing mutex/list; noaccess decoder and mutating lookup functions unchanged.",
+    "Native guest asserts145complete28-byteMBI/status records with guards;989-check contract included in four-profile registry-driven CI.",
+    "Workflow pins assembled tree for regular and upper-RAM builds; host checks use actual assembled source; serial/result artifacts retained.",
+    "Product diff contains only workflow, lock, native registry,0110 patch,and optimization docs.",
+    "Independently reran guarded maintained source suite in supported Docker on actual -m32 and -m64: 38,143 cases each, ASan/UBSan pass; 210,757,081 and 210,737,557 checks.",
+    "Guarded PDE rounding progresses: i386 oversized efff0000 case uses 1,968 PDE reads versus baseline 983,024, with unchanged full result.",
+    "New native wrapped_tail fixture adds five checks after the unchanged 145 captured reference records: total994. High range reserves metadata only, low query compares all28bytes/status/guards, only low reservation is released, fixture then shuts down."
+  ],
+  "declined_to_judge": [
+    "Fresh final native execution and complete exact-head CI until the regenerated package finishes qualification.",
+    "Final regenerated product tree/lock/ROM identities until supplied; initial main-only packaging and workflow wiring were checked.",
+    "Windows lab or game behavior; reviewer performed no Windows actions.",
+    "Game-level loading/scenery benefit; historical API measurements do not establish it.",
+    "Independent rerun of historical reference/ABBA observations; only their documented scope and maintained oracle assertions were reviewed."
+  ],
+  "workspace_safety": "No target product HEAD,index,or files changed by reviewer; receipt/repro writes confined to this external review directory.",
+  "reviewed_corrected_vm_sha256": "cb27b351cd93c183197a844479737d84ca1d196e9ca20fea6e28c286a8f19fd8",
+  "resolved_findings": [
+    {
+      "id": "tail-end-wrap",
+      "status": "resolved in final one-walk source",
+      "path": "ntoskrnl/xb/mm/vm.c",
+      "line": 677,
+      "finding": "Tail shortcut assumes the last reservation end cannot wrap. Main accepts overflowing explicit MEM_RESERVE requests, so a wrapped high tail can cause an earlier valid reservation to be returned as MEM_FREE.",
+      "proof": "Actual production allocator/protect/overlap/insert/region bodies compiled by supported toolchain cc -m32: low 0x20000000,size0x10000 and high0x70000000,size0xa0000000 reserves both succeed; low query changes MEM_RESERVE to MEM_FREE.",
+      "receipt": "public-allocate-repro",
+      "recommended_fix": "On wrapped LastEnd, perform the existing ordered walk; keep mutating semantics unchanged.",
+      "resolution": "Tail shortcut removed; unconditional ordered walk preserves baseline for accepted wrapped reservations and overlapping release topology."
+    },
+    {
+      "id": "pde-boundary-wrap",
+      "status": "resolved in final one-walk source",
+      "path": "ntoskrnl/xb/mm/vm.c",
+      "line": 729,
+      "finding": "Absent-PDE rounding wraps at final 4 MiB span when an existing oversized reservation ends at0xffff0000; candidate restarts its walk while baseline finishes.",
+      "proof": "32-bit arithmetic actual-query model, reservation0x10000000,size0xefff0000 and all PDEs absent.",
+      "receipt": "pde-wrap-repro",
+      "limitation": "Direct native reachability is weaker: present kernel/self-map PTEs normally stop a reserved scan before this boundary.",
+      "recommended_fix": "When NextPde does not advance, use the original one-page forward step.",
+      "resolution": "If PDE boundary rounding fails to advance, use the original one-page step."
+    },
+    {
+      "id": "accepted-release-overlap-tail-proof",
+      "status": "resolved in final one-walk source",
+      "path": "ntoskrnl/xb/mm/vm.c",
+      "line": 677,
+      "finding": "An accepted wrapping MEM_RELEASE can create an earlier overlapping region whose end exceeds the final list tail, despite a nonwrapping tail end. Guarding only LastEnd overflow leaves query output inequivalent.",
+      "proof": "Supported real 32-bit binary with extracted actual main allocate/free bodies. Reserve0x20000000,size0x10000 succeeds; release0x20001000,size0xe0000000 succeeds; query0x20002000 is MEM_RESERVE,AllocationBase0x1000,size0xe000 in baseline versus MEM_FREE,size0x5ffde000 in guarded candidate.",
+      "receipt": "wrapped-release-repro",
+      "recommended_resolution": "Remove tail shortcut to preserve every accepted main state without changing mutation behavior or adding cached metadata; alternatively explicitly narrow the equivalence contract.",
+      "resolution": "Tail shortcut removed; unconditional ordered walk preserves baseline for accepted wrapped reservations and overlapping release topology."
+    }
+  ],
+  "important": [],
+  "final_source": {
+    "directory": "/home/codex/xemu-shader-workbench-handoff/.scratch/forza-api-native-20261013/pr235-main-release64/work-1etnwmgw/source",
+    "vm_sha256": "926a2adeb6173a414b771c9eda10a66b7cb9c5496a0d277a1ea38506519db7a3",
+    "production_outside_query_equals_main": true,
+    "runtime": "One ordered containing/next-reservation walk; reservation-clamped absent-PDE skip; nonadvancing rounded boundary falls back to original page walk; no tail shortcut.",
+    "maintained_host_cases_per_abi": 38160,
+    "host_32_checks": 211247430,
+    "host_64_checks": 211227954,
+    "native_checks": 994,
+    "captured_full_mbi_status_oracle_cases": 145,
+    "native_main_compatibility_checks": 5
+  },
+  "independent_final_validation": {
+    "host_log": "final-onewalk-host.log",
+    "both_actual_abis": true,
+    "sanitizers": [
+      "ASan",
+      "UBSan"
+    ],
+    "free_after_256_reservations": {
+      "baseline_forward_nodes": 512,
+      "final_forward_nodes": 256,
+      "final_tail_observations": 0
+    },
+    "sparse_12mib_plus_12kib": {
+      "baseline_pde_reads": 3075,
+      "final_pde_reads": 5
+    },
+    "accepted_wrapped_release_real32": {
+      "allocator_status": "STATUS_SUCCESS",
+      "release_status": "STATUS_SUCCESS",
+      "baseline_state": "MEM_RESERVE",
+      "final_state": "MEM_RESERVE",
+      "baseline_region_size": "0xe000",
+      "final_region_size": "0xe000"
+    },
+    "native_fixture_review": "High overflowing range reserves metadata only after all captured oracle cases. It never commits, decommits, or releases high range; compares low status/full 28-byte MBI/guards, releases only low, then ends isolated CI boot."
+  },
+  "ready_to_merge_assessment": "No Critical, Important, or Minor open source findings. Ready once regenerated main-only package pins these final source bytes and fresh exact-head CI passes all matrix and auxiliary gates. Historical tail timing is not final candidate performance evidence."
+}

@@ -55,7 +55,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = d5e5c40cb66deb63d31030668ee04e61877e3b64
+            test "$actual_tree" = 85f8166e1bd3c5e970bf27db7b1b899905ba9fc3
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -114,6 +114,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/interrupt-admission/check.py" "$output/interrupt-admission" >"$output/interrupt-admission.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/interrupt-public-abi/check.py" "$output/interrupt-public-abi" >"$output/interrupt-public-abi.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/performance-counter/check.py" "$output/performance-counter" >"$output/performance-counter.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/vm-query-fastpath/check.py" "$GUEST_SOURCE" "$output/vm-query-fastpath" >"$output/vm-query-fastpath.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/io-apc-order/check.py" "$output/io-apc-order" >"$output/io-apc-order.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/critical-section/check.py" "$output/critical-section" >"$output/critical-section.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/workqueue/check-fixed-worker-queue.py" "$output/fixed-worker-queue" >"$output/fixed-worker-queue.log" 2>&1
@@ -148,7 +149,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'd5e5c40cb66deb63d31030668ee04e61877e3b64', result
+          assert result['source_tree'] == '85f8166e1bd3c5e970bf27db7b1b899905ba9fc3', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
@@ -265,6 +266,7 @@ jobs:
             artifacts/io-apc-order-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/gpu-instance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/performance-counter-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/vm-query-fastpath-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/io-completion-probe-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/thread-base-priority-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/thread-current-priority-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/

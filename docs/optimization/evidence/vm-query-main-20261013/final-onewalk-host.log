@@ -1,0 +1,38 @@
+regression tail-wrap abi=32 base=20000000 tail=70000000 tail_size=a0000000
+regression tail-wrap abi=32 passed
+regression pde-wrap abi=32 base=10000000 size=efff0000
+work pde-wrap abi=32 size=efff0000 baseline_pde=983024 candidate_pde=1968
+regression pde-wrap abi=32 base=10000000 size=efbff000
+work pde-wrap abi=32 size=efbff000 baseline_pde=982015 candidate_pde=960
+regression pde-wrap abi=32 base=10000000 size=efc00000
+work pde-wrap abi=32 size=efc00000 baseline_pde=982016 candidate_pde=960
+regression pde-wrap abi=32 base=10000000 size=efc01000
+work pde-wrap abi=32 size=efc01000 baseline_pde=982017 candidate_pde=961
+regression pde-wrap abi=32 base=10000000 size=effff000
+work pde-wrap abi=32 size=effff000 baseline_pde=983039 candidate_pde=1983
+regression pde-wrap abi=32 passed
+regression release-wrap abi=32 earlier=00001000/2000f000 tail=20000000/00001000
+regression release-wrap abi=32 passed
+work free-after256 baseline_nodes=512 candidate_nodes=256 candidate_tail=0
+work sparse12MiB baseline_pde=3075 candidate_pde=5 baseline_pte=0 candidate_pte=0
+query actual-source differential: abi=32 cases=38160 checks=211247430 fast=1
+regression tail-wrap abi=64 base=20000000 tail=70000000 tail_size=a0000000
+regression tail-wrap abi=64 passed
+regression pde-wrap abi=64 base=10000000 size=efff0000
+work pde-wrap abi=64 size=efff0000 baseline_pde=983024 candidate_pde=961
+regression pde-wrap abi=64 base=10000000 size=efbff000
+work pde-wrap abi=64 size=efbff000 baseline_pde=982015 candidate_pde=960
+regression pde-wrap abi=64 base=10000000 size=efc00000
+work pde-wrap abi=64 size=efc00000 baseline_pde=982016 candidate_pde=960
+regression pde-wrap abi=64 base=10000000 size=efc01000
+work pde-wrap abi=64 size=efc01000 baseline_pde=982017 candidate_pde=961
+regression pde-wrap abi=64 base=10000000 size=effff000
+work pde-wrap abi=64 size=effff000 baseline_pde=983039 candidate_pde=961
+regression pde-wrap abi=64 passed
+regression release-wrap abi=64 earlier=00001000/2000f000 tail=20000000/00001000
+regression release-wrap abi=64 passed
+work free-after256 baseline_nodes=512 candidate_nodes=256 candidate_tail=0
+work sparse12MiB baseline_pde=3075 candidate_pde=5 baseline_pte=0 candidate_pte=0
+query actual-source differential: abi=64 cases=38160 checks=211227954 fast=1
+
+exit=0
