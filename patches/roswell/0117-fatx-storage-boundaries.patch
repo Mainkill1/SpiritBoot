@@ -1,0 +1,203 @@
+--- a/ntoskrnl/io/iomgr/iofunc.c
++++ b/ntoskrnl/io/iomgr/iofunc.c
+@@ -1539,30 +1539,35 @@
+     Status = ObReferenceObjectByHandle(FileHandle,
+                                        0,
+                                        IoFileObjectType,
+                                        PreviousMode,
+                                        (PVOID*)&FileObject,
+                                        &ObjectHandleInfo);
+     if (!NT_SUCCESS(Status)) return Status;
+ 
++#ifndef SARCH_XBOX
++    /* Xbox permits flushing read-only file and volume handles. The filesystem
++     * still validates the operation and reports lower storage failures. */
+     /*
+      * Check if the handle has either FILE_WRITE_DATA or FILE_APPEND_DATA was
+      * granted. However, if this is a named pipe, make sure we don't ask for
+      * FILE_APPEND_DATA as it interferes with the FILE_CREATE_PIPE_INSTANCE
+      * access right!
+      */
+     if (!(ObjectHandleInfo.GrantedAccess &
+          ((!(FileObject->Flags & FO_NAMED_PIPE) ? FILE_APPEND_DATA : 0) |
+          FILE_WRITE_DATA)))
+     {
+         /* We failed */
+         ObDereferenceObject(FileObject);
+         return STATUS_ACCESS_DENIED;
+     }
++
++#endif
+ 
+     /* Check if we should use Sync IO or not */
+     if (FileObject->Flags & FO_SYNCHRONOUS_IO)
+     {
+         /* Lock it */
+         Status = IopLockFileObject(FileObject, PreviousMode);
+         if (Status != STATUS_SUCCESS)
+         {
+--- a/drivers/filesystems/vfatfs/finfo.c
++++ b/drivers/filesystems/vfatfs/finfo.c
+@@ -1352,19 +1352,27 @@
+     DPRINT("VfatSetAllocationSizeInformation(File <%wZ>, AllocationSize %d %u)\n",
+            &Fcb->PathNameU, AllocationSize->HighPart, AllocationSize->LowPart);
+ 
+     if (IsFatX)
+         OldSize = Fcb->entry.FatX.FileSize;
+     else
+         OldSize = Fcb->entry.Fat.FileSize;
+ 
++    /* FATX cannot represent a negative EOF or a file of 4 GiB or more.
++     * Reject both before narrowing to LowPart or touching the cluster chain.
++     * The public Xbox API reports capacity exhaustion for the upper bound,
++     * even when the volume has enough free clusters for the requested size. */
++    if (IsFatX && AllocationSize->QuadPart < 0)
++    {
++        return STATUS_INVALID_PARAMETER;
++    }
+     if (AllocationSize->u.HighPart > 0)
+     {
+-        return STATUS_INVALID_PARAMETER;
++        return IsFatX ? STATUS_DISK_FULL : STATUS_INVALID_PARAMETER;
+     }
+ 
+     if (OldSize == NewSize &&
+         (!AllocationOnly ||
+          ROUND_UP_64(NewSize, ClusterSize) == Fcb->RFCB.AllocationSize.QuadPart))
+     {
+         return STATUS_SUCCESS;
+     }
+--- /dev/null
++++ b/tests/host/fatx/check-size-boundaries.py
+@@ -0,0 +1,131 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Execute the production resize function with a bounded cluster-device double.
++
++Catch cap truncation, wrong status, or failed-extension chain/free-space damage.
++The only doubles are lower storage/cache operations; resize/rollback is real.
++"""
++import importlib.util
++from pathlib import Path
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location("extract", root / "tests/host/kernel-performance/check.py")
++extract = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(extract)
++body = extract.function((root / "drivers/filesystems/vfatfs/finfo.c").read_text(),
++                        "VfatSetAllocationSizeInformation")
++shim = r'''
++#include <stdint.h>
++#include <stddef.h>
++#include <assert.h>
++#include <string.h>
++#include <stdio.h>
++typedef uint32_t ULONG, *PULONG;
++typedef int32_t NTSTATUS;
++typedef int BOOLEAN;
++typedef union { int64_t QuadPart; struct { ULONG LowPart; int32_t HighPart; }; struct { ULONG LowPart; int32_t HighPart; } u; } LARGE_INTEGER, *PLARGE_INTEGER;
++typedef struct { LARGE_INTEGER AllocationSize, FileSize, ValidDataLength; } FILE_SIZES;
++typedef union { struct { ULONG FileSize, FirstCluster; } FatX; struct { ULONG FileSize; uint16_t FirstCluster, FirstClusterHigh; } Fat; } ENTRY;
++typedef struct { FILE_SIZES RFCB; ENTRY entry; ULONG LastCluster, LastOffset, Flags; } FCB, *PVFATFCB;
++typedef struct { struct { ULONG BytesPerCluster, FatType; } FatInfo; int fatx; } DEVICE, *PDEVICE_EXTENSION;
++typedef struct { void *SectionObjectPointer; } FILE_OBJECT, *PFILE_OBJECT;
++#define TRUE 1
++#define FALSE 0
++#define STATUS_SUCCESS 0
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000d)
++#define STATUS_DISK_FULL ((NTSTATUS)0xc000007f)
++#define STATUS_USER_MAPPED_FILE ((NTSTATUS)0xc0000243)
++#define NT_SUCCESS(x) ((x)>=0)
++#define FAT32 3
++#define FCB_IS_DIRTY 1
++#define FILE_NOTIFY_CHANGE_SIZE 1
++#define FILE_ACTION_MODIFIED 1
++#define DPRINT(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define ASSERT assert
++#define ROUND_DOWN(n,s) ((n)/(s)*(s))
++#define ROUND_UP_64(n,s) (((int64_t)(n)+(s)-1)/(s)*(s))
++static ULONG links[10];
++static unsigned mutations, invalidations, updates;
++static int vfatVolumeIsFatX(PDEVICE_EXTENSION d) { return d->fatx; }
++static void VfatInvalidateSeekCheckpoints(PVFATFCB f) { (void)f; ++invalidations; }
++static ULONG vfatDirEntryGetFirstCluster(PDEVICE_EXTENSION d, ENTRY *e) { return d->fatx ? e->FatX.FirstCluster : e->Fat.FirstCluster; }
++static NTSTATUS WriteCluster(PDEVICE_EXTENSION d, ULONG c, ULONG value) { (void)d; assert(c>=2&&c<10); links[c]=value; ++mutations; return 0; }
++static NTSTATUS NextCluster(PDEVICE_EXTENSION d, ULONG first, ULONG *c, BOOLEAN extend) {
++ (void)first; ULONG next=*c?links[*c]:UINT32_MAX;
++ if (extend&&next==UINT32_MAX) {
++   for(ULONG i=2;i<10;i++)if(!links[i]){WriteCluster(d,i,UINT32_MAX); if(*c)WriteCluster(d,*c,i); *c=i; return 0;}
++   return STATUS_DISK_FULL;
++ }
++ *c=next; return 0;
++}
++static NTSTATUS OffsetToCluster(PDEVICE_EXTENSION d, ULONG first, ULONG offset, ULONG *c, BOOLEAN extend) {
++ *c=first;
++ for(ULONG i=0;i<offset/d->FatInfo.BytesPerCluster;i++){ NTSTATUS s=NextCluster(d,first,c,extend); if(s)return s; }
++ return 0;
++}
++static void UpdateFileSize(PFILE_OBJECT o, PVFATFCB f, ULONG n, ULONG cluster, BOOLEAN fatx) {
++ (void)o; f->RFCB.FileSize.QuadPart=n; f->RFCB.AllocationSize.QuadPart=ROUND_UP_64(n,cluster);
++ if(fatx)f->entry.FatX.FileSize=n; else f->entry.Fat.FileSize=n;
++}
++static void UpdateAllocationSize(PFILE_OBJECT o, PVFATFCB f, ULONG n, ULONG c) { (void)o; f->RFCB.AllocationSize.QuadPart=ROUND_UP_64(n,c); }
++static int MmCanFileBeTruncated(void *o, PLARGE_INTEGER s) { (void)o; (void)s; return 1; }
++static NTSTATUS VfatUpdateEntry(PDEVICE_EXTENSION d, PVFATFCB f) { (void)d; (void)f; ++updates; return 0; }
++static void vfatReportChange(PDEVICE_EXTENSION d, PVFATFCB f, ULONG c, ULONG a) { (void)d; (void)f; (void)c; (void)a; }
++#ifndef SARCH_XBOX
++static void FAT32UpdateFreeClustersCount(PDEVICE_EXTENSION d) { (void)d; }
++#endif
++'''
++cases = r'''
++static void seed(FCB *f, int populated) {
++ memset(f,0,sizeof(*f)); memset(links,0,sizeof(links)); mutations=invalidations=updates=0;
++ if(populated){ f->entry.FatX.FirstCluster=2; f->entry.FatX.FileSize=512; f->RFCB.FileSize.QuadPart=512;
++ f->RFCB.AllocationSize.QuadPart=4096; f->RFCB.ValidDataLength.QuadPart=512; links[2]=UINT32_MAX; }
++}
++int main(void) {
++ DEVICE d={{4096,16},1}; FILE_OBJECT file={0}; FCB f,before; LARGE_INTEGER n;
++ static const int64_t over_cap[]={0x100000000LL,0x100000200LL,0x7fffffffffffffffLL};
++ for(unsigned i=0;i<sizeof(over_cap)/sizeof(over_cap[0]);i++)for(int allocation=0;allocation<2;allocation++){
++  seed(&f,1);before=f;n.QuadPart=over_cap[i];
++  assert(VfatSetAllocationSizeInformation(&file,&f,&d,&n,allocation)==STATUS_DISK_FULL);
++  assert(!memcmp(&f,&before,sizeof(f))&&mutations==0&&invalidations==0&&updates==0);
++ }
++ static const int64_t negative[]={-1LL,-0x100000000LL+512,INT64_MIN};
++ for(unsigned i=0;i<sizeof(negative)/sizeof(negative[0]);i++){
++  seed(&f,1);before=f;n.QuadPart=negative[i];
++  assert(VfatSetAllocationSizeInformation(&file,&f,&d,&n,FALSE)==STATUS_INVALID_PARAMETER);
++  assert(!memcmp(&f,&before,sizeof(f))&&mutations==0&&invalidations==0&&updates==0);
++ }
++ /* The 32-bit maximum remains representable; a bounded disk must reject it
++  * through allocation and restore every cluster, rather than truncate to zero. */
++ for(int populated=0;populated<2;populated++)for(int allocation=0;allocation<2;allocation++){
++  seed(&f,populated);before=f;n.QuadPart=0xffffffffLL;
++  assert(VfatSetAllocationSizeInformation(&file,&f,&d,&n,allocation)==STATUS_DISK_FULL);
++  assert(f.entry.FatX.FileSize==before.entry.FatX.FileSize&&f.entry.FatX.FirstCluster==before.entry.FatX.FirstCluster);
++  assert(!memcmp(&f.RFCB,&before.RFCB,sizeof(f.RFCB))&&updates==0&&mutations>0);
++  for(unsigned i=2;i<10;i++)assert(links[i]==(populated&&i==2?UINT32_MAX:0));
++ }
++ seed(&f,1);n.QuadPart=8192;
++ assert(VfatSetAllocationSizeInformation(&file,&f,&d,&n,FALSE)==0);
++ assert(f.entry.FatX.FileSize==8192&&links[2]==3&&links[3]==UINT32_MAX);
++ n.QuadPart=512;assert(VfatSetAllocationSizeInformation(&file,&f,&d,&n,FALSE)==0);
++ assert(f.entry.FatX.FileSize==512&&links[2]==UINT32_MAX&&links[3]==0);
++ /* Other FAT formats keep their existing cap status. */
++ seed(&f,0);d.fatx=0;n.QuadPart=0x100000000LL;
++ assert(VfatSetAllocationSizeInformation(&file,&f,&d,&n,FALSE)==STATUS_INVALID_PARAMETER);
++ assert(mutations==0&&invalidations==0&&updates==0);
++ puts("PASS: production FATX cap, resize, failed allocation rollback, generic FAT cap");
++}
++'''
++source = out / "size-boundaries.c"
++source.write_text(shim + body + cases)
++for flavor in ("xbox", "generic"):
++    binary = out / flavor
++    defines = ["-DSARCH_XBOX"] if flavor == "xbox" else []
++    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fsanitize=undefined", *defines,
++                    str(source), "-o", str(binary)], check=True)
++    subprocess.run([str(binary)], check=True)
