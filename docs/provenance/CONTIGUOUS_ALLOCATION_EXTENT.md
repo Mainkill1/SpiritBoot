@@ -79,3 +79,10 @@ This does not establish Forza's complete memory budget or rule out pressure.
 Physical hardware, 128 MiB, and the disabled legacy allocator are not covered
 by the native receipts. The branch is based on scheduler commit `62a1f6d4`;
 the extent patch remains separately reviewable.
+
+CI follow-up: the extracted allocator retry fixture still supplied the old
+five-argument helper declaration and expected a 5,000-byte query result. The
+production helper has four arguments and reports the occupied 8,192-byte extent.
+The fixture now matches that contract while preserving all seven interleaved
+allocation, reclaim, relocation, and ownership assertions. This test-only update
+rebuilds to the identical qualified 64 MiB ROM hash.

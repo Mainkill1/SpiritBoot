@@ -60,3 +60,6 @@ failing scenery path. This is a confirmed compatibility correction, not proof
 that delayed scenery loading is fixed. No new Forza performance improvement or
 physical Xbox qualification is claimed. The failed `extent-candidate64.bin`
 manual test remains an explicit negative result.
+
+The inherited allocation retry fixture was repaired in PR #229 and merged here.
+The rebuilt 64 MiB ROM is byte-identical; assembled tree is `fd3ed364fead7b309dae41583c1cb0a969fbb3d0`.
