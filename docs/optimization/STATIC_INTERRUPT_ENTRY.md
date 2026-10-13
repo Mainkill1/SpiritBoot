@@ -142,9 +142,13 @@ relaxed by this change. Physical Xbox behavior has not been measured here.
 
 ## Completed packaged qualification and paired attribution
 
-The exact packaged release64 image passes 10,898 native assertions across its
+The exact packaged release64 image completes 10,898 numbered native checks across its
 API suite (639), public interrupt lifecycle (17), IOSB/APC contracts (338),
-seek/mutation (2,071), and outstanding I/O lifetime/rundown (7,833). Each full
+seek/mutation (2,071), and outstanding I/O lifetime/rundown (7,833). Of these,
+10,892 assertions pass and six are existing expected-TODO mismatches, with no
+unexpected failure. The 639-check API harness reports its suite as passing
+while retaining these six known exceptions; they are not newly proven API
+equivalence. The receipt lists each exception explicitly. Each full
 numbered sequence, fixture/ROM identity and normal process exit was verified.
 A separate cross-branch control using PR230's stronger owner fixture fails
 13 checks on both the unchanged PR233 base and this packaged image: five
@@ -187,3 +191,28 @@ the stated 35.7438% reduction. The original xemu executable's retained-symbol
 disassembly also confirms the broad page-invalidation loop is present in the
 actual tested binary; no runtime retranslation count is claimed. Both review
 and owned-executable evidence are retained beside this writeup.
+
+## Exact combined candidate completion
+
+The best private candidate (`irq-static-candidate64.bin`, SHA-256 beginning
+913293b4) now also passes the separate outstanding-I/O lifetime (7,833),
+IOSB/APC (338) and mutation (2,071) probes on its own exact ROM. Together with
+its earlier API and actual-interrupt probes, that is 10,898 numbered checks:
+10,892 passing assertions and six retained expected-TODO failures. The API
+exceptions concern oversized EOF status, read-only volume flush, two floating
+point emulator exceptions, and two process/thread-list behaviors. None is
+represented as fixed by this interrupt-entry change. This preserves the
+separation between a passing regression gate and complete reference parity.
+
+The additional private evidence archive has SHA-256
+0dbc554ada77ad639285c6ee069281cd4d18ca4956e4853f5cc017a8a7b79f0d.
+All three new processes exit normally, use the exact intended BIOS/emulator,
+and have complete sequential TAP plans. The combined receipt links the earlier
+same-ROM API and interrupt results; no cross-ROM result is substituted.
+
+Allocator-header-only inspection also verifies the four live 1,024-byte blocks
+on the original shared page: device object, I/O interrupt, IDE channel array,
+and another device object. Headers remain stable through all twelve replay
+phases, with all byte hashes and 12,288 completion counters intact. Tags alone
+do not establish the two device instances. The evidence does not justify a
+new pool reservation or policy change.
