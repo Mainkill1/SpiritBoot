@@ -1,0 +1,58 @@
+840039d8 <_A_SHAUpdate@12>:
+840039d8:	55                   	push   %ebp
+840039d9:	89 e5                	mov    %esp,%ebp
+840039db:	57                   	push   %edi
+840039dc:	56                   	push   %esi
+840039dd:	53                   	push   %ebx
+840039de:	83 ec 1c             	sub    $0x1c,%esp
+840039e1:	8b 5d 08             	mov    0x8(%ebp),%ebx
+840039e4:	8b 75 10             	mov    0x10(%ebp),%esi
+840039e7:	8b 7d 0c             	mov    0xc(%ebp),%edi
+840039ea:	8b 53 58             	mov    0x58(%ebx),%edx
+840039ed:	89 d0                	mov    %edx,%eax
+840039ef:	83 e0 3f             	and    $0x3f,%eax
+840039f2:	01 f2                	add    %esi,%edx
+840039f4:	89 53 58             	mov    %edx,0x58(%ebx)
+840039f7:	73 03                	jae    840039fc <_A_SHAUpdate@12+0x24>
+840039f9:	ff 43 54             	incl   0x54(%ebx)
+840039fc:	89 f2                	mov    %esi,%edx
+840039fe:	c1 ea 1d             	shr    $0x1d,%edx
+84003a01:	01 53 54             	add    %edx,0x54(%ebx)
+84003a04:	8d 14 30             	lea    (%eax,%esi,1),%edx
+84003a07:	83 fa 3f             	cmp    $0x3f,%edx
+84003a0a:	77 0f                	ja     84003a1b <_A_SHAUpdate@12+0x43>
+84003a0c:	01 d8                	add    %ebx,%eax
+84003a0e:	89 74 24 08          	mov    %esi,0x8(%esp)
+84003a12:	89 7c 24 04          	mov    %edi,0x4(%esp)
+84003a16:	89 04 24             	mov    %eax,(%esp)
+84003a19:	eb 46                	jmp    84003a61 <_A_SHAUpdate@12+0x89>
+84003a1b:	8d 0c 06             	lea    (%esi,%eax,1),%ecx
+84003a1e:	8d 14 03             	lea    (%ebx,%eax,1),%edx
+84003a21:	83 f9 3f             	cmp    $0x3f,%ecx
+84003a24:	76 30                	jbe    84003a56 <_A_SHAUpdate@12+0x7e>
+84003a26:	be 40 00 00 00       	mov    $0x40,%esi
+84003a2b:	89 7c 24 04          	mov    %edi,0x4(%esp)
+84003a2f:	29 c6                	sub    %eax,%esi
+84003a31:	89 14 24             	mov    %edx,(%esp)
+84003a34:	89 74 24 08          	mov    %esi,0x8(%esp)
+84003a38:	01 f7                	add    %esi,%edi
+84003a3a:	89 4d ec             	mov    %ecx,-0x14(%ebp)
+84003a3d:	e8 62 f2 ff ff       	call   84002ca4 <_memmove>
+84003a42:	8b 4d ec             	mov    -0x14(%ebp),%ecx
+84003a45:	8d 43 40             	lea    0x40(%ebx),%eax
+84003a48:	89 da                	mov    %ebx,%edx
+84003a4a:	8d 71 c0             	lea    -0x40(%ecx),%esi
+84003a4d:	e8 ca d2 03 00       	call   84040d1c <_SHA1Transform>
+84003a52:	31 c0                	xor    %eax,%eax
+84003a54:	eb c5                	jmp    84003a1b <_A_SHAUpdate@12+0x43>
+84003a56:	89 74 24 08          	mov    %esi,0x8(%esp)
+84003a5a:	89 7c 24 04          	mov    %edi,0x4(%esp)
+84003a5e:	89 14 24             	mov    %edx,(%esp)
+84003a61:	e8 3e f2 ff ff       	call   84002ca4 <_memmove>
+84003a66:	83 c4 1c             	add    $0x1c,%esp
+84003a69:	5b                   	pop    %ebx
+84003a6a:	5e                   	pop    %esi
+84003a6b:	5f                   	pop    %edi
+84003a6c:	5d                   	pop    %ebp
+84003a6d:	c2 0c 00             	ret    $0xc
+

@@ -1,0 +1,192 @@
+Write performance release investigation — 2026-10-13
+
+Status: CLOSED for the original broad write-performance regression. Seven
+matched native pairs do not reproduce the two reported whole-leaf regressions.
+A small isolated flush timing increase remains visible in paired medians, with
+overlapping ranges and mixed direction. No causal runtime defect is established
+and no speculative 0119 patch is justified. Details and limits follow below.
+
+Product comparisons: pre-optimization baseline 464e7ea versus final performance
+commit 8268b1cbd8371a87e4e84cdba45709a56371035a. The actual latter source is the
+staged tree 9ef0d1d0f503eccf9d966d4b6901993c7364754c under
+../perf-native-hotpaths-20261013/artifacts/performance-release64/work-t2eitw9k/source.
+Its HEAD alone does not identify applied patches.
+
+Existing evidence: final three-pair campaign reports flush_buffers_visibility
+7.747 -> 8.546 ms and overwrite_reextend_same_handle 16.925 -> 18.483 ms.
+These are complete leaf timings, not syscall latency. Other slower leaves vary
+between campaigns. This is a reason to measure focused operations, not evidence
+that a specific kernel function regressed.
+
+Frozen original fixture copies:
+  tests/xbe/write-performance/frozen/{harness.h,tap.c,tap.h,io/cc_write.c,io/createfile.c}
+These are byte-for-byte copies from the frozen API leaf performance fixture.
+Their three replay cases are flush_buffers_visibility,
+overwrite_reextend_same_handle and open_same_eof_preserves_contents.
+The first measures deterministic 64 KiB pattern generation/checking, create,
+write, flush, cross-handle open/read, closes, and delete. The latter two measure
+128 KiB generation/checking, initial create/write/close, existing-file open,
+EOF query, EOF set, second EOF query, read, close and delete. Each starts by
+removing the prior path and deletes on successful completion. Initial absence
+makes the first cleanup open fail normally; subsequent successful runs also
+start absent. The frozen flush leaf verifies returned read length and every
+byte, but does not independently query EOF. The overwrite/open controls verify
+EOF before and after extension as well as read length and every byte.
+
+Static successful original-leaf exported call counts with an absent initial
+path (not dynamic internal I/O counts):
+  flush: 4 NtCreateFile, 3 NtClose, 1 NtWriteFile, 1 NtFlushBuffersFile, 1 NtReadFile.
+  overwrite/open: 4 IoCreateFile, 3 NtClose, 1 NtWriteFile, 1 NtReadFile,
+                  2 NtQueryInformationFile, 1 NtSetInformationFile.
+Both include the unsuccessful initial deletion open. No TAP output occurs
+within a measured leaf.
+
+Six separate controls measure only one operation each: written-handle flush,
+64 KiB write, overwrite-open of an existing 128 KiB file, same-handle reextend
+to 128 KiB, parent-directory open and close of a written 64 KiB handle. Setup
+removes/recreates the same private path before every iteration. Source bytes
+are deterministically regenerated. Writes use an explicit zero offset.
+Verification and cleanup occur outside the operation timing. Every data case
+checks returned status, read count, EOF and every byte; overwrite also checks
+its disposition and the zero-length intermediate state. The parent control
+checks successful open, FILE_OPENED and the Directory attribute. A failed case
+invalidates the run, even if timing records remain present.
+
+Fixture v1 runs nine cases with nine samples each, in fixed case order. Sample
+zero means first invocation of that case in this process; samples 1..8 mean
+warmed repetitions. These are not cold-disk measurements: earlier cases,
+firmware boot, host caches and TCG translation may already warm shared code
+or data. Pair campaigns must start from the identical base HDD snapshot and
+alternate firmware order, keeping emulator build, machine configuration and
+fixture image hash identical. A first-call-only effect and a persistent warm
+operation effect have different interpretations. At least seven alternating
+pairs are recommended after qualification against baseline/current/Complex.
+The native runner owns asset hashes, snapshot and configuration provenance.
+
+Raw QPC deltas (64-bit ticks) and the frequency are emitted after timing, with
+81 ordered TAP assertions. tools/write_performance.py rejects missing/duplicate
+captures, wrong plan, wrong sequence, wrong byte count, zero ticks/frequency,
+failed correctness/TAP, missing final PASS or bad summary. It reports first
+invocation and warm median/min/max separately. It does not by itself validate
+firmware identity or assert a causal regression from timing.
+
+Source investigation: the baseline-to-final runtime patch additions cover
+explicit timer APC mode, validated pin commit, and DES rounds. There is no new
+filesystem write/flush algorithm in that delta. The validated pin commit
+removes repeated eligibility checks under the already-held PFN lock; it does
+not add a write/flush. The current VfatFlushWriteThrough still traverses the
+file and ancestor directory streams then FAT. NtFlushBuffersFile dispatches
+to VfatFlushFile/CcFlushCache, including dirty entry update. These paths can
+make total leaf cost sensitive to metadata/cache state, but this is a
+hypothesis rather than a measured cause. Normal Vfat flush DPRINT sites are
+disabled by NDEBUG; cache warnings are exceptional. No new write-path serial
+logging was found in the runtime delta. Guest QPC includes host scheduling
+and TCG translation time, so layout/cold-translation explanations also need
+first-call versus warm evidence. Neither logging nor TCG is assumed causal.
+
+Validation performed before native qualification:
+  nxdk cross-build succeeded (existing linker .edata merge warning).
+  python -m unittest discover -s tests/host: 134 tests, 3 skipped, no failures.
+  Parser negative cases cover corrupt status/size/ticks/sample/TAP/frequency,
+  failed summary, truncation, duplicate captures, and surplus timing records.
+  ISO SHA256: 4722e4048efc14a96f0c554a05b4d5c5a763ddefa0d10fc476ed881a000cbc55
+  XBE SHA256: 7ecd57b7b9a8d6a3866aaf3845565267467c40f230b4d18df29cfd36ef71e6b5
+
+Independent SHA review (separate requested release review):
+The SHA candidate changes only compression-loop organization relative to the
+actual final source. Round 15 endian conversion and rounds 16..19 schedule
+transition are correct. Five-round groups restore working variable order.
+The circular schedule writes and State load/addition order remain identical;
+public context load/store, counters, alias handling and final reset are not
+changed. Independently reran actual-source host differential/oracle test:
+13,410 checks passed, including all state and ring-buffer bytes, full-arena
+update/final aliases, synthetic counter carry, reserved bytes, reset, SHA and
+truncated-key HMAC known/independent oracles. Compression-loop evaluations were
+19 versus 81. Host 1 MiB medians were 1.110 versus 1.573 ms (not a native claim).
+Evidence: artifacts/sha-independent-review/work.json. No blocking finding.
+
+Native seven-pair result (completed 2026-10-13)
+
+All 14 native captures validate against the strict fixture contract, giving
+1,134 passing correctness assertions and 1,134 raw QPC measurements. Each
+firmware contributes seven first-call and 56 warmed samples for each case.
+The seven independent run pairs, not the 56 within-run samples, are the unit
+used for directional comparison. Ordering alternates: preperf first for even
+pairs, current first for odd pairs. Warm metrics below are the median of eight
+samples within each run, followed by the median across seven runs. The paired
+ratio is the median of the seven current/preperf per-run ratios, and need not
+equal the ratio of the two displayed aggregate medians.
+
+Firmware identity:
+  preperf: 1ed234ebaf8e95937225c3002b6eac26257b0f3d1ff8f3d6a3aabd464955fb0b
+  current: 62edb78f3ac8dd5739c2b6b9d1a838a4447f3c7662db4e4166e3c795081db027
+The native campaign label "baseline" means current performance firmware here;
+"preperf" is the earlier product baseline. They are not SHA/storage candidates.
+The fixture ISO is unchanged from the manifest above. All runs report the same
+emulator hash 14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d,
+64 MiB, session 1, EEPROM hash, backing path/size/modification timestamp, and
+QPC frequency 3,374,488 Hz. Every runner result exited successfully with code 0.
+All 14 exported post-exit xemu.toml files parse to identical configuration
+except BIOS path and each run's private EEPROM/overlay paths. The script checks
+BIOS paths against launch receipts and private paths against their run names.
+Vulkan, vsync=false, shader cache=false, 1280x720, input setup, boot ROM and DVD
+path all match. All 14 post-exit config hashes differ from their prelaunch
+receipt hashes; the runner reports that xemu rewrites configuration on exit.
+Both hash sets are retained. Exported post-exit normalization is verified;
+exact prelaunch bytes cannot be reconstructed from hashes alone.
+Backing content is not independently hashed in these receipts. Snapshot/launch
+construction is owned by the native runner, not inferred from timing records.
+
+Warm results, milliseconds (preperf -> current; paired ratio; slower pairs):
+  leaf-flush                  8.54456 ->   8.37875; 1.00363; 4/7
+  leaf-overwrite             15.31299 ->  15.28439; 0.98262; 3/7
+  leaf-open-same-eof         14.75157 ->  14.87337; 1.02426; 5/7
+  flush-written-64k           0.02134 ->   0.02119; 1.07639; 4/7
+  write-64k                   1.37710 ->   1.41784; 1.00811; 4/7
+  overwrite-existing-128k     0.35576 ->   0.33027; 0.82569; 3/7
+  reextend-128k               0.01956 ->   0.01882; 1.03788; 4/7
+  parent-open                 0.03601 ->   0.03615; 0.98340; 3/7
+  close-written-64k           0.03363 ->   0.03112; 0.93722; 2/7
+Exact values, every pair and every raw sample are in native-seven-pairs/report.json;
+the compact metrics are also in native-seven-pairs/summary.csv.
+
+The targeted whole-leaf flush ranges overlap: 7.903..9.079 ms preperf and
+8.233..9.190 ms current. Their median paired difference is +0.03082 ms,
+rather than the earlier campaign's roughly +0.799 ms. Overwrite warm ranges
+also overlap: 14.538..15.985 ms versus 14.568..15.674 ms; its median paired
+difference is -0.25989 ms, rather than the earlier roughly +1.558 ms. This
+closes the original reproducible-regression concern under this frozen native
+fixture. It does not prove every title workload has identical performance.
+
+Do not erase the small flush-only observation: first-call median paired cost
+is +5.038 microseconds (ratio 1.08293; 5/7 slower); warm median paired cost is
++1.630 microseconds (ratio 1.07639; 4/7 slower). First-call ranges overlap
+59.27..61.94 versus 60.45..66.38 microseconds; warm per-run medians overlap
+17.48..26.23 versus 20.45..23.56 microseconds. The aggregate warm current
+median is slightly lower while the paired median delta is positive, showing
+why both statistics are retained. This mixed, tiny control cost neither
+supports the old millisecond-scale leaf explanation nor identifies a safe
+runtime fix. Additional causal isolation would be required before changing
+flush code.
+
+First invocation of leaf-flush costs approximately 59.38 -> 60.36 ms, versus
+~8.5 ms warm. Its median paired difference is +1.279 ms, with 5/7 slower;
+first-call ranges overlap 57.84..61.49 and 59.14..64.34 ms. This is the first
+file operation in the focused title and is not comparable to an original
+full-suite leaf that runs after earlier I/O groups. It demonstrates a large
+first-invocation effect within both firmwares. The current evidence does not
+separate filesystem/host cache setup, emulator translation or host scheduling
+as causes. The first-call overwrite results instead trend slightly faster
+(17.691 -> 17.495 ms; ratio 0.98319; 3/7 slower). Broad write syscall controls
+also show mixed direction. No additional normal-path logging or filesystem
+algorithm change was identified that explains an across-the-board regression.
+
+Closure: retain the measured small flush-control effect as a limitation;
+close the original flush/overwrite whole-leaf regression as not reproduced
+in seven alternating native pairs. Ship no write-path runtime change based on
+this evidence. Receipt copies, file hashes, replay parser output, all raw
+samples and a reproducible analysis script accompany this report in
+  docs/provenance/write-performance-20261013/native-seven-pairs/
+Run from the repository:
+  python docs/provenance/write-performance-20261013/native-seven-pairs/analysis.py \
+    --results docs/provenance/write-performance-20261013/native-seven-pairs

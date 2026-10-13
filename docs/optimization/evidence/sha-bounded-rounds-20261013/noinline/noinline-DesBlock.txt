@@ -1,0 +1,99 @@
+8400e5d4 <_DesBlock>:
+8400e5d4:	55                   	push   %ebp
+8400e5d5:	89 e5                	mov    %esp,%ebp
+8400e5d7:	57                   	push   %edi
+8400e5d8:	56                   	push   %esi
+8400e5d9:	53                   	push   %ebx
+8400e5da:	31 db                	xor    %ebx,%ebx
+8400e5dc:	83 ec 1c             	sub    $0x1c,%esp
+8400e5df:	89 45 e0             	mov    %eax,-0x20(%ebp)
+8400e5e2:	8a 45 08             	mov    0x8(%ebp),%al
+8400e5e5:	89 4d dc             	mov    %ecx,-0x24(%ebp)
+8400e5e8:	b9 c0 af 05 84       	mov    $0x8405afc0,%ecx
+8400e5ed:	88 45 db             	mov    %al,-0x25(%ebp)
+8400e5f0:	8d 45 e8             	lea    -0x18(%ebp),%eax
+8400e5f3:	e8 94 02 00 00       	call   8400e88c <_DesPermute.constprop.0>
+8400e5f8:	8b 45 e8             	mov    -0x18(%ebp),%eax
+8400e5fb:	8b 55 ec             	mov    -0x14(%ebp),%edx
+8400e5fe:	0f c8                	bswap  %eax
+8400e600:	89 45 e4             	mov    %eax,-0x1c(%ebp)
+8400e603:	0f ca                	bswap  %edx
+8400e605:	80 7d db 00          	cmpb   $0x0,-0x25(%ebp)
+8400e609:	89 d8                	mov    %ebx,%eax
+8400e60b:	74 07                	je     8400e614 <_DesBlock+0x40>
+8400e60d:	b8 0f 00 00 00       	mov    $0xf,%eax
+8400e612:	29 d8                	sub    %ebx,%eax
+8400e614:	8b 7d dc             	mov    -0x24(%ebp),%edi
+8400e617:	8d 0c c7             	lea    (%edi,%eax,8),%ecx
+8400e61a:	89 d0                	mov    %edx,%eax
+8400e61c:	89 d7                	mov    %edx,%edi
+8400e61e:	0f b6 31             	movzbl (%ecx),%esi
+8400e621:	c1 c0 05             	rol    $0x5,%eax
+8400e624:	c1 ef 17             	shr    $0x17,%edi
+8400e627:	83 e0 3f             	and    $0x3f,%eax
+8400e62a:	83 e7 3f             	and    $0x3f,%edi
+8400e62d:	31 f0                	xor    %esi,%eax
+8400e62f:	0f b6 71 01          	movzbl 0x1(%ecx),%esi
+8400e633:	8b 04 85 c0 a7 05 84 	mov    -0x7bfa5840(,%eax,4),%eax
+8400e63a:	31 fe                	xor    %edi,%esi
+8400e63c:	0f b6 79 02          	movzbl 0x2(%ecx),%edi
+8400e640:	33 04 b5 c0 a8 05 84 	xor    -0x7bfa5740(,%esi,4),%eax
+8400e647:	89 d6                	mov    %edx,%esi
+8400e649:	c1 ee 13             	shr    $0x13,%esi
+8400e64c:	83 e6 3f             	and    $0x3f,%esi
+8400e64f:	31 fe                	xor    %edi,%esi
+8400e651:	0f b6 79 03          	movzbl 0x3(%ecx),%edi
+8400e655:	33 04 b5 c0 a9 05 84 	xor    -0x7bfa5640(,%esi,4),%eax
+8400e65c:	89 d6                	mov    %edx,%esi
+8400e65e:	c1 ee 0f             	shr    $0xf,%esi
+8400e661:	83 e6 3f             	and    $0x3f,%esi
+8400e664:	31 fe                	xor    %edi,%esi
+8400e666:	0f b6 79 04          	movzbl 0x4(%ecx),%edi
+8400e66a:	33 04 b5 c0 aa 05 84 	xor    -0x7bfa5540(,%esi,4),%eax
+8400e671:	89 d6                	mov    %edx,%esi
+8400e673:	c1 ee 0b             	shr    $0xb,%esi
+8400e676:	83 e6 3f             	and    $0x3f,%esi
+8400e679:	31 fe                	xor    %edi,%esi
+8400e67b:	0f b6 79 05          	movzbl 0x5(%ecx),%edi
+8400e67f:	33 04 b5 c0 ab 05 84 	xor    -0x7bfa5440(,%esi,4),%eax
+8400e686:	89 d6                	mov    %edx,%esi
+8400e688:	c1 ee 07             	shr    $0x7,%esi
+8400e68b:	83 e6 3f             	and    $0x3f,%esi
+8400e68e:	31 fe                	xor    %edi,%esi
+8400e690:	0f b6 79 06          	movzbl 0x6(%ecx),%edi
+8400e694:	0f b6 49 07          	movzbl 0x7(%ecx),%ecx
+8400e698:	33 04 b5 c0 ac 05 84 	xor    -0x7bfa5340(,%esi,4),%eax
+8400e69f:	89 d6                	mov    %edx,%esi
+8400e6a1:	c1 ee 03             	shr    $0x3,%esi
+8400e6a4:	83 e6 3f             	and    $0x3f,%esi
+8400e6a7:	31 fe                	xor    %edi,%esi
+8400e6a9:	33 04 b5 c0 ad 05 84 	xor    -0x7bfa5240(,%esi,4),%eax
+8400e6b0:	89 d6                	mov    %edx,%esi
+8400e6b2:	d1 c6                	rol    $1,%esi
+8400e6b4:	83 e6 3f             	and    $0x3f,%esi
+8400e6b7:	31 ce                	xor    %ecx,%esi
+8400e6b9:	8b 4d e4             	mov    -0x1c(%ebp),%ecx
+8400e6bc:	89 55 e4             	mov    %edx,-0x1c(%ebp)
+8400e6bf:	33 04 b5 c0 ae 05 84 	xor    -0x7bfa5140(,%esi,4),%eax
+8400e6c6:	31 c8                	xor    %ecx,%eax
+8400e6c8:	43                   	inc    %ebx
+8400e6c9:	83 fb 10             	cmp    $0x10,%ebx
+8400e6cc:	74 07                	je     8400e6d5 <_DesBlock+0x101>
+8400e6ce:	89 c2                	mov    %eax,%edx
+8400e6d0:	e9 30 ff ff ff       	jmp    8400e605 <_DesBlock+0x31>
+8400e6d5:	0f c8                	bswap  %eax
+8400e6d7:	89 45 e8             	mov    %eax,-0x18(%ebp)
+8400e6da:	8b 45 e0             	mov    -0x20(%ebp),%eax
+8400e6dd:	0f ca                	bswap  %edx
+8400e6df:	b9 80 a7 05 84       	mov    $0x8405a780,%ecx
+8400e6e4:	89 55 ec             	mov    %edx,-0x14(%ebp)
+8400e6e7:	8d 55 e8             	lea    -0x18(%ebp),%edx
+8400e6ea:	e8 9d 01 00 00       	call   8400e88c <_DesPermute.constprop.0>
+8400e6ef:	83 c4 1c             	add    $0x1c,%esp
+8400e6f2:	5b                   	pop    %ebx
+8400e6f3:	5e                   	pop    %esi
+8400e6f4:	5f                   	pop    %edi
+8400e6f5:	5d                   	pop    %ebp
+8400e6f6:	c3                   	ret
+8400e6f7:	90                   	nop
+

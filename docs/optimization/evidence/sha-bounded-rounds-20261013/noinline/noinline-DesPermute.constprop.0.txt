@@ -1,0 +1,35 @@
+8400e88c <_DesPermute.constprop.0>:
+8400e88c:	55                   	push   %ebp
+8400e88d:	89 e5                	mov    %esp,%ebp
+8400e88f:	57                   	push   %edi
+8400e890:	56                   	push   %esi
+8400e891:	89 ce                	mov    %ecx,%esi
+8400e893:	b9 02 00 00 00       	mov    $0x2,%ecx
+8400e898:	53                   	push   %ebx
+8400e899:	89 c3                	mov    %eax,%ebx
+8400e89b:	31 c0                	xor    %eax,%eax
+8400e89d:	89 df                	mov    %ebx,%edi
+8400e89f:	83 ec 0c             	sub    $0xc,%esp
+8400e8a2:	89 55 ec             	mov    %edx,-0x14(%ebp)
+8400e8a5:	f3 ab                	rep stos %eax,%es:(%edi)
+8400e8a7:	31 ff                	xor    %edi,%edi
+8400e8a9:	0f b6 14 3e          	movzbl (%esi,%edi,1),%edx
+8400e8ad:	8b 45 ec             	mov    -0x14(%ebp),%eax
+8400e8b0:	e8 03 fd ff ff       	call   8400e5b8 <_DesBit.lto_priv.0>
+8400e8b5:	89 f9                	mov    %edi,%ecx
+8400e8b7:	89 fa                	mov    %edi,%edx
+8400e8b9:	47                   	inc    %edi
+8400e8ba:	f7 d1                	not    %ecx
+8400e8bc:	c1 ea 03             	shr    $0x3,%edx
+8400e8bf:	83 e1 07             	and    $0x7,%ecx
+8400e8c2:	d3 e0                	shl    %cl,%eax
+8400e8c4:	08 04 13             	or     %al,(%ebx,%edx,1)
+8400e8c7:	83 ff 40             	cmp    $0x40,%edi
+8400e8ca:	75 dd                	jne    8400e8a9 <_DesPermute.constprop.0+0x1d>
+8400e8cc:	83 c4 0c             	add    $0xc,%esp
+8400e8cf:	5b                   	pop    %ebx
+8400e8d0:	5e                   	pop    %esi
+8400e8d1:	5f                   	pop    %edi
+8400e8d2:	5d                   	pop    %ebp
+8400e8d3:	c3                   	ret
+

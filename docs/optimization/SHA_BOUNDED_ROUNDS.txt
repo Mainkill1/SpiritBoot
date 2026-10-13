@@ -1,0 +1,242 @@
+SHA-1 bounded compression loops — 2026-10-13
+
+Current candidate: Xbox-only noinline compression revision, flash349d5f39...
+First candidate33fc537f... is rejected for a reproducible native DES slowdown.
+The noinline revision passes host and linked-layout verification; native
+acceptance belongs to the final combined ROM qualification described separately.
+The first-candidate evidence below is retained to document the failed trial.
+
+Patch 0118-sha-bounded-rounds.patch replaces the Xbox-only 80-round dispatch
+loop with five-round groups, split by SHA phase. Fifteen initial byte-swap
+rounds run in three groups; the 15..19 boundary is explicit; each remaining
+20-round phase runs in four groups. Five rounds restore a,b,c,d,e's names to
+their original logical roles. The non-Xbox implementation is unchanged.
+
+This removes per-round phase and schedule-kind selection while retaining the
+same 16-word in-place schedule. Update, count arithmetic, context translation,
+copying, final padding/reset and crypto vector dispatch are unchanged. In
+particular, no compression call points directly at caller input: compression
+continues mutating the existing working buffer. No tables or heap allocations
+are added, and DES/RSA implementations are untouched.
+
+Baseline product: 8268b1cbd8371a87e4e84cdba45709a56371035a
+Baseline assembled tree: 9ef0d1d0f503eccf9d966d4b6901993c7364754c
+Candidate assembled tree: d73e07d9b3a9aee3b2b437fe807b55f32640e0a8
+Baseline flash SHA256:
+62edb78f3ac8dd5739c2b6b9d1a838a4447f3c7662db4e4166e3c795081db027
+Candidate flash SHA256:
+33fc537ff03946fe5a48bd27e40a4e51928a9e23244d9d8f6609c9aa9c244f71
+Local candidate: artifacts/sha-release64/flash.bin
+
+Host verification
+
+The new actual-source sha-rounds.py was written and run before implementation.
+It compiled exact staged baseline SHA and crypto bodies and passed the behavior
+checks, then failed the compression loop budget: 81 evaluated conditions vs a
+maximum 24 per block. The candidate passes with 19. Counters exist only in the
+extracted host translation unit, never firmware. This is an executed-work
+bound, not a wall-time threshold or a source-string assertion.
+
+13,410 checks cover 4,096 arbitrary state/block transforms, including all 512
+input bits individually; both the five state words and all 64 mutated schedule
+bytes must match. Update/final differential checks compare entire backing
+allocations across unaligned public contexts, caller input/context aliases,
+digest/context aliases, boundary lengths, synthetic count carry, and reset.
+Independent hashlib SHA-1 and hmac oracles include empty/abc/million-a and
+1MiB inputs, streamed chunks and key lengths 0/1/20/64/65/80. HMAC uses the
+existing console key-truncation contract. Tests operate on owned source; no
+binary reference implementation is introduced.
+
+Existing kernel-performance/check.py --optimized --compare also passes all
+30,978 checks (SHA/DES complete state hashes equal; RSA oracle checks included).
+Product unittest discovery passes 131 tests, with three existing skips.
+CI reconstructs the prior SHA source by reverse-applying only the SHA source
+hunk, then runs the new differential and bounded-work test on assembled code.
+The exact same CI reconstruction command was verified locally.
+
+Instrumented host 1MiB medians (9 samples): baseline 1.637ms, candidate 1.162ms
+(29.0% lower). A repeat through the CI baseline path measured 1.594/1.131ms.
+These are host diagnostics. The native qualification below found an unrelated
+DES performance regression and prevents accepting this first candidate.
+
+Release64 image audit
+
+Metric                            Baseline       Candidate       Delta
+Flash bytes                        524288          524288             0
+Stripped kernel PE bytes           509952          511488         +1536
+Mapped image bytes                 569344          573440         +4096
+.text virtual bytes                346688          348536         +1848
+.text mapped pages                     85              86            +1
+ROM backed pages                       92              93            +1
+Permanent image RAM pages              14              14             0
+Discardable image pages                33              33             0
+Compressed prepared bytes           46848           46824           -24
+Payload slot free bytes              79424           75352         -4072
+Warm-stage required pages              177             178            +1
+Warm-stage capacity pages              505             505             0
+
+This is a bounded partial unroll: executable growth is below 2KiB, vs the old
+source comment's roughly 3.8KiB saving from fully rolling the core. The text
+crosses a page boundary; following section RVAs move by one page. Permanent
+RAM remains 14 pages: one header, one retained text, one data, eleven BSS.
+The extra mapped page is ROM backed. Small -32 byte rdata/BSS alignment changes
+are measured output effects, not new global-state savings claimed by the patch.
+Loader binary is identical. tools/des_layout_audit.py verified exact build
+identities, PE geometry, every ROM-span CRC and unchanged DES table bytes.
+The permanent backing audit does not replace a runtime free-memory observation.
+
+Independent review
+
+release_write_perf independently reviewed the staged candidate and ran its
+SHA harness: no blocking correctness finding; 13,410 checks passed, 19/81 loop
+conditions. Review confirmed the 15..19 transition, five-round variable order,
+and preserved circular schedule mutation and wrapper behavior. Independent
+host medians were 1.110/1.573ms; again these are not native timing claims.
+
+Reproduce
+
+python3 CANDIDATE_SOURCE/tests/host/kernel-performance/sha-rounds.py \
+  CANDIDATE_SOURCE BASELINE_SOURCE OUTPUT --optimized
+python3 CANDIDATE_SOURCE/tests/host/kernel-performance/check.py \
+  CANDIDATE_SOURCE OUTPUT --optimized --compare BASELINE_SOURCE
+python3 -m unittest discover -s tests/host
+python3 tools/des_layout_audit.py --baseline BASELINE_BUILD_DIRECTORY \
+  --candidate artifacts/sha-release64 --output OUTPUT.json
+
+Evidence: docs/optimization/evidence/sha-bounded-rounds-20261013/
+Builds use the existing spiritboot-toolchain Docker image, isolated /work,
+pristine source mounted read-only at /source, release variant, memory 64MiB.
+
+Native qualification of first candidate (33fc537f...) — HOLD
+
+All 21 microbenchmark runs in seven sequential triplets completed with exit zero,
+41/41 TAP checks, 40 workloads and all 118 exact ordered samples per run (2,478
+total). Sample indices, iterations, correct=1 and checksums match the previously
+frozen fixture contract across all three kernels. Trial order alternates
+baseline/SHA/Complex and Complex/SHA/baseline. Each workload uses its per-boot
+sample median, divided by guest frequency and iteration count; the table below
+reports medians of seven boots. One cold-object sample is emitted per boot.
+Ranges are descriptive; no confidence interval or game performance is claimed.
+
+The candidate full API suite completes all 639 rows: 630 ordinary passes,
+four pre-existing TODO failures, five explicit skips, zero unexpected failures.
+The guest summary's 634 includes the four TODO failures; it is not 634 true passes.
+SHA/HMAC and public crypto output checks pass. Exact TODO/SKIP names are in
+native/report.json. No storage fix is included in this standalone SHA image.
+
+Receipts verify BIOS, ISO and executable hashes, interactive session, exit state,
+64MiB memory, EEPROM identity, invariant HDD backing metadata, nonoverlapping
+runs and alternating order. The archived runner creates a new QCOW2 overlay per
+run. Full remote config/HDD bytes and executable/Complex bytes were not exported,
+so those hashes/backing identities remain receipt attestations; this analysis
+does not claim a fresh local hash of unavailable remote files.
+
+Workload                         Baseline us    SHA us       Complex us   Change
+empty                                  0.196       0.202       0.209    +3.0%
+pin-1                                  1.030       1.020       0.619    -0.9%
+pin-16                                 6.876       6.748       0.798    -1.9%
+pin-64                                25.287      25.068       1.313    -0.9%
+pin-65                                30.719      30.381       1.307    -1.1%
+pin-256                              117.953     117.434       3.380    -0.4%
+pin-4096                            1903.622    1865.394      45.111    -2.0%
+pin-reject-0                           0.511       0.506       0.470    -1.2%
+pin-reject-32                          6.277       6.262       0.613    -0.2%
+pin-reject-64                         12.135      11.999       0.785    -1.1%
+pin-reject-65                         12.245      12.203       0.782    -0.3%
+pool-1                                 2.880       2.987       2.389    +3.7%
+pool-16                               14.965      15.539       9.481    +3.8%
+pool-256                             170.767     173.211      99.630    +1.4%
+pool-1024                            653.432     670.620     387.556    +2.6%
+sysva-1                               13.724      13.243       2.213    -3.5%
+sysva-16                              55.786      54.342       9.815    -2.6%
+sysva-1024                          2810.500    2828.281     607.111    +0.6%
+sysva-1025                          2853.174    2799.832     592.296    -1.9%
+sysva-4096                         11566.792   11417.732    2827.259    -1.3%
+object-cold-64                       433.844     403.913     119.407    -6.9%
+object-warm-1                          1.254       1.199       0.896    -4.4%
+object-warm-8                          7.638       7.251       4.470    -5.1%
+object-warm-64                        83.290      81.494      33.167    -2.2%
+modexp-1-e1-odd                       54.355      54.592      47.014    +0.4%
+modexp-1-e65537-odd                   60.148      59.111      52.954    -1.7%
+modexp-2-e3-even                      81.864      88.532      49.148    +8.1%
+modexp-32-e3-odd                    1674.476    1708.555      49.037    +2.0%
+modexp-64-e65537-odd                7550.182    7520.252      57.481    -0.4%
+modexp-512-e1-odd                 350779.733  347672.595      83.259    -0.9%
+sha-0                                  8.866       8.206       4.349    -7.4%
+sha-1                                  8.728       8.195       4.446    -6.1%
+sha-63                                13.144      11.381       6.117   -13.4%
+sha-65                                12.645      11.215       5.889   -11.3%
+sha-4096                             255.631     198.030      94.185   -22.5%
+sha-1MiB                           62743.741   49289.255   23544.000   -21.4%
+des-block                             10.085      14.956       1.491   +48.3%
+des3-block                            27.810      43.081       2.514   +54.9%
+des-cbc-4096                        3704.562    5216.495     412.741   +40.8%
+des3-cbc-4096                      10636.280   15151.336    1016.296   +42.4%
+
+SHA-1MiB improves 62.744 -> 49.289ms (-21.4%) and remains 2.09x Complex's
+23.544ms. SHA-4096 improves 22.5%; all six SHA medians improve. However DES-block,
+3DES-block, DES-CBC-4096 and 3DES-CBC-4096 regress 48.3%, 54.9%, 40.8% and 42.4%.
+Every one of their seven pairs is slower (minimum paired increase 33.3%, 49.4%,
+33.6%, 39.0% respectively). This candidate must not be accepted as a net
+performance fix. Other observations include pool-1024 +2.6% (all seven slower),
+modexp-32-e3 +2.0% (all seven slower), and modexp-2-e3 +8.1% with overlapping
+paired directions (-16.1%..+11.3%). All 40 workloads, pair values and ranges are
+recorded in native/workloads.csv and native/report.json, including improvements
+outside SHA that are not attributed to this source change.
+
+Owned-kernel assembly investigation shows identical DES instruction counts and
+call structure: DesBlock 97, DesCryptBlock 56, DesPermute 33, DesBit 13. Baseline
+DesPermute at 0x8400e998 calls DesBit at 0x8400e6c4 within one 4KiB page; candidate
+DesPermute at 0x8400f0c0 calls DesBit at 0x8400edec across a page. SHA compression
+was inlined into early A_SHAUpdate, growing it from 151 to 767 instructions and
+moving the DES helpers. Cross-page execution is a testable layout hypothesis,
+not yet a proven cause. The next bounded experiment keeps SHA compression out
+of line, restoring locality without changing the DES source.
+
+Reanalysis: python3 docs/optimization/evidence/sha-bounded-rounds-20261013/native/analyze.py
+Raw exported receipts and logs: native/receipts.zip; frozen contracts.json comes
+from the prior strict analyzer, not from trusting this candidate's outputs.
+
+Noinline correction — standalone build/host/layout proof
+
+The Xbox compression definition now has a static forward declaration carrying
+__attribute__((noinline)). This keeps the shared compression core out of the
+early A_SHAUpdate routine. The SHA round code, circular buffer writes, caller
+copying, counts, padding/final reset, context layout and DES code are unchanged.
+Non-Xbox builds do not receive this attribute. Each block adds a normal internal
+call/return; the algorithm still executes 19 compression-loop checks per block.
+
+Standalone candidate assembled tree:
+d8c6f0e7b74add8c4113ef8a08431f059f606c2f
+Standalone candidate flash SHA256:
+349d5f39cf13da0e3f52ac2fcd8f4d1973dd4efbccc982b57295e37735d4effe
+ROM: artifacts/sha-noinline-release64/flash.bin
+
+Actual linked A_SHAUpdate is 56 instructions; SHA1Transform is 684 instructions
+at 0x84040d1c. DesBit at 0x8400e5b8 and DesPermute at 0x8400e88c again share one
+4KiB page. Their 13/33 instruction counts and the 97/56 counts of DesBlock and
+DesCryptBlock match the baseline and first candidate. Exact owned-code excerpts
+and addresses are retained under evidence/.../noinline/. Keeping DES helpers
+within one page is corroborated independently by release_write_perf. It is
+layout evidence for the stated hypothesis, not proof of recovered performance;
+the final combined image must receive its own native screen and qualification.
+
+The standalone revision passes 13,410 SHA differential/oracle checks and all
+30,978 existing full kernel-performance oracle checks against baseline9ef0d1d0.
+Product suite:131 tests, three existing skips, no failures. The independent
+reviewer reran all13,410 SHA checks and found no correctness blocker. Instrumented
+host1MiB median is1.159ms vs1.633ms baseline; host timings are diagnostic only.
+
+Relative to baseline62ed: .text346688->348556 bytes (+1868), stripped PE
+509952->511488 (+1536), mapped image569344->573440 (+4096), ROM92->93 pages,
+permanent image RAM14->14 pages, discardable33->33 pages. Warm-stage requirement
+177->178 pages of505. Compressed prepared payload46848->46828 bytes; payload
+headroom79424->75348. Exact ROM-span CRCs and loader identity pass the layout
+audit. The final combined build's geometry may differ and needs its own audit.
+
+The native receipt analyzer additionally passes14 corruption checks: altered
+sample checksum/iteration/correctness/index/terminal, unexpected API TODO pass,
+unknown API contract, ordinary API failure, wrong BIOS, noninteractive session,
+incomplete/failed process, wrong RAM profile and changed backing metadata are
+all rejected. Original API/micro controls are accepted.
+Reproduce: python3 docs/optimization/evidence/sha-bounded-rounds-20261013/native/test-analyze.py

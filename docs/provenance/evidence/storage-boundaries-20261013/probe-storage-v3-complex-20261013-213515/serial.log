@@ -1,0 +1,74 @@
+TAP version 14
+ok 1 - open readonly volume
+# flush readonly-volume status=00000000 iosb=00000000 info=0
+ok 2 - readonly volume flush succeeds
+ok 3 - create disposable data file
+ok 4 - seed exact payload
+ok 5 - writable file flush succeeds
+ok 6 - open readonly regular file
+# flush readonly-file status=00000000 iosb=00000000 info=0
+ok 7 - readonly regular file flush succeeds
+ok 8 - query large partition space
+# large free units=0:311273 cluster=16384
+# EOF before exact-4GiB status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 9 - seed EOF is 512 bytes
+ok 10 - query pre-resize space
+# resize begin exact-4GiB high=00000001 low=00000000
+# resize result exact-4GiB status=c000007f iosb=5a5a5a5a info=1515870810
+ok 11 - unrepresentable or unavailable file size returns DISK_FULL
+# EOF after status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 12 - failed resize preserves EOF
+ok 13 - failed resize preserves bytes
+ok 14 - failed resize preserves free clusters
+ok 15 - recreate independent case file
+ok 16 - seed independent case
+# EOF before 4GiB-plus-512 status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 17 - seed EOF is 512 bytes
+ok 18 - query pre-resize space
+# resize begin 4GiB-plus-512 high=00000001 low=00000200
+# resize result 4GiB-plus-512 status=c000007f iosb=5a5a5a5a info=1515870810
+ok 19 - unrepresentable or unavailable file size returns DISK_FULL
+# EOF after status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 20 - failed resize preserves EOF
+ok 21 - failed resize preserves bytes
+ok 22 - failed resize preserves free clusters
+ok 23 - recreate independent case file
+ok 24 - seed independent case
+# EOF before beyond-free-large status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 25 - seed EOF is 512 bytes
+ok 26 - query pre-resize space
+# resize begin beyond-free-large high=00000001 low=2ffe4000
+# resize result beyond-free-large status=c000007f iosb=5a5a5a5a info=1515870810
+ok 27 - unrepresentable or unavailable file size returns DISK_FULL
+# EOF after status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 28 - failed resize preserves EOF
+ok 29 - failed resize preserves bytes
+ok 30 - failed resize preserves free clusters
+ok 31 - recreate independent case file
+ok 32 - seed independent case
+# EOF before negative-lowpart-512 status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 33 - seed EOF is 512 bytes
+ok 34 - query pre-resize space
+# resize begin negative-lowpart-512 high=ffffffff low=00000200
+# resize result negative-lowpart-512 status=c000000d iosb=5a5a5a5a info=1515870810
+ok 35 - negative file size returns INVALID_PARAMETER
+# EOF after status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 36 - failed resize preserves EOF
+ok 37 - failed resize preserves bytes
+ok 38 - failed resize preserves free clusters
+ok 39 - create cache-partition data file
+ok 40 - seed cache-partition payload
+ok 41 - query cache partition space
+ok 42 - free-space case lies below file-size cap
+# EOF before beyond-free-small status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 43 - seed EOF is 512 bytes
+ok 44 - query pre-resize space
+# resize begin beyond-free-small high=00000000 low=29f50000
+# resize result beyond-free-small status=c000007f iosb=5a5a5a5a info=1515870810
+ok 45 - unrepresentable or unavailable file size returns DISK_FULL
+# EOF after status=00000000 info=56 eof=00000000:00000200 allocation=00000000:00000200
+ok 46 - failed resize preserves EOF
+ok 47 - failed resize preserves bytes
+ok 48 - failed resize preserves free clusters
+# checks=48 failures=0
+1..48

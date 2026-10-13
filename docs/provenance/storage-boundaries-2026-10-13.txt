@@ -1,0 +1,68 @@
+Storage boundary compatibility, 2026-10-13
+
+Cause and scope
+
+NtFlushBuffersFile inherited a desktop NT granted-access check that rejected
+handles without FILE_WRITE_DATA or FILE_APPEND_DATA before creating the flush
+IRP. Complex public API observations establish SUCCESS for both read-only
+Partition1 volume handles and read-only regular-file handles. Patch 0117 omits
+that check only for SARCH_XBOX; object reference, synchronous locking, dispatch,
+completion and storage error propagation retain their existing behavior.
+
+VfatSetAllocationSizeInformation rejected positive HighPart as INVALID_PARAMETER
+before attempting allocation. The original API regression request exceeded both
+free disk space and the FATX representable file size, so that test alone could
+not identify the contract. Independent 4 GiB and 4 GiB + 512 requests on a volume
+with more than 4 GiB free establish DISK_FULL for the size cap itself. A cache
+partition request below 4 GiB separately exercises actual free-space exhaustion.
+
+The same guard ignored negative HighPart. A negative signed request with LowPart
+512 succeeded as if it were a 512-byte EOF. Complex returns INVALID_PARAMETER.
+Patch 0117 rejects negative FATX sizes and maps only positive unrepresentable
+FATX sizes to DISK_FULL before equality shortcuts, checkpoint invalidation, or
+cluster mutation. The 32-bit size cap stays in place. Generic FAT cap behavior
+is preserved. Existing allocation and rollback logic is unchanged.
+
+The patch adds no kernel allocation, global state, static RAM, or storage scan.
+
+Verification
+
+The full production resize routine is compiled into a host harness with bounded
+lower-level cluster/cache doubles. This runs both Xbox and generic builds and
+checks positive cap rejection without side effects, negative rejection,
+empty/existing-chain rollback, allocation-only failures, the largest representable
+32-bit size, ordinary grow/shrink, and generic FAT status preservation. It failed
+on the baseline cap-status assertion and passed after the change. Product host
+suite: 131 tests, zero failures, three existing skips. Independent review by the
+release_sha agent reproduced the baseline failure and both passing host flavors,
+and reported no blocking production issue.
+
+The native fixture contains 48 checks; all size failures verify exact payload,
+EOF, and available-cluster preservation. v1 investigated the reference with
+FileStandardInformation, which the reference rejects. Existing public API test
+cc_write.c documented that limitation. v3 uses FileNetworkOpenInformation and
+checks the seeded EOF before every case as well as after each rejection; it also
+reopens and reseeds the case file independently. The correction changes the
+query to a reference-supported API, without relaxing any preservation assertion.
+
+Native v3 results: baseline 48 checks / 6 expected failures; Complex 48 / 0;
+candidate 48 / 0. All EOF, payload, and free-cluster invariants pass on all three.
+The candidate exits normally and matches the reference statuses and IOSB
+observations. Raw serial logs and input/launch/result receipts are in
+'evidence/storage-boundaries-20261013/probe-storage-v3-*'. The large partition
+reports 311273 free clusters of 16384 bytes, proving both cap-only requests are
+below free capacity. Patch 0117a promotes the two existing API TODOs to ordinary
+assertions; CI registers the 48-check native guest and bounded host test.
+
+Qualified flash SHA256:
+8feab7792b73fd840ab717897fb1cbf87d85e1baafc9050ea53191674503a81e
+Qualified ISO SHA256:
+9273b50ac9a3699aee02730c0e6eb6a2740a74de1f8f306643b41772f7e6ad23
+Built source tree before test-only 0117a:
+3242d63f312e862df4ecde22ea79c4ba2b6dae27
+Final patched source tree including 0117a:
+616b732fc9504264a7c0ad34b093e98efb5d17ff
+
+The candidate kernel binary predates the test-only fixture/TODO patch. Kernel
+source is identical. Full integrated BIOS qualification belongs to the parent
+task.

@@ -1,0 +1,115 @@
+Final combined ROM microbenchmark review — 2026-10-13
+
+The final noinline SHA candidate has a repeatable SHA benefit, with remaining
+DES and small modular-exponentiation cost trends. This is not evidence that
+all workloads are faster or that the release has zero performance regressions.
+No further speculative code changes are recommended from these timings alone.
+Native correctness passed throughout; release acceptance is a tradeoff decision.
+
+Compared exact locally rehashed ROMs:
+  prior performance: 62edb78f3ac8dd5739c2b6b9d1a838a4447f3c7662db4e4166e3c795081db027
+  final combined:    be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827
+  final source tree: 694b0e2461558f6a5f7a774fd34c79bd7cdc111e
+Frozen locally rehashed portable ISO:
+  65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705
+
+Twelve runs cover two separate three-pair cohorts: initial layout qualification
+and the later full-release campaign. Both cohorts remain in the report; neither
+was discarded. Each alternates baseline/current order. All runs exited zero,
+with 41 clean TAP assertions each (492 total), and exactly 118 timing records
+each (1,416 total). All 40 workload names, sample numbers, iteration counts,
+correct flags and checksums match the frozen contract. All execution windows
+are non-overlapping. Faulted/truncated/duplicate/extra/corrupted parser cases
+are rejected by the companion negative tests.
+
+Every receipt identifies the same xemu executable hash, 64 MiB, EEPROM hash,
+HDD backing path/length/modification time, session and QPC frequency 3,374,488.
+Exported post-exit configurations normalize identically after removing BIOS
+and private run EEPROM/overlay paths. The two cohorts use different DVD source
+paths but every launch reports the identical locally verified ISO hash above;
+that path difference is normalized only after checking that identity. Hashes
+of exact receipt/config bytes are retained. Post-exit config differs from the
+prelaunch recorded hash because xemu rewrites it, as reported by the runner.
+Backing content and remote executable bytes are not independently rehashed;
+the local ROM and ISO bytes are. These scope limits remain in report.json.
+
+For each workload, take the median of three guest-QPC samples per run (one
+sample for object-cold-64), normalize by iterations and clock frequency, then
+compare the six run medians. The paired median percentage is computed from
+six matched ratios and can differ from the percentage between aggregate
+medians. Within-run samples are not treated as independent boot repetitions.
+Ranges below and in CSV are descriptive, not confidence intervals. No empty
+loop subtraction or outlier removal is performed.
+
+Combined six-pair result (microseconds per iteration):
+Workload                  Prior       Final    Aggregate  Paired median  Slower
+modexp-1-e65537-odd          57.365     59.139    +3.09%      +2.32%    5/6
+sha-0                         8.879      8.215    -7.47%      -7.78%    0/6
+sha-1                         8.829      8.165    -7.53%      -7.62%    0/6
+sha-63                       12.829     11.260   -12.23%     -12.08%    0/6
+sha-65                       12.438     11.066   -11.03%     -11.41%    0/6
+sha-4096                    247.501    196.011   -20.80%     -21.14%    0/6
+sha-1MiB                  63566.977  48692.276   -23.40%     -23.64%    0/6
+des-block                     9.880     10.063    +1.85%      +1.27%    5/6
+des3-block                   27.317     27.854    +1.97%      +0.16%    3/6
+des-cbc-4096               3478.602   3674.039    +5.62%      +3.39%    5/6
+des3-cbc-4096             10107.607  10620.130    +5.07%      +2.20%    3/6
+
+SHA: all six workloads improve in all six matched pairs. For SHA-1 MiB, the
+per-pair change spans -26.71% to -21.01%; prior per-run medians span
+61.972..66.443 ms and final medians span 48.069..49.022 ms, with no overlap.
+The first cohort independently gives -23.83% aggregate and the second -23.76%.
+Both cohorts individually have disjoint faster ranges for all SHA sizes. When
+pooling both cohorts, sha-0 ranges overlap slightly, while its six paired
+comparisons still all favor final. The other five SHA pooled ranges remain
+disjoint. This supports the bounded-compression change on this emulator.
+
+Remaining control costs must remain visible:
+- DES-CBC-4096: +5.62% between aggregate medians, +3.39% median paired change,
+  slower in 5/6 pairs. The per-pair range is -3.08%..+8.59%. Prior per-run
+  medians span 3.401..3.893 ms; final spans 3.431..3.773 ms. The aggregate
+  increase is about 195 microseconds per 4 KiB operation. Both three-pair
+  cohorts have positive aggregate changes (+4.82% and +6.42%). This is the
+  clearest remaining non-SHA cost trend, despite overlapping distributions.
+- DES single block: +1.85% aggregate, +1.28% paired median, 5/6 slower, with
+  paired changes -7.82%..+9.53% and overlapping ranges.
+- 3DES block: +1.97% aggregate, +0.16% paired median, split 3/6 slower.
+- 3DES-CBC: +5.07% aggregate, +2.20% paired median, split 3/6 slower; the
+  aggregate increase is about 513 microseconds per 4 KiB operation. Ranges
+  overlap and pair changes span -1.88%..+9.33%.
+- modexp-1-e65537-odd: +3.09% aggregate (~1.77 microseconds), +2.32% paired
+  median, 5/6 slower. First-cohort ranges were narrowly disjoint; the second
+  cohort broadens the pooled ranges enough to overlap. Preserve the first
+  observation while avoiding a uniform-regression claim.
+
+Fourteen of forty workloads have positive pooled aggregate change. The other
+positive changes are pin-1, pool-1, sysva-1, sysva-16, sysva-4096, object-cold-64,
+object-warm-64, modexp-32-e3-odd and modexp-64-e65537-odd. Each has overlapping
+pooled ranges and mixed pair directions. All forty workloads, including gains,
+are listed in workloads.csv with all paired values and ranges in report.json.
+No pooled workload has disjoint slower ranges. This does not erase the trends
+above: six paired runs are a small performance sample, not proof of equality.
+
+The prior inline SHA experiment had a larger DES slowdown and was blocked.
+The final candidate restores DesBit/DesPermute to a shared code page. That
+layout fact and the improved observed control results support the chosen
+noinline experiment, but do not prove that page placement alone caused all
+remaining timing differences. DES algorithm source is unchanged. Avoid
+attributing the residual cost to an unmeasured cache/TCG mechanism.
+
+Correctness and image review are separate: the exact final artifact passed
+13,410 actual-source SHA differential/oracle checks, production FATX tests,
+ROM integrity checks and unchanged permanent image RAM accounting (14 pages),
+as recorded in release-independent-review-2026-10-13.txt. This micro report
+adds native performance evidence, not game-wide or physical-console claims.
+
+Evidence: docs/provenance/final-layout-micro-20261013/
+  receipts.zip: exact 12 native logs/configs/launch/result/input receipts.
+  report.json: all raw samples, per-run values, hashes and three summaries
+    (each cohort separately, then all six pairs).
+  workloads.csv: all 40 workloads for each summary.
+  contracts.json/micro_parser.py/test-parser.py: strict fixture contract and
+    negative tests; parser-tests.log records their result.
+  local-assets.json: local rehashes of both ROMs and ISO.
+  analyze.py: replay from receipts.zip without Windows access.
+Run: python docs/provenance/final-layout-micro-20261013/analyze.py

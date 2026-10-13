@@ -1,0 +1,464 @@
+--- a/tests/xbe/api-regression/io/storage.c
++++ b/tests/xbe/api-regression/io/storage.c
+@@ -11,12 +11,11 @@
+  *
+  * Retail-validated semantics:
+  *  - NtFlushBuffersFile on a written HDD file and on the Partition1
+  *    DASD volume handle both return STATUS_SUCCESS.  Retail does not
+  *    require write access on the handle for the flush (a GENERIC_READ
+- *    volume handle flushes fine); nxkrnl returns STATUS_ACCESS_DENIED
+- *    there, tracked as a TODO test below.
++ *    volume handle flushes fine).
+  *  - IOCTL_STORAGE_CHECK_VERIFY{,2} against \Device\CdRom0 return
+  *    STATUS_INVALID_DEVICE_REQUEST in every shape probed (no buffer,
+  *    ULONG change-count buffer, undersized buffer), media present.
+  *    Retail simply does not implement the CHECK_VERIFY contract; DVD
+  *    arrival is signalled out-of-band (SMC tray state), so a media
+@@ -211,13 +210,11 @@
+ }
+ 
+ static const test_entry_t io_storage_entries[] = {
+     {"flush_hdd_file",               t_flush_hdd_file},
+     {"flush_volume_handle",          t_flush_volume_handle},
+-    {"flush_volume_readonly",        t_flush_volume_readonly,
+-     .todo = "retail flushes a read-only volume handle; "
+-             "nxkrnl returns ACCESS_DENIED"},
++    {"flush_volume_readonly",        t_flush_volume_readonly},
+     {"dvd_check_verify",             t_dvd_check_verify},
+     {"dvd_check_verify2",            t_dvd_check_verify2},
+     {"dvd_check_verify_count",       t_dvd_check_verify_count},
+     {"dvd_check_verify_small_buffer", t_dvd_check_verify_small_buffer},
+ };
+--- a/tests/xbe/api-regression/io/bad_ptr.c
++++ b/tests/xbe/api-regression/io/bad_ptr.c
+@@ -161,12 +161,12 @@
+ 
+ static bool t_set_eof_beyond_free_space(void)
+ {
+     /* Extending past free space exercises the cluster-allocation error
+      * flow; retail surfaces STATUS_DISK_FULL as a plain return.  On
+-     * this disk free space exceeds the FAT 4 GB file cap, and vfat
+-     * trips its size-cap check first. */
++     * this disk free space exceeds the FATX 4 GB file cap; both
++     * capacity limits return STATUS_DISK_FULL. */
+     HANDLE h;
+     IO_STATUS_BLOCK iosb;
+     FILE_FS_SIZE_INFORMATION fs;
+     NTSTATUS s;
+ 
+@@ -337,13 +337,11 @@
+ 
+ static const test_entry_t io_bad_ptr_entries[] = {
+     {"wait_garbage_handle",              t_wait_garbage_handle},
+     {"read_zero_length_garbage_buffer",  t_read_zero_length_garbage_buffer},
+     {"write_zero_length_garbage_buffer", t_write_zero_length_garbage_buffer},
+-    {"set_eof_beyond_free_space",        t_set_eof_beyond_free_space,
+-     "vfat trips its FAT 4 GB size cap (C000000D) before the free-space "
+-     "check; retail FATX returns STATUS_DISK_FULL"},
++    {"set_eof_beyond_free_space",        t_set_eof_beyond_free_space},
+ #if BADPTR_FATAL_PROBES
+     {"FATAL_read_garbage_buffer",        t_fatal_read_garbage_buffer},
+     {"FATAL_write_garbage_buffer",       t_fatal_write_garbage_buffer},
+     {"FATAL_querydir_garbage_buffer",    t_fatal_querydir_garbage_buffer},
+     {"FATAL_wait_garbage_timeout_signaled",
+--- /dev/null
++++ b/tests/xbe/storage-contract/main.c
+@@ -0,0 +1,101 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <string.h>
++#include "regression.h"
++
++static unsigned char payload[512], actual[512];
++static NTSTATUS open_path(const char *path, ACCESS_MASK access, ULONG disposition,
++                          ULONG options, HANDLE *handle)
++{
++    ANSI_STRING name; OBJECT_ATTRIBUTES oa; IO_STATUS_BLOCK io;
++    RtlInitAnsiString(&name,path);
++    InitializeObjectAttributes(&oa,&name,OBJ_CASE_INSENSITIVE,NULL,NULL);
++    return NtCreateFile(handle,access|SYNCHRONIZE,&oa,&io,NULL,
++        FILE_ATTRIBUTE_NORMAL,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
++        disposition,options|FILE_SYNCHRONOUS_IO_NONALERT);
++}
++static void unchanged(HANDLE h, const FILE_FS_SIZE_INFORMATION *before)
++{
++    IO_STATUS_BLOCK io; FILE_NETWORK_OPEN_INFORMATION info; FILE_FS_SIZE_INFORMATION fs;
++    LARGE_INTEGER off={.QuadPart=0}; NTSTATUS s;
++    memset(&info,0x5a,sizeof(info));
++    s=NtQueryInformationFile(h,&io,&info,sizeof(info),FileNetworkOpenInformation);
++    tap_comment("EOF after status=%08lx info=%lu eof=%08lx:%08lx allocation=%08lx:%08lx",(ULONG)s,io.Information,(ULONG)info.EndOfFile.HighPart,info.EndOfFile.LowPart,(ULONG)info.AllocationSize.HighPart,info.AllocationSize.LowPart);
++    regression_check(NT_SUCCESS(s)&&info.EndOfFile.QuadPart==sizeof(payload),"failed resize preserves EOF");
++    memset(actual,0,sizeof(actual));
++    s=NtReadFile(h,NULL,NULL,NULL,&io,actual,sizeof(actual),&off);
++    regression_check(NT_SUCCESS(s)&&io.Information==sizeof(actual)&&!memcmp(actual,payload,sizeof(actual)),"failed resize preserves bytes");
++    s=NtQueryVolumeInformationFile(h,&io,&fs,sizeof(fs),FileFsSizeInformation);
++    regression_check(NT_SUCCESS(s)&&fs.AvailableAllocationUnits.QuadPart==before->AvailableAllocationUnits.QuadPart,"failed resize preserves free clusters");
++}
++static void resize_case(HANDLE h, LONGLONG size, const char *name, int survey)
++{
++    FILE_END_OF_FILE_INFORMATION eof={.EndOfFile={.QuadPart=size}};
++    FILE_FS_SIZE_INFORMATION before; FILE_NETWORK_OPEN_INFORMATION info; IO_STATUS_BLOCK io; NTSTATUS s;
++    memset(&info,0x5a,sizeof(info));
++    s=NtQueryInformationFile(h,&io,&info,sizeof(info),FileNetworkOpenInformation);
++    tap_comment("EOF before %s status=%08lx info=%lu eof=%08lx:%08lx allocation=%08lx:%08lx",name,(ULONG)s,io.Information,(ULONG)info.EndOfFile.HighPart,info.EndOfFile.LowPart,(ULONG)info.AllocationSize.HighPart,info.AllocationSize.LowPart);
++    regression_check(NT_SUCCESS(s)&&info.EndOfFile.QuadPart==sizeof(payload),"seed EOF is 512 bytes");
++    s=NtQueryVolumeInformationFile(h,&io,&before,sizeof(before),FileFsSizeInformation);
++    regression_require(NT_SUCCESS(s),"query pre-resize space");
++    tap_comment("resize begin %s high=%08lx low=%08lx",name,(ULONG)eof.EndOfFile.HighPart,eof.EndOfFile.LowPart);
++    tap_drain(); memset(&io,0x5a,sizeof(io));
++    s=NtSetInformationFile(h,&io,&eof,sizeof(eof),FileEndOfFileInformation);
++    tap_comment("resize result %s status=%08lx iosb=%08lx info=%lu",name,(ULONG)s,(ULONG)io.Status,io.Information);
++    if(survey)regression_check(s==(NTSTATUS)0xc000000d,"negative file size returns INVALID_PARAMETER");
++    else regression_check(s==(NTSTATUS)0xc000007f,"unrepresentable or unavailable file size returns DISK_FULL");
++    unchanged(h,&before);
++}
++int main(void)
++{
++    HANDLE h=NULL, ro=NULL; IO_STATUS_BLOCK io; NTSTATUS s;
++    const char *path="\\Device\\Harddisk0\\Partition1\\SpiritBootStorageContract.tmp";
++    LARGE_INTEGER off={.QuadPart=0}; FILE_FS_SIZE_INFORMATION fs;
++    regression_begin();
++    for(unsigned i=0;i<sizeof(payload);i++)payload[i]=(unsigned char)(i*37+11);
++    s=open_path("\\Device\\Harddisk0\\Partition1",GENERIC_READ,FILE_OPEN,0,&h);
++    regression_require(NT_SUCCESS(s),"open readonly volume");
++    memset(&io,0x5a,sizeof(io)); s=NtFlushBuffersFile(h,&io);
++    tap_comment("flush readonly-volume status=%08lx iosb=%08lx info=%lu",(ULONG)s,(ULONG)io.Status,io.Information);
++    regression_check(s==0&&io.Status==0,"readonly volume flush succeeds"); NtClose(h);
++    s=open_path(path,GENERIC_READ|GENERIC_WRITE|DELETE,FILE_OVERWRITE_IF,FILE_NON_DIRECTORY_FILE,&h);
++    regression_require(NT_SUCCESS(s),"create disposable data file");
++    s=NtWriteFile(h,NULL,NULL,NULL,&io,payload,sizeof(payload),&off);
++    regression_require(NT_SUCCESS(s)&&io.Information==sizeof(payload),"seed exact payload");
++    s=NtFlushBuffersFile(h,&io); regression_check(s==0,"writable file flush succeeds");
++    s=open_path(path,GENERIC_READ,FILE_OPEN,FILE_NON_DIRECTORY_FILE,&ro);
++    regression_require(NT_SUCCESS(s),"open readonly regular file");
++    memset(&io,0x5a,sizeof(io)); s=NtFlushBuffersFile(ro,&io);
++    tap_comment("flush readonly-file status=%08lx iosb=%08lx info=%lu",(ULONG)s,(ULONG)io.Status,io.Information);
++    regression_check(s==0&&io.Status==0,"readonly regular file flush succeeds"); NtClose(ro);
++    s=NtQueryVolumeInformationFile(h,&io,&fs,sizeof(fs),FileFsSizeInformation);
++    regression_require(NT_SUCCESS(s),"query large partition space");
++    tap_comment("large free units=%lu:%lu cluster=%lu",(ULONG)fs.AvailableAllocationUnits.HighPart,fs.AvailableAllocationUnits.LowPart,fs.SectorsPerAllocationUnit*fs.BytesPerSector);
++    resize_case(h,0x100000000LL,"exact-4GiB",0);
++    NtClose(h); s=open_path(path,GENERIC_READ|GENERIC_WRITE|DELETE,FILE_OVERWRITE_IF,FILE_NON_DIRECTORY_FILE,&h);
++    regression_require(NT_SUCCESS(s),"recreate independent case file");
++    s=NtWriteFile(h,NULL,NULL,NULL,&io,payload,sizeof(payload),&off); regression_require(NT_SUCCESS(s),"seed independent case");
++    resize_case(h,0x100000200LL,"4GiB-plus-512",0);
++    NtClose(h); s=open_path(path,GENERIC_READ|GENERIC_WRITE|DELETE,FILE_OVERWRITE_IF,FILE_NON_DIRECTORY_FILE,&h);
++    regression_require(NT_SUCCESS(s),"recreate independent case file");
++    s=NtWriteFile(h,NULL,NULL,NULL,&io,payload,sizeof(payload),&off); regression_require(NT_SUCCESS(s),"seed independent case");
++    resize_case(h,((ULONGLONG)fs.AvailableAllocationUnits.QuadPart+16)*fs.SectorsPerAllocationUnit*fs.BytesPerSector,"beyond-free-large",0);
++    /* LowPart equals the seeded EOF, so even a truncating implementation cannot
++     * allocate gigabytes or destroy the payload during this signedness survey. */
++    NtClose(h); s=open_path(path,GENERIC_READ|GENERIC_WRITE|DELETE,FILE_OVERWRITE_IF,FILE_NON_DIRECTORY_FILE,&h);
++    regression_require(NT_SUCCESS(s),"recreate independent case file");
++    s=NtWriteFile(h,NULL,NULL,NULL,&io,payload,sizeof(payload),&off); regression_require(NT_SUCCESS(s),"seed independent case");
++    resize_case(h,-0x100000000LL+512,"negative-lowpart-512",1);
++    NtClose(h);
++    s=open_path("\\Device\\Harddisk0\\Partition3\\SpiritBootStorageContract.tmp",GENERIC_READ|GENERIC_WRITE|DELETE,FILE_OVERWRITE_IF,FILE_NON_DIRECTORY_FILE,&h);
++    regression_require(NT_SUCCESS(s),"create cache-partition data file");
++    s=NtWriteFile(h,NULL,NULL,NULL,&io,payload,sizeof(payload),&off);
++    regression_require(NT_SUCCESS(s)&&io.Information==sizeof(payload),"seed cache-partition payload");
++    s=NtQueryVolumeInformationFile(h,&io,&fs,sizeof(fs),FileFsSizeInformation);
++    regression_require(NT_SUCCESS(s),"query cache partition space");
++    LONGLONG bytes=((ULONGLONG)fs.AvailableAllocationUnits.QuadPart+16)*fs.SectorsPerAllocationUnit*fs.BytesPerSector;
++    regression_require(bytes>512&&bytes<0x100000000LL,"free-space case lies below file-size cap");
++    resize_case(h,bytes,"beyond-free-small",0);
++    NtClose(h); regression_finish();
++}
+--- /dev/null
++++ b/tests/xbe/storage-contract/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = storage-contract
++GEN_XISO = storage-contract.iso
++NXDK_DIR ?= /home/codex/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c
++CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+--- /dev/null
++++ b/tests/xbe/storage-contract/README.md
+@@ -0,0 +1,43 @@
++# Storage boundary contract
++
++Boot on a fresh disposable HDD overlay with populated FATX Partition1 and
++Partition3 volumes and a COM1 serial capture. The fixture creates only
++`SpiritBootStorageContract.tmp` on those partitions, prints TAP, and shuts down.
++Partition1 must have more than 4 GiB free; Partition3 must have less than 4 GiB
++free. All test files contain a synthetic 512-byte pattern. Each size case is
++reopened and reseeded independently.
++
++The 48 assertions check read-only volume and regular-file flushes, a writable
++flush control, positive size-cap and free-space failures, negative size rejection,
++and preserved EOF, payload bytes and free clusters after each failed resize.
++Queries use `FileNetworkOpenInformation`, the reference-supported class; the
++reference rejects `FileStandardInformation`, which made the first investigative
++fixture unsuitable for checking EOF. No expectations were relaxed to fix that
++fixture error.
++
++The exact 4 GiB and 4 GiB + 512 requests isolate the FATX representability limit
++on the large partition. The request beyond Partition1 free space crosses both
++limits. Partition3 independently exercises actual allocation failure below the
++file-size cap. That last case can take longer because it extends and rolls back
++clusters. The negative request has LowPart 512, preventing a baseline signedness
++bug from attempting a huge allocation. The expected statuses are DISK_FULL for
++positive capacity failures and INVALID_PARAMETER for negative EOF.
++
++Build:
++
++```sh
++NXDK_DIR=/home/codex/src/nxdk PATH=/home/codex/src/nxdk/bin:$PATH make
++```
++
++Run the same ISO on the baseline, reference and candidate BIOSes. Require all
++48 checks and zero failures for qualification. The baseline is expected to fail
++six status checks while retaining its data and free-space invariants.
++
++The complementary patched-source host test executes the real resize/rollback
++function with a bounded cluster-device double, including empty/existing chains,
++allocation-only requests, maximum representable size, normal grow/shrink, and
++unchanged generic FAT cap semantics:
++
++```sh
++python3 tests/host/fatx/check-size-boundaries.py /tmp/storage-size-check
++```
+--- /dev/null
++++ b/tests/xbe/storage-contract/regression.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include "tap.h"
++#include <xboxkrnl/xboxkrnl.h>
++
++static unsigned regression_checks, regression_failures;
++
++static void regression_begin(void)
++{
++    tap_version(14);
++}
++
++static void regression_check(int passed, const char *description)
++{
++    ++regression_checks;
++    if (passed) {
++        tap_ok(regression_checks, description);
++    } else {
++        ++regression_failures;
++        tap_not_ok(regression_checks, description);
++    }
++}
++
++static void regression_finish(void) __attribute__((noreturn));
++static void regression_finish(void)
++{
++    LARGE_INTEGER delay = { .QuadPart = -5000000 };
++    tap_comment("checks=%u failures=%u", regression_checks, regression_failures);
++    tap_plan(regression_checks);
++    tap_drain();
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    /* A failed shutdown remains a timeout, never a passing capture. */
++    for (;;) __asm__ __volatile__("hlt");
++}
++
++static inline void regression_require(int passed, const char *description)
++{
++    regression_check(passed, description);
++    if (!passed) regression_finish();
++}
+--- /dev/null
++++ b/tests/xbe/storage-contract/tap.c
+@@ -0,0 +1,166 @@
++/*
++ * TAP 14 emitter.  Bytes go out the LPC47M157 SuperIO's COM1 at 115200 8N1
++ * (I/O 0x3F8).  We program the UART ourselves at first call so the suite
++ * works against both nxkrnl (which already programs it for DbgPrint) and
++ * the retail kernel (which doesn't).  isa-debugcon (port 0xE9) was the
++ * historical target but the upstream xemu AppImage builds without it.
++ */
++
++#include "tap.h"
++#include <stdio.h>
++#include <stdarg.h>
++
++#define COM1     0x3F8
++#define COM1_THR (COM1 + 0)
++#define COM1_DLL (COM1 + 0)
++#define COM1_IER (COM1 + 1)
++#define COM1_DLH (COM1 + 1)
++#define COM1_LCR (COM1 + 3)
++#define COM1_MCR (COM1 + 4)
++#define COM1_LSR (COM1 + 5)
++
++#define LSR_THRE 0x20  /* transmit holding register empty */
++#define LSR_TEMT 0x40  /* transmitter empty (shift + holding both drained) */
++#define LCR_DLAB 0x80
++#define LCR_8N1  0x03
++
++static inline void outb(unsigned short port, unsigned char val)
++{
++    __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
++}
++
++static inline unsigned char inb(unsigned short port)
++{
++    unsigned char ret;
++    __asm__ __volatile__("inb %1, %0" : "=a"(ret) : "Nd"(port));
++    return ret;
++}
++
++/* Xbox is single-CPU: prevent a scheduled kernel/debug writer from entering
++ * between bytes. Restore the caller's full flags, including an already-clear
++ * IF. Formatting stays outside this span; no kernel-private lock is borrowed. */
++static inline unsigned int tap_irq_save(void)
++{
++    unsigned int flags;
++    __asm__ __volatile__("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
++    return flags;
++}
++
++static inline void tap_irq_restore(unsigned int flags)
++{
++    __asm__ __volatile__("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
++}
++
++static void com_init(void)
++{
++    static int initialized = 0;
++    if (initialized) return;
++    initialized = 1;
++    outb(COM1_IER, 0x00);             /* disable all interrupts */
++    outb(COM1_LCR, LCR_DLAB);         /* DLAB=1 to set divisor */
++    outb(COM1_DLL, 0x01);             /* 115200 baud (1.8432 MHz / 16 / 1) */
++    outb(COM1_DLH, 0x00);
++    outb(COM1_LCR, LCR_8N1);          /* DLAB=0, 8N1 */
++    /* Retain the existing FIFO mode and queued bytes. THRE polling works
++     * with either the reset/default UART or a kernel-configured FIFO; changing
++     * FIFO enable or clearing it could discard the preceding debug message. */
++    outb(COM1_MCR, 0x0B);             /* DTR + RTS + OUT2 */
++}
++
++static void com_putc(char c)
++{
++    while ((inb(COM1_LSR) & LSR_THRE) == 0) { }
++    outb(COM1_THR, (unsigned char)c);
++}
++
++void tap_drain(void)
++{
++    while ((inb(COM1_LSR) & LSR_TEMT) == 0) { }
++}
++
++static void com_puts(const char *s)
++{
++    unsigned int flags = tap_irq_save();
++    com_init();
++    while (*s) com_putc(*s++);
++    tap_irq_restore(flags);
++}
++
++static void com_vprintf(const char *fmt, va_list ap)
++{
++    char buf[256];
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_puts(buf);
++}
++
++static void com_printf(const char *fmt, ...)
++{
++    va_list ap;
++    va_start(ap, fmt);
++    com_vprintf(fmt, ap);
++    va_end(ap);
++}
++
++void tap_puts(const char *s)
++{
++    com_puts(s);
++}
++
++void tap_version(unsigned int v)
++{
++    com_printf("TAP version %u\n", v);
++}
++
++void tap_plan(unsigned int n)
++{
++    com_printf("1..%u\n", n);
++}
++
++void tap_ok(unsigned int n, const char *desc)
++{
++    com_printf("ok %u - %s\n", n, desc);
++}
++
++void tap_not_ok(unsigned int n, const char *desc)
++{
++    com_printf("not ok %u - %s\n", n, desc);
++}
++
++void tap_diag_begin(void)
++{
++    com_puts("  ---\n");
++}
++
++void tap_diag_end(void)
++{
++    com_puts("  ...\n");
++}
++
++void tap_diag_kv(const char *key, const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("  %s: %s\n", key, buf);
++}
++
++void tap_comment(const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("# %s\n", buf);
++}
+--- /dev/null
++++ b/tests/xbe/storage-contract/tap.h
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include <stdarg.h>
++#include <stdbool.h>
++
++void tap_version(unsigned int v);
++void tap_plan(unsigned int n);
++void tap_ok(unsigned int n, const char *desc);
++void tap_not_ok(unsigned int n, const char *desc);
++
++/* Open / close a YAML diagnostic block underneath a `not ok` line. */
++void tap_diag_begin(void);
++void tap_diag_end(void);
++void tap_diag_kv(const char *key, const char *fmt, ...);
++
++void tap_comment(const char *fmt, ...);
++
++/* Drop a raw string verbatim (no formatting / framing).  Used for the
++ * "== api-regression begin ==" / "== ... end ==" markers in main.c so
++ * the runner can slice the TAP block out of the surrounding kernel
++ * debug stream. */
++void tap_puts(const char *s);
++
++/* Block until the UART transmitter is fully drained.  Call before
++ * issuing an SMC shutdown so the final bytes aren't lost. */
++void tap_drain(void);
