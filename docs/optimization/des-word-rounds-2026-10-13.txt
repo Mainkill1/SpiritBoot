@@ -1,0 +1,69 @@
+DES word rounds candidate — 2026-10-13
+
+Scope and evidence
+
+The repeated full-XISO campaign reports roughly 79x DES CBC and 99x triple-DES
+CBC slowdowns relative to Complex. Source inspection identifies 48 E-expansion
+bit extractions and 32 P-permutation bit extractions per round, repeated sixteen
+times per eight-byte DES pass. Including IP/FP, baseline performs 1,408 DesBit
+calls per block. This is algorithmic work throughout real CBC buffers.
+
+Patch 0116 uses unsigned 32-bit halves and direct six-bit E windows, then combines
+each S-box with P in a generated 8x64 constant table. Table values were calculated
+from the existing FIPS 46-3 S-box/P constants in owned public crypto.c. No external
+implementation, proprietary source or disassembly was consulted. Eight table
+lookups per round replace byte assembly, bit loops and temporary copies. Existing
+IP/FP still perform 128 DesBit calls per pass. Triple-DES uses the same change in
+all three passes. The public schedule, mutable schedule loading, cipher/op rules,
+CBC loop, output order, feedback, partial lengths and vector dispatch are intact.
+No SHA, RSA or exponent-specific behavior changes are included.
+
+Correctness and deterministic work
+
+Before implementation, des-rounds.py passed 6,144 baseline differential cases and
+its optimized-work assertion failed as intended: 1,408 DesBit calls > budget128.
+After implementation, all 6,144 passed with the work bound enabled. These comprise
+4,096 block cases with arbitrary mutable schedules, bit-basis/plain random inputs,
+DES and nonzero triple-DES cipher selectors, decrypt/encrypt/noncanonical operation
+codes; and 2,048 CBC cases with unaligned data/schedules, input-output-feedback
+aliases (including caller key tables), incomplete lengths, 4KiB buffers and entire backing-allocation equality.
+
+The existing kernel-performance/check.py suite passed 30,978 checks with
+--optimized --compare BASELINE, including independent FIPS DES and triple-DES known
+answers and unchanged complete SHA-context/DES-CBC state hashes. Product host
+suite passed 130 tests, with three skips. Freestanding i386 -Os -Wall -Wextra
+-Werror compilation passed for both extracted actual-source DES implementations.
+Object .text is 1,787 -> 1,665 bytes; .rodata is 896 -> 2,336 bytes. Combined growth
+is 1,318 bytes. These are isolated object figures, not linked firmware size.
+
+Reproduction from assembled source
+
+python3 tests/host/kernel-performance/des-rounds.py CANDIDATE BASELINE OUTPUT --optimized
+python3 tests/host/kernel-performance/check.py CANDIDATE OUTPUT --optimized --compare BASELINE
+
+From product: python3 -m unittest discover -s tests/host -v
+
+Baseline assembled source tree: 04e3879e287135735111efdc8d25488d94a7793c
+Candidate assembled source tree: 97826a931ea1110ee3341467ccee27131e1e1c00
+Product base: 464e7ea67cefcd639b65aefbbe732885816f8d8c
+
+Native qualification
+
+The standalone final Release64 ROM cee608a... passed the full API suite with no
+new mismatch (630 ordinary passes, four existing TODO failures, five skips).
+Seven alternating matched baseline/candidate trials of the unchanged portable
+40-workload fixture verified all results. Median DES-CBC-4096 fell from
+33.369 to 3.530 ms (9.45x throughput), and 3DES-CBC-4096 from 100.172 to 10.063 ms
+(9.95x). These are synthetic real-buffer workloads, not game FPS measurements.
+The layout audit adds zero permanent image RAM pages; see des-final-layout-
+2026-10-13.txt. Final combined qualification and all slower observations are in
+native-performance-2026-10-13.txt and its reproducible evidence archive.
+
+Independent review verified all 512 generated SP values against the baseline
+S-box/P constants and every E window against all 32 bit-basis inputs. No blocking
+findings. A test-comment mismatch was resolved by adding real table/buffer alias
+cases; the final 6,144-case suite passed normally and under UBSan with immediate
+failure on undefined behavior. Initial/final per-bit permutations remain a possible follow-up
+only if native measurements justify it. SHA's current Xbox-only rolled compression
+core is another separately measurable candidate; private RSA CRT was already faster
+in supplied results, and exponent-one microbenchmarks were not optimized.

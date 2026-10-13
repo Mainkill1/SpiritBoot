@@ -55,7 +55,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 04e3879e287135735111efdc8d25488d94a7793c
+            test "$actual_tree" = 9ef0d1d0f503eccf9d966d4b6901993c7364754c
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -147,6 +147,10 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/pool-size/check.py" "$output/pool-size" >"$output/pool-size.log" 2>&1
             "$GUEST_SOURCE/tests/host/clean-room/run.sh" "$output/clean-room" >"$output/clean-room.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/kernel-performance/check.py" "$GUEST_SOURCE" "$output/optimization" --optimized >"$output/optimization.log" 2>&1
+            mkdir -p "$output/des-baseline/ntoskrnl/xb"
+            cp "$GUEST_SOURCE/ntoskrnl/xb/crypto.c" "$output/des-baseline/ntoskrnl/xb/crypto.c"
+            (cd "$output/des-baseline" && git init -q && git apply --reverse --include=ntoskrnl/xb/crypto.c /work/patches/roswell/0116-des-word-rounds.patch)
+            python3 "$GUEST_SOURCE/tests/host/kernel-performance/des-rounds.py" "$GUEST_SOURCE" "$output/des-baseline" "$output/des-rounds" --optimized >"$output/des-rounds.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/kernel-performance/pins.py" "$GUEST_SOURCE" "$output/pins" --optimized --vector >"$output/pins.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/kernel-performance/pins.py" "$GUEST_SOURCE" "$output/pins-diagnostics" --optimized --vector --diagnostics >"$output/pins-diagnostics.log" 2>&1'
       - name: Build optional upper RAM reservation profile
@@ -161,7 +165,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '04e3879e287135735111efdc8d25488d94a7793c', result
+          assert result['source_tree'] == '9ef0d1d0f503eccf9d966d4b6901993c7364754c', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'

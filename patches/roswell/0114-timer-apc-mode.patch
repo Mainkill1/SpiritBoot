@@ -1,0 +1,163 @@
+--- a/ntoskrnl/ex/timer.c
++++ b/ntoskrnl/ex/timer.c
+@@ -573,27 +573,28 @@
+         /* Dereference Object */
+         ObDereferenceObject(Timer);
+     }
+ 
+     /* Return Status */
+     return Status;
+ }
+ 
+ NTSTATUS
+ NTAPI
+-NtSetTimer(IN HANDLE TimerHandle,
+-           IN PLARGE_INTEGER DueTime,
+-           IN PTIMER_APC_ROUTINE TimerApcRoutine OPTIONAL,
+-           IN PVOID TimerContext OPTIONAL,
+-           IN BOOLEAN WakeTimer,
+-           IN LONG Period OPTIONAL,
+-           OUT PBOOLEAN PreviousState OPTIONAL)
++NxkSetTimerMode(IN HANDLE TimerHandle,
++                IN PLARGE_INTEGER DueTime,
++                IN PTIMER_APC_ROUTINE TimerApcRoutine OPTIONAL,
++                IN KPROCESSOR_MODE ApcMode,
++                IN PVOID TimerContext OPTIONAL,
++                IN BOOLEAN WakeTimer,
++                IN LONG Period OPTIONAL,
++                OUT PBOOLEAN PreviousState OPTIONAL)
+ {
+     PETIMER Timer;
+     KIRQL OldIrql;
+     BOOLEAN State;
+     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
+     PETHREAD Thread = PsGetCurrentThread();
+     LARGE_INTEGER TimerDueTime;
+     PETHREAD TimerThread;
+     ULONG DerefsToDo = 1;
+     NTSTATUS Status = STATUS_SUCCESS;
+@@ -704,21 +705,21 @@
+         Timer->Period = Period;
+         if (TimerApcRoutine)
+         {
+             /* Initialize the APC */
+             KeInitializeApc(&Timer->TimerApc,
+                             &Thread->Tcb,
+                             CurrentApcEnvironment,
+                             ExpTimerApcKernelRoutine,
+                             (PKRUNDOWN_ROUTINE)NULL,
+                             (PKNORMAL_ROUTINE)TimerApcRoutine,
+-                            PreviousMode,
++                            ApcMode,
+                             TimerContext);
+ 
+             /* Lock the Thread's Active List and Insert */
+             KeAcquireSpinLockAtDpcLevel(&Thread->ActiveTimerListLock);
+             InsertTailList(&Thread->ActiveTimerListHead,
+                            &Timer->ActiveTimerListEntry);
+             Timer->ApcAssociated = TRUE;
+             KeReleaseSpinLockFromDpcLevel(&Thread->ActiveTimerListLock);
+ 
+             /* One less dereference to do */
+@@ -751,10 +752,28 @@
+                 /* Do nothing */
+                 (void)0;
+             }
+             _SEH2_END;
+         }
+     }
+ 
+     /* Return to Caller */
+     return Status;
+ }
++
++/* The NT entry point inherits its APC mode from the caller. Xbox supplies
++ * that mode explicitly through NxkSetTimerMode, without changing the mode
++ * used for handle access and pointer probing. */
++NTSTATUS
++NTAPI
++NtSetTimer(IN HANDLE TimerHandle,
++           IN PLARGE_INTEGER DueTime,
++           IN PTIMER_APC_ROUTINE TimerApcRoutine OPTIONAL,
++           IN PVOID TimerContext OPTIONAL,
++           IN BOOLEAN WakeTimer,
++           IN LONG Period OPTIONAL,
++           OUT PBOOLEAN PreviousState OPTIONAL)
++{
++    return NxkSetTimerMode(TimerHandle, DueTime, TimerApcRoutine,
++                           ExGetPreviousMode(), TimerContext, WakeTimer,
++                           Period, PreviousState);
++}
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -2864,22 +2864,23 @@
+ {
+     return NtQuerySemaphore(SemaphoreHandle, SemaphoreBasicInformation,
+                             SemaphoreInformation,
+                             sizeof(SEMAPHORE_BASIC_INFORMATION), NULL);
+ }
+ 
+ extern NTSTATUS NTAPI NtCreateTimer(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
+                                     TIMER_TYPE);
+ extern NTSTATUS NTAPI NtQueryTimer(HANDLE, TIMER_INFORMATION_CLASS, PVOID,
+                                    ULONG, PULONG);
+-extern NTSTATUS NTAPI NtSetTimer(HANDLE, PLARGE_INTEGER, PTIMER_APC_ROUTINE,
+-                                 PVOID, BOOLEAN, LONG, PBOOLEAN);
++extern NTSTATUS NTAPI NxkSetTimerMode(HANDLE, PLARGE_INTEGER, PTIMER_APC_ROUTINE,
++                                      KPROCESSOR_MODE, PVOID, BOOLEAN, LONG,
++                                      PBOOLEAN);
+ 
+ /*
+  * Executive timers.  The console's creator takes no access mask, its setter
+  * names the mode the APC is delivered in rather than inheriting the
+  * caller's, and its query answers exactly one information class.
+  * NtCancelTimer is NT's, unchanged, and is exported directly.
+  */
+ NTSTATUS NTAPI
+ XeNtCreateTimer(PHANDLE TimerHandle, PXBE_OBJECT_ATTRIBUTES XAttr,
+                   TIMER_TYPE TimerType)
+@@ -2889,34 +2890,37 @@
+     POBJECT_ATTRIBUTES oa = XeTranslateOa(XAttr, &ntoa, &name);
+     NTSTATUS status = NtCreateTimer(TimerHandle, TIMER_ALL_ACCESS, oa,
+                                     TimerType);
+ 
+     if (name.Buffer != NULL)
+         RtlFreeUnicodeString(&name);
+     return status;
+ }
+ 
+ /*
+- * ApcMode is accepted and cannot be honored: there is no ring 3 to return
+- * to, so a UserMode APC would be queued and never run.  Title APCs are
+- * delivered as kernel APCs throughout -- the async-IO completion path does
+- * the same -- which is what makes the routine run either way.
++ * Preserve the requested mode: user timer APCs are dispatched by the same
++ * alertable-wait path as user I/O APCs. Kernel timer APCs remain deliverable
++ * independently of an alertable wait.
+  */
+ NTSTATUS NTAPI
+ XeNtSetTimerEx(HANDLE TimerHandle, PLARGE_INTEGER DueTime,
+                  PTIMER_APC_ROUTINE TimerApcRoutine, KPROCESSOR_MODE ApcMode,
+                  PVOID TimerContext, BOOLEAN WakeTimer, LONG Period,
+                  PBOOLEAN PreviousState)
+ {
+-    UNREFERENCED_PARAMETER(ApcMode);
+-    return NtSetTimer(TimerHandle, DueTime, TimerApcRoutine, TimerContext,
+-                      WakeTimer, Period, PreviousState);
++    /* ApcMode indexes the thread's two APC queues. Reject unsupported modes
++     * before the setter can cancel or rearm an existing timer. */
++    if (ApcMode != KernelMode && ApcMode != UserMode)
++        return STATUS_INVALID_PARAMETER;
++
++    return NxkSetTimerMode(TimerHandle, DueTime, TimerApcRoutine, ApcMode,
++                           TimerContext, WakeTimer, Period, PreviousState);
+ }
+ 
+ NTSTATUS NTAPI
+ XeNtQueryTimer(HANDLE TimerHandle, PVOID TimerInformation)
+ {
+     return NtQueryTimer(TimerHandle, TimerBasicInformation, TimerInformation,
+                         sizeof(TIMER_BASIC_INFORMATION), NULL);
+ }
+ 
+ extern NTSTATUS NTAPI IoSetIoCompletion(PVOID, PVOID, PVOID, NTSTATUS,

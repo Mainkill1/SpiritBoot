@@ -1,0 +1,24 @@
+Validated seven matched pairs (14 runs), each with 40 workloads, 118 exact samples/checksums and 41 passing TAP checks.
+pin-4096: 2239.006 -> 1906.808 us per lock/unlock pair (14.84% less time; ratio 0.8516); faster in 7/7 pairs, observed range direction: faster.
+
+Pin workload details:
+pin-1: 1.129 -> 1.026 us; ratio 0.9089; faster pairs 7/7; faster ranges
+pin-16: 8.279 -> 6.827 us; ratio 0.8246; faster pairs 7/7; faster ranges
+pin-256: 141.484 -> 120.074 us; ratio 0.8487; faster pairs 7/7; faster ranges
+pin-4096: 2239.006 -> 1906.808 us; ratio 0.8516; faster pairs 7/7; faster ranges
+pin-64: 31.027 -> 25.583 us; ratio 0.8245; faster pairs 7/7; faster ranges
+pin-65: 36.320 -> 31.018 us; ratio 0.8540; faster pairs 7/7; faster ranges
+pin-reject-0: 0.506 -> 0.506 us; ratio 1.0012; faster pairs 3/7; overlap ranges
+pin-reject-32: 6.428 -> 6.377 us; ratio 0.9922; faster pairs 4/7; overlap ranges
+pin-reject-64: 12.337 -> 12.295 us; ratio 0.9966; faster pairs 4/7; overlap ranges
+pin-reject-65: 12.509 -> 12.467 us; ratio 0.9967; faster pairs 3/7; overlap ranges
+
+Unrelated workloads with separated observed ranges (reported, not attributed to pin changes):
+object-warm-1: ratio 1.0570; slower
+object-warm-8: ratio 1.0766; slower
+pool-1024: ratio 0.9038; faster
+pool-256: ratio 0.9100; faster
+
+Each run uses median(ticks*1e6/frequency/iterations) over its samples; comparison uses median of seven run medians. Ratio is candidate/baseline. Range direction requires nonoverlapping min/max, as analyze.py.
+Synthetic microbenchmarks only. Observed ranges are descriptive, not confidence intervals. No claim of equivalent Complex performance or improved relocation behavior.
+The previous consecutive-frame candidate was rejected after native slowdown. This candidate removes duplicate eligibility checks without relying on mapping geometry. Full API qualification is a separate receipt set.

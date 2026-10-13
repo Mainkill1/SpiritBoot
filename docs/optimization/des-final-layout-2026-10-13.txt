@@ -1,0 +1,68 @@
+DES final release64 layout/residency audit — 2026-10-13
+
+Exact baseline flash: 1ed234ebaf8e95937225c3002b6eac26257b0f3d1ff8f3d6a3aabd464955fb0b
+Exact candidate flash: cee608a37a28338aed50aae860c649315261ca1022bf86198cfca73e3f76cc04
+Candidate tree: 97826a931ea1110ee3341467ccee27131e1e1c00
+
+Metric                             Baseline      Candidate      Delta
+Flash bytes                         524288         524288           0
+Stripped kernel PE bytes            508416         509440       +1024
+Mapped image bytes                  569344         569344           0
+Mapped image pages                     139            139           0
+ROM backed image pages                  92             92           0
+Discardable image pages                 33             33           0
+Permanent image RAM pages               14             14           0
+Permanent image RAM bytes            57344          57344           0
+.text virtual bytes                 346616         346584         -32
+.rdata virtual bytes                 26208          27648       +1440
+.text mapped pages                      85             85           0
+.rdata mapped pages                      7              7           0
+Compressed prepared payload bytes    46832          46840          +8
+Payload slot free bytes               79440          79432          -8
+Warm-stage required pages               177            177           0
+Warm-stage capacity pages               505            505           0
+
+All section RVAs, aligned page counts, writable/discardable flags, and all four
+ROM span RVA/page/physical-address triples are identical. .data/.bss/INIT/.rsrc
+lengths are unchanged. The 14 permanent image RAM pages are: one header page,
+one runtime-patched .text page, one .data page, eleven .bss pages. 84 .text pages,
+seven .rdata pages and one PAGE page are ROM backed; 24 INIT plus nine .rsrc pages
+are discardable. This describes exact image backing and the unchanged donation
+code; it is not a substitute for a runtime available-memory observation.
+
+The 2048-byte DesSp table occupies VA 0x84059980..0x8405a180 and physical flash
+0xff079980..0xff07a180, crossing two already allocated ROM pages. All 512 table
+words extracted from owned source match those exact flash bytes. The table is
+not copied to permanent RAM. .rdata's final page retains 1024 bytes of capacity.
+The prepared image's transient decompression footprint is unchanged as well.
+
+Method: decoded the exact flash NXIR payload and XZ stream, parsed its NXRP
+residency table and verified every span CRC; cross-checked PE geometry and nm
+symbols from each exact build. The loader-only nxldr.bin hashes also match:
+c5a58373f16cf7a3dd51ad5edc34f0cbb7835ea53b55a3d80eff0f7250119580.
+The audit changes no source, build artifact or Windows state.
+Machine-readable evidence: docs/provenance/evidence/des-word-rounds-20261013/layout-comparison.json
+Reproduce from product:
+python3 tools/des_layout_audit.py --baseline BASELINE_BUILD_DIRECTORY --candidate CANDIDATE_BUILD_DIRECTORY --output OUTPUT.json
+
+BASELINE_BUILD_DIRECTORY is the directory containing baseline build.json and
+flash.bin; CANDIDATE_BUILD_DIRECTORY is artifacts/des-final-release64. Each must
+retain the work directory named by its build manifest.
+
+Next SHA candidate (inspection only)
+
+sdk/lib/cryptlib/sha1.c explicitly selects an 80-iteration rolled compression core
+under SARCH_XBOX; its comment accepts lower speed to save roughly 3.8KB text.
+Each round includes schedule wrapping and phase selection. Native evidence shows
+SHA 1MiB was around 2.68x slower; the round core is a plausible contributor,
+not yet a measured attribution. A bounded partially unrolled or phase-split core
+could trade fewer branches/address calculations for resident ROM text, but must
+be compared with the existing unrolled core and qualified natively. Any growth
+must be audited for crossed pages and retained-patch placement as done above.
+
+Avoid changing SHA update/context translation as part of that experiment: it has
+existing observable partial-buffer writes, count carry and overlapping caller
+buffer contracts covered by kernel-performance/check.py. Direct input transforms
+would currently mutate input because SHA1Transform uses its buffer as a circular
+schedule, so bypassing memcpy is not independently safe. No SHA implementation
+change, timing experiment or speculative patch was made.

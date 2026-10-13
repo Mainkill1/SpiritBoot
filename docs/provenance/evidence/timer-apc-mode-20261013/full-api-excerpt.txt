@@ -1,0 +1,31 @@
+Selected full API regression rows; not a complete TAP stream.
+1..639
+not ok 178 - io/bad-ptr/set_eof_beyond_free_space # TODO vfat trips its FAT 4 GB size cap (C000000D) before the free-space check; retail FATX returns STATUS_DISK_FULL
+not ok 201 - io/storage/flush_volume_readonly # TODO retail flushes a read-only volume handle; nxkrnl returns ACCESS_DENIED
+ok 292 - io/finfo/rename_dos_root # SKIP Complex rejects the DOS-root rename contract asserted by this fixture
+ok 319 - ke/exceptions/x87_divide_by_zero # SKIP xemu TCG does not deliver the unmasked FP exception expected by this fixture
+ok 320 - ke/exceptions/sse_divide_by_zero # SKIP xemu TCG does not deliver the unmasked FP exception expected by this fixture
+not ok 580 - ke/procprio/a_new_thread_starts_at_the_process_priority # TODO only the calling thread follows the process: there is no list of the title's threads to walk
+not ok 584 - ke/procprio/the_process_lists_its_threads # TODO the process' thread list is published empty: linking into it needs KTHREAD.ThreadListEntry, past the end of the shadow
+# LEAF name=ex/timer/a_notification_timer_stays_signalled ticks=170770 ok=1 todo=0
+ok 612 - ex/timer/a_notification_timer_stays_signalled
+# LEAF name=ex/timer/a_synchronization_timer_auto_resets ticks=169432 ok=1 todo=0
+ok 613 - ex/timer/a_synchronization_timer_auto_resets
+# LEAF name=ex/timer/a_periodic_timer_keeps_firing ticks=304001 ok=1 todo=0
+ok 614 - ex/timer/a_periodic_timer_keeps_firing
+# LEAF name=ex/timer/a_cancelled_timer_never_fires ticks=1014270 ok=1 todo=0
+ok 615 - ex/timer/a_cancelled_timer_never_fires
+# LEAF name=ex/timer/query_reports_the_time_remaining ticks=66939 ok=1 todo=0
+ok 616 - ex/timer/query_reports_the_time_remaining
+# LEAF name=ex/timer/cancel_reports_the_signal_state ticks=938 ok=1 todo=0
+ok 617 - ex/timer/cancel_reports_the_signal_state
+# LEAF name=ex/timer/rearming_reports_the_previous_signal_state ticks=65817 ok=1 todo=0
+ok 618 - ex/timer/rearming_reports_the_previous_signal_state
+# LEAF name=ex/timer/a_kernel_mode_apc_runs_on_expiry ticks=1685084 ok=1 todo=0
+ok 619 - ex/timer/a_kernel_mode_apc_runs_on_expiry
+# LEAF name=ex/timer/a_user_mode_apc_runs_on_expiry ticks=168829 ok=1 todo=0
+ok 620 - ex/timer/a_user_mode_apc_runs_on_expiry
+ok 625 - hal/av/guess_field # SKIP Complex bugchecks on this fixture optional NULL result query
+ok 632 - io/dismount/a_device_with_no_volume_still_succeeds # SKIP Complex rejects the raw-device success contract asserted by this fixture
+# tests=639 passed=634 failed=0 skipped=5
+== api-regression end PASS ==

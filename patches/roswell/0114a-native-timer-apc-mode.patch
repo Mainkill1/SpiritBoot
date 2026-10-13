@@ -1,0 +1,340 @@
+--- /dev/null
++++ b/tests/xbe/timer-apc-mode/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = timer-apc-mode
++GEN_XISO = timer-apc-mode.iso
++NXDK_DIR ?= /home/codex/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c
++CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+--- /dev/null
++++ b/tests/xbe/timer-apc-mode/README.md
+@@ -0,0 +1,27 @@
++# Timer APC mode contract
++
++The synthetic guest arms a 50 ms timer, waits on an unsignaled event with a
++500 ms timeout, and observes the public API status and callback effects.
++It does not inspect proprietary code or depend on wall-clock thresholds.
++
++Cases:
++
++- UserMode APC during an alertable wait: STATUS_USER_APC, exactly one callback.
++- UserMode APC during a nonalertable wait: STATUS_TIMEOUT and no callback;
++  a following zero-time alertable wait dispatches it and returns STATUS_USER_APC.
++- Cancel a queued UserMode timer APC before entering an alertable wait: no callback
++  and STATUS_TIMEOUT from the following zero-time wait.
++- KernelMode APC during an alertable wait: callback runs, but the event wait
++  completes with STATUS_TIMEOUT.
++
++Delivered callbacks must receive the original context and execute on the setting
++thread. Elapsed milliseconds are diagnostic only. The TAP stream includes all
++assertions, a plan, and the failure count before shutdown.
++
++Build with the pinned nxdk fixture or an existing nxdk checkout:
++
++```sh
++PATH=/home/codex/src/nxdk/bin:$PATH make NXDK_DIR=/home/codex/src/nxdk
++```
++
++Output: `timer-apc-mode.iso` and `bin/default.xbe`.
+--- /dev/null
++++ b/tests/xbe/timer-apc-mode/main.c
+@@ -0,0 +1,56 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include "regression.h"
++static volatile ULONG calls;
++static PVOID observed_context;
++static DWORD callback_thread;
++static VOID NTAPI callback(PVOID context, ULONG low, LONG high)
++{
++    (void)low; (void)high;
++    observed_context = context;
++    callback_thread = GetCurrentThreadId();
++    ++calls;
++}
++static void run_case(KPROCESSOR_MODE mode, BOOLEAN alertable, BOOLEAN cancel_pending)
++{
++    HANDLE timer = NULL, event = NULL;
++    LARGE_INTEGER due = {.QuadPart = -500000}, timeout = {.QuadPart = -5000000};
++    LARGE_INTEGER zero = {.QuadPart = 0};
++    NTSTATUS status;
++    static ULONG marker;
++    ULONG started = GetTickCount();
++    DWORD setter = GetCurrentThreadId();
++    regression_require(NT_SUCCESS(NtCreateTimer(&timer, NULL, NotificationTimer)), "create timer");
++    regression_require(NT_SUCCESS(NtCreateEvent(&event, NULL, NotificationEvent, FALSE)), "create unsignaled event");
++    calls = 0; observed_context = NULL; callback_thread = 0;
++    regression_require(NT_SUCCESS(NtSetTimerEx(timer, &due, callback, mode, &marker, FALSE, 0, NULL)), "arm timer callback");
++    status = NtWaitForSingleObjectEx(event, UserMode, alertable, &timeout);
++    tap_comment("mode=%u alertable=%u cancel=%u status=%08lx elapsed=%lu callbacks=%lu",
++                (unsigned)mode, (unsigned)alertable, (unsigned)cancel_pending,
++                (ULONG)status, GetTickCount() - started, calls);
++    regression_check(status == ((mode == UserMode && alertable) ? STATUS_USER_APC : STATUS_TIMEOUT),
++                     "wait status honors timer APC mode");
++    if (mode == UserMode && !alertable) {
++        regression_check(calls == 0, "user callback stays queued during nonalertable wait");
++        if (cancel_pending) NtCancelTimer(timer, NULL);
++        status = NtWaitForSingleObjectEx(event, UserMode, TRUE, &zero);
++        regression_check(status == (cancel_pending ? STATUS_TIMEOUT : STATUS_USER_APC),
++                         "queued user APC dispatch or cancellation controls next alertable wait");
++    }
++    regression_check(calls == (cancel_pending ? 0u : 1u), "callback count is exact");
++    if (!cancel_pending) {
++        regression_check(observed_context == &marker, "callback receives original context");
++        regression_check(callback_thread == setter, "callback runs on setting thread");
++    }
++    NtCancelTimer(timer, NULL); NtClose(timer); NtClose(event);
++}
++int main(void)
++{
++    regression_begin();
++    run_case(UserMode, TRUE, FALSE);
++    run_case(UserMode, FALSE, FALSE);
++    run_case(UserMode, FALSE, TRUE);
++    run_case(KernelMode, TRUE, FALSE);
++    regression_finish();
++}
+--- /dev/null
++++ b/tests/xbe/timer-apc-mode/regression.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include "tap.h"
++#include <xboxkrnl/xboxkrnl.h>
++
++static unsigned regression_checks, regression_failures;
++
++static void regression_begin(void)
++{
++    tap_version(14);
++}
++
++static void regression_check(int passed, const char *description)
++{
++    ++regression_checks;
++    if (passed) {
++        tap_ok(regression_checks, description);
++    } else {
++        ++regression_failures;
++        tap_not_ok(regression_checks, description);
++    }
++}
++
++static void regression_finish(void) __attribute__((noreturn));
++static void regression_finish(void)
++{
++    LARGE_INTEGER delay = { .QuadPart = -5000000 };
++    tap_comment("checks=%u failures=%u", regression_checks, regression_failures);
++    tap_plan(regression_checks);
++    tap_drain();
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    /* A failed shutdown remains a timeout, never a passing capture. */
++    for (;;) __asm__ __volatile__("hlt");
++}
++
++static inline void regression_require(int passed, const char *description)
++{
++    regression_check(passed, description);
++    if (!passed) regression_finish();
++}
+--- /dev/null
++++ b/tests/xbe/timer-apc-mode/tap.c
+@@ -0,0 +1,166 @@
++/*
++ * TAP 14 emitter.  Bytes go out the LPC47M157 SuperIO's COM1 at 115200 8N1
++ * (I/O 0x3F8).  We program the UART ourselves at first call so the suite
++ * works against both nxkrnl (which already programs it for DbgPrint) and
++ * the retail kernel (which doesn't).  isa-debugcon (port 0xE9) was the
++ * historical target but the upstream xemu AppImage builds without it.
++ */
++
++#include "tap.h"
++#include <stdio.h>
++#include <stdarg.h>
++
++#define COM1     0x3F8
++#define COM1_THR (COM1 + 0)
++#define COM1_DLL (COM1 + 0)
++#define COM1_IER (COM1 + 1)
++#define COM1_DLH (COM1 + 1)
++#define COM1_LCR (COM1 + 3)
++#define COM1_MCR (COM1 + 4)
++#define COM1_LSR (COM1 + 5)
++
++#define LSR_THRE 0x20  /* transmit holding register empty */
++#define LSR_TEMT 0x40  /* transmitter empty (shift + holding both drained) */
++#define LCR_DLAB 0x80
++#define LCR_8N1  0x03
++
++static inline void outb(unsigned short port, unsigned char val)
++{
++    __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
++}
++
++static inline unsigned char inb(unsigned short port)
++{
++    unsigned char ret;
++    __asm__ __volatile__("inb %1, %0" : "=a"(ret) : "Nd"(port));
++    return ret;
++}
++
++/* Xbox is single-CPU: prevent a scheduled kernel/debug writer from entering
++ * between bytes. Restore the caller's full flags, including an already-clear
++ * IF. Formatting stays outside this span; no kernel-private lock is borrowed. */
++static inline unsigned int tap_irq_save(void)
++{
++    unsigned int flags;
++    __asm__ __volatile__("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
++    return flags;
++}
++
++static inline void tap_irq_restore(unsigned int flags)
++{
++    __asm__ __volatile__("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
++}
++
++static void com_init(void)
++{
++    static int initialized = 0;
++    if (initialized) return;
++    initialized = 1;
++    outb(COM1_IER, 0x00);             /* disable all interrupts */
++    outb(COM1_LCR, LCR_DLAB);         /* DLAB=1 to set divisor */
++    outb(COM1_DLL, 0x01);             /* 115200 baud (1.8432 MHz / 16 / 1) */
++    outb(COM1_DLH, 0x00);
++    outb(COM1_LCR, LCR_8N1);          /* DLAB=0, 8N1 */
++    /* Retain the existing FIFO mode and queued bytes. THRE polling works
++     * with either the reset/default UART or a kernel-configured FIFO; changing
++     * FIFO enable or clearing it could discard the preceding debug message. */
++    outb(COM1_MCR, 0x0B);             /* DTR + RTS + OUT2 */
++}
++
++static void com_putc(char c)
++{
++    while ((inb(COM1_LSR) & LSR_THRE) == 0) { }
++    outb(COM1_THR, (unsigned char)c);
++}
++
++void tap_drain(void)
++{
++    while ((inb(COM1_LSR) & LSR_TEMT) == 0) { }
++}
++
++static void com_puts(const char *s)
++{
++    unsigned int flags = tap_irq_save();
++    com_init();
++    while (*s) com_putc(*s++);
++    tap_irq_restore(flags);
++}
++
++static void com_vprintf(const char *fmt, va_list ap)
++{
++    char buf[256];
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_puts(buf);
++}
++
++static void com_printf(const char *fmt, ...)
++{
++    va_list ap;
++    va_start(ap, fmt);
++    com_vprintf(fmt, ap);
++    va_end(ap);
++}
++
++void tap_puts(const char *s)
++{
++    com_puts(s);
++}
++
++void tap_version(unsigned int v)
++{
++    com_printf("TAP version %u\n", v);
++}
++
++void tap_plan(unsigned int n)
++{
++    com_printf("1..%u\n", n);
++}
++
++void tap_ok(unsigned int n, const char *desc)
++{
++    com_printf("ok %u - %s\n", n, desc);
++}
++
++void tap_not_ok(unsigned int n, const char *desc)
++{
++    com_printf("not ok %u - %s\n", n, desc);
++}
++
++void tap_diag_begin(void)
++{
++    com_puts("  ---\n");
++}
++
++void tap_diag_end(void)
++{
++    com_puts("  ...\n");
++}
++
++void tap_diag_kv(const char *key, const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("  %s: %s\n", key, buf);
++}
++
++void tap_comment(const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("# %s\n", buf);
++}
+--- /dev/null
++++ b/tests/xbe/timer-apc-mode/tap.h
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include <stdarg.h>
++#include <stdbool.h>
++
++void tap_version(unsigned int v);
++void tap_plan(unsigned int n);
++void tap_ok(unsigned int n, const char *desc);
++void tap_not_ok(unsigned int n, const char *desc);
++
++/* Open / close a YAML diagnostic block underneath a `not ok` line. */
++void tap_diag_begin(void);
++void tap_diag_end(void);
++void tap_diag_kv(const char *key, const char *fmt, ...);
++
++void tap_comment(const char *fmt, ...);
++
++/* Drop a raw string verbatim (no formatting / framing).  Used for the
++ * "== api-regression begin ==" / "== ... end ==" markers in main.c so
++ * the runner can slice the TAP block out of the surrounding kernel
++ * debug stream. */
++void tap_puts(const char *s);
++
++/* Block until the UART transmitter is fully drained.  Call before
++ * issuing an SMC shutdown so the final bytes aren't lost. */
++void tap_drain(void);
