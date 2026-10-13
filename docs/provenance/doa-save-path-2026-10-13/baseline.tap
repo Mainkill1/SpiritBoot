@@ -1,0 +1,56 @@
+TAP version 14
+# map E status=00000000
+# directory status=00000000
+ok 1 - create isolated probe directory
+# api=0 path=0 status=00000000
+ok 2 - separator spelling matches reference status
+ok 3 - write synthetic save payload
+ok 4 - flush synthetic save payload
+ok 5 - reopen alias reads exact saved bytes
+# api=0 path=1 status=c0000033
+not ok 6 - separator spelling matches reference status
+# api=0 path=2 status=c0000033
+ok 7 - separator spelling matches reference status
+# api=0 path=3 status=00000000
+not ok 8 - separator spelling matches reference status
+ok 9 - reopen alias reads exact saved bytes
+# api=0 path=4 status=c0000033
+not ok 10 - separator spelling matches reference status
+# api=1 path=0 status=00000000
+ok 11 - separator spelling matches reference status
+ok 12 - reopen alias reads exact saved bytes
+# api=1 path=1 status=c0000033
+not ok 13 - separator spelling matches reference status
+# api=1 path=2 status=c0000033
+ok 14 - separator spelling matches reference status
+# api=1 path=3 status=00000000
+not ok 15 - separator spelling matches reference status
+ok 16 - reopen alias reads exact saved bytes
+# api=1 path=4 status=c0000033
+not ok 17 - separator spelling matches reference status
+# api=2 path=0 status=00000000
+ok 18 - separator spelling matches reference status
+ok 19 - reopen alias reads exact saved bytes
+# api=2 path=1 status=c0000033
+not ok 20 - separator spelling matches reference status
+# api=2 path=2 status=c0000033
+ok 21 - separator spelling matches reference status
+# api=2 path=3 status=00000000
+not ok 22 - separator spelling matches reference status
+ok 23 - reopen alias reads exact saved bytes
+# api=2 path=4 status=c0000033
+not ok 24 - separator spelling matches reference status
+ok 25 - directory-relative control opens
+ok 26 - directory-relative control opens
+ok 27 - directory-relative control opens
+not ok 28 - double separator creates a new save file
+# survey=0 status=00000000
+# survey=1 status=c0000033
+# survey=2 status=c0000033
+# survey=3 status=c0000033
+# survey=4 status=c0000033
+# survey=5 status=00000000
+# survey=6 status=c0000033
+# survey=7 status=c0000033
+# checks=28 failures=10
+1..28
