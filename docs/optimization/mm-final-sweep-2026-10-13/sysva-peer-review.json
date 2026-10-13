@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "verdict": "No blockers in the two reviewed production changes; unchanged ownership/rollback/pinning and actual PTE validity are supported by source review and independently executed real-body host fixtures.",
+  "source_tree": "1a9a1d1f6c627c430d39998b880b3bbf3fe1b6d0",
+  "source_files_sha256": {
+    "ntoskrnl/xb/mm/sysva.c": "80aeefb6460732637f6d0930f0d1d9c5baf90e8fa442c8fa44395f222286e4aa",
+    "ntoskrnl/xb/mm/iospace.c": "be008642447cb4c3929f34b24a4803107529537143b7efe277d47b56b19561a4",
+    "ntoskrnl/xb/mm/pagesupply.c": "3bb01ba320bcddb8675e038953e2a342683af249cf3f550d5762f18a3ccae2ea",
+    "ntoskrnl/xb/mm/api.c": "64f3d17951034cbfd618eaeac05bfb92f61d23683cac5f76a073ff6db8c232fd",
+    "ntoskrnl/mm/ARM3/mmsup.c": "699cf9de38e8c149138bd9deaef0fb482ffb9bbbf7fa531d701a5fd20f3dd021",
+    "tests/host/system-va-raw/check.py": "b4b7ff17c9e5a97d8adcba36fa485b1b9f2d8a7e812a479c620114f99254ac11",
+    "tests/host/system-va-raw/check-validity.py": "5f24b1ec7a079813922f8da493b7984e74b191c13f8ae473baa2c53bc21dbb61",
+    "tests/host/system-va-raw/cases.c": "216aed002945619ed70a6143328072ea7edc3a81efc31c05781faf8889bf3309",
+    "tests/host/system-va-raw/shim.h": "cefa366fcf53841978cf0219df5de5a27550caffd1691b19a1aa509f98820006"
+  },
+  "patch_sha256": {
+    "0122b-system-va-uninitialized-data.patch": "90e22ec45ae541d5e32d8994e142a6a6d0028f19477302bf413a0e7b5b5c60ad",
+    "0123-system-va-mapping-validity.patch": "275ebd28da58ef26efe881febbfc8ed085ab70c92fc425d6b316141a71db0c76"
+  },
+  "runs": [
+    {
+      "command": [
+        "python3",
+        "/home/codex/xemu-shader-workbench-handoff/.scratch/remaining-sysva-audit-20261013/artifacts/sysva-selected-release64/work-u2rv1k_d/source/tests/host/system-va-raw/check.py",
+        "/home/codex/xemu-shader-workbench-handoff/.scratch/remaining-pool-audit-20261013/artifacts/sysva-peer-review"
+      ],
+      "exit_code": 0,
+      "log": "sysva-production-peer-review.log",
+      "log_sha256": "dc978e6b610be53c735d720cb7d780482497b9b65dc2e3544ac958fc8c36cf73"
+    },
+    {
+      "command": [
+        "python3",
+        "/home/codex/xemu-shader-workbench-handoff/.scratch/remaining-sysva-audit-20261013/artifacts/sysva-selected-release64/work-u2rv1k_d/source/tests/host/system-va-raw/check-validity.py",
+        "/home/codex/xemu-shader-workbench-handoff/.scratch/remaining-pool-audit-20261013/artifacts/sysva-validity-peer-review"
+      ],
+      "exit_code": 0,
+      "log": "sysva-validity-peer-review.log",
+      "log_sha256": "0ccff1b4928cf446ed1d6ba3d6eca2fd37969a429099fec3696466e79e618564"
+    }
+  ],
+  "note": "No emulator or proprietary implementation was inspected.",
+  "combined_review_source_tree": "c24c8ce13b2395c4748305d191fb5ec02e204722",
+  "combined_runtime_files_identical": {
+    "ntoskrnl/xb/mm/sysva.c": true,
+    "ntoskrnl/xb/mm/iospace.c": true,
+    "ntoskrnl/xb/mm/pagesupply.c": true,
+    "ntoskrnl/xb/mm/api.c": true,
+    "ntoskrnl/mm/ARM3/mmsup.c": true
+  }
+}
