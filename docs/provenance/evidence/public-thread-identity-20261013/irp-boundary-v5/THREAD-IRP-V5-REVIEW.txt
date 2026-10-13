@@ -1,0 +1,63 @@
+Independent read-only IRP thread-boundary review, 2026-10-13
+
+Conclusion: no source blocker found in patch 0109a-public-irp-thread-boundaries.patch,
+SHA256 0368026b6c8371a0b05a43974cd39d087d07e938f1b586968ecd453bc390a96d.
+Exact immutable assembled source c5a4fb8a95538e2f976cfa933395857e38bd3d57:
+../async-qualification-agent/thread-abi-design/pr-v5b-release64/work-t1erpfq4/source.
+ROM identity supplied by build: d542171d60701f7fdab977b047458d27d40d713f235b7251c6af3eb88a27c2f9.
+All 11 runtime files match the reviewed D/source; per-file hashes retained in
+thread-irp-v5-review.json. No source edits were made by this reviewer.
+
+Consumer normalization:
+IopNativeIrpThread is a desktop identity operation. On Xbox, missing low-bit
+membership proves a native/nonregistered pointer; a positive filter still
+requires exact registry identity. IopGetIrpThread translates the local value,
+not the shared IRP. IopQueueIrpToThread therefore attaches ThreadListEntry to
+native IrpList under the existing guarded-region protection. IofCompleteRequest
+resolves the issuer before constructing the native completion APC. Requestor
+process/session, device verification, hard-error APC, file-lock, and directory
+notification consumers resolve before dereferencing native ETHREAD fields.
+The remaining raw dereference in irp.c is within #if 0. The Xbox-built filesystem
+set is vfatfs and xdvdfs; their thread-field uses are native assignments, not
+unconverted dereferences. Other desktop-only drivers are not claimed qualified.
+
+Publication:
+All three public builders call the native builder first, preserving native
+thread queueing, and then publish the returned field only if allocation
+succeeded. TitleOwnedDriver is established by public XeIoCreateDevice, not
+inferred from a callback address or thread. IofCallDriver and all three actual
+StartIo callback sites publish immediately before calling title-owned code.
+A native-to-title-to-native stack retains public identity after the boundary;
+its native consumers normalize locally. Publication is idempotent and NULL
+remains NULL. These paths neither restore the pointer after callback nor access
+the IRP afterward. An immediate completion/free is consequently safe.
+
+Cancellation, rundown, and reuse:
+Existing callbacks see the shared packet's existing public identity. Cancellation
+and completion logic and spinlock order are unchanged. Public IoStartPacket
+has no cancel-function argument; its wrapper passes NULL. Packets constructed
+natively and queued without having reached title code remain native until
+StartIo publication; that is deliberate, not a full shadow of every queue.
+Thread rundown operates on native IrpList and disassociation clears the shared
+Thread field to NULL before unlinking. Later canceled completion follows the
+existing no-owner cleanup path. Associated IRPs copy the shared identity and
+are reclaimed through unchanged master ownership. IoReuseIrp calls existing
+IoInitializeIrp, clearing the pointer and preserving only its documented
+allocation flags and status. Registry lifetime remains final object deletion;
+this patch does not manufacture another reference or shorten ownership.
+
+Independent execution:
+Ran the exact immutable source's tests/host/thread-view/check-irp.py with output
+under this agent's thread-irp-v5-review-host. ASan/UBSan: 69 checks passed,
+8 completion and 4 cancel callbacks. Tests include native/public issuer values,
+completion from another current thread, title/native layering, callback-free,
+retained completion, null-after-rundown, and reuse. Registry lookup itself is
+modeled in this harness; its separate exact-identity/deletion suite supplies
+that coverage. This review does not count the owner's native tests as rerun.
+
+Scope limits:
+This is read/publication correctness for IRP thread identity. The public
+thread's IrpList and dynamic scheduler fields are not made live mirrors, and no
+full thread-ABI equivalence or speedup follows from this patch. The owner's
+expanded native buffered-read oracle is still being corrected reference-first;
+its final pass is required before broad native qualification is claimed.

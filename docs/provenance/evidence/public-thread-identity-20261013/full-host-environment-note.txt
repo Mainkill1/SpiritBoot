@@ -1,0 +1,8 @@
+The full workflow actual-source batch ran 88 checks. 87 passed in the Docker
+host-test image. The class-errorlog-layout check could not execute the compiler
+path recorded by the native build because that path is a host toolchain wrapper
+whose interpreter is absent inside this container. It was rerun with that exact
+configured native toolchain on the host and passed all release/debug size and
+consumer checks. This is an environment retry, not a changed implementation or
+suppressed layout assertion. See full-host-pr.json and
+host-pr-class-errorlog-layout-native-toolchain.log.

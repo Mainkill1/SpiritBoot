@@ -1,0 +1,46 @@
+# Public thread identity evidence
+
+These are public-API standalone XBE receipts on the original uninstrumented
+xemu binary. `launch.json` pins BIOS, emulator and fixture SHA256 values;
+`serial.log` contains all assertions. A process exit code alone is insufficient.
+No proprietary binary, code or disassembly is included.
+
+`wait-v4-oracle-complex-*` intentionally preserves an invalid fixture: it
+expected APC_LEVEL for a user APC kernel routine and passed NULL for the
+required public wait-block array. Complex runs both user APC routines at
+PASSIVE_LEVEL; NULL blocks bugcheck. Corrected captures are separate.
+
+`wait-v4-corrected-prototype3-*` is a valid failing v3 control: exactly 20
+assertions reject abandoned-result block fields and callback-time native
+pointers. Complex and v4 pass all 295 checks. `wait-v4-mixed-*` also includes
+a held public self-thread in the wait array and WaitNext before user APC.
+
+The async2 cost control deliberately fails only the aggregate public thread
+identity/exit assertion. Its timing and page measurements are still reported,
+with that expected failure made explicit. Both v4 runs pass all 139 checks.
+Performance values are within-boot medians of three rounds; the four boots
+run A/B/B/A. No traces, HDD throttle or diagnostic ROM instrumentation is used.
+
+The authoritative narrative and limitations are in
+[PUBLIC_THREAD_IDENTITY.md](../../PUBLIC_THREAD_IDENTITY.md).
+
+Committed Windows text copies normalize CRLF to LF and trim CPU-brand padding
+in emulator stderr; the failed bugcheck capture also trims trailing blank lines.
+The normalization manifest
+records original and normalized SHA256 values; original captures remain retained
+in the qualification workspace. No assertion text or measurements were edited.
+
+The combined async5 archive is copied byte-exact and has its own BIOS/source
+identity. It covers PR230 owner + PR233 behavior + v4 thread runtime. Its
+11,640 functional assertions and four world replays are not relabeled as runs
+of the separately built standalone packaged ROM.
+
+`irp-boundary-v5/` retains the initial checked-CI regression and green base
+control, the correction's actual-source host checks, independent review,
+excluded native fixtures and final 77-check Complex/release/checked oracle.
+It also contains the exact v5 10,537-check functional runs, unthrottled world
+A/B/B/A, memory footprint and full green CI matrix receipt. The one throttled
+run is labeled in its launch record and qualifies pending-request lifetime;
+its time is not used for performance. `normalization-v5.json` separately pins
+all original and normalized native files. CI checked64 uses its own build and
+run hashes, while sharing the same source tree as the local v5 builds.

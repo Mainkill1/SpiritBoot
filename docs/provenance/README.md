@@ -41,3 +41,5 @@ Current compatibility records include:
 - [Public title interrupt objects](TITLE_INTERRUPT_PUBLIC_ABI.md)
 - [Halo 64 MiB memory compatibility](HALO_64MIB_MEMORY_COMPATIBILITY.md)
 - [Native handle classification](TITLE_HANDLE_CLASSIFICATION.md)
+
+- [Public thread identity and terminal status](PUBLIC_THREAD_IDENTITY.md): full backing storage, exact pointer translation, lifetime publication and qualified caller wait blocks.

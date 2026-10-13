@@ -1,0 +1,593 @@
+diff --git a/ntoskrnl/include/internal/io_x.h b/ntoskrnl/include/internal/io_x.h
+--- a/ntoskrnl/include/internal/io_x.h
++++ b/ntoskrnl/include/internal/io_x.h
+@@ -44,11 +44,33 @@
+     ObDereferenceObject(FileObject);
+ }
+ 
++/* An Xbox IRP is one shared packet. Its thread can be a title's public
++ * identity; resolve the consumer-local value without rewriting the packet.
++ * Ordinary native addresses take the residue-negative path without lookup. */
++FORCEINLINE
++PETHREAD
++IopNativeIrpThread(IN PETHREAD Thread)
++{
++#ifdef SARCH_XBOX
++    if (NxkThreadViewLowBits & (1UL << ((ULONG_PTR)Thread & 31)))
++        return (PETHREAD)NxkThreadNativeObject(Thread);
++#endif
++    return Thread;
++}
++
++FORCEINLINE
++PETHREAD
++IopGetIrpThread(IN PIRP Irp)
++{
++    return IopNativeIrpThread(Irp->Tail.Overlay.Thread);
++}
++
++
+ FORCEINLINE
+ VOID
+ IopQueueIrpToThread(IN PIRP Irp)
+ {
+-    PETHREAD Thread = Irp->Tail.Overlay.Thread;
++    PETHREAD Thread = IopGetIrpThread(Irp);
+ 
+     /* Disable special kernel APCs so we can't race with IopCompleteRequest.
+      * IRP's thread must be the current thread */
+diff --git a/ntoskrnl/include/internal/xbthread.h b/ntoskrnl/include/internal/xbthread.h
+--- a/ntoskrnl/include/internal/xbthread.h
++++ b/ntoskrnl/include/internal/xbthread.h
+@@ -3,6 +3,7 @@
+ extern ULONG NxkThreadViewLowBits;
+ extern PVOID volatile NxkThreadViewCachedPublic;
+ PVOID NxkThreadPublicPointer(PKTHREAD Thread);
++VOID NxkPublishIrpThread(PIRP Irp);
+ PKTHREAD NxkResolveThreadPointer(PVOID Pointer);
+ PVOID NxkThreadNativeObject(PVOID Object);
+ PVOID NxkThreadPublicObject(PVOID Object);
+diff --git a/ntoskrnl/io/iomgr/irp.c b/ntoskrnl/io/iomgr/irp.c
+--- a/ntoskrnl/io/iomgr/irp.c
++++ b/ntoskrnl/io/iomgr/irp.c
+@@ -1315,6 +1315,10 @@
+     /* Get the Device Object */
+     StackPtr->DeviceObject = DeviceObject;
+ 
++#ifdef SARCH_XBOX
++    if (DeviceObject->TitleOwnedDriver) NxkPublishIrpThread(Irp);
++#endif
++
+     /* Call it */
+     return DriverObject->MajorFunction[StackPtr->MajorFunction](DeviceObject,
+                                                                 Irp);
+@@ -1587,7 +1591,7 @@
+     }
+ 
+     /* Get the thread and file object */
+-    Thread = Irp->Tail.Overlay.Thread;
++    Thread = IopGetIrpThread(Irp);
+     FileObject = Irp->Tail.Overlay.OriginalFileObject;
+ 
+     /* Make sure the IRP isn't canceled */
+@@ -1814,16 +1818,17 @@
+ NTAPI
+ IoGetRequestorProcess(IN PIRP Irp)
+ {
++    PETHREAD Thread = IopGetIrpThread(Irp);
+     /* Return the requestor process */
+-    if (Irp->Tail.Overlay.Thread)
++    if (Thread)
+     {
+         if (Irp->ApcEnvironment == OriginalApcEnvironment)
+         {
+-            return Irp->Tail.Overlay.Thread->ThreadsProcess;
++            return Thread->ThreadsProcess;
+         }
+         else if (Irp->ApcEnvironment == AttachedApcEnvironment)
+         {
+-            return (PEPROCESS)Irp->Tail.Overlay.Thread->Tcb.ApcState.Process;
++            return (PEPROCESS)Thread->Tcb.ApcState.Process;
+         }
+     }
+ 
+@@ -1855,11 +1860,12 @@
+                         OUT PULONG pSessionId)
+ {
+     PEPROCESS Process;
++    PETHREAD Thread = IopGetIrpThread(Irp);
+ 
+     /* Return the session */
+-    if (Irp->Tail.Overlay.Thread)
+-    {
+-        Process = Irp->Tail.Overlay.Thread->ThreadsProcess;
++    if (Thread)
++    {
++        Process = Thread->ThreadsProcess;
+         *pSessionId = MmGetSessionId(Process);
+         return STATUS_SUCCESS;
+     }
+diff --git a/ntoskrnl/io/iomgr/device.c b/ntoskrnl/io/iomgr/device.c
+--- a/ntoskrnl/io/iomgr/device.c
++++ b/ntoskrnl/io/iomgr/device.c
+@@ -552,6 +552,9 @@
+         }
+ 
+         /* Call the Start I/O Routine */
++#ifdef SARCH_XBOX
++        if (DeviceObject->TitleOwnedDriver) NxkPublishIrpThread(Irp);
++#endif
+         DeviceObject->DriverObject->DriverStartIo(DeviceObject, Irp);
+     }
+     else
+@@ -600,6 +603,9 @@
+         }
+ 
+         /* Call the Start I/O Routine */
++#ifdef SARCH_XBOX
++        if (DeviceObject->TitleOwnedDriver) NxkPublishIrpThread(Irp);
++#endif
+         DeviceObject->DriverObject->DriverStartIo(DeviceObject, Irp);
+     }
+     else
+@@ -2065,6 +2071,9 @@
+         }
+ 
+         /* Call the Start I/O function */
++#ifdef SARCH_XBOX
++        if (DeviceObject->TitleOwnedDriver) NxkPublishIrpThread(Irp);
++#endif
+         DeviceObject->DriverObject->DriverStartIo(DeviceObject, Irp);
+     }
+     else
+diff --git a/ntoskrnl/io/iomgr/error.c b/ntoskrnl/io/iomgr/error.c
+--- a/ntoskrnl/io/iomgr/error.c
++++ b/ntoskrnl/io/iomgr/error.c
+@@ -684,7 +684,7 @@
+                  IN PVPB Vpb,
+                  IN PDEVICE_OBJECT RealDeviceObject)
+ {
+-    PETHREAD Thread = Irp->Tail.Overlay.Thread;
++    PETHREAD Thread = IopGetIrpThread(Irp);
+     PKAPC ErrorApc;
+ 
+     /* Don't do anything if hard errors are disabled on the thread */
+diff --git a/ntoskrnl/io/iomgr/util.c b/ntoskrnl/io/iomgr/util.c
+--- a/ntoskrnl/io/iomgr/util.c
++++ b/ntoskrnl/io/iomgr/util.c
+@@ -305,7 +305,7 @@
+                     IN PDEVICE_OBJECT DeviceObject)
+ {
+     /* Set the pointer in the thread */
+-    Thread->DeviceToVerify = DeviceObject;
++    IopNativeIrpThread(Thread)->DeviceToVerify = DeviceObject;
+ }
+ 
+ /*
+@@ -325,7 +325,7 @@
+     }
+ 
+     /* Set the pointer in the IRP */
+-    Irp->Tail.Overlay.Thread->DeviceToVerify = DeviceObject;
++    IopGetIrpThread(Irp)->DeviceToVerify = DeviceObject;
+ }
+ 
+ /*
+@@ -336,7 +336,7 @@
+ IoGetDeviceToVerify(IN PETHREAD Thread)
+ {
+     /* Return the pointer that was set with IoSetDeviceToVerify */
+-    return Thread->DeviceToVerify;
++    return IopNativeIrpThread(Thread)->DeviceToVerify;
+ }
+ 
+ /*
+diff --git a/ntoskrnl/fsrtl/filelock.c b/ntoskrnl/fsrtl/filelock.c
+--- a/ntoskrnl/fsrtl/filelock.c
++++ b/ntoskrnl/fsrtl/filelock.c
+@@ -752,7 +752,7 @@
+     PIO_STACK_LOCATION IoStack = IoGetCurrentIrpStackLocation(Irp);
+     COMBINED_LOCK_ELEMENT ToFind;
+     PCOMBINED_LOCK_ELEMENT Found;
+-    PEPROCESS Process = Irp->Tail.Overlay.Thread->ThreadsProcess;
++    PEPROCESS Process = IopGetIrpThread(Irp)->ThreadsProcess;
+     DPRINT("CheckLockForWriteAccess(%wZ, Offset %08x%08x, Length %x)\n",
+            &IoStack->FileObject->FileName,
+            IoStack->Parameters.Write.ByteOffset.HighPart,
+diff --git a/ntoskrnl/fsrtl/notify.c b/ntoskrnl/fsrtl/notify.c
+--- a/ntoskrnl/fsrtl/notify.c
++++ b/ntoskrnl/fsrtl/notify.c
+@@ -940,7 +940,7 @@
+             NotifyChange->BufferLength = Stack->Parameters.NotifyDirectory.Length;
+         }
+ 
+-        NotifyChange->OwningProcess = NotifyIrp->Tail.Overlay.Thread->ThreadsProcess;
++        NotifyChange->OwningProcess = IopGetIrpThread(NotifyIrp)->ThreadsProcess;
+ 
+         /* Insert the notification into the notification list */
+         InsertTailList(NotifyList, &(NotifyChange->NotifyList));
+diff --git a/ntoskrnl/xb/threadview.c b/ntoskrnl/xb/threadview.c
+--- a/ntoskrnl/xb/threadview.c
++++ b/ntoskrnl/xb/threadview.c
+@@ -106,6 +106,15 @@
+  * The complete allocation covers KTHREAD 0x110 and ETHREAD 0x140. */
+ C_ASSERT(sizeof(((PKTHREAD)0)->XeXboxShadow) == 0x140);
+ C_ASSERT(sizeof(KWAIT_BLOCK) == 0x18);
++
++/* The shared IRP may outlive this callback. Publish once before exposing it
++ * to title code; never restore after code that can complete/free the packet. */
++VOID NxkPublishIrpThread(PIRP Irp)
++{
++    PKTHREAD Thread = (PKTHREAD)NxkThreadNativeObject(Irp->Tail.Overlay.Thread);
++    Irp->Tail.Overlay.Thread = (PETHREAD)NxkThreadPublicPointer(Thread);
++}
++
+ 
+ static VOID
+ NxkPublishThreadControls(PKTHREAD Thread)
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -1017,6 +1017,39 @@
+ XeIoAllocateIrp(_In_ CCHAR StackSize)
+ {
+     return IoAllocateIrp(StackSize, FALSE);
++}
++
++/* Native builders retain native ownership and queueing. Publish only the
++ * returned packet field at the public boundary; consumers resolve locally. */
++PIRP NTAPI
++XeIoBuildAsynchronousFsdRequest(ULONG Major, PDEVICE_OBJECT Device, PVOID Buffer,
++                               ULONG Length, PLARGE_INTEGER Offset,
++                               PIO_STATUS_BLOCK Iosb)
++{
++    PIRP Irp = IoBuildAsynchronousFsdRequest(Major, Device, Buffer, Length, Offset, Iosb);
++    if (Irp != NULL) NxkPublishIrpThread(Irp);
++    return Irp;
++}
++
++PIRP NTAPI
++XeIoBuildSynchronousFsdRequest(ULONG Major, PDEVICE_OBJECT Device, PVOID Buffer,
++                              ULONG Length, PLARGE_INTEGER Offset,
++                              PKEVENT Event, PIO_STATUS_BLOCK Iosb)
++{
++    PIRP Irp = IoBuildSynchronousFsdRequest(Major, Device, Buffer, Length, Offset, Event, Iosb);
++    if (Irp != NULL) NxkPublishIrpThread(Irp);
++    return Irp;
++}
++
++PIRP NTAPI
++XeIoBuildDeviceIoControlRequest(ULONG Code, PDEVICE_OBJECT Device, PVOID Input,
++                               ULONG InputLength, PVOID Output, ULONG OutputLength,
++                               BOOLEAN Internal, PKEVENT Event, PIO_STATUS_BLOCK Iosb)
++{
++    PIRP Irp = IoBuildDeviceIoControlRequest(Code, Device, Input, InputLength,
++                                            Output, OutputLength, Internal, Event, Iosb);
++    if (Irp != NULL) NxkPublishIrpThread(Irp);
++    return Irp;
+ }
+ 
+ /* Xbox dropped NT's cancel-routine arg; pass NULL. */
+diff --git a/ntoskrnl/xb/ordinals.map b/ntoskrnl/xb/ordinals.map
+--- a/ntoskrnl/xb/ordinals.map
++++ b/ntoskrnl/xb/ordinals.map
+@@ -98,9 +98,9 @@
+ 59   IoAllocateIrp       XeIoAllocateIrp   # Xbox @4 -> NT @8 adapter
+ 
+ # --- Io* (Xbox ANSI -> NT UNICODE adapters) ------------------------------ #
+-60   IoBuildAsynchronousFsdRequest   # signature matches NT's exactly
+-61   IoBuildDeviceIoControlRequest   # signature matches NT's exactly
+-62   IoBuildSynchronousFsdRequest    # signature matches NT's exactly
++60   IoBuildAsynchronousFsdRequest XeIoBuildAsynchronousFsdRequest # publish public IRP thread identity
++61   IoBuildDeviceIoControlRequest XeIoBuildDeviceIoControlRequest # publish public IRP thread identity
++62   IoBuildSynchronousFsdRequest XeIoBuildSynchronousFsdRequest # publish public IRP thread identity
+ 63   IoCheckShareAccess              # signature matches NT's exactly
+ 64   IoCompletionObjectType  XeIoCompletionObjectType  # 28-byte Xbox-shape struct
+ 65   XeIoCreateDevice                # Xbox @24 ANSI -> NT @28 UNICODE
+diff --git a/tests/host/thread-view/check-irp.py b/tests/host/thread-view/check-irp.py
+new file mode 100644
+--- /dev/null
++++ b/tests/host/thread-view/check-irp.py
+@@ -0,0 +1,52 @@
++"""Compile actual IRP ownership/completion consumers with a minimal OS model."""
++from pathlib import Path
++import subprocess, sys
++here=Path(__file__).resolve().parent
++root=Path(sys.argv[2]).resolve() if len(sys.argv)>2 else here.parents[2]
++outdir=Path(sys.argv[1]).resolve();outdir.mkdir(parents=True,exist_ok=True)
++def function(path,signature):
++    s=(root/path).read_text();a=s.index(signature);b=s.index('{',a);n=1;e=b+1
++    while n:
++        n+=(s[e]=='{')-(s[e]=='}');e+=1
++    return s[a:e]+'\n'
++io='ntoskrnl/io/iomgr/irp.c';ih='ntoskrnl/include/internal/io_x.h'
++helpers=''
++for name in ['IopNativeIrpThread','IopGetIrpThread']:
++    if name+'(' in (root/ih).read_text():
++        helpers+=function(ih,'FORCEINLINE\nPETHREAD\n'+name+'(')
++# Pin every checked public callback entry site and every active raw dereference.
++import re
++device=(root/'ntoskrnl/io/iomgr/device.c').read_text()
++assert len(re.findall(r'if \(DeviceObject->TitleOwnedDriver\) NxkPublishIrpThread\(Irp\);\s*#endif\s*DeviceObject->DriverObject->DriverStartIo\(DeviceObject, Irp\);',device))==3
++irp=(root/io).read_text()
++assert 'if (DeviceObject->TitleOwnedDriver) NxkPublishIrpThread(Irp);' in irp
++assert 'AssocIrp->Tail.Overlay.Thread = Irp->Tail.Overlay.Thread;' in irp
++for path in ['ntoskrnl/io/iomgr/error.c','ntoskrnl/io/iomgr/util.c','ntoskrnl/fsrtl/notify.c','ntoskrnl/fsrtl/filelock.c']:
++    assert 'Tail.Overlay.Thread->' not in (root/path).read_text(),path
++text=(here/'irp-fixture.c').read_text()
++bodies=helpers+function('ntoskrnl/xb/threadview.c','VOID NxkPublishIrpThread(')+''.join([
++    function(ih,'FORCEINLINE\nVOID\nIopQueueIrpToThread('),
++    function(ih,'FORCEINLINE\nVOID\nIopUnQueueIrpFromThread('),
++    function(io,'VOID\nNTAPI\nIoQueueThreadIrp('),
++    *[function('ntoskrnl/xb/xbe.c','PIRP NTAPI\nXe'+name+'(') for name in ['IoBuildAsynchronousFsdRequest','IoBuildSynchronousFsdRequest','IoBuildDeviceIoControlRequest']],
++    function(io,'FORCEINLINE\nVOID\nIopClearStackLocation('),
++    function(io,'VOID\nFASTCALL\nIofCompleteRequest('),
++    function(io,'NTSTATUS\nFASTCALL\nIofCallDriver('),
++    function(io,'VOID\nNTAPI\nIoInitializeIrp('),
++    function(io,'VOID\nNTAPI\nIoReuseIrp('),
++    function(io,'VOID\nNTAPI\nIopDisassociateThreadIrp('),
++    function('ntoskrnl/io/iomgr/device.c','VOID\nNTAPI\nIoStartPacket('),
++    function('ntoskrnl/io/iomgr/device.c','VOID\nNTAPI\nIopStartNextPacket('),
++    function('ntoskrnl/io/iomgr/device.c','VOID\nNTAPI\nIopStartNextPacketByKey('),
++    function(io,'BOOLEAN\nNTAPI\nIoCancelIrp('),
++    function(io,'PEPROCESS\nNTAPI\nIoGetRequestorProcess('),
++    function(io,'NTSTATUS\nNTAPI\nIoGetRequestorSessionId('),
++    function('ntoskrnl/io/iomgr/util.c','VOID\nNTAPI\nIoSetDeviceToVerify('),
++    function('ntoskrnl/io/iomgr/util.c','PDEVICE_OBJECT\nNTAPI\nIoGetDeviceToVerify('),
++    function('ntoskrnl/io/iomgr/util.c','VOID\nNTAPI\nIoSetHardErrorOrVerifyDevice('),
++])
++out=outdir/'irp-thread-host-generated.c';out.write_text(text.replace('/* PRODUCTION_BODIES */',bodies))
++subprocess.run(['cc','-std=gnu11','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',
++                '-Wall','-Wextra','-Werror','-Wno-unused-parameter','-Wno-unused-function',
++                str(out),'-o',str(outdir/'irp-thread-host')],check=True)
++subprocess.run([str(outdir/'irp-thread-host')],check=True)
+diff --git a/tests/host/thread-view/irp-fixture.c b/tests/host/thread-view/irp-fixture.c
+new file mode 100644
+--- /dev/null
++++ b/tests/host/thread-view/irp-fixture.c
+@@ -0,0 +1,245 @@
++#include <assert.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#define SARCH_XBOX 1
++#define FORCEINLINE static inline
++#define VOID void
++#define IN
++#define OUT
++#define OPTIONAL
++#define RtlZeroMemory(p,n) memset(p,0,n)
++#define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p)-offsetof(t,f)))
++#define NO_MORE_IRP_STACK_LOCATIONS 3
++#define DISPATCH_LEVEL 2
++#define APC_LEVEL 1
++#define IO_DRIVER_CANCEL_TIMEOUT 1
++#define LockQueueIoCompletionLock 1
++#define DOE_SIO_NO_CANCEL 1
++#define NTAPI
++#define FASTCALL
++#define ASSERT assert
++#define IOTRACE(...) ((void)0)
++#define DPRINT1(...) ((void)0)
++#define UNIMPLEMENTED_DBGBREAK(...) abort()
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(s) ((int32_t)(s)>=0)
++#define STATUS_SUCCESS 0
++#define STATUS_PENDING 0x103
++#define STATUS_MORE_PROCESSING_REQUIRED ((int32_t)0xc0000016)
++#define STATUS_REPARSE 0x104
++#define STATUS_UNSUCCESSFUL ((int32_t)0xc0000001)
++#define IO_TYPE_IRP 6
++#define MULTIPLE_IRP_COMPLETE_REQUESTS 1
++#define CANCEL_STATE_IN_COMPLETED_IRP 2
++#define SL_ERROR_RETURNED 0x80
++#define SL_PENDING_RETURNED 1
++#define SL_INVOKE_ON_SUCCESS 0x40
++#define SL_INVOKE_ON_ERROR 0x80
++#define SL_INVOKE_ON_CANCEL 0x20
++#define IRP_ASSOCIATED_IRP 1
++#define IRP_PAGING_IO 2
++#define IRP_CLOSE_OPERATION 4
++#define IRP_SYNCHRONOUS_PAGING_IO 8
++#define IRP_DEFER_IO_COMPLETION 16
++#define IO_REMOUNT 1
++#define IO_REPARSE_TAG_MOUNT_POINT 0xa0000003
++#define STATUS_IO_REPARSE_TAG_NOT_HANDLED ((int32_t)0xc0000279)
++#define PtrToUlong(x) ((unsigned)(uintptr_t)(x))
++#define UlongToPtr(x) ((void *)(uintptr_t)(x))
++typedef uint32_t ULONG,*PULONG;typedef uintptr_t ULONG_PTR;typedef int32_t NTSTATUS;
++typedef int BOOLEAN,KIRQL,CCHAR;typedef unsigned char UCHAR;typedef unsigned short USHORT;typedef void *PVOID;typedef char *PCHAR;
++typedef struct LIST_ENTRY {struct LIST_ENTRY *Flink,*Blink;} LIST_ENTRY,*PLIST_ENTRY;
++typedef struct {unsigned SessionId;} PROCESS,*PEPROCESS;
++typedef struct THREAD {
++    unsigned ApcStateIndex;
++    struct {struct {PEPROCESS Process;} ApcState;} Tcb;
++    PEPROCESS ThreadsProcess;
++    void *DeviceToVerify;
++    LIST_ENTRY IrpList;
++} THREAD,*PETHREAD,*PKTHREAD;
++typedef struct {int signals;} EVENT,*PKEVENT;
++typedef struct {int64_t QuadPart;} LARGE_INTEGER,*PLARGE_INTEGER;
++typedef struct {NTSTATUS Status;uintptr_t Information;} IOSB,*PIO_STATUS_BLOCK;
++struct IRP;typedef struct IRP IRP,*PIRP;
++typedef struct DEVICE DEVICE,*PDEVICE_OBJECT;
++typedef struct {NTSTATUS (*MajorFunction[16])(PDEVICE_OBJECT,PIRP);void (*DriverStartIo)(PDEVICE_OBJECT,PIRP);} DRIVER,*PDRIVER_OBJECT;
++typedef struct KDEVICE_QUEUE_ENTRY {struct KDEVICE_QUEUE_ENTRY *Next;unsigned key;} KDEVICE_QUEUE_ENTRY,*PKDEVICE_QUEUE_ENTRY;
++typedef struct {int busy;PKDEVICE_QUEUE_ENTRY head,tail;} QUEUE;
++struct DEVICE {PDRIVER_OBJECT DriverObject;BOOLEAN TitleOwnedDriver;PIRP CurrentIrp;QUEUE DeviceQueue;struct {unsigned StartIoFlags;} ext;};
++#define IoGetDevObjExtension(d) (&(d)->ext)
++typedef struct {int dummy;} FILE_OBJECT,*PFILE_OBJECT;
++typedef struct MDL {struct MDL *Next;} MDL,*PMDL;
++typedef void *PREPARSE_DATA_BUFFER;
++typedef void (*PDRIVER_CANCEL)(PDEVICE_OBJECT,PIRP);
++typedef struct KAPC {PKTHREAD Thread;void *KernelRoutine;} KAPC,*PKAPC;
++typedef struct STACK {
++    unsigned char MajorFunction,MinorFunction,Flags,Control;
++    struct {struct {void *Argument1,*Argument2,*Argument3,*Argument4;} Others;} Parameters;
++    PFILE_OBJECT FileObject;PDEVICE_OBJECT DeviceObject;
++    NTSTATUS (*CompletionRoutine)(PDEVICE_OBJECT,PIRP,PVOID);PVOID Context;
++} STACK,*PIO_STACK_LOCATION;
++struct IRP {
++    unsigned Type,CurrentLocation,StackCount,Flags,PendingReturned,Cancel,ApcEnvironment,Size,AllocationFlags;
++    PDRIVER_CANCEL CancelRoutine;KIRQL CancelIrql;
++    struct {NTSTATUS Status;uintptr_t Information;} IoStatus,*UserIosb;
++    PKEVENT UserEvent;PMDL MdlAddress;
++    struct {PIRP MasterIrp;int IrpCount;} AssociatedIrp;
++    LIST_ENTRY ThreadListEntry;
++    union {struct {KDEVICE_QUEUE_ENTRY DeviceQueueEntry;PETHREAD Thread;PCHAR AuxiliaryBuffer;PIO_STACK_LOCATION CurrentStackLocation;PFILE_OBJECT OriginalFileObject;} Overlay;KAPC Apc;} Tail;
++};
++static THREAD native_thread,public_thread,other_thread;
++static PROCESS process={77};static PKTHREAD current=&native_thread;
++static unsigned guarded,apcs,cleanups,cancel_calls,callbacks,checks;
++static PIRP callback_irp;static PETHREAD expected_public;
++static ULONG NxkThreadViewLowBits;
++static PVOID NxkThreadNativeObject(PVOID p){return p==&public_thread?&native_thread:p;}
++static PVOID NxkThreadPublicPointer(PKTHREAD p){assert(p==NULL||p==&native_thread);return p?&public_thread:NULL;}
++static PKTHREAD KeGetCurrentThread(void){return current;}
++static void InitializeListHead(PLIST_ENTRY h){h->Flink=h->Blink=h;}
++static int IsListEmpty(PLIST_ENTRY h){return h->Flink==h;}
++static void InsertHeadList(PLIST_ENTRY h,PLIST_ENTRY e){e->Flink=h->Flink;e->Blink=h;h->Flink->Blink=e;h->Flink=e;}
++static void RemoveEntryList(PLIST_ENTRY e){e->Blink->Flink=e->Flink;e->Flink->Blink=e->Blink;}
++static void KeEnterGuardedRegionThread(void *p){assert(p==&current->Tcb);guarded++;}
++static void KeLeaveGuardedRegionThread(void *p){assert(p==&current->Tcb&&guarded);guarded--;}
++static int KeAreAllApcsDisabled(void){return guarded!=0;}
++static void KeBugCheckEx(unsigned c,uintptr_t a,uintptr_t b,uintptr_t d,uintptr_t e){abort();}
++static int InterlockedDecrement(int *p){return --*p;}
++static PIO_STACK_LOCATION IoGetCurrentIrpStackLocation(PIRP i){return i->Tail.Overlay.CurrentStackLocation;}
++static void IoMarkIrpPending(PIRP i){i->Tail.Overlay.CurrentStackLocation->Control|=1;}
++static void IoFreeMdl(PMDL p){abort();}
++static void IoFreeIrp(PIRP p){abort();}
++static void ExFreePool(void *p){abort();}
++static void MmUnlockPages(PMDL p){abort();}
++static void KeSetEvent(PKEVENT e,int b,int w){e->signals++;}
++static struct {PIRP ReserveIrp;} IopReserveIrpAllocator;
++static void IopFreeReserveIrp(int b){abort();}
++static void IopCompleteRequest(void){}
++static void KeInitializeApc(PKAPC a,void *t,int env,void *k,void *r,void *n,int mode,void *ctx){
++    assert(t==&native_thread.Tcb);a->Thread=&native_thread;a->KernelRoutine=k;
++}
++static int KeInsertQueueApc(PKAPC a,void *f,void *d,int b){assert(a->Thread==&native_thread);apcs++;return 1;}
++static void IopCleanupIrp(PIRP i,PFILE_OBJECT f){cleanups++;}
++static void IoAcquireCancelSpinLock(KIRQL *q){*q=2;}
++static void IoReleaseCancelSpinLock(KIRQL q){assert(q==2);}
++static PDRIVER_CANCEL IoSetCancelRoutine(PIRP i,PDRIVER_CANCEL r){PDRIVER_CANCEL old=i->CancelRoutine;i->CancelRoutine=r;return old;}
++static unsigned MmGetSessionId(PEPROCESS p){return p->SessionId;}
++static PIO_STACK_LOCATION IoGetNextIrpStackLocation(PIRP i){return i->Tail.Overlay.CurrentStackLocation-1;}
++static unsigned current_irql;
++static PETHREAD PsGetCurrentThread(void){return current;}
++static KIRQL KeAcquireQueuedSpinLock(unsigned q){unsigned old=current_irql;current_irql=2;return old;}
++static void KeReleaseQueuedSpinLock(unsigned q,KIRQL old){current_irql=old;}
++static PLIST_ENTRY RemoveHeadList(PLIST_ENTRY head){PLIST_ENTRY e=head->Flink;RemoveEntryList(e);return e;}
++typedef struct {unsigned ErrorCode;} IO_ERROR_LOG_PACKET,*PIO_ERROR_LOG_PACKET;
++static PIO_ERROR_LOG_PACKET IoAllocateErrorLogEntry(PDEVICE_OBJECT d,unsigned size){return NULL;}
++static void IoWriteErrorLogEntry(PIO_ERROR_LOG_PACKET p){abort();}
++static PIRP IopDeadIrp;
++static void KeRaiseIrql(unsigned q,KIRQL *old){*old=current_irql;current_irql=q;}
++static void KeLowerIrql(KIRQL q){current_irql=q;}
++static BOOLEAN KeInsertDeviceQueue(QUEUE *q,PKDEVICE_QUEUE_ENTRY e){if(!q->busy){q->busy=1;return 0;}e->Next=NULL;if(q->tail)q->tail->Next=e;else q->head=e;q->tail=e;return 1;}
++static BOOLEAN KeInsertByKeyDeviceQueue(QUEUE *q,PKDEVICE_QUEUE_ENTRY e,ULONG k){e->key=k;return KeInsertDeviceQueue(q,e);}
++static PKDEVICE_QUEUE_ENTRY KeRemoveDeviceQueue(QUEUE *q){PKDEVICE_QUEUE_ENTRY e=q->head;if(e){q->head=e->Next;if(!q->head)q->tail=NULL;}else q->busy=0;return e;}
++static PKDEVICE_QUEUE_ENTRY KeRemoveByKeyDeviceQueue(QUEUE *q,ULONG k){return KeRemoveDeviceQueue(q);}
++static PIRP built;
++static PIRP IoBuildAsynchronousFsdRequest(ULONG m,PDEVICE_OBJECT d,PVOID b,ULONG l,PLARGE_INTEGER o,PIO_STATUS_BLOCK s){return built;}
++static PIRP IoBuildSynchronousFsdRequest(ULONG m,PDEVICE_OBJECT d,PVOID b,ULONG l,PLARGE_INTEGER o,PKEVENT e,PIO_STATUS_BLOCK s){return built;}
++static PIRP IoBuildDeviceIoControlRequest(ULONG c,PDEVICE_OBJECT d,PVOID b,ULONG l,PVOID b2,ULONG l2,BOOLEAN in,PKEVENT e,PIO_STATUS_BLOCK s){return built;}
++enum {KernelMode,OriginalApcEnvironment=0,AttachedApcEnvironment=1};
++/* PRODUCTION_BODIES */
++static NTSTATUS completed(PDEVICE_OBJECT d,PIRP i,PVOID c){assert(i==callback_irp&&i->Tail.Overlay.Thread==expected_public);callbacks++;return STATUS_SUCCESS;}
++static void cancelled(PDEVICE_OBJECT d,PIRP i){assert(i->Cancel&&i->Tail.Overlay.Thread==expected_public);cancel_calls++;IoReleaseCancelSpinLock(i->CancelIrql);}
++static void init(PIRP i,PETHREAD t){memset(i,0,sizeof(*i)+2*sizeof(STACK));i->Type=IO_TYPE_IRP;i->Size=sizeof(*i)+2*sizeof(STACK);i->StackCount=i->CurrentLocation=1;i->Tail.Overlay.Thread=t;i->Tail.Overlay.CurrentStackLocation=(STACK *)(i+1);i->IoStatus.Status=0;InitializeListHead(&i->ThreadListEntry);}
++static DEVICE layered[3];
++static unsigned layer_calls,start_calls,retained;
++static NTSTATUS layer_dispatch(PDEVICE_OBJECT d,PIRP i){
++    unsigned n=(unsigned)(d-layered);layer_calls++;
++    assert(i->Tail.Overlay.Thread==(n==0?&native_thread:&public_thread));checks++;
++    assert(IoGetRequestorProcess(i)==&process);checks++;
++    if(n<2)return IofCallDriver(d+1,i);
++    IofCompleteRequest(i,0);return STATUS_SUCCESS;
++}
++static NTSTATUS free_dispatch(PDEVICE_OBJECT d,PIRP i){assert(i->Tail.Overlay.Thread==&public_thread);free(i);checks++;return STATUS_SUCCESS;}
++static void start_io(PDEVICE_OBJECT d,PIRP i){assert(i->Tail.Overlay.Thread==&public_thread&&d->CurrentIrp==i);start_calls++;checks++;}
++static void free_start_io(PDEVICE_OBJECT d,PIRP i){assert(i->Tail.Overlay.Thread==&public_thread);free(i);checks++;}
++static NTSTATUS retain_complete(PDEVICE_OBJECT d,PIRP i,PVOID c){assert(i->Tail.Overlay.Thread==&public_thread);retained++;checks++;return STATUS_MORE_PROCESSING_REQUIRED;}
++static NTSTATUS free_complete(PDEVICE_OBJECT d,PIRP i,PVOID c){assert(i->Tail.Overlay.Thread==&public_thread);free(i);checks++;return STATUS_MORE_PROCESSING_REQUIRED;}
++static void boundary_cases(void){
++    DRIVER drivers[3]={0};
++    for(unsigned n=0;n<3;n++){drivers[n].MajorFunction[0]=layer_dispatch;layered[n].DriverObject=&drivers[n];layered[n].TitleOwnedDriver=(n==1);}
++    PIRP i=calloc(1,sizeof(*i)+4*sizeof(STACK));assert(i);init(i,&native_thread);
++    i->StackCount=3;i->CurrentLocation=4;i->Tail.Overlay.CurrentStackLocation=(STACK *)(i+1)+3;
++    unsigned before=apcs;assert(IofCallDriver(&layered[0],i)==0&&layer_calls==3&&apcs==before+1);checks++;free(i);
++    DEVICE d={.DriverObject=&drivers[0],.TitleOwnedDriver=1};drivers[0].MajorFunction[0]=free_dispatch;
++    i=calloc(1,sizeof(*i)+2*sizeof(STACK));assert(i);init(i,&native_thread);i->CurrentLocation=2;i->Tail.Overlay.CurrentStackLocation++;
++    assert(IofCallDriver(&d,i)==0);checks++; /* callback frees: ASan catches any post-call access */
++    drivers[0].DriverStartIo=start_io;
++    PIRP queued[3];
++    for(unsigned n=0;n<3;n++){queued[n]=calloc(1,sizeof(*i)+2*sizeof(STACK));assert(queued[n]);init(queued[n],&native_thread);ULONG key=n;IoStartPacket(&d,queued[n],n?&key:NULL,NULL);}
++    assert(start_calls==1&&queued[1]->Tail.Overlay.Thread==&native_thread);checks++;
++    IopStartNextPacket(&d,FALSE);IopStartNextPacketByKey(&d,FALSE,2);IopStartNextPacket(&d,FALSE);
++    assert(start_calls==3&&d.CurrentIrp==NULL&&current_irql==0);checks++;
++    for(unsigned n=0;n<3;n++)free(queued[n]);
++    drivers[0].DriverStartIo=free_start_io;
++    i=calloc(1,sizeof(*i)+2*sizeof(STACK));assert(i);init(i,&native_thread);IoStartPacket(&d,i,NULL,NULL);
++    assert(current_irql==0);checks++;
++    i=calloc(1,sizeof(*i)+2*sizeof(STACK));assert(i);init(i,&public_thread);
++    i->Tail.Overlay.CurrentStackLocation->Control=SL_INVOKE_ON_SUCCESS;
++    i->Tail.Overlay.CurrentStackLocation->CompletionRoutine=retain_complete;
++    before=apcs;IofCompleteRequest(i,0);
++    assert(retained==1&&apcs==before&&i->Tail.Overlay.Thread==&public_thread);checks++;
++    IoReuseIrp(i,STATUS_PENDING);assert(i->Tail.Overlay.Thread==NULL);checks++;
++    init(i,&public_thread);i->Tail.Overlay.CurrentStackLocation->Control=SL_INVOKE_ON_SUCCESS;
++    i->Tail.Overlay.CurrentStackLocation->CompletionRoutine=free_complete;IofCompleteRequest(i,0);
++    assert(apcs==before);checks++;
++}
++int main(int argc,char **argv){
++    unsigned mode=argc>1?(unsigned)strtoul(argv[1],NULL,10):0;
++    NxkThreadViewLowBits=1u<<((uintptr_t)&public_thread&31);
++    native_thread.ThreadsProcess=native_thread.Tcb.ApcState.Process=&process;
++    InitializeListHead(&native_thread.IrpList);InitializeListHead(&public_thread.IrpList);
++    unsigned char memory[sizeof(IRP)+2*sizeof(STACK)] __attribute__((aligned(16)));
++    PIRP i=(PIRP)memory;
++    for(unsigned pub=0;pub<2;pub++)for(unsigned cancel=0;cancel<2;cancel++)for(unsigned other=0;other<2;other++){
++        PETHREAD t=pub?&public_thread:&native_thread;init(i,t);expected_public=t;
++        current=&native_thread;
++        if(mode!=1){IoQueueThreadIrp(i);assert(i->Tail.Overlay.Thread==t&&native_thread.IrpList.Flink==&i->ThreadListEntry&&guarded==0);checks++;}
++        if(mode==2){guarded++;IopUnQueueIrpFromThread(i);guarded--;continue;}
++        i->Tail.Overlay.CurrentStackLocation->Control=SL_INVOKE_ON_SUCCESS;
++        i->Tail.Overlay.CurrentStackLocation->CompletionRoutine=completed;callback_irp=i;
++        if(cancel){i->CancelRoutine=cancelled;assert(IoCancelIrp(i));checks++;}
++        current=other?&other_thread:&native_thread;unsigned before=apcs;
++        IofCompleteRequest(i,0);assert(apcs==before+1);checks++;
++        current=&native_thread;guarded++;IopUnQueueIrpFromThread(i);guarded--;
++        assert(IsListEmpty(&native_thread.IrpList)&&IsListEmpty(&i->ThreadListEntry));checks++;
++    }
++    if(mode==2){puts("queue-only passed");return 0;}
++    for(unsigned pub=0;pub<2;pub++){
++        PETHREAD t=pub?&public_thread:&native_thread;init(i,t);unsigned session=0;DEVICE d;
++        assert(IoGetRequestorProcess(i)==&process);checks++;
++        assert(IoGetRequestorSessionId(i,&session)==0&&session==77);checks++;
++        IoSetDeviceToVerify(t,&d);assert(IoGetDeviceToVerify(&native_thread)==&d);checks++;
++        IoSetHardErrorOrVerifyDevice(i,NULL);assert(IoGetDeviceToVerify(t)==NULL);checks++;
++    }
++    init(i,NULL);i->Cancel=1;unsigned before=cleanups;IofCompleteRequest(i,0);assert(cleanups==before+1);checks++;
++    init(i,NULL);assert(IoGetRequestorProcess(i)==NULL);checks++;
++    assert(callbacks==8&&cancel_calls==4);checks++;
++    /* Exit disassociation clears the shared field before later cancellation completion. */
++    init(i,&public_thread);IoQueueThreadIrp(i);IopDisassociateThreadIrp();
++    assert(i->Tail.Overlay.Thread==NULL&&IsListEmpty(&native_thread.IrpList)&&IsListEmpty(&i->ThreadListEntry));checks++;
++    i->Cancel=TRUE;before=cleanups;IofCompleteRequest(i,0);assert(cleanups==before+1);checks++;
++    for(unsigned success=0;success<2;success++)for(unsigned builder=0;builder<3;builder++){
++        init(i,&native_thread);built=success?i:NULL;PIRP got;
++        if(builder==0)got=XeIoBuildAsynchronousFsdRequest(0,NULL,NULL,0,NULL,NULL);
++        else if(builder==1)got=XeIoBuildSynchronousFsdRequest(0,NULL,NULL,0,NULL,NULL,NULL);
++        else got=XeIoBuildDeviceIoControlRequest(0,NULL,NULL,0,NULL,0,0,NULL,NULL);
++        assert(got==built&&(!got||got->Tail.Overlay.Thread==&public_thread));checks++;
++    }
++    boundary_cases();
++    /* A completion owner can retain and reuse a public packet. */
++    init(i,&public_thread);i->AllocationFlags=7;IoReuseIrp(i,STATUS_PENDING);
++    assert(i->Tail.Overlay.Thread==NULL&&i->IoStatus.Status==STATUS_PENDING&&i->AllocationFlags==7);checks++;
++    printf("irp_thread_checks=%u passed; completion_callbacks=%u cancel_callbacks=%u\n",checks,callbacks,cancel_calls);
++}

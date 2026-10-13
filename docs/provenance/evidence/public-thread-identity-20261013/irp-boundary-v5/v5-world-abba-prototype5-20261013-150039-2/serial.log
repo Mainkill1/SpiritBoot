@@ -1,0 +1,59 @@
+TAP version 14
+ok 1 - establish the same title framebuffer mode
+ok 2 - initialize a GPU-backed title framebuffer
+ok 3 - GPU framebuffer presented before timed requests
+ok 4 - allocate aligned replay buffer
+# world path=\Device\Harddisk0\Partition3\FarmersLipShort.res status=00000000
+ok 5 - open retained private world resource
+# queue begin phase=0 dataset=0 depth=1 pages=14305
+ok 6 - queued world data matches reference SHA1
+# queue phase=0 dataset=0 depth=1 pages=14305 batch_us=105451 pending=1024 ready=5 hash=04953067 sha1=b21b3a6ebc51c149b0cd94cdb50d237027c25170
+# queue timing submit_total=42323 p50=36 p95=58 max=1205 complete_total=103540 p50=88 p95=140 max=1666
+# queue begin phase=0 dataset=1 depth=1 pages=14305
+ok 7 - queued world data matches reference SHA1
+# queue phase=0 dataset=1 depth=1 pages=14305 batch_us=94934 pending=1024 ready=6 hash=0df9bcd8 sha1=9000a2c4d834f1ee1bbc2752cd042d4895a3b8f0
+# queue timing submit_total=38078 p50=34 p95=56 max=144 complete_total=93171 p50=81 p95=130 max=1127
+# queue begin phase=0 dataset=0 depth=4 pages=14305
+ok 8 - queued world data matches reference SHA1
+# queue phase=0 dataset=0 depth=4 pages=14305 batch_us=85123 pending=1024 ready=25 hash=04953067 sha1=b21b3a6ebc51c149b0cd94cdb50d237027c25170
+# queue timing submit_total=62935 p50=60 p95=125 max=324 complete_total=213749 p50=192 p95=363 max=1211
+# queue begin phase=0 dataset=1 depth=4 pages=14305
+ok 9 - queued world data matches reference SHA1
+# queue phase=0 dataset=1 depth=4 pages=14305 batch_us=74893 pending=1024 ready=19 hash=0df9bcd8 sha1=9000a2c4d834f1ee1bbc2752cd042d4895a3b8f0
+# queue timing submit_total=55117 p50=57 p95=112 max=192 complete_total=187652 p50=181 p95=274 max=659
+# queue begin phase=0 dataset=0 depth=12 pages=14305
+ok 10 - queued world data matches reference SHA1
+# queue phase=0 dataset=0 depth=12 pages=14305 batch_us=75829 pending=1024 ready=30 hash=04953067 sha1=b21b3a6ebc51c149b0cd94cdb50d237027c25170
+# queue timing submit_total=66118 p50=63 p95=131 max=296 complete_total=482791 p50=462 p95=829 max=1259
+# queue begin phase=0 dataset=1 depth=12 pages=14301
+ok 11 - queued world data matches reference SHA1
+# queue phase=0 dataset=1 depth=12 pages=14301 batch_us=74067 pending=1024 ready=17 hash=0df9bcd8 sha1=9000a2c4d834f1ee1bbc2752cd042d4895a3b8f0
+# queue timing submit_total=64481 p50=63 p95=128 max=275 complete_total=490955 p50=469 p95=825 max=1716
+ok 12 - reach equal 900-page pressure
+# queue begin phase=1 dataset=0 depth=1 pages=900
+ok 13 - queued world data matches reference SHA1
+# queue phase=1 dataset=0 depth=1 pages=900 batch_us=98642 pending=1024 ready=2 hash=04953067 sha1=b21b3a6ebc51c149b0cd94cdb50d237027c25170
+# queue timing submit_total=40373 p50=36 p95=56 max=183 complete_total=96731 p50=87 p95=139 max=1043
+# queue begin phase=1 dataset=1 depth=1 pages=900
+ok 14 - queued world data matches reference SHA1
+# queue phase=1 dataset=1 depth=1 pages=900 batch_us=92836 pending=1024 ready=4 hash=0df9bcd8 sha1=9000a2c4d834f1ee1bbc2752cd042d4895a3b8f0
+# queue timing submit_total=38230 p50=35 p95=52 max=187 complete_total=91088 p50=82 p95=122 max=1083
+# queue begin phase=1 dataset=0 depth=4 pages=900
+ok 15 - queued world data matches reference SHA1
+# queue phase=1 dataset=0 depth=4 pages=900 batch_us=80450 pending=1024 ready=21 hash=04953067 sha1=b21b3a6ebc51c149b0cd94cdb50d237027c25170
+# queue timing submit_total=60506 p50=61 p95=117 max=237 complete_total=200250 p50=191 p95=299 max=1195
+# queue begin phase=1 dataset=1 depth=4 pages=900
+ok 16 - queued world data matches reference SHA1
+# queue phase=1 dataset=1 depth=4 pages=900 batch_us=75763 pending=1024 ready=24 hash=0df9bcd8 sha1=9000a2c4d834f1ee1bbc2752cd042d4895a3b8f0
+# queue timing submit_total=57111 p50=60 p95=109 max=239 complete_total=189540 p50=186 p95=277 max=705
+# queue begin phase=1 dataset=0 depth=12 pages=900
+ok 17 - queued world data matches reference SHA1
+# queue phase=1 dataset=0 depth=12 pages=900 batch_us=78174 pending=1024 ready=23 hash=04953067 sha1=b21b3a6ebc51c149b0cd94cdb50d237027c25170
+# queue timing submit_total=69104 p50=64 p95=133 max=274 complete_total=496599 p50=469 p95=859 max=1408
+# queue begin phase=1 dataset=1 depth=12 pages=900
+ok 18 - queued world data matches reference SHA1
+# queue phase=1 dataset=1 depth=12 pages=900 batch_us=72725 pending=1024 ready=22 hash=0df9bcd8 sha1=9000a2c4d834f1ee1bbc2752cd042d4895a3b8f0
+# queue timing submit_total=63393 p50=62 p95=123 max=244 complete_total=472016 p50=450 p95=808 max=1292
+ok 19 - close read-only world resource
+# checks=19 failures=0
+1..19
