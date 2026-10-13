@@ -17,9 +17,12 @@ static struct {
     ULONG suffix[128];
 } guarded;
 static KEVENT observed;
+static KDPC observed_dpc;
 static volatile ULONG callback_count;
 static volatile ULONG callback_interrupt;
 static volatile ULONG callback_context;
+static volatile ULONG dpc_count;
+static volatile ULONG dpc_irql;
 static ULONG owned_context = 0x49525133UL;
 static unsigned checks;
 static unsigned failures;
@@ -31,6 +34,17 @@ static void check(int pass, const char *name)
     else { ++failures; tap_not_ok(checks, name); }
 }
 
+static VOID NTAPI signal_observed(PKDPC dpc, PVOID context,
+                                 PVOID argument1, PVOID argument2)
+{
+    (void)dpc;
+    (void)argument1;
+    (void)argument2;
+    dpc_irql = KeGetCurrentIrql();
+    ++dpc_count;
+    KeSetEvent((PKEVENT)context, 0, FALSE);
+}
+
 static BOOLEAN NTAPI service(PKINTERRUPT interrupt, PVOID context)
 {
     if (!(PCRTC_INTR & VBLANK)) return FALSE;
@@ -38,7 +52,9 @@ static BOOLEAN NTAPI service(PKINTERRUPT interrupt, PVOID context)
     callback_interrupt = (ULONG)interrupt;
     callback_context = (ULONG)context;
     ++callback_count;
-    KeSetEvent(&observed, 0, FALSE);
+    /* Event signaling requires DISPATCH_LEVEL or below. The ISR runs
+     * at DIRQL; defer signaling through an owned DPC. */
+    KeInsertQueueDpc(&observed_dpc, NULL, NULL);
     return TRUE;
 }
 
@@ -74,6 +90,7 @@ int main(void)
     tap_version(14);
     memset(&guarded, 0xa5, sizeof(guarded));
     KeInitializeEvent(&observed, NotificationEvent, FALSE);
+    KeInitializeDpc(&observed_dpc, signal_observed, &observed);
     vector = HalGetInterruptVector(3, &irql);
     tap_comment("public_object=%08lx bytes=%lu irq3_vector=%lu irql=%u context=%08lx",
                 (ULONG)&guarded.interrupt, (ULONG)sizeof(KINTERRUPT), vector,
@@ -115,10 +132,14 @@ int main(void)
     PMC_INTR_ENABLE = pmc;
     PCRTC_INTR = VBLANK;
     disconnected = connected ? KeDisconnectInterrupt(&guarded.interrupt) : FALSE;
+    KeRemoveQueueDpc(&observed_dpc);
     PCRTC_INTR_ENABLE = pcrtc;
-    tap_comment("wait=%08lx callbacks=%lu received_object=%08lx received_context=%08lx",
-                (ULONG)wait_status, callback_count, callback_interrupt, callback_context);
-    check(wait_status == STATUS_SUCCESS && callback_count != 0, "bounded vblank interrupt reaches the owned handler");
+    tap_comment("wait=%08lx callbacks=%lu received_object=%08lx received_context=%08lx dpcs=%lu dpc_irql=%lu",
+                (ULONG)wait_status, callback_count, callback_interrupt, callback_context,
+                dpc_count, dpc_irql);
+    check(wait_status == STATUS_SUCCESS && callback_count != 0 &&
+          dpc_count != 0 && dpc_irql == DISPATCH_LEVEL,
+          "bounded vblank interrupt and deferred notification reach the owned handlers");
     check(callback_interrupt == (ULONG)&guarded.interrupt, "handler receives the original public interrupt object");
     check(callback_context == (ULONG)&owned_context, "handler receives the supplied context");
     check(disconnected, "owned interrupt disconnects");

@@ -880,23 +880,25 @@ index 00000000..c3e7c89e
 +include $(NXDK_DIR)/Makefile
 diff --git a/tests/xbe/interrupt-public-abi/README.md b/tests/xbe/interrupt-public-abi/README.md
 new file mode 100644
-index 00000000..45e5e92f
+index 00000000..ec148fb3
 --- /dev/null
 +++ b/tests/xbe/interrupt-public-abi/README.md
-@@ -0,0 +1,7 @@
+@@ -0,0 +1,9 @@
 +# Public interrupt ABI probe
 +
-+This independently authored XBE checks the 112-byte Xbox interrupt object, public initialization fields, Connected transitions, bounds guards, and actual NV2A IRQ3 callback identity/context. It does not inspect reference implementation instructions. A real vblank triggers the handler and a two-second wait bounds delivery. The probe restores the saved PMC/PCRTC enables, disconnects, prints its 17 numbered TAP checks, and requests power-off.
++This independently authored XBE checks the 112-byte Xbox interrupt object, public initialization fields, Connected transitions, bounds guards, and actual NV2A IRQ3 callback identity/context. It does not inspect reference implementation instructions. A real vblank triggers the handler, which queues an owned DPC to signal the event at DISPATCH_LEVEL. A two-second wait bounds delivery. The probe masks the source, disconnects, removes its queued DPC, restores the saved PMC/PCRTC enables, prints its 17 numbered TAP checks, and requests power-off.
 +
 +Build with the pinned nxdk container from `sources/firmware-lock.json` and run on a fresh 64 MiB xemu session with COM1 capture. The original test payload is frozen in the accompanying provenance evidence. See `docs/provenance/TITLE_INTERRUPT_PUBLIC_ABI.md` for controls and limits.
 +
 +This checks cold-boot interrupt behavior. Hardware testing, live connected reinitialization, and title-generated public dispatch code are outside this probe.
++
++The historical V2 payload signaled the event directly from DIRQL. It passed the released/reference/candidate release comparison, but checked-firmware CI caught the event routine's IRQL assertion after check 11. The maintained V3 probe defers that signal and requires actual DPC delivery at DISPATCH_LEVEL within check 12. Historical payloads and failed CI receipts remain evidence; they are not substitutes for complete V3 TAP on checked profiles.
 diff --git a/tests/xbe/interrupt-public-abi/main.c b/tests/xbe/interrupt-public-abi/main.c
 new file mode 100644
-index 00000000..89e1e0c4
+index 00000000..56201257
 --- /dev/null
 +++ b/tests/xbe/interrupt-public-abi/main.c
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,149 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later
 + * Independently authored public ABI probe; no reference implementation input.
 + */
@@ -916,9 +918,12 @@ index 00000000..89e1e0c4
 +    ULONG suffix[128];
 +} guarded;
 +static KEVENT observed;
++static KDPC observed_dpc;
 +static volatile ULONG callback_count;
 +static volatile ULONG callback_interrupt;
 +static volatile ULONG callback_context;
++static volatile ULONG dpc_count;
++static volatile ULONG dpc_irql;
 +static ULONG owned_context = 0x49525133UL;
 +static unsigned checks;
 +static unsigned failures;
@@ -930,6 +935,17 @@ index 00000000..89e1e0c4
 +    else { ++failures; tap_not_ok(checks, name); }
 +}
 +
++static VOID NTAPI signal_observed(PKDPC dpc, PVOID context,
++                                 PVOID argument1, PVOID argument2)
++{
++    (void)dpc;
++    (void)argument1;
++    (void)argument2;
++    dpc_irql = KeGetCurrentIrql();
++    ++dpc_count;
++    KeSetEvent((PKEVENT)context, 0, FALSE);
++}
++
 +static BOOLEAN NTAPI service(PKINTERRUPT interrupt, PVOID context)
 +{
 +    if (!(PCRTC_INTR & VBLANK)) return FALSE;
@@ -937,7 +953,9 @@ index 00000000..89e1e0c4
 +    callback_interrupt = (ULONG)interrupt;
 +    callback_context = (ULONG)context;
 +    ++callback_count;
-+    KeSetEvent(&observed, 0, FALSE);
++    /* Event signaling requires DISPATCH_LEVEL or below. The ISR runs
++     * at DIRQL; defer signaling through an owned DPC. */
++    KeInsertQueueDpc(&observed_dpc, NULL, NULL);
 +    return TRUE;
 +}
 +
@@ -973,6 +991,7 @@ index 00000000..89e1e0c4
 +    tap_version(14);
 +    memset(&guarded, 0xa5, sizeof(guarded));
 +    KeInitializeEvent(&observed, NotificationEvent, FALSE);
++    KeInitializeDpc(&observed_dpc, signal_observed, &observed);
 +    vector = HalGetInterruptVector(3, &irql);
 +    tap_comment("public_object=%08lx bytes=%lu irq3_vector=%lu irql=%u context=%08lx",
 +                (ULONG)&guarded.interrupt, (ULONG)sizeof(KINTERRUPT), vector,
@@ -1014,10 +1033,14 @@ index 00000000..89e1e0c4
 +    PMC_INTR_ENABLE = pmc;
 +    PCRTC_INTR = VBLANK;
 +    disconnected = connected ? KeDisconnectInterrupt(&guarded.interrupt) : FALSE;
++    KeRemoveQueueDpc(&observed_dpc);
 +    PCRTC_INTR_ENABLE = pcrtc;
-+    tap_comment("wait=%08lx callbacks=%lu received_object=%08lx received_context=%08lx",
-+                (ULONG)wait_status, callback_count, callback_interrupt, callback_context);
-+    check(wait_status == STATUS_SUCCESS && callback_count != 0, "bounded vblank interrupt reaches the owned handler");
++    tap_comment("wait=%08lx callbacks=%lu received_object=%08lx received_context=%08lx dpcs=%lu dpc_irql=%lu",
++                (ULONG)wait_status, callback_count, callback_interrupt, callback_context,
++                dpc_count, dpc_irql);
++    check(wait_status == STATUS_SUCCESS && callback_count != 0 &&
++          dpc_count != 0 && dpc_irql == DISPATCH_LEVEL,
++          "bounded vblank interrupt and deferred notification reach the owned handlers");
 +    check(callback_interrupt == (ULONG)&guarded.interrupt, "handler receives the original public interrupt object");
 +    check(callback_context == (ULONG)&owned_context, "handler receives the supplied context");
 +    check(disconnected, "owned interrupt disconnects");
