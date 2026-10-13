@@ -1,5 +1,59 @@
 # Public thread identity and terminal status
 
+The initial full CI matrix exposed an additional IRP thread-pointer boundary
+regression after the release-only qualification below. The follow-up IRP
+boundary fix is described in the final section. Its full checked runtime and
+corrected expanded native qualification are still pending; the draft remains
+blocked for integration until they pass.
+
+## IRP boundary follow-up (v5, native qualification pending)
+
+PR233's exact checked64 CI run 38405100975 completed all 639 API tests,
+including `io/threadirp` 505–508. Initial PR234 run 38408986927 stopped after
+505: `IopQueueIrpToThread` treated public `Tail.Overlay.Thread` as native
+ETHREAD and asserted in its guarded-region operation. The harness timeout
+followed that runtime assertion; both release jobs also failed. These results
+supersede any inference of full correctness from the earlier v4 release tests.
+
+Patch `0109a-public-irp-thread-boundaries.patch` keeps the shared IRP and its
+published thread field. Native consumers resolve a local pointer for queueing,
+completion APC targeting, process/session lookup, hard-error handling, device
+verification and FSRTL process reads. Native pointers with a negative address
+residue avoid lookup. Public builders publish the identity on return. Dispatch
+and all three StartIo entry paths publish before callbacks only for the
+existing `TitleOwnedDriver` provenance flag. No packet access is added after a
+callback that may pend, forward, retain, reuse or free it. Native-only packets
+retain their original representation.
+
+No packet allocation, reference or lifetime cache is added. The native IRP list
+remains authoritative. Existing disassociation clears the shared thread field;
+reinitialization clears ownership and list membership. The public intrusive
+IRP list is not mirrored, and live scheduler fields remain outside this scope.
+
+The new actual-source ASan/UBSan suite passes 69 assertions: both identities,
+queue/unqueue, issuer/other-thread completion, cancellation, orphan cleanup
+after actual disassociation, native→title→native forwarding, all StartIo
+entries, freeing callbacks, MORE_PROCESSING_REQUIRED, reuse, and builder
+success/failure. All 89 workflow source checks pass; an independent review
+also reran the 69 new checks. Host dispatch/IRQL/allocation primitives are
+models, so native guest qualification is still required.
+
+The first Complex public oracle passed 57/57. An expanded fixture passed its
+first 73 checks on Complex and v5, then used an invalid buffered read reporting
+0x1234 bytes for a 32-byte request. That fixture is excluded from qualification
+and preserved separately. The corrected case must pass Complex before rerun
+on the candidate.
+
+Exact source tree: `c5a4fb8a95538e2f976cfa933395857e38bd3d57`.
+Release64 ROM: `d542171d60701f7fdab977b047458d27d40d713f235b7251c6af3eb88a27c2f9`.
+Checked64 ROM: `77169666082d8c52d0960a6c4df094537d2a7680021d36d7aa811c8ddee6a4c5`.
+These are distinct from the original v4 and combined async5 receipts below.
+[CI failure excerpts and host receipts](evidence/public-thread-identity-20261013/irp-boundary-v5/)
+retain that distinction. Corrected native tests and the new full CI matrix are
+pending; this draft remains blocked for integration.
+
+## Original thread identity implementation and qualification
+
 Public thread references previously exposed the native `ETHREAD`, while
 `KeGetCurrentThread` returned a different, 0x80-byte public shadow. The public
 `GetExitCodeThread` wrapper reads `HasTerminated` at 0x77 and `ExitStatus` at
