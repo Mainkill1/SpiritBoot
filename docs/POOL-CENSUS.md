@@ -4,8 +4,8 @@ The pool census is an opt-in diagnostic build for SpiritBoot issue [#213](https:
 
 It does not change the allocator's size classes or the normal release image. The diagnostic build uses fixed preallocated counters and adds work to pool allocation/free paths, so do not use it for performance comparisons.
 
-The current integration starts from SpiritBoot product commit
-`ac1544c06384b1907a2183b3d33fb5bdf8341993` and kernel commit
+The current integration starts from merged SpiritBoot product commit
+`e250e9924fc738ffd2502264a6f5559ca534ec43` and kernel commit
 `f852bb55d26b75008e5bcedae27ef798cf2dffcc` (tree
 `d5e5c40cb66deb63d31030668ee04e61877e3b64`). Diagnostic patches 104 through
 109 produce kernel commit `0b050104253b4cdd1ecc8bc1dec939ab87ce543f`,
