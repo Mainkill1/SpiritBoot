@@ -17,7 +17,7 @@ Each mean contains four batches: two runs × two distinct recorded request seque
 
 ## Cause and limits
 
-Prior fully accounted RDTSC capture identified about 4.9–5.2 ms/1,024 in the interval containing the channel active-slot bitmap store, compared with about 0.05 us for an ordinary private bitmap store. Native address capture proved the channel bitmap and executed KINTERRUPT DispatchCode share physical page 03baa000, while the request-status store is on a different page. Owned xemu code routes stores to translated-code pages through its code-write slow path and TB-range lookup; a disjoint data write need not invalidate the IRQ stub itself. The correct mechanism claim is repeated code-page write handling, not necessarily repeated destruction of an overlapping TB.
+Prior fully accounted RDTSC capture identified about 4.9–5.2 ms/1,024 in the interval containing the channel active-slot bitmap store, compared with about 0.05 us for an ordinary private bitmap store. Native address capture proved the channel bitmap and executed KINTERRUPT DispatchCode share physical page 03baa000, while the request-status store is on a different page. Original xemu code routes stores to translated-code pages through its code-write slow path. In the Xbox system build, tb-maint.c disables the byte-range overlap test under XBOX and invalidates all translated blocks on that physical page. The completion bitmap write therefore invalidates the IRQ stub despite their disjoint byte offsets; its next invocation needs translation again. This corrects the earlier scan-only interpretation, which missed the XBOX conditional. See IRQ-CODE-PAGE-MECHANISM.md for exact source evidence.
 
 The candidate routes each PIC vector through immutable kernel code while retaining native interrupt objects, callback/IRQL/PIC behavior, and existing object lifetimes. This causally removes executable stubs from the shared mutable pool page. The ~27 ms replay gain exceeds the single ~5 ms isolated bitmap interval: other writes to that shared page can also avoid slow handling. A matched diagnostic pair is planned to test the individual interval on async4 with/without the static-vector patch. Until then, do not attribute the entire gain to the single bitmap instruction.
 
@@ -33,3 +33,7 @@ No extra resident page was added: owned PE sections retain their addresses and r
 - Launch script: run-irq-static.ps1. Scheduled task CodexStorageIRQStatic20261013 completed 0.
 - Raw receipts: evidence/storage-irq-static-stock-*-20261013-142935-*.
 - Parsed validation and all phase values: irq-static-results.json; regenerate with analyze-irq-static.py.
+
+## Follow-up attribution
+
+The matched RDTSC pair is complete: completion bitmap mean5.025→0.124ms/1024 and actual IDT entry moves off shared physical page while pool addresses stay identical. Submission channel stores were already cheap, so they do not explain the entire27ms gain. Full counts, quiet/disturbed accounting and clocks are in IRQ-MATCHED-ATTRIBUTION.md.
