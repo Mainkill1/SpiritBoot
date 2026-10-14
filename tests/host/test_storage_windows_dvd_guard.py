@@ -117,6 +117,41 @@ class WindowsDvdGuardTests(unittest.TestCase):
         }
         ''')
 
+    def test_pipe_fields_preserve_first_equals_and_reject_malformed_duplicates(self):
+        with tempfile.TemporaryDirectory(prefix='pr248-win-pipe-fields-') as temporary:
+            path=Path(temporary)/'receipt.txt'
+            path.write_text('\nidentity=DESKTOP\\codex\narguments=-qmp tcp:127.0.0.1:1234,server=on,wait=off\nempty=\ntext=  keep = all  \nCase=one\ncase=two\n')
+            quoted=str(path).replace("'","''")
+            self.invoke("$r=Read-Pr248Fields '"+quoted+"';"+r'''
+                Assert-Pr248 ($r['arguments'] -ceq '-qmp tcp:127.0.0.1:1234,server=on,wait=off' -and
+                    $r['empty'] -ceq '' -and $r['text'] -ceq '  keep = all  ' -and
+                    $r['Case'] -ceq 'one' -and $r['case'] -ceq 'two') 'pipe field value/ordinal key changed';
+            ''')
+            for value in ['missing delimiter\n','key=one\nkey=two\n']:
+                path.write_text(value)
+                self.invoke("$rejected=$false;try{Read-Pr248Fields '"+quoted+"'|Out-Null}catch{$rejected=$true};"
+                            "Assert-Pr248 $rejected 'malformed/duplicate receipt accepted'")
+
+    def test_framework_split_overload_surface_reproduces_native_failure(self):
+        # Emulate only the Framework String overload surface/enum validity,
+        # not native PowerShell5.1 execution. The actual V3 failure is retained.
+        self.invoke(r'''
+            Add-Type -TypeDefinition @'
+using System;
+public sealed class Pr248FrameworkSplitSurface {
+ private readonly string value;
+ public Pr248FrameworkSplitSurface(string value) { this.value=value; }
+ public string[] Split(char[] separators, int count) { return value.Split(separators,count); }
+ public string[] Split(string[] separators, StringSplitOptions options) {
+  if ((int)options<0 || (int)options>1) throw new ArgumentException("Framework enum2 invalid");
+  return value.Split(separators,options);
+ }
+}
+'@;
+            $rejected=$false;try{[void]([Pr248FrameworkSplitSurface]::new('key=a=b').Split(@('='),2))}
+            catch{$rejected=$true};Assert-Pr248 $rejected 'Framework ambiguous enum surface did not reproduce';
+        ''')
+
     def test_route_guard_rejects_foreign_ambiguous_locked_or_writable_media(self):
         self.invoke(r'''
         $package=[IO.Path]::GetFullPath('owned-package');

@@ -87,9 +87,12 @@ function Read-Pr248Fields([string]$Path) {
     $value = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
     foreach ($line in [IO.File]::ReadAllLines($Path)) {
         if (!$line) { continue }
-        $parts = $line.Split(@('='),2)
-        Assert-Pr248 ($parts.Count -eq 2 -and !$value.ContainsKey($parts[0])) 'Malformed/duplicate pipe receipt'
-        $value.Add($parts[0],$parts[1])
+        # Avoid PS5.1 binding the two arguments to StringSplitOptions(enum2).
+        $delimiter = $line.IndexOf([char]'=')
+        Assert-Pr248 ($delimiter -ge 0) 'Malformed/duplicate pipe receipt'
+        $key = $line.Substring(0,$delimiter)
+        Assert-Pr248 (!$value.ContainsKey($key)) 'Malformed/duplicate pipe receipt'
+        $value.Add($key,$line.Substring($delimiter+1))
     }
     return ,$value
 }
