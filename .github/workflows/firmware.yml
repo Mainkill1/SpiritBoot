@@ -55,7 +55,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 7e891ec86f42b1313e5cd3453347836ac451ba79
+            test "$actual_tree" = 8231cceb5e3ecd578499fa0d2fbf421f0143642c
             python3 "$GUEST_SOURCE/tests/host/nxstorage/check.py" "$output/nxstorage" >"$output/nxstorage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
