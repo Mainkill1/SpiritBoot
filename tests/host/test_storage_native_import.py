@@ -58,7 +58,7 @@ def evaluate(attempt,evidence,observed):
 '''
 
 
-def portable_capture(folder, tool, *, kind=None, cache_policy=None, pressure_pages=None):
+def portable_capture(folder, tool, *, kind=None, cache_policy=None, pressure_pages=None, variant=None):
     """Invented native receipts exercising the general importer in a clean checkout."""
     comp = comparator_fixtures.load_tool()
     (folder / "collector.py").write_text(DOUBLE)
@@ -85,7 +85,8 @@ def portable_capture(folder, tool, *, kind=None, cache_policy=None, pressure_pag
     comparator_fixtures.reseal_fixture(schedule)
     job = next(job for job in schedule['jobs'] if (kind is None or job['case']['kind']==kind)
                and (cache_policy is None or job['cache_policy']==cache_policy)
-               and (pressure_pages is None or job['case'].get('pressure_pages')==pressure_pages))
+               and (pressure_pages is None or job['case'].get('pressure_pages')==pressure_pages)
+               and (variant is None or job['case'].get('variant')==variant))
     case=job["case"];entry=spec["artifact_policy"]["cases"][case["id"]]
     native_id, run = "invented-native-attempt", "invented-native-run"
     binding = {"schema_version":1,"scheduled_attempt_id":job["attempt_id"],
@@ -104,11 +105,18 @@ def portable_capture(folder, tool, *, kind=None, cache_policy=None, pressure_pag
         "bytes_completed_expected":case['bytes_per_operation']*case['operations'],
         "assertions_expected":case['assertions'],"expected_sha256":case['expected_sha256']}
     if case.get('pressure_pages',0)>0:expected['pressure_target_pages']=case['pressure_pages']
+    if 'request_vectors' in case:expected['request_vectors']=copy.deepcopy(case['request_vectors'])
     attempt={"id":native_id,"request_path":"request.json","request_sha256":sha(request),
         "input_directory":"inputs","expected_inputs":{"aa-binding.json":sha(aa),"xemu":job['manifest']['xemu_sha256'],
         "flash.bin":job['manifest']['flash_sha256'],"storage-perf.iso":entry['boot_iso']['sha256']},
         "recorder_xbe_sha256":entry['recorder_xbe']['sha256'],"expected_case":expected,
         "seed_request_mode":"prepared_xiso","performance_acceptance_eligible":False,"tracing_enabled":False}
+    if case['kind']=='dvd-xiso':
+        attempt['expected_inputs']['target.iso']=entry['original_released_iso']['sha256']
+        attempt['expected_media_device_hypothesis']='ide0-cd1'
+        attempt['dvd_binding']={'mode':'DVD-fixed-wrapper','exact_original_media_parity':False,
+            'boot_wrapper_iso_sha256':entry['boot_iso']['sha256'],
+            'original_released_iso_sha256':entry['original_released_iso']['sha256']}
     plan={"schema_version":1,"parser_sha256":sha(ROOT/'tools/storage_native_runner.py'),"attempts":[attempt],
         "method_source_pins":{"storage-post-context.py":sha(ROOT/'tests/xbe/storage-perf/storage-post-context.py')},
         "timing_calibration_eligible":True,"timing_scope":"within-host-relative-AA",
@@ -128,7 +136,7 @@ def portable_capture(folder, tool, *, kind=None, cache_policy=None, pressure_pag
     prepared=dict(Sha256='2'*64,Bytes=1310720,SeedSha256=entry['hdd_seed']['sha256'],
         DiskAssetId=entry['hdd_seed']['asset_id'],Destination='hdd.qcow2')
     inputs=[dict(Path=k,Sha256=v,ExpectedSha256=v,Verified=True) for k,v in attempt['expected_inputs'].items()]
-    input_manifest=dict(RuntimeFiles=[prepared,dict(Destination='eeprom.bin',Sha256=job['manifest']['eeprom_sha256'],Bytes=256)],Inputs=inputs)
+    input_manifest=dict(PackageDirectory='/invented/package',RuntimeFiles=[prepared,dict(Destination='eeprom.bin',Sha256=job['manifest']['eeprom_sha256'],Bytes=256)],Inputs=inputs)
     write(evidence,'input-manifest.json',input_manifest)
     launch=dict(runId=run,job=native_id,executableSha256='1'*64,startPaused=False)
     write(evidence,'launch.json',launch)
@@ -155,6 +163,12 @@ def portable_capture(folder, tool, *, kind=None, cache_policy=None, pressure_pag
         start_time_at_end='123',exe_path_at_end='/invented/xemu',clock_context=clock,
         serial_end=dict(strict_successful_END_verified=True,sha256=sha(evidence/'native-serial.log'),bytes=len(raw.encode()),offset_at_eof=len(raw.encode())),
         post_state=dict(status='shutdown',running=False))
+    if case['kind']=='dvd-xiso':
+        name='/invented/package/storage-perf.iso'
+        post['recorder']={'path':name,'sha256':entry['boot_iso']['sha256'],'bytes':entry['boot_iso']['bytes']}
+        post['actual_route']={'device':'ide0-cd1','actual_inserted_path':name,'raw_block':{
+            'device':'ide0-cd1','removable':True,'locked':False,
+            'inserted':{'file':name,'ro':True,'drv':'raw'}}}
     write(evidence,'native-storage-post-context.json',post)
     (evidence/'native-host-controls.txt').write_text('pid=42\nuid=1000\npolicy=dynamic powersave\n')
     write(evidence,'diagnostics/run-state/report.json',dict(Status='complete',ComparisonReady=True,DriverNamespaceVerified=True,CacheMode='cold',Issues=[]))
@@ -416,3 +430,76 @@ class RetainedDeckArchive(unittest.TestCase):
         checked=importer._context(evidence,raw,job)
         self.assertEqual(checked['clock_context']['libc_file']['binding_method'],'btrfs-root-subvolume-map-files')
         self.assertNotEqual(checked['clock_context']['libc_file']['device'],checked['clock_context']['libc_file']['mapped_device'])
+
+
+class PortableDvdMediaImporter(unittest.TestCase):
+    importer = PortableNativeImporter.importer
+    def test_DVD_emitter_populates_actual_wrapper_and_separate_original_before_comparator(self):
+        for variant in ('standard','alternate'):
+            with self.subTest(variant=variant),tempfile.TemporaryDirectory() as temp:
+                f=portable_capture(pathlib.Path(temp),load_tool(),kind='dvd-xiso',variant=variant)
+                importer=self.importer(f);importer.configure_schedule(f['schedule'],artifact_root=f['folder'],clock_review_sha256=f['clock_review_sha256'])
+                row=importer.emit_job(f['native_id'],output_root=f['folder'])
+                self.assertTrue(row['timing_qualified_for_declared_scope'],row.get('eligibility_reasons'))
+                self.assertEqual(row.get('media_sha256'),f['job']['case']['iso_sha256'])
+                entry=f['schedule']['spec']['artifact_policy']['cases'][row['case_id']]
+                self.assertEqual(row['original_released_iso_sha256'],entry['original_released_iso']['sha256'])
+                self.assertNotEqual(row['media_sha256'],row['original_released_iso_sha256'])
+                self.assertFalse(row['exact_original_media_parity']);self.assertEqual(row['media_method'],'fixed-wrapper')
+                comp=comparator_fixtures.load_tool();metrics,issues,failures,_=comp.inspect_records(f['schedule'],[row],evidence_root=f['folder'])
+                self.assertIn(row['attempt_id'],metrics);self.assertEqual([x for x in issues if not x.endswith('missing attempt')],[]);self.assertEqual(failures,[])
+
+class RetainedDvdMediaImporter(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        location=os.environ.get('STORAGE_NATIVE_IMPORT_CYCLE72')
+        if not location:raise unittest.SkipTest('set immutable actual first72 archive; no live ledger reads')
+        cls.archive=pathlib.Path(location);cls.freeze=cls.archive/'deck-aa-v352-preparation'
+        path=cls.archive/'v352-first-cycle-import.jsonl'
+        assert sha(path)=='70738c086e853b459bf3c941fc3a8d9992ea4867f6ca79fe85a90e32493896db'
+        cls.rows=[json.loads(x) for x in path.read_text().splitlines()];cls.schedule=json.loads((cls.freeze/'schedule.json').read_text());cls.plan=json.loads((cls.freeze/'qualification-plan.json').read_text())
+        cls.comp=comparator_fixtures.load_tool();cls.tool=load_tool();cls.importer=cls.tool.NativeImporter.__new__(cls.tool.NativeImporter)
+        cls.importer.comp=cls.comp;cls.importer.artifact_root=cls.freeze
+    def data(self,row):
+        job=next(j for j in self.schedule['jobs'] if j['attempt_id']==row['attempt_id']);attempt=next(a for a in self.plan['attempts'] if a['id']==row['native_attempt_id']);entry=self.schedule['spec']['artifact_policy']['cases'][row['case_id']]
+        manifest=json.loads((self.archive/'evidence'/row['native_run_id']/'input-manifest.json').read_text())
+        return copy.deepcopy(attempt),copy.deepcopy(manifest),copy.deepcopy(job['case']),copy.deepcopy(entry),copy.deepcopy(row['dvd_media']['post'])
+    def test_actual72_red_shape_then_diagnostic_corrected_fields_cover_both_DVD_variants(self):
+        metrics,issues,failures,_=self.comp.inspect_records(self.schedule,self.rows,evidence_root=self.freeze)
+        self.assertEqual(len(metrics),64);self.assertEqual(sum('optical variant media hash mismatch' in x for x in issues),8)
+        repaired=copy.deepcopy(self.rows);observed=set()
+        for row in repaired:
+            if row['case_id'].startswith('dvd-'):
+                values=self.data(row);fields=self.importer._dvd_media_fields(*values);row.update(fields)
+                self.assertEqual(row['media_sha256'],values[2]['iso_sha256']);self.assertFalse(row['exact_original_media_parity'])
+                self.assertEqual(row['dvd_media'],next(r['dvd_media'] for r in self.rows if r['attempt_id']==row['attempt_id']))
+                observed.add((row['media_sha256'],row['original_released_iso_sha256']))
+        self.assertEqual(observed,{('6b8c26ab5201eef7d213d6329b5cddc225a8c2f60c403df7ae48491ecd5d0bd7','8d01028844e508629d3f73481714ad46ea9931ba55f35956f28d7121f9eba475'),('9c3e20d49cad3886f0b341b4bfe4c4f24c5afa9c13632f09e246d0ac67d4d180','099d161a6010499cb86be58ccd2297a8be8802d8b8f4b97f7ef720ff5d0d6d33')})
+        metrics,issues,failures,_=self.comp.inspect_records(self.schedule,repaired,evidence_root=self.freeze)
+        self.assertEqual(len(metrics),72);self.assertEqual(sum(x.endswith('missing attempt') for x in issues),288)
+        self.assertEqual([x for x in issues if not x.endswith('missing attempt')],[]);self.assertEqual(failures,[])
+        # This is diagnostic dictionary repair, not a new clock verifier/schedule
+        # qualification. Original rows, proofs, context and immutable plan remain unchanged.
+    def test_actual_original_input_and_wrapper_route_faults_reject(self):
+        row=next(r for r in self.rows if r['case_id'].startswith('dvd-'))
+        for fault in ('missing_original','wrong_original','wrong_expected_original','unverified_original','duplicate_original','coherent_foreign_original','missing_frozen_original','wrong_wrapper','wrong_route','writable_route','parity_claim'):
+            with self.subTest(fault=fault):
+                a,m,c,e,p=self.data(row);original=next(x for x in m['Inputs'] if x['Path']=='target.iso')
+                if fault=='missing_original':m['Inputs'].remove(original)
+                if fault=='wrong_original':original['Sha256']='f'*64
+                if fault=='wrong_expected_original':original['ExpectedSha256']='f'*64
+                if fault=='unverified_original':original['Verified']=False
+                if fault=='duplicate_original':m['Inputs'].append(copy.deepcopy(original))
+                if fault=='coherent_foreign_original':original.update(Sha256='f'*64,ExpectedSha256='f'*64);a['expected_inputs']['target.iso']='f'*64;a['dvd_binding']['original_released_iso_sha256']='f'*64
+                if fault=='missing_frozen_original':del a['expected_inputs']['target.iso']
+                if fault=='wrong_wrapper':p['recorder']['sha256']='f'*64
+                if fault=='wrong_route':p['actual_route']['raw_block']['inserted']['file']='/foreign/target.iso'
+                if fault=='writable_route':p['actual_route']['raw_block']['inserted']['ro']=False
+                if fault=='parity_claim':a['dvd_binding']['exact_original_media_parity']=True
+                with self.assertRaises(ValueError):self.importer._dvd_media_fields(a,m,c,e,p)
+    def test_changed_verifier_cannot_reuse_original_V352_clock_contract(self):
+        probe=self.tool.NativeImporter.__new__(self.tool.NativeImporter)
+        probe.plan=copy.deepcopy(self.plan);probe.collector_path=self.freeze/'qualification-collector.py'
+        with self.assertRaisesRegex(ValueError,'clock contract does not identify the executed importer/helper'):
+            probe.configure_schedule(self.schedule,artifact_root=self.freeze,
+                clock_review_sha256='c99659264ca9b338af0d254d6ab43479e2fb52b6e2a0437ce79a65faecd6d6f6')

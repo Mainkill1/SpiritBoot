@@ -307,6 +307,42 @@ class NativeImporter:
                 "actual host policy differs from predeclared controls")
         return post
 
+    def _dvd_media_fields(self, attempt, manifest, case, entry, post):
+        """Bind the mounted wrapper and original-media provenance as distinct facts."""
+        wrapper, original = entry["measured_media_iso"], entry["original_released_iso"]
+        binding = attempt.get("dvd_binding", {})
+        require(case.get("kind") == "dvd-xiso" and binding.get("mode") == "DVD-fixed-wrapper"
+                and binding.get("exact_original_media_parity") is False
+                and wrapper["sha256"] == entry["boot_iso"]["sha256"] == case.get("iso_sha256")
+                and binding.get("boot_wrapper_iso_sha256") == wrapper["sha256"]
+                and binding.get("original_released_iso_sha256") == original["sha256"]
+                and wrapper["sha256"] != original["sha256"],
+                "DVD fixed wrapper/original-media identities differ from frozen roles")
+        inputs = {}
+        for name, descriptor in (("storage-perf.iso", wrapper), ("target.iso", original)):
+            rows = [row for row in manifest.get("Inputs", []) if row.get("Path") == name]
+            require(attempt["expected_inputs"].get(name) == descriptor["sha256"]
+                    and len(rows) == 1 and rows[0].get("Verified") is True
+                    and rows[0].get("Sha256") == rows[0].get("ExpectedSha256") == descriptor["sha256"],
+                    "actual DVD wrapper/original input binding differs: " + name)
+            self.comp.read_structural_artifact(descriptor, self.artifact_root, {})
+            inputs[name] = rows[0]
+        package = Path(manifest["PackageDirectory"])
+        recorder, route = post.get("recorder", {}), post.get("actual_route", {})
+        block = route.get("raw_block", {}); inserted = block.get("inserted", {})
+        device = attempt.get("expected_media_device_hypothesis")
+        require(package.is_absolute() and recorder.get("path") == str(package / "storage-perf.iso")
+                and recorder.get("sha256") == inputs["storage-perf.iso"]["Sha256"]
+                and recorder.get("bytes") == wrapper["bytes"]
+                and route.get("actual_inserted_path") == inserted.get("file") == recorder["path"]
+                and route.get("device") == block.get("device") == device and device == "ide0-cd1"
+                and block.get("removable") is True and block.get("locked") is False
+                and inserted.get("ro") is True and inserted.get("drv") == "raw",
+                "actual DVD readonly wrapper route/hash differs")
+        return {"media_sha256": inputs["storage-perf.iso"]["Sha256"],
+                "original_released_iso_sha256": inputs["target.iso"]["Sha256"],
+                "media_method": "fixed-wrapper", "exact_original_media_parity": False}
+
     def emit_job(self, native_attempt_id, *, output_root):
         """Emit actual rows and readable proofs; missing evidence never supplies a value."""
         require(hasattr(self,"schedule"), "configure the frozen schedule before import")
@@ -352,6 +388,8 @@ class NativeImporter:
                     "actual request lacks independent private guest state")
             row["fresh_overlay"]=True
             post=self._context(evidence,observed,job)
+            if case["kind"]=="dvd-xiso":
+                row.update(self._dvd_media_fields(attempt,manifest,case,entry,post))
             report=read(evidence / "diagnostics/run-state/report.json")
             # Guest priming (case warm/cold-ish) and host runtime cache isolation
             # are separate controls; the reviewed native collector checks the former.
