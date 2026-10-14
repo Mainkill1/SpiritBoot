@@ -66,7 +66,11 @@ Maintain guest-visible names (`\Driver\Disk`, `\Driver\Cdrom`, `\Device\Harddisk
 ### Completed bounded preparation, still outside candidate qualification
 
 - [x] Independently authored request core: 42 deterministic + 8 controlled real-thread ownership scenarios; sanitizer and i386 helper checks. Native IRP/MDL/cancel/rundown adapter remains open.
-- [x] Independently authored geometry composer: 13 scenarios / 6,001 checks; measured count-compatible initialized-prefix policy and remaining native parity gaps. Retained partmgr adapter remains open.
+- [x] Independently authored geometry composer: 13 scenarios / 6,001 checks; measured count-compatible initialized-prefix policy and remaining native parity gaps.
+- [x] Narrow geometry owner adapter: 16 scenarios / 61,973 checks, independently reviewed ownership/lock boundaries and actual Xbox target assertions; compiled and linked only for the explicitly selected lab/candidate route. Native parity and caller lifetime/IRQL qualification remain open.
+- [x] Independent normalized cache-property encoder: 20 sanitizer fixture groups and i386 helper/ABI checks. Native metadata capture and property dispatch remain open; the raw WORD84/WORD83 validity correction is documented.
+- [x] Independent cache-publication primitive: 32 sanitizer host groups, stale/duplicate/reset/generation rejection, raw-memory exclusion and linked i386 helper checks. Reviewed transaction/lifetime requirements are recorded; native producers, source guards, worker-result handoff and installed dispatch remain open.
+- [x] Read-only baseline provenance/footprint audit: 22 SDK/DDK helpers plus five additional SCSI utilities and exact compiled occurrences are recorded. Grants/removal and native storage allocation high-water remain open.
 - [x] Actual CLI/CMake missing/unknown selection and absent complete adapter rejection; real reference64/reference128/reserved128 release ROMs reproduce published hashes. Final full profile matrix remains open.
 - [x] Protected PowerShell desktop pipe proof and first owned graphical guest on Windows Codex/session1; earlier direct launches remain provisional evidence.
 
@@ -133,7 +137,7 @@ Tasks:
 ## P5 — Static-license closure, final validation and merge gate
 
 - [ ] Candidate linker inputs (including expanded response/archive transitive closure) contain **no `libclasspnp.a`/`libdisk.a`**. Validate actual retained PE native functions, optimized inline/code/data ranges, inlined SDK/DDK helper bodies, and build input grants—not just old symbol-name grep.
-- [ ] Resolve 22 SDK/DDK helper grants and any other discovered uncertain source, GCC runtime exception, original notices and full corresponding source. Preserve old archive historical notices where required but do not ship incorporated incompatible code in final BIOS.
+- [ ] Resolve or eliminate 22 SDK/DDK helper identities, five additional SCSI utilities and any other discovered uncertain source; verify GCC runtime exception, original notices and full corresponding source. Preserve old archive historical notices where required but do not ship incorporated incompatible code in final BIOS.
 - [ ] Validate `build.json` backend identity/source tree, patch SHA256, PE/flash hashes, no unauthorized backend fallback, deterministic clean builds and correct 64/128 firmware memory/size.
 - [ ] Run final host/native/XISO/save/game/performance matrix against the **exact** final candidate; external legal/provenance reviewer and technical code reviewer verify compiled firmware. Record any supported/unverified physical hardware scope.
 - [ ] Mark ready for review only when all correctness, provenance, performance and footprint gates are PASS; do not close #245 or publish a “GPL-clean” claim on partial evidence.

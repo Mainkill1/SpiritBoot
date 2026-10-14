@@ -1,0 +1,1164 @@
+diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
+index 08af1eff..f9dbe4b6 100644
+--- a/drivers/storage/class/nxstorage/CMakeLists.txt
++++ b/drivers/storage/class/nxstorage/CMakeLists.txt
+@@ -1,4 +1,4 @@
+ # Independently authored laboratory primitives; no FDO/IRP adapter yet.
+ # This target is linked only by the explicitly labeled partial prototype.
+-add_library(nxstorage STATIC request.c geometry_composer.c cache_query.c)
++add_library(nxstorage STATIC request.c geometry_composer.c cache_query.c cache_property.c)
+ target_include_directories(nxstorage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+diff --git a/drivers/storage/class/nxstorage/cache_property.c b/drivers/storage/class/nxstorage/cache_property.c
+new file mode 100644
+index 00000000..dea5a2d5
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/cache_property.c
+@@ -0,0 +1,166 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "cache_property.h"
++
++/* One independently packed scalar: nine payload bits, twenty-three epoch bits.
++ * The final epoch is poison; it is never issued as a writer ticket. */
++#define EPOCH_SHIFT 9u
++#define EPOCH_MASK 0xfffffe00u
++#define PROFILE_MASK 3u
++#define KNOWN_BIT 4u
++#define SUPPORT_BIT 8u
++#define ACTIVE_BIT 16u
++#define SELECT_SHIFT 5u
++#define PROOF_SHIFT 7u
++
++_Static_assert(sizeof(nx_lcq_state) == 4 && _Alignof(nx_lcq_state) >= 4,
++               "publication requires aligned four-byte storage");
++_Static_assert(__atomic_always_lock_free(4, 0), "no kernel libatomic fallback");
++
++static uint32_t next_ticket(nx_lcq_state *state, int forget_profile)
++{
++    uint32_t seen = __atomic_load_n(&state->published, __ATOMIC_ACQUIRE);
++    for (unsigned attempt = 0; attempt < 16; ++attempt) {
++        uint32_t epoch = seen >> EPOCH_SHIFT;
++        uint32_t next;
++        if (epoch >= NX_LCQ_MAX_WRITERS) break;
++        next = ((epoch + 1u) << EPOCH_SHIFT) | (forget_profile ? 0u : seen & PROFILE_MASK);
++        if (__atomic_compare_exchange_n(&state->published, &seen, next, 0,
++                                         __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return next;
++    }
++    /* Closing the record also revokes all previously issued tickets. Profile
++     * becomes Unknown, avoiding a stale profile on contention exhaustion. */
++    (void)__atomic_exchange_n(&state->published, EPOCH_MASK, __ATOMIC_ACQ_REL);
++    return 0;
++}
++
++void nx_lcq_init(nx_lcq_state *state, enum nx_cache_profile profile)
++{
++    uint32_t p = profile == NX_CACHE_PROFILE_ATA ? 1u :
++                 profile == NX_CACHE_PROFILE_OPTICAL ? 2u : 0u;
++    __atomic_store_n(&state->published, p, __ATOMIC_RELEASE);
++}
++
++void nx_lcq_invalidate(nx_lcq_state *state) { (void)next_ticket(state, 0); }
++/* Reset/removal/reclassification can revoke the profile as well as cache facts. */
++void nx_lcq_revoke(nx_lcq_state *state) { (void)next_ticket(state, 1); }
++
++void nx_lcq_define(nx_lcq_writer *writer, enum nx_lcq_destination destination,
++                   uint32_t command, size_t requested_bytes)
++{
++    *writer = (nx_lcq_writer){0};
++    if ((destination != NX_LCQ_CACHED && destination != NX_LCQ_LOCAL) ||
++        (command != 0xec && command != 0xa1)) return;
++    writer->destination = (uint8_t)destination;
++    writer->command = (uint8_t)command;
++    /* Zero means unqualified, not a narrowed or measured transfer length. */
++    writer->requested_bytes = requested_bytes == NX_LCQ_IDENTITY_BYTES ?
++        NX_LCQ_IDENTITY_BYTES : 0u;
++}
++
++int nx_lcq_start(nx_lcq_state *state, nx_lcq_writer *writer,
++                  uint32_t final_command, size_t final_bytes, enum nx_lcq_proof proof)
++{
++    writer->stamp = 0; writer->started = 0; writer->proof = 0;
++    if ((writer->destination != NX_LCQ_CACHED && writer->destination != NX_LCQ_LOCAL) ||
++        (writer->command != 0xec && writer->command != 0xa1) ||
++        final_command != writer->command) return 0;
++    /* Invalidate every tracked writer, including an unqualified/changed extent. */
++    writer->stamp = next_ticket(state, 0);
++    if (!writer->stamp) return 0;
++    writer->started = 1;
++    if (writer->requested_bytes == NX_LCQ_IDENTITY_BYTES &&
++        final_bytes == NX_LCQ_IDENTITY_BYTES &&
++        (proof == NX_LCQ_PIO_COUNTED || proof == NX_LCQ_DMA_CONTROLLER))
++        writer->proof = (uint8_t)proof;
++    return 1;
++}
++
++nx_lcq_result nx_lcq_result_copy(const nx_lcq_writer *writer,
++                                uint8_t raw_status, uint32_t raw_bytes)
++{
++    nx_lcq_result r = {*writer, raw_bytes, raw_status};
++    return r;
++}
++
++static int qualifying_result(nx_lcq_result result)
++{
++    return result.writer.started == 1 && result.writer.stamp != 0 &&
++        (result.writer.destination == NX_LCQ_CACHED || result.writer.destination == NX_LCQ_LOCAL) &&
++        (result.writer.command == 0xec || result.writer.command == 0xa1) &&
++        result.writer.requested_bytes == NX_LCQ_IDENTITY_BYTES &&
++        (result.writer.proof == NX_LCQ_PIO_COUNTED || result.writer.proof == NX_LCQ_DMA_CONTROLLER) &&
++        result.raw_status == 1 && result.raw_bytes == NX_LCQ_IDENTITY_BYTES;
++}
++
++int nx_lcq_current(const nx_lcq_state *state, nx_lcq_result result)
++{
++    return qualifying_result(result) &&
++        __atomic_load_n(&state->published, __ATOMIC_ACQUIRE) == result.writer.stamp;
++}
++
++int nx_lcq_publish(nx_lcq_state *state, nx_lcq_result result, nx_lcq_raw raw)
++{
++    uint32_t expected = result.writer.stamp;
++    uint32_t payload = (raw.transport_flags & NX_LCQ_ATAPI_FLAG) ? 2u : 1u;
++    uint32_t select = 0;
++    if (!qualifying_result(result)) return 0;
++    if (payload == 1u && (raw.support84 & NX_LCQ_VALID_MASK) == NX_LCQ_VALID_ONE) {
++        payload |= KNOWN_BIT;
++        if (raw.support82 & NX_LCQ_CACHE_BIT) payload |= SUPPORT_BIT;
++        if (raw.active85 & NX_LCQ_CACHE_BIT) payload |= ACTIVE_BIT;
++        if ((raw.device_flags & NX_LCQ_LBA48_FLAG) && (raw.support83 & NX_LCQ_FLUSH_EXT_BIT)) select = 2;
++        else if (raw.support83 & NX_LCQ_FLUSH_BIT) select = 1;
++    }
++    payload |= select << SELECT_SHIFT;
++    payload |= (uint32_t)result.writer.proof << PROOF_SHIFT;
++    return __atomic_compare_exchange_n(&state->published, &expected,
++        (result.writer.stamp & EPOCH_MASK) | payload, 0, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
++}
++
++static uint16_t read_word(const uint8_t *p)
++{
++    return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
++}
++
++int nx_lcq_read_raw(nx_lcq_raw *raw, const void *identity, size_t identity_bytes,
++                    uint32_t transport_flags, uint32_t device_flags)
++{
++    const uint8_t *bytes = identity;
++    nx_lcq_raw copy;
++    if (!raw || !bytes || identity_bytes < NX_LCQ_IDENTITY_BYTES) return 0;
++    copy.support82 = read_word(bytes + NX_LCQ_WORD82_OFFSET);
++    copy.support83 = read_word(bytes + NX_LCQ_WORD83_OFFSET);
++    copy.support84 = read_word(bytes + NX_LCQ_WORD84_OFFSET);
++    copy.active85 = read_word(bytes + NX_LCQ_WORD85_OFFSET);
++    copy.transport_flags = transport_flags; copy.device_flags = device_flags;
++    *raw = copy;
++    return 1;
++}
++
++nx_cache_snapshot nx_lcq_snapshot(const nx_lcq_state *state)
++{
++    uint32_t value = __atomic_load_n(&state->published, __ATOMIC_ACQUIRE);
++    uint32_t select = (value >> SELECT_SHIFT) & 3u;
++    nx_cache_snapshot s;
++    s.profile = value & PROFILE_MASK;
++    s.command_sets_known = (value & KNOWN_BIT) != 0;
++    s.cache_supported = (value & SUPPORT_BIT) != 0;
++    s.cache_active = (value & ACTIVE_BIT) != 0;
++    s.flush_selection_known = s.command_sets_known;
++    s.selected_flush = select == 1u ? 0xe7u : select == 2u ? 0xeau : 0u;
++    return s;
++}
++
++enum nx_lcq_proof nx_lcq_snapshot_proof(const nx_lcq_state *state)
++{
++    uint32_t value = __atomic_load_n(&state->published, __ATOMIC_ACQUIRE);
++    uint32_t proof = (value >> PROOF_SHIFT) & 3u;
++    return proof == 1 ? NX_LCQ_PIO_COUNTED : proof == 2 ? NX_LCQ_DMA_CONTROLLER : NX_LCQ_UNPROVED;
++}
++
++nx_cache_reply nx_lcq_query(const nx_lcq_state *state, void *system_buffer,
++                            size_t input_bytes, size_t output_bytes)
++{
++    nx_cache_snapshot snapshot = nx_lcq_snapshot(state);
++    return nx_cache_query_encode(snapshot, system_buffer, input_bytes, system_buffer, output_bytes);
++}
+diff --git a/drivers/storage/class/nxstorage/cache_property.h b/drivers/storage/class/nxstorage/cache_property.h
+new file mode 100644
+index 00000000..d05faaa0
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/cache_property.h
+@@ -0,0 +1,75 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_LOWER_CACHE_PROPERTY_H
++#define NX_LOWER_CACHE_PROPERTY_H
++
++#include "cache_query.h"
++/* Newly owned publication record, not a retained lower/private type overlay. */
++typedef struct nx_lcq_state { uint32_t published; } nx_lcq_state;
++
++enum nx_lcq_destination { NX_LCQ_OTHER = 0, NX_LCQ_CACHED = 1, NX_LCQ_LOCAL = 2 };
++enum nx_lcq_proof { NX_LCQ_UNPROVED = 0, NX_LCQ_PIO_COUNTED = 1, NX_LCQ_DMA_CONTROLLER = 2 };
++enum {
++    NX_LCQ_IDENTITY_BYTES = 512, NX_LCQ_MAX_WRITERS = 8388606,
++    NX_LCQ_WORD82_OFFSET = 164, NX_LCQ_WORD83_OFFSET = 166,
++    NX_LCQ_WORD84_OFFSET = 168, NX_LCQ_WORD85_OFFSET = 170,
++    NX_LCQ_VALID_MASK = 0xc000, NX_LCQ_VALID_ONE = 0x4000,
++    NX_LCQ_CACHE_BIT = 0x20, NX_LCQ_FLUSH_BIT = 0x1000,
++    NX_LCQ_FLUSH_EXT_BIT = 0x2000, NX_LCQ_ATAPI_FLAG = 0x10,
++    NX_LCQ_LBA48_FLAG = 4, NX_LCQ_LOCAL_FLAG = 0x8000,
++    NX_LCQ_PROGRAM_DMA_FLAG = 0x00200000
++};
++
++/* New fixed request-owned metadata, copied before mapping/translation/reuse. */
++typedef struct nx_lcq_writer {
++    uint32_t stamp;
++    uint32_t requested_bytes;
++    uint8_t destination, command, proof, started;
++} nx_lcq_writer;
++
++typedef struct nx_lcq_result {
++    nx_lcq_writer writer;
++    uint32_t raw_bytes;
++    uint8_t raw_status;
++} nx_lcq_result;
++
++/* Copied coherent words from completed retained IDENTIFY plus negotiated flags.
++ * The producer establishes coherence; never pass a live DMA destination. */
++typedef struct nx_lcq_raw {
++    uint16_t support82;
++    uint16_t support83;
++    uint16_t support84;
++    uint16_t active85;
++    uint32_t transport_flags;
++    uint32_t device_flags;
++} nx_lcq_raw;
++
++void nx_lcq_init(nx_lcq_state *state, enum nx_cache_profile profile);
++void nx_lcq_invalidate(nx_lcq_state *state);
++void nx_lcq_revoke(nx_lcq_state *state);
++void nx_lcq_define(nx_lcq_writer *writer, enum nx_lcq_destination destination,
++                   uint32_t command, size_t requested_bytes);
++int nx_lcq_start(nx_lcq_state *state, nx_lcq_writer *writer,
++                  uint32_t final_command, size_t final_bytes, enum nx_lcq_proof proof);
++nx_lcq_result nx_lcq_result_copy(const nx_lcq_writer *writer,
++                                uint8_t raw_status, uint32_t raw_bytes);
++int nx_lcq_current(const nx_lcq_state *state, nx_lcq_result result);
++int nx_lcq_publish(nx_lcq_state *state, nx_lcq_result result, nx_lcq_raw raw);
++int nx_lcq_read_raw(nx_lcq_raw *raw, const void *identity, size_t identity_bytes,
++                    uint32_t transport_flags, uint32_t device_flags);
++nx_cache_snapshot nx_lcq_snapshot(const nx_lcq_state *state);
++enum nx_lcq_proof nx_lcq_snapshot_proof(const nx_lcq_state *state);
++nx_cache_reply nx_lcq_query(const nx_lcq_state *state, void *system_buffer,
++                            size_t input_bytes, size_t output_bytes);
++
++/* One serialized publisher; invalidate at actual cached-write start before DMA,
++ * and before other source/negotiation mutation. Publish a successful stable
++ * terminal view before any successor writer starts. Failure leaves Unknown.
++ * Raw status/count are captured before translation; PIO_COUNTED means the
++ * retained raw success contract proved all requested bytes, DMA_CONTROLLER
++ * means programmed descriptors + controller success (no actual-byte counter).
++ * Each real start/revocation advances a bounded generation. Exhaustion or
++ * contention failure permanently closes qualification until object recreation.
++ * init is constructor-only with no live tickets. All operations need residency,
++ * a single serialized producer and external rundown. current is not a raw-read
++ * synchronization lock; caller still prevents later writers while copying. */
++#endif
+diff --git a/drivers/storage/class/nxstorage/native_capture.inc b/drivers/storage/class/nxstorage/native_capture.inc
+new file mode 100644
+index 00000000..49cc6883
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/native_capture.inc
+@@ -0,0 +1,71 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independently authored producer adapters, candidate-only. Caller holds the
++ * source-proved producer serialization/rundown boundaries in INTEGRATION.md.
++ * These functions never start I/O, change cache settings, queue, IRQ or timing.
++ */
++static inline void
++NxAtapiCacheInitialize(PATAPORT_DEVICE_EXTENSION device)
++{
++    nx_lcq_init(&device->NxCacheQueryState, NX_CACHE_PROFILE_UNKNOWN);
++}
++
++static inline void
++NxAtapiCacheUnavailable(PATAPORT_DEVICE_EXTENSION device)
++{
++    nx_lcq_revoke(&device->NxCacheQueryState);
++}
++
++static inline void
++NxAtapiCacheWriterReset(PATA_DEVICE_REQUEST request)
++{
++    nx_lcq_define(&request->NxCacheWriter, NX_LCQ_OTHER, 0, 0);
++}
++
++/* Invoke once on constructed identity, before any DataBuffer mapping. Keep
++ * this marker across mappings/requeues; reset it before request storage reuse. */
++static inline void
++NxAtapiCacheTrack(PATAPORT_DEVICE_EXTENSION device, PATA_DEVICE_REQUEST request)
++{
++    enum nx_lcq_destination destination = NX_LCQ_OTHER;
++    if (request->Flags & NX_LCQ_LOCAL_FLAG) destination = NX_LCQ_LOCAL;
++    else if (request->DataBuffer == (void *)&device->IdentifyDeviceData)
++        destination = NX_LCQ_CACHED;
++    nx_lcq_define(&request->NxCacheWriter, destination,
++                  request->TaskFile.Command, request->DataTransferLength);
++}
++
++/* Invoke after mappings/PrepareIo, immediately before external real start.
++ * PROGRAM_DMA is the actual transfer engine, including PIO-via-DMA and the
++ * completed fallback decision; ATA DMA opcode flags alone are insufficient. */
++static inline void
++NxAtapiCacheStart(PATAPORT_DEVICE_EXTENSION device, PATA_DEVICE_REQUEST request)
++{
++    enum nx_lcq_proof proof = (request->Flags & NX_LCQ_PROGRAM_DMA_FLAG) ?
++        NX_LCQ_DMA_CONTROLLER : NX_LCQ_PIO_COUNTED;
++    (void)nx_lcq_start(&device->NxCacheQueryState, &request->NxCacheWriter,
++                      request->TaskFile.Command, request->DataTransferLength, proof);
++}
++
++/* Invoke before translation rewrites status/count/pointers and before request
++ * recycle. Local-buffer owners retain this result by value until cache copy. */
++static inline nx_lcq_result
++NxAtapiCacheRawResult(PATA_DEVICE_REQUEST request)
++{
++    return nx_lcq_result_copy(&request->NxCacheWriter,
++                              request->SrbStatus, request->DataTransferLength);
++}
++
++/* Caller excludes every source writer/flag mutation throughout this function.
++ * Runtime: after translation/addressing, before successor start. Worker:
++ * after successful full local identity copy plus profile/flag consistency.
++ * current is an epoch/result check, not a substitute for that read guard. */
++static inline int
++NxAtapiCachePublish(PATAPORT_DEVICE_EXTENSION device, nx_lcq_result result)
++{
++    nx_lcq_raw raw;
++    if (!nx_lcq_current(&device->NxCacheQueryState, result)) return 0;
++    if (!nx_lcq_read_raw(&raw, &device->IdentifyDeviceData,
++        sizeof(device->IdentifyDeviceData), device->Device.TransportFlags,
++        device->Device.DeviceFlags)) return 0;
++    return nx_lcq_publish(&device->NxCacheQueryState, result, raw);
++}
+diff --git a/drivers/storage/class/nxstorage/native_hook.inc b/drivers/storage/class/nxstorage/native_hook.inc
+new file mode 100644
+index 00000000..26c8c700
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/native_hook.inc
+@@ -0,0 +1,23 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Candidate-only: include after approved native declarations and cache_property.h.
++ * The existing PDO dispatch owns sole completion and its remove-lock epilogue.
++ */
++static NTSTATUS
++NxAtapiQueryWriteCache(PATAPORT_DEVICE_EXTENSION device, PIRP irp,
++                      PIO_STACK_LOCATION stack)
++{
++    nx_cache_reply reply = nx_lcq_query(&device->NxCacheQueryState,
++        irp->AssociatedIrp.SystemBuffer,
++        stack->Parameters.DeviceIoControl.InputBufferLength,
++        stack->Parameters.DeviceIoControl.OutputBufferLength);
++    /* The caller still owns parent/buffer. No device access follows encoding. */
++    irp->IoStatus.Information = reply.information;
++    switch (reply.status) {
++        case NX_CACHE_REPLY_OK: return STATUS_SUCCESS;
++        case NX_CACHE_REPLY_INPUT_SHORT: return STATUS_BUFFER_TOO_SMALL;
++        case NX_CACHE_REPLY_UNSUPPORTED: return STATUS_NOT_SUPPORTED;
++        case NX_CACHE_REPLY_OUTPUT_SHORT: return STATUS_INFO_LENGTH_MISMATCH;
++        case NX_CACHE_REPLY_INVALID: return STATUS_INVALID_PARAMETER;
++    }
++    return STATUS_INVALID_PARAMETER;
++}
+diff --git a/tests/host/nxstorage/ata-cache-abi-facts.h b/tests/host/nxstorage/ata-cache-abi-facts.h
+new file mode 100644
+index 00000000..e19346c1
+--- /dev/null
++++ b/tests/host/nxstorage/ata-cache-abi-facts.h
+@@ -0,0 +1,83 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independent numeric interoperability facts. No implementation body.
++ */
++#pragma once
++#define PR248_ATACACHE_ATAPORT_DEVICE_EXTENSION_DeviceType_offset 920u
++#define PR248_ATACACHE_ATAPORT_DEVICE_EXTENSION_Device_offset 56u
++#define PR248_ATACACHE_ATAPORT_DEVICE_EXTENSION_IdentifyDeviceData_offset 216u
++#define PR248_ATACACHE_ATAPORT_DEVICE_EXTENSION_IdentifyPacketData_offset 216u
++#define PR248_ATACACHE_ATAPORT_DEVICE_EXTENSION_NotPresent_offset 202u
++#define PR248_ATACACHE_ATAPORT_DEVICE_EXTENSION_align 8u
++#define PR248_ATACACHE_ATAPORT_DEVICE_EXTENSION_size 1008u
++#define PR248_ATACACHE_ATAPORT_IO_CONTEXT_DeviceFlags_offset 12u
++#define PR248_ATACACHE_ATAPORT_IO_CONTEXT_QueueLock_offset 32u
++#define PR248_ATACACHE_ATAPORT_IO_CONTEXT_TransportFlags_offset 4u
++#define PR248_ATACACHE_ATA_DEVICE_REQUEST_DataBuffer_offset 28u
++#define PR248_ATACACHE_ATA_DEVICE_REQUEST_DataTransferLength_offset 40u
++#define PR248_ATACACHE_ATA_DEVICE_REQUEST_InternalState_offset 80u
++#define PR248_ATACACHE_ATA_DEVICE_REQUEST_SrbStatus_offset 60u
++#define PR248_ATACACHE_ATA_DEVICE_REQUEST_TaskFile_Command_offset 8u
++#define PR248_ATACACHE_DEVICE_IS_ATAPI 16u
++#define PR248_ATACACHE_DEVICE_LBA48 4u
++#define PR248_ATACACHE_DEVICE_UNINITIALIZED 512u
++#define PR248_ATACACHE_DEV_ATA 1u
++#define PR248_ATACACHE_DEV_ATAPI 2u
++#define PR248_ATACACHE_GCC_ATOMIC_4_ALWAYS_LOCK_FREE 1u
++#define PR248_ATACACHE_GCC_ATOMIC_ACQUIRE 2u
++#define PR248_ATACACHE_GCC_ATOMIC_ACQ_REL 4u
++#define PR248_ATACACHE_GCC_ATOMIC_LONG_LOCK_FREE 2u
++#define PR248_ATACACHE_GCC_ATOMIC_RELAXED 0u
++#define PR248_ATACACHE_GCC_ATOMIC_RELEASE 3u
++#define PR248_ATACACHE_GCC_ATOMIC_SEQ_CST 5u
++#define PR248_ATACACHE_IDENTIFY_DEVICE_DATA_CommandSetActive_offset 170u
++#define PR248_ATACACHE_IDENTIFY_DEVICE_DATA_CommandSetActive_size 6u
++#define PR248_ATACACHE_IDENTIFY_DEVICE_DATA_CommandSetSupport_offset 164u
++#define PR248_ATACACHE_IDENTIFY_DEVICE_DATA_CommandSetSupport_size 6u
++#define PR248_ATACACHE_IDENTIFY_DEVICE_DATA_align 1u
++#define PR248_ATACACHE_IDENTIFY_DEVICE_DATA_size 512u
++#define PR248_ATACACHE_IDE_COMMAND_ATAPI_IDENTIFY 161u
++#define PR248_ATACACHE_IDE_COMMAND_FLUSH_CACHE 231u
++#define PR248_ATACACHE_IDE_COMMAND_FLUSH_CACHE_EXT 234u
++#define PR248_ATACACHE_IDE_COMMAND_IDENTIFY 236u
++#define PR248_ATACACHE_InterlockedCompareExchange_intrinsic_type_matches 1u
++#define PR248_ATACACHE_InterlockedExchange_intrinsic_type_matches 1u
++#define PR248_ATACACHE_LONG_align 4u
++#define PR248_ATACACHE_LONG_size 4u
++#define PR248_ATACACHE_REQUEST_FLAG_HAS_LOCAL_BUFFER 32768u
++#define PR248_ATACACHE_REQUEST_FLAG_INTERNAL 4194304u
++#define PR248_ATACACHE_REQUEST_STATE_NOT_STARTED 1u
++#define PR248_ATACACHE_SRB_STATUS_PENDING 0u
++#define PR248_ATACACHE_SRB_STATUS_SUCCESS 1u
++#define PR248_ATACACHE_STATUS_MORE_PROCESSING_REQUIRED 0xc0000016u
++#define PR248_ATACACHE_STATUS_NOT_SUPPORTED 0xc00000bbu
++#define PR248_ATACACHE_ULONG_align 4u
++#define PR248_ATACACHE_ULONG_size 4u
++#define PR248_ATACACHE_USHORT_align 2u
++#define PR248_ATACACHE_USHORT_size 2u
++#define PR248_ATACACHE_flush_cache_ext_support_ata_word_index 83u
++#define PR248_ATACACHE_flush_cache_ext_support_byte_offset 166u
++#define PR248_ATACACHE_flush_cache_ext_support_word_mask_or_value 8192u
++#define PR248_ATACACHE_flush_cache_support_ata_word_index 83u
++#define PR248_ATACACHE_flush_cache_support_byte_offset 166u
++#define PR248_ATACACHE_flush_cache_support_word_mask_or_value 4096u
++#define PR248_ATACACHE_lba48_support_ata_word_index 83u
++#define PR248_ATACACHE_lba48_support_byte_offset 166u
++#define PR248_ATACACHE_lba48_support_word_mask_or_value 1024u
++#define PR248_ATACACHE_word83_valid_marker_one_ata_word_index 83u
++#define PR248_ATACACHE_word83_valid_marker_one_byte_offset 166u
++#define PR248_ATACACHE_word83_valid_marker_one_word_mask_or_value 16384u
++#define PR248_ATACACHE_word83_valid_marker_two_ata_word_index 83u
++#define PR248_ATACACHE_word83_valid_marker_two_byte_offset 166u
++#define PR248_ATACACHE_word83_valid_marker_two_word_mask_or_value 32768u
++#define PR248_ATACACHE_word84_retained_valid_marker_one_ata_word_index 84u
++#define PR248_ATACACHE_word84_retained_valid_marker_one_byte_offset 168u
++#define PR248_ATACACHE_word84_retained_valid_marker_one_word_mask_or_value 16384u
++#define PR248_ATACACHE_word84_retained_valid_marker_two_ata_word_index 84u
++#define PR248_ATACACHE_word84_retained_valid_marker_two_byte_offset 168u
++#define PR248_ATACACHE_word84_retained_valid_marker_two_word_mask_or_value 32768u
++#define PR248_ATACACHE_write_cache_active_ata_word_index 85u
++#define PR248_ATACACHE_write_cache_active_byte_offset 170u
++#define PR248_ATACACHE_write_cache_active_word_mask_or_value 32u
++#define PR248_ATACACHE_write_cache_support_ata_word_index 82u
++#define PR248_ATACACHE_write_cache_support_byte_offset 164u
++#define PR248_ATACACHE_write_cache_support_word_mask_or_value 32u
+diff --git a/tests/host/nxstorage/check.py b/tests/host/nxstorage/check.py
+index 221e1718..a700726b 100644
+--- a/tests/host/nxstorage/check.py
++++ b/tests/host/nxstorage/check.py
+@@ -23,13 +23,24 @@ subprocess.run([cc] + flags + ["-I" + str(tests), "-include", str(tests / "geome
+     str(tests / "test_geometry_owner_adapter.c"), "-o", str(adapter_executable)], check=True)
+ subprocess.run([str(adapter_executable)], check=True, env=dict(os.environ,
+     ASAN_OPTIONS="detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1", UBSAN_OPTIONS="halt_on_error=1"))
+-for production in ("request.c", "geometry_composer.c", "cache_query.c"):
++cache_publication_test = output / "lower_cache_publication_test"
++subprocess.run([cc] + flags + ["-pthread", "-I" + str(tests), str(source / "cache_property.c"),
++    str(source / "cache_query.c"), str(tests / "lower_query_test.c"), "-o", str(cache_publication_test)], check=True)
++subprocess.run([str(cache_publication_test)], check=True, env=dict(os.environ,
++    ASAN_OPTIONS="detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1", UBSAN_OPTIONS="halt_on_error=1"))
++for production in ("request.c", "geometry_composer.c", "cache_query.c", "cache_property.c"):
+     obj = output / (production + ".i386.o")
+     target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
+     subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-I" + str(source), "-c", str(source / production), "-o", str(obj)], check=True)
+     undefined = subprocess.check_output(["nm", "-u", str(obj)], text=True)
+-    if undefined.strip():
++    expected = "U nx_cache_query_encode" if production == "cache_property.c" else ""
++    if undefined.strip() != expected:
+         raise SystemExit("Unexpected i386 helpers: " + undefined)
++combined = output / "cache-publication-combined.i386.o"
++subprocess.run(["ld", "-m", "elf_i386", "-r", str(output / "cache_property.c.i386.o"),
++                str(output / "cache_query.c.i386.o"), "-o", str(combined)], check=True)
++if subprocess.check_output(["nm", "-u", str(combined)], text=True).strip():
++    raise SystemExit("Unexpected linked i386 cache helpers")
+ abi_object = output / "cache-abi-assert.i386.o"
+ target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
+ subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-I" + str(source), "-I" + str(tests), "-c", str(tests / "cache_abi_assert.c"), "-o", str(abi_object)], check=True)
+diff --git a/tests/host/nxstorage/lower_query_test.c b/tests/host/nxstorage/lower_query_test.c
+new file mode 100644
+index 00000000..1792a000
+--- /dev/null
++++ b/tests/host/nxstorage/lower_query_test.c
+@@ -0,0 +1,608 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "cache_property.h"
++#include "status-facts.h"
++#include "ata-cache-abi-facts.h"
++#include <pthread.h>
++#include <stdatomic.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sanitizer/asan_interface.h>
++
++#include "native_doubles.h"
++
++static unsigned passed, failed;
++#define CHECK(x) do { if (!(x)) { \
++    fprintf(stderr, "%s:%d: assertion failed: %s\n", __func__, __LINE__, #x); \
++    return 0; \
++} } while (0)
++
++static const uint8_t query[12] = {4,0,0,0,0,0,0,0,0,0,0,0};
++static const uint8_t enabled_flush[28] = {
++    28,0,0,0,28,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0};
++static const uint8_t disabled_flush[28] = {
++    28,0,0,0,28,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0};
++static const uint8_t unknown[28] = {
++    28,0,0,0,28,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
++static const uint8_t enabled_no_flush[28] = {
++    28,0,0,0,28,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
++static const uint8_t disabled_no_flush[28] = {
++    28,0,0,0,28,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
++
++static nx_lcq_raw raw_enabled(void)
++{
++    nx_lcq_raw raw = {0x20, 0x5000, 0x4000, 0x20, 0, 0};
++    return raw;
++}
++
++static nx_lcq_result started(nx_lcq_state *state, enum nx_lcq_destination destination,
++                              enum nx_lcq_proof proof)
++{
++    nx_lcq_writer writer;
++    nx_lcq_define(&writer,destination,0xec,512);
++    (void)nx_lcq_start(state,&writer,0xec,512,proof);
++    return nx_lcq_result_copy(&writer,1,512);
++}
++static int publish_full(nx_lcq_state *state,nx_lcq_raw raw)
++{
++    return nx_lcq_publish(state,started(state,NX_LCQ_CACHED,NX_LCQ_PIO_COUNTED),raw);
++}
++
++static int answer(nx_lcq_raw raw, const uint8_t *expected)
++{
++    ATAPORT_DEVICE_EXTENSION device;
++    uint8_t buffer[40];
++    IRP irp = {{buffer+1},{123,999}};
++    IO_STACK_LOCATION stack = {{{12,28}}};
++    NTSTATUS status;
++    memset(&device, 0, sizeof(device));
++    nx_lcq_init(&device.NxCacheQueryState, NX_CACHE_PROFILE_ATA);
++    (void)publish_full(&device.NxCacheQueryState, raw);
++    memset(buffer, 0xa5, sizeof(buffer));
++    memcpy(buffer+1, query, sizeof(query));
++    status = NxAtapiQueryWriteCache(&device, &irp, &stack);
++    CHECK(status == STATUS_SUCCESS);
++    CHECK(irp.IoStatus.Information == 28);
++    CHECK(memcmp(buffer+1, expected, 28) == 0);
++    CHECK(buffer[0] == 0xa5 && buffer[29] == 0xa5);
++    CHECK(!device.hardware_commands && !device.cache_changes &&
++          !device.queue_changes && !device.irq_changes);
++    return 1;
++}
++
++static int regular_flush(void) { return answer(raw_enabled(), enabled_flush); }
++static int extended_preferred(void)
++{
++    nx_lcq_raw r = raw_enabled(); r.support83 = 0x7000; r.device_flags = 4;
++    return answer(r, enabled_flush);
++}
++static int extended_without_regular(void)
++{
++    nx_lcq_raw r = raw_enabled(); r.support83 = 0x6000; r.device_flags = 4;
++    return answer(r, enabled_flush);
++}
++static int extended_only_no_lba48(void)
++{
++    nx_lcq_raw r = raw_enabled(); r.support83 = 0x6000;
++    return answer(r, enabled_no_flush);
++}
++static int regular_fallback_without_lba48(void)
++{
++    nx_lcq_raw r = raw_enabled(); r.support83 = 0x7000;
++    return answer(r, enabled_flush);
++}
++static int no_opcode(void)
++{
++    nx_lcq_raw r = raw_enabled(); r.support83 = 0x4000; r.device_flags = 4;
++    return answer(r, enabled_no_flush);
++}
++static int actual_selector_fact(void)
++{
++    const struct { uint16_t word83,word84; uint32_t negotiated_flags,opcode; } fixtures[] = {
++        {0x7000,0x4000,4,0xea}, {0x6000,0x4000,4,0xea}, {0x7000,0x4000,0,0xe7},
++        {0x5000,0x4000,4,0xe7}, {0x6000,0x4000,0,0}, {0x4000,0x4000,4,0},
++        {0x7000,0xc000,4,0}, {0x1000,0x4000,0,0xe7}
++    };
++    nx_lcq_state state; nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    for(size_t i=0;i<sizeof(fixtures)/sizeof(fixtures[0]);++i) {
++        nx_lcq_raw raw=raw_enabled(); raw.support83=fixtures[i].word83;
++        raw.support84=fixtures[i].word84;
++        raw.device_flags=fixtures[i].negotiated_flags;
++        (void)publish_full(&state,raw);
++        nx_cache_snapshot s=nx_lcq_snapshot(&state);
++        CHECK(s.selected_flush==fixtures[i].opcode);
++    }
++    /* Disabled cache keeps the real selectable capability, independently
++     * from the retained sync early gate that issues no command. */
++    nx_lcq_raw raw=raw_enabled(); raw.active85=0; raw.support83=0x7000; raw.device_flags=4;
++    (void)publish_full(&state,raw);
++    nx_cache_snapshot s=nx_lcq_snapshot(&state);
++    CHECK(s.cache_active==0 && s.selected_flush==0xea);
++    return 1;
++}
++static int disabled_is_independent_of_selector(void)
++{
++    nx_lcq_raw r = raw_enabled(); r.active85 = 0;
++    CHECK(answer(r, disabled_flush));
++    r.support83 = 0x4000;
++    CHECK(answer(r, disabled_no_flush));
++    return 1;
++}
++static int invalid_markers(void)
++{
++    const uint16_t markers[] = {0x0000,0x8000,0xc000};
++    for (size_t i=0;i<sizeof(markers)/sizeof(markers[0]);++i) {
++        nx_lcq_raw r = raw_enabled(); r.support84=(uint16_t)(markers[i]|0x3000u); r.device_flags=4;
++        CHECK(answer(r, unknown));
++    }
++    return 1;
++}
++static int retained_word84_validity_is_distinct_from_word83(void)
++{
++    nx_lcq_raw r=raw_enabled();
++    r.support83=0x1000; /* standard word83 marker absent, retained regular bit present */
++    CHECK(answer(r,enabled_flush));
++    r.support83=0x5000; r.support84=0; /* standard word83 valid cannot substitute word84 */
++    CHECK(answer(r,unknown));
++    return 1;
++}
++static int contradictory_or_absent_cache(void)
++{
++    nx_lcq_raw r = raw_enabled(); r.support82=0;
++    CHECK(answer(r, unknown));
++    r.active85=0;
++    CHECK(answer(r, unknown));
++    return 1;
++}
++static int no_fua_or_unrelated_flag_credit(void)
++{
++    nx_lcq_raw r = raw_enabled(); r.support83=0x4000; r.device_flags=8;
++    CHECK(answer(r, enabled_no_flush));
++    r.support82=0xffff; r.active85=0xffff; r.support83=0x7fff;
++    r.transport_flags=0xfffffff0u & ~0x10u; r.device_flags=UINT32_MAX;
++    CHECK(answer(r, enabled_flush));
++    return 1;
++}
++static int initialization_and_refresh_failure(void)
++{
++    nx_lcq_state state; uint8_t b[28]; nx_cache_reply result;
++    nx_lcq_init(&state, NX_CACHE_PROFILE_ATA);
++    memcpy(b,query,12);
++    result=nx_lcq_query(&state,b,12,28);
++    CHECK(result.status==NX_CACHE_REPLY_OK && result.information==28);
++    CHECK(memcmp(b,unknown,28)==0);
++    (void)publish_full(&state,raw_enabled());
++    nx_lcq_invalidate(&state);
++    memcpy(b,query,12);
++    result=nx_lcq_query(&state,b,12,28);
++    CHECK(result.status==NX_CACHE_REPLY_OK && result.information==28);
++    CHECK(memcmp(b,unknown,28)==0);
++    return 1;
++}
++static int publication_uses_copied_facts(void)
++{
++    nx_lcq_state state; nx_lcq_raw raw=raw_enabled(); uint8_t b[28]; nx_cache_reply result;
++    nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    (void)publish_full(&state,raw);
++    memset(&raw,0,sizeof(raw)); /* later cached-source change cannot tear old reply */
++    memcpy(b,query,12); result=nx_lcq_query(&state,b,12,28);
++    CHECK(result.status==NX_CACHE_REPLY_OK && result.information==28);
++    CHECK(memcmp(b,enabled_flush,28)==0);
++    nx_lcq_invalidate(&state);
++    memcpy(b,query,12); result=nx_lcq_query(&state,b,12,28);
++    CHECK(result.status==NX_CACHE_REPLY_OK && memcmp(b,unknown,28)==0);
++    raw=raw_enabled(); raw.active85=0; raw.support83=0x4000;
++    (void)publish_full(&state,raw);
++    memcpy(b,query,12); result=nx_lcq_query(&state,b,12,28);
++    CHECK(result.status==NX_CACHE_REPLY_OK && memcmp(b,disabled_no_flush,28)==0);
++    return 1;
++}
++static int raw_declaration_capture_bounds_and_unaligned(void)
++{
++    uint8_t identity[514]={0}; nx_lcq_raw raw,old;
++    identity[1+164]=0x20; identity[1+167]=0x50;
++    identity[1+169]=0x40; identity[1+170]=0x20;
++    memset(&old,0xa5,sizeof(old));
++    for(size_t n=0;n<512;++n) {
++        raw=old;
++        CHECK(!nx_lcq_read_raw(&raw,identity+1,n,0,4));
++        CHECK(memcmp(&raw,&old,sizeof(raw))==0);
++    }
++    CHECK(nx_lcq_read_raw(&raw,identity+1,512,0,4));
++    CHECK(raw.support82==0x20 && raw.support83==0x5000 && raw.support84==0x4000 && raw.active85==0x20);
++    CHECK(raw.transport_flags==0 && raw.device_flags==4);
++    raw=old; CHECK(!nx_lcq_read_raw(&raw,NULL,512,0,4));
++    CHECK(memcmp(&raw,&old,sizeof(raw))==0);
++    CHECK(!nx_lcq_read_raw(NULL,identity+1,512,0,4));
++    return 1;
++}
++static int writer_survives_mapping_and_translation(void)
++{
++    nx_lcq_state state; nx_lcq_writer writer; uint8_t b[28];
++    nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    nx_lcq_define(&writer,NX_LCQ_CACHED,0xec,512);
++    /* DataBuffer can map to a different address after this owned classification. */
++    CHECK(nx_lcq_start(&state,&writer,0xec,512,NX_LCQ_PIO_COUNTED));
++    nx_lcq_result result=nx_lcq_result_copy(&writer,1,512);
++    memset(&writer,0,sizeof(writer)); /* original request storage can later recycle */
++    CHECK(nx_lcq_current(&state,result));
++    CHECK(nx_lcq_publish(&state,result,raw_enabled()));
++    memcpy(b,query,12); nx_cache_reply r=nx_lcq_query(&state,b,12,28);
++    CHECK(r.status==NX_CACHE_REPLY_OK && memcmp(b,enabled_flush,28)==0);
++    CHECK(nx_lcq_snapshot_proof(&state)==NX_LCQ_PIO_COUNTED);
++    return 1;
++}
++static int failed_partial_pending_unproved_never_publish(void)
++{
++    const struct { uint8_t status; uint32_t bytes; } fixtures[]={{4,512},{0,512},{1,511},{1,0}};
++    nx_lcq_state state; nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    for(size_t i=0;i<sizeof(fixtures)/sizeof(fixtures[0]);++i) {
++        nx_lcq_result result=started(&state,NX_LCQ_CACHED,NX_LCQ_PIO_COUNTED);
++        result.raw_status=fixtures[i].status; result.raw_bytes=fixtures[i].bytes;
++        CHECK(!nx_lcq_current(&state,result));
++        CHECK(!nx_lcq_publish(&state,result,raw_enabled()));
++        uint8_t b[28]; memcpy(b,query,12); nx_cache_reply r=nx_lcq_query(&state,b,12,28);
++        CHECK(r.status==NX_CACHE_REPLY_OK && memcmp(b,unknown,28)==0);
++    }
++    nx_lcq_writer writer; nx_lcq_define(&writer,NX_LCQ_CACHED,0xec,512);
++    CHECK(nx_lcq_start(&state,&writer,0xec,512,NX_LCQ_UNPROVED));
++    CHECK(!nx_lcq_publish(&state,nx_lcq_result_copy(&writer,1,512),raw_enabled()));
++    return 1;
++}
++static int duplicate_reset_and_new_writer_revoke_old_terminal(void)
++{
++    nx_lcq_state state; nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    nx_lcq_result old=started(&state,NX_LCQ_CACHED,NX_LCQ_PIO_COUNTED);
++    nx_lcq_invalidate(&state); /* reset/classification/cache mutation revokes old generation */
++    CHECK(!nx_lcq_current(&state,old)); CHECK(!nx_lcq_publish(&state,old,raw_enabled()));
++    nx_lcq_result newer=started(&state,NX_LCQ_CACHED,NX_LCQ_PIO_COUNTED);
++    nx_lcq_raw raw=raw_enabled(); raw.active85=0; raw.support83=0x4000;
++    CHECK(nx_lcq_publish(&state,newer,raw));
++    CHECK(!nx_lcq_current(&state,newer)); CHECK(!nx_lcq_publish(&state,newer,raw_enabled()));
++    CHECK(!nx_lcq_publish(&state,old,raw_enabled()));
++    uint8_t b[28]; memcpy(b,query,12); nx_cache_reply r=nx_lcq_query(&state,b,12,28);
++    CHECK(r.status==NX_CACHE_REPLY_OK && memcmp(b,disabled_no_flush,28)==0);
++    return 1;
++}
++static int local_copy_publication_and_dma_proof_are_explicit(void)
++{
++    nx_lcq_state state; nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    nx_lcq_result result=started(&state,NX_LCQ_LOCAL,NX_LCQ_DMA_CONTROLLER);
++    /* Local raw completion alone does not automatically publish before cache copy. */
++    uint8_t b[28]; memcpy(b,query,12); nx_cache_reply r=nx_lcq_query(&state,b,12,28);
++    CHECK(r.status==NX_CACHE_REPLY_OK && memcmp(b,unknown,28)==0);
++    CHECK(nx_lcq_publish(&state,result,raw_enabled())); /* after copy + negotiation */
++    CHECK(nx_lcq_snapshot_proof(&state)==NX_LCQ_DMA_CONTROLLER);
++    nx_lcq_invalidate(&state);
++    CHECK(nx_lcq_snapshot_proof(&state)==NX_LCQ_UNPROVED);
++    CHECK(!nx_lcq_publish(&state,result,raw_enabled()));
++    return 1;
++}
++static int classification_mismatch_cannot_invalidate_healthy_data(void)
++{
++    nx_lcq_state state; nx_lcq_writer writer; nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    CHECK(publish_full(&state,raw_enabled()));
++    const struct { enum nx_lcq_destination destination; uint32_t command; size_t bytes; } f[]={
++        {NX_LCQ_OTHER,0xec,512},{NX_LCQ_CACHED,0x35,512},
++        {(enum nx_lcq_destination)99,0xec,512}
++    };
++    for(size_t i=0;i<sizeof(f)/sizeof(f[0]);++i) {
++        nx_lcq_define(&writer,f[i].destination,f[i].command,f[i].bytes);
++        CHECK(!nx_lcq_start(&state,&writer,f[i].command,f[i].bytes,NX_LCQ_PIO_COUNTED));
++    }
++    nx_lcq_define(&writer,NX_LCQ_CACHED,0xec,512);
++    CHECK(!nx_lcq_start(&state,&writer,0x25,512,NX_LCQ_PIO_COUNTED));
++    uint8_t b[28]; memcpy(b,query,12); nx_cache_reply r=nx_lcq_query(&state,b,12,28);
++    CHECK(r.status==NX_CACHE_REPLY_OK && memcmp(b,enabled_flush,28)==0);
++    return 1;
++}
++static int unproved_or_changed_extent_start_invalidates_prior_known(void)
++{
++    const size_t extents[]={511,SIZE_MAX,512};
++    nx_lcq_state state; nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    for(size_t i=0;i<sizeof(extents)/sizeof(extents[0]);++i) {
++        CHECK(publish_full(&state,raw_enabled()));
++        nx_lcq_writer writer; nx_lcq_define(&writer,NX_LCQ_CACHED,0xec,extents[i]);
++        CHECK(nx_lcq_start(&state,&writer,0xec,extents[i],NX_LCQ_UNPROVED));
++        CHECK(!nx_lcq_publish(&state,nx_lcq_result_copy(&writer,1,512),raw_enabled()));
++        uint8_t b[28]; memcpy(b,query,12); nx_cache_reply r=nx_lcq_query(&state,b,12,28);
++        CHECK(r.status==NX_CACHE_REPLY_OK && memcmp(b,unknown,28)==0);
++    }
++    return 1;
++}
++static int writer_generation_exhaustion_never_wraps_to_old_ticket(void)
++{
++    nx_lcq_state state; nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    nx_lcq_result first=started(&state,NX_LCQ_CACHED,NX_LCQ_PIO_COUNTED),last=first;
++    CHECK(first.writer.started);
++    for(unsigned i=1;i<NX_LCQ_MAX_WRITERS;++i) last=started(&state,NX_LCQ_CACHED,NX_LCQ_PIO_COUNTED);
++    CHECK(last.writer.started && nx_lcq_current(&state,last));
++    nx_lcq_result exhausted=started(&state,NX_LCQ_CACHED,NX_LCQ_PIO_COUNTED);
++    CHECK(!exhausted.writer.started);
++    CHECK(!nx_lcq_publish(&state,first,raw_enabled()));
++    CHECK(!nx_lcq_publish(&state,last,raw_enabled()));
++    CHECK(!nx_lcq_publish(&state,exhausted,raw_enabled()));
++    CHECK(nx_lcq_snapshot_proof(&state)==NX_LCQ_UNPROVED);
++    CHECK(nx_lcq_snapshot(&state).command_sets_known==0);
++    return 1;
++}
++static void populate_identity(ATAPORT_DEVICE_EXTENSION *device)
++{
++    memset(device->IdentifyDeviceData,0,sizeof(device->IdentifyDeviceData));
++    device->IdentifyDeviceData[164]=0x20; device->IdentifyDeviceData[167]=0x70;
++    device->IdentifyDeviceData[169]=0x40; device->IdentifyDeviceData[170]=0x20;
++    device->Device.TransportFlags=0; device->Device.DeviceFlags=4;
++}
++static int native_capture_mapping_translation_and_reuse(void)
++{
++    ATAPORT_DEVICE_EXTENSION device={0}; ATA_DEVICE_REQUEST request={0};
++    NxAtapiCacheInitialize(&device); populate_identity(&device);
++    request.TaskFile.Command=0xec; request.DataTransferLength=512;
++    request.DataBuffer=&device.IdentifyDeviceData;
++    NxAtapiCacheTrack(&device,&request);
++    request.DataBuffer=(void *)&request; /* mapped address no longer equals cached union */
++    NxAtapiCacheStart(&device,&request);
++    request.SrbStatus=1;
++    nx_lcq_result result=NxAtapiCacheRawResult(&request);
++    request.SrbStatus=4; request.DataTransferLength=8; NxAtapiCacheWriterReset(&request);
++    CHECK(NxAtapiCachePublish(&device,result));
++    CHECK(nx_lcq_snapshot(&device.NxCacheQueryState).selected_flush==0xea);
++    CHECK(nx_lcq_snapshot_proof(&device.NxCacheQueryState)==NX_LCQ_PIO_COUNTED);
++    CHECK(!NxAtapiCachePublish(&device,result));
++    return 1;
++}
++static int native_local_dma_engine_and_reclassification(void)
++{
++    ATAPORT_DEVICE_EXTENSION device={0}; ATA_DEVICE_REQUEST request={0};
++    NxAtapiCacheInitialize(&device); populate_identity(&device);
++    request.TaskFile.Command=0xec; request.DataTransferLength=512;
++    request.Flags=0x8000u|0x00200000u; /* local buffer, programmed DMA; ATA DMA bit absent */
++    NxAtapiCacheTrack(&device,&request); NxAtapiCacheStart(&device,&request); request.SrbStatus=1;
++    nx_lcq_result result=NxAtapiCacheRawResult(&request);
++    CHECK(result.writer.destination==NX_LCQ_LOCAL);
++    CHECK(result.writer.proof==NX_LCQ_DMA_CONTROLLER);
++    CHECK(NxAtapiCachePublish(&device,result)); /* explicit after-copy boundary */
++    CHECK(nx_lcq_snapshot_proof(&device.NxCacheQueryState)==NX_LCQ_DMA_CONTROLLER);
++    NxAtapiCacheUnavailable(&device);
++    CHECK(nx_lcq_snapshot(&device.NxCacheQueryState).profile==NX_CACHE_PROFILE_UNKNOWN);
++    __asan_poison_memory_region(device.IdentifyDeviceData,512);
++    CHECK(!NxAtapiCachePublish(&device,result));
++    __asan_unpoison_memory_region(device.IdentifyDeviceData,512);
++    request.TaskFile.Command=0xa1; request.DataTransferLength=512;
++    NxAtapiCacheTrack(&device,&request); NxAtapiCacheStart(&device,&request); request.SrbStatus=1;
++    result=NxAtapiCacheRawResult(&request);
++    device.Device.TransportFlags=0x10;
++    CHECK(NxAtapiCachePublish(&device,result));
++    uint8_t b[28]; memcpy(b,query,12); nx_cache_reply r=nx_lcq_query(&device.NxCacheQueryState,b,12,28);
++    CHECK(r.status==NX_CACHE_REPLY_UNSUPPORTED && r.information==0);
++    return 1;
++}
++static int native_failed_raw_result_cannot_use_formatter_success(void)
++{
++    ATAPORT_DEVICE_EXTENSION device={0}; ATA_DEVICE_REQUEST request={0};
++    NxAtapiCacheInitialize(&device); populate_identity(&device);
++    request.TaskFile.Command=0xec; request.DataTransferLength=512; request.DataBuffer=&device.IdentifyDeviceData;
++    NxAtapiCacheTrack(&device,&request); NxAtapiCacheStart(&device,&request);
++    request.SrbStatus=4; nx_lcq_result result=NxAtapiCacheRawResult(&request);
++    request.SrbStatus=1; request.DataTransferLength=8; /* translation hides original error */
++    CHECK(!NxAtapiCachePublish(&device,result));
++    CHECK(nx_lcq_snapshot_proof(&device.NxCacheQueryState)==NX_LCQ_UNPROVED);
++    CHECK(nx_lcq_snapshot(&device.NxCacheQueryState).command_sets_known==0);
++    return 1;
++}
++typedef struct {
++    ATAPORT_DEVICE_EXTENSION *device;
++    pthread_mutex_t source_guard,events;
++    pthread_cond_t condition;
++    int poisoned,release,published;
++} source_context;
++static void *source_writer(void *arg)
++{
++    source_context *ctx=arg; ATA_DEVICE_REQUEST request={0};
++    pthread_mutex_lock(&ctx->source_guard);
++    request.TaskFile.Command=0xec; request.DataTransferLength=512;
++    request.DataBuffer=&ctx->device->IdentifyDeviceData;
++    NxAtapiCacheTrack(ctx->device,&request); NxAtapiCacheStart(ctx->device,&request);
++    ctx->device->IdentifyDeviceData[164]=0; /* partially replaced source */
++    __asan_poison_memory_region(ctx->device->IdentifyDeviceData,512);
++    pthread_mutex_lock(&ctx->events); ctx->poisoned=1;
++    pthread_cond_broadcast(&ctx->condition);
++    while(!ctx->release) pthread_cond_wait(&ctx->condition,&ctx->events);
++    pthread_mutex_unlock(&ctx->events);
++    __asan_unpoison_memory_region(ctx->device->IdentifyDeviceData,512);
++    populate_identity(ctx->device); ctx->device->IdentifyDeviceData[170]=0;
++    ctx->device->IdentifyDeviceData[167]=0x40;
++    request.SrbStatus=1; nx_lcq_result result=NxAtapiCacheRawResult(&request);
++    ctx->published=NxAtapiCachePublish(ctx->device,result);
++    pthread_mutex_unlock(&ctx->source_guard);
++    return NULL;
++}
++static int native_query_never_reads_inflight_raw_source(void)
++{
++    ATAPORT_DEVICE_EXTENSION device={0}; pthread_t thread;
++    source_context ctx={.device=&device};
++    CHECK(pthread_mutex_init(&ctx.source_guard,NULL)==0);
++    CHECK(pthread_mutex_init(&ctx.events,NULL)==0);
++    CHECK(pthread_cond_init(&ctx.condition,NULL)==0);
++    NxAtapiCacheInitialize(&device); populate_identity(&device);
++    CHECK(publish_full(&device.NxCacheQueryState,raw_enabled()));
++    CHECK(pthread_create(&thread,NULL,source_writer,&ctx)==0);
++    pthread_mutex_lock(&ctx.events);
++    while(!ctx.poisoned) pthread_cond_wait(&ctx.condition,&ctx.events);
++    pthread_mutex_unlock(&ctx.events);
++    uint8_t b[28]; memcpy(b,query,12); IRP irp={{b},{123,999}};
++    IO_STACK_LOCATION stack={{{12,28}}};
++    NTSTATUS status=NxAtapiQueryWriteCache(&device,&irp,&stack);
++    int ok=status==STATUS_SUCCESS && irp.IoStatus.Information==28 && memcmp(b,unknown,28)==0;
++    pthread_mutex_lock(&ctx.events); ctx.release=1; pthread_cond_broadcast(&ctx.condition);
++    pthread_mutex_unlock(&ctx.events); CHECK(pthread_join(thread,NULL)==0);
++    CHECK(pthread_cond_destroy(&ctx.condition)==0);
++    CHECK(pthread_mutex_destroy(&ctx.events)==0); CHECK(pthread_mutex_destroy(&ctx.source_guard)==0);
++    CHECK(ok && ctx.published);
++    memcpy(b,query,12); CHECK(NxAtapiQueryWriteCache(&device,&irp,&stack)==STATUS_SUCCESS);
++    CHECK(memcmp(b,disabled_no_flush,28)==0);
++    return 1;
++}
++static int queued_successor_is_unknown_before_old_parent_completes(void)
++{
++    nx_lcq_state state; nx_lcq_raw first=raw_enabled(),queued=first;
++    uint8_t b[28]; nx_cache_reply result;
++    queued.active85=0; queued.support83=0x4000;
++    nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    /* Both commands may already be built; invalidation follows actual start. */
++    nx_lcq_invalidate(&state);
++    (void)publish_full(&state,first); /* full successful translation terminal */
++    nx_lcq_invalidate(&state); /* successor now starts, before first parent completes */
++    memcpy(b,query,12); result=nx_lcq_query(&state,b,12,28);
++    CHECK(result.status==NX_CACHE_REPLY_OK && memcmp(b,unknown,28)==0);
++    /* No publication is allowed from a partial in-flight successor view. */
++    (void)publish_full(&state,queued); /* full successful successor terminal */
++    memcpy(b,query,12); result=nx_lcq_query(&state,b,12,28);
++    CHECK(result.status==NX_CACHE_REPLY_OK && memcmp(b,disabled_no_flush,28)==0);
++    return 1;
++}
++static int optical_profile(void)
++{
++    nx_lcq_state state; nx_lcq_raw raw=raw_enabled(); uint8_t b[28],before[28]; nx_cache_reply result;
++    nx_lcq_init(&state,NX_CACHE_PROFILE_OPTICAL); raw.transport_flags=0x10;
++    (void)publish_full(&state,raw); memset(b,0xa5,sizeof(b)); memcpy(b,query,12); memcpy(before,b,28);
++    result=nx_lcq_query(&state,b,12,28);
++    CHECK(result.status==NX_CACHE_REPLY_UNSUPPORTED && result.information==0 && memcmp(b,before,28)==0);
++    b[4]=1; result=nx_lcq_query(&state,b,12,0);
++    CHECK(result.status==NX_CACHE_REPLY_UNSUPPORTED && result.information==0);
++    return 1;
++}
++static int native_negotiation_and_error_information(void)
++{
++    ATAPORT_DEVICE_EXTENSION device; nx_lcq_init(&device.NxCacheQueryState,NX_CACHE_PROFILE_ATA);
++    (void)publish_full(&device.NxCacheQueryState,raw_enabled());
++    for(size_t input=0;input<12;++input) {
++        uint8_t b[28]; memcpy(b,query,12); IRP irp={{b},{123,999}};
++        IO_STACK_LOCATION stack={{{input,28}}};
++        CHECK(NxAtapiQueryWriteCache(&device,&irp,&stack)==STATUS_BUFFER_TOO_SMALL);
++        CHECK(irp.IoStatus.Information==0 && memcmp(b,query,12)==0);
++    }
++    for(size_t output=0;output<=36;++output) {
++        uint8_t b[40],before[40]; memset(b,0xa5,sizeof(b)); memcpy(b,query,12); memcpy(before,b,40);
++        IRP irp={{b},{123,999}}; IO_STACK_LOCATION stack={{{12,output}}};
++        NTSTATUS status=NxAtapiQueryWriteCache(&device,&irp,&stack);
++        if(output<8) {
++            CHECK(status==STATUS_INFO_LENGTH_MISMATCH && irp.IoStatus.Information==0);
++            CHECK(memcmp(b,before,40)==0);
++        } else {
++            size_t bytes=output<28?8:28;
++            CHECK(status==STATUS_SUCCESS && irp.IoStatus.Information==bytes);
++            CHECK(memcmp(b,enabled_flush,bytes)==0);
++            CHECK(memcmp(b+bytes,before+bytes,40-bytes)==0);
++        }
++    }
++    return 1;
++}
++static int exists_unsupported_type_and_null(void)
++{
++    ATAPORT_DEVICE_EXTENSION device; uint8_t b[28]; IRP irp={{b},{123,999}};
++    IO_STACK_LOCATION stack={{{12,0}}};
++    nx_lcq_init(&device.NxCacheQueryState,NX_CACHE_PROFILE_ATA);
++    memcpy(b,query,12); b[4]=1;
++    CHECK(NxAtapiQueryWriteCache(&device,&irp,&stack)==STATUS_SUCCESS && irp.IoStatus.Information==0);
++    CHECK(b[0]==4 && b[4]==1);
++    b[4]=2;
++    CHECK(NxAtapiQueryWriteCache(&device,&irp,&stack)==STATUS_NOT_SUPPORTED && irp.IoStatus.Information==0);
++    irp.AssociatedIrp.SystemBuffer=NULL; stack.Parameters.DeviceIoControl.OutputBufferLength=28;
++    CHECK(NxAtapiQueryWriteCache(&device,&irp,&stack)==STATUS_INVALID_PARAMETER && irp.IoStatus.Information==0);
++    return 1;
++}
++
++typedef struct { nx_lcq_state *state; _Atomic int go; } concurrent_context;
++static void *publisher(void *arg)
++{
++    concurrent_context *ctx=arg; nx_lcq_raw a=raw_enabled(),b=a;
++    b.active85=0; b.support83=0x4000;
++    while(!atomic_load_explicit(&ctx->go,memory_order_acquire)) { }
++    for(unsigned i=0;i<20000;++i) {
++        nx_lcq_invalidate(ctx->state); (void)publish_full(ctx->state,a);
++        nx_lcq_invalidate(ctx->state); (void)publish_full(ctx->state,b);
++    }
++    return NULL;
++}
++static int coherent_concurrent_publication(void)
++{
++    nx_lcq_state state; pthread_t thread; concurrent_context ctx={&state,0}; unsigned bad=0;
++    nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    CHECK(pthread_create(&thread,NULL,publisher,&ctx)==0);
++    atomic_store_explicit(&ctx.go,1,memory_order_release);
++    for(unsigned i=0;i<40000;++i) {
++        uint8_t b[28]; memcpy(b,query,12); nx_cache_reply r=nx_lcq_query(&state,b,12,28);
++        if(r.status!=NX_CACHE_REPLY_OK || r.information!=28 ||
++           (memcmp(b,unknown,28)!=0 && memcmp(b,enabled_flush,28)!=0 && memcmp(b,disabled_no_flush,28)!=0)) ++bad;
++    }
++    CHECK(pthread_join(thread,NULL)==0);
++    CHECK(bad==0);
++    return 1;
++}
++
++static void owner_complete(IRP *irp, ATAPORT_DEVICE_EXTENSION *device, uint8_t *buffer,
++                           unsigned *completions, NTSTATUS *seen, size_t *information)
++{
++    ++*completions; *seen=irp->IoStatus.Status; *information=irp->IoStatus.Information;
++    free(buffer); free(irp); free(device);
++}
++static NTSTATUS owner_dispatch(IRP *irp, ATAPORT_DEVICE_EXTENSION *device, IO_STACK_LOCATION *stack,
++                               uint8_t *buffer,unsigned *completions,NTSTATUS *seen,size_t *information)
++{
++    NTSTATUS status=NxAtapiQueryWriteCache(device,irp,stack);
++    irp->IoStatus.Status=status;
++    owner_complete(irp,device,buffer,completions,seen,information);
++    /* Borrowed parent/device/buffer are now freed. Only captured scalar returns. */
++    return status;
++}
++static int sole_owner_completion_and_reclamation(void)
++{
++    const size_t lengths[]={0,8,28};
++    for(size_t i=0;i<3;++i) {
++        IRP *irp=malloc(sizeof(*irp)); ATAPORT_DEVICE_EXTENSION *device=malloc(sizeof(*device));
++        uint8_t *buffer=malloc(28); IO_STACK_LOCATION stack={{{12,lengths[i]}}};
++        unsigned completions=0; NTSTATUS seen=123; size_t information=999;
++        CHECK(irp && device && buffer);
++        memcpy(buffer,query,12); irp->AssociatedIrp.SystemBuffer=buffer; irp->IoStatus.Information=999;
++        nx_lcq_init(&device->NxCacheQueryState,NX_CACHE_PROFILE_ATA);
++        (void)publish_full(&device->NxCacheQueryState,raw_enabled());
++        NTSTATUS returned=owner_dispatch(irp,device,&stack,buffer,&completions,&seen,&information);
++        CHECK(completions==1 && returned==seen);
++        CHECK(seen==(lengths[i]?STATUS_SUCCESS:STATUS_INFO_LENGTH_MISMATCH));
++        CHECK(information==lengths[i]);
++    }
++    return 1;
++}
++
++static void run(const char *name,int(*test)(void))
++{ if(test()){++passed;printf("PASS %s\n",name);}else{++failed;printf("FAIL %s\n",name);} }
++#define RUN(t) run(#t,t)
++int main(void)
++{
++    RUN(regular_flush); RUN(extended_preferred); RUN(extended_without_regular);
++    RUN(extended_only_no_lba48); RUN(regular_fallback_without_lba48); RUN(no_opcode);
++    RUN(actual_selector_fact);
++    RUN(disabled_is_independent_of_selector); RUN(invalid_markers);
++    RUN(retained_word84_validity_is_distinct_from_word83);
++    RUN(contradictory_or_absent_cache); RUN(no_fua_or_unrelated_flag_credit);
++    RUN(initialization_and_refresh_failure); RUN(publication_uses_copied_facts);
++    RUN(raw_declaration_capture_bounds_and_unaligned); RUN(writer_survives_mapping_and_translation);
++    RUN(failed_partial_pending_unproved_never_publish);
++    RUN(duplicate_reset_and_new_writer_revoke_old_terminal);
++    RUN(local_copy_publication_and_dma_proof_are_explicit);
++    RUN(classification_mismatch_cannot_invalidate_healthy_data);
++    RUN(unproved_or_changed_extent_start_invalidates_prior_known);
++    RUN(writer_generation_exhaustion_never_wraps_to_old_ticket);
++    RUN(native_capture_mapping_translation_and_reuse);
++    RUN(native_local_dma_engine_and_reclassification);
++    RUN(native_failed_raw_result_cannot_use_formatter_success);
++    RUN(native_query_never_reads_inflight_raw_source);
++    RUN(queued_successor_is_unknown_before_old_parent_completes);
++    RUN(optical_profile); RUN(native_negotiation_and_error_information);
++    RUN(exists_unsupported_type_and_null); RUN(coherent_concurrent_publication);
++    RUN(sole_owner_completion_and_reclamation);
++    printf("%u passed; %u failed\n",passed,failed);
++    return failed?EXIT_FAILURE:EXIT_SUCCESS;
++}
+diff --git a/tests/host/nxstorage/native_doubles.h b/tests/host/nxstorage/native_doubles.h
+new file mode 100644
+index 00000000..a32e0a5c
+--- /dev/null
++++ b/tests/host/nxstorage/native_doubles.h
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_LCQ_NATIVE_DOUBLES_H
++#define NX_LCQ_NATIVE_DOUBLES_H
++#include "cache_property.h"
++#include "status-facts.h"
++#include "ata-cache-abi-facts.h"
++/* Logical host public/owner doubles; no native byte layout is asserted here.
++ * Status bits now use the explicitly approved compiled scalar packets. */
++typedef uint32_t NTSTATUS;
++#define STATUS_SUCCESS PR248_STATUS_SUCCESS
++#define STATUS_BUFFER_TOO_SMALL PR248_STATUS_BUFFER_TOO_SMALL
++#define STATUS_NOT_SUPPORTED PR248_ATACACHE_STATUS_NOT_SUPPORTED
++#define STATUS_INFO_LENGTH_MISMATCH PR248_STATUS_INFO_LENGTH_MISMATCH
++#define STATUS_INVALID_PARAMETER PR248_STATUS_INVALID_PARAMETER
++typedef struct {
++    nx_lcq_state NxCacheQueryState;
++    _Alignas(8) uint8_t IdentifyDeviceData[512];
++    struct { uint32_t TransportFlags, DeviceFlags; } Device;
++    unsigned hardware_commands, cache_changes, queue_changes, irq_changes;
++} ATAPORT_DEVICE_EXTENSION, *PATAPORT_DEVICE_EXTENSION;
++typedef struct {
++    nx_lcq_writer NxCacheWriter;
++    struct { uint8_t Command; } TaskFile;
++    void *DataBuffer;
++    uint32_t Flags,DataTransferLength;
++    uint8_t SrbStatus;
++} ATA_DEVICE_REQUEST,*PATA_DEVICE_REQUEST;
++typedef struct {
++    struct { void *SystemBuffer; } AssociatedIrp;
++    struct { NTSTATUS Status; size_t Information; } IoStatus;
++} IRP, *PIRP;
++typedef struct {
++    struct { struct { size_t InputBufferLength, OutputBufferLength; } DeviceIoControl; } Parameters;
++} IO_STACK_LOCATION, *PIO_STACK_LOCATION;
++
++#include "native_hook.inc"
++#include "native_capture.inc"
++#endif
+diff --git a/tests/host/nxstorage/status-facts.h b/tests/host/nxstorage/status-facts.h
+new file mode 100644
+index 00000000..d3aa592e
+--- /dev/null
++++ b/tests/host/nxstorage/status-facts.h
+@@ -0,0 +1,11 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independently packaged compiled scalar target facts; no helper bodies. */
++#pragma once
++#define PR248_STATUS_SUCCESS 0x00000000u
++#define PR248_STATUS_PENDING 0x00000103u
++#define PR248_STATUS_BUFFER_TOO_SMALL 0xc0000023u
++#define PR248_STATUS_INSUFFICIENT_RESOURCES 0xc000009au
++#define PR248_STATUS_INVALID_PARAMETER 0xc000000du
++#define PR248_STATUS_INVALID_DEVICE_REQUEST 0xc0000010u
++#define PR248_STATUS_INFO_LENGTH_MISMATCH 0xc0000004u
++#define PR248_STATUS_UNRECOGNIZED_MEDIA 0xc0000014u

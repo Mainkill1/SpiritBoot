@@ -3,11 +3,17 @@
 **SINGLE PR DELIVERY:** [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248) owns the entire implementation through final release checks. The authoritative, detailed task list is [IMPLEMENTATION-CHECKLIST.md](IMPLEMENTATION-CHECKLIST.md). Internal P0–P5 checkpoints are commits/reviews *within #248*, not additional PRs. This file describes the boundary; where historical provisional stages conflict, the master checklist takes precedence.
 
 
-**Status:** design / preflight only; **no replacement firmware has been implemented or qualified by this PR**. See [issue #245](https://github.com/Mainkill1/SpiritBoot/issues/245). Do not close the issue based on this document, a successful compile, or a string scan.
+**Status:** partial laboratory implementation. Independently authored request,
+geometry and cache primitives are implemented, and the narrow geometry owner
+adapter builds against actual Xbox declarations in the 64 MiB lab image. Full
+HDD/DVD class implementation and native qualification remain open. See
+[geometry build evidence](geometry-target-build.json) and
+[issue #245](https://github.com/Mainkill1/SpiritBoot/issues/245). Do not close the
+issue based on a successful compile or a string scan.
 
 ## 0. Scope, release identity, and why a narrow rewrite
 
-The published v1.0.0 audit identifies **139 distinct retained Microsoft sample/private-header function bodies** within the compiled firmware: 65 represented by 66 native named symbols, 79 confirmed nonzero inline source functions, with five identities in both sets. This is **not** a percentage of image bytes or RAM, and is not a finding that every tiny body is independently protectable. The actual retained transfer-queue, submission, completion, retry, sense and disk-control implementations are substantive. The separately identified 19 `srbhelper.h` and three `classpnp.h` SDK/DDK helper names still require independent rights analysis.
+The published v1.0.0 audit identifies **139 distinct retained Microsoft sample/private-header function bodies** within the compiled firmware: 65 represented by 66 native named symbols, 79 confirmed nonzero inline source functions, with five identities in both sets. This is **not** a percentage of image bytes or RAM, and is not a finding that every tiny body is independently protectable. The actual retained transfer-queue, submission, completion, retry, sense and disk-control implementations are substantive. The separately identified 19 `srbhelper.h` and three `classpnp.h` SDK/DDK helper names, plus five additional SCSI utility identities, still require removal or independent rights resolution. The pinned [baseline audit](baseline-provenance-audit/README.md) records compiled occurrences and footprint limits.
 
 Pinned product revision: `b65a3f77d9887c9285e936996eb4d286a66f540c`.
 Pinned Roswell revision: `1569e2e89fb47cc72b9c704a8884f98200432bd4`.

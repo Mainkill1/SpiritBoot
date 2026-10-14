@@ -17,7 +17,8 @@ class NxStorageProductionTests(unittest.TestCase):
         lock = json.loads((ROOT / 'sources/firmware-lock.json').read_text())
         patches = []
         for name in ("0127-independent-storage-primitives.patch", "0129-independent-cache-query-primitive.patch",
-                     "0130-independent-geometry-owner-adapter.patch"):
+                     "0130-independent-geometry-owner-adapter.patch",
+                     "0131-independent-cache-publication-primitive.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -39,4 +40,5 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertIn('13 scenarios, 6001 checks', result.stdout)
             self.assertIn('20 passed; 0 failed', result.stdout)
             self.assertIn('16 adapter scenarios, 61973 checks', result.stdout)
+            self.assertIn('32 passed; 0 failed', result.stdout)
             self.assertIn('production checks passed', result.stdout)
