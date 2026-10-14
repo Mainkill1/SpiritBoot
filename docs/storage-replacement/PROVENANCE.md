@@ -1,5 +1,8 @@
 # Storage replacement source provenance and permission protocol
 
+**Execution:** one PR, [#248](https://github.com/Mainkill1/SpiritBoot/pull/248), from implementation through final compiled firmware review. See [single-PR checklist](IMPLEMENTATION-CHECKLIST.md). Do not open independent implementation PRs or treat completed design documents as firmware license clearance.
+
+
 **Purpose:** document a reproducible technical separation between observed behavior and protected implementation expression. This does not supply legal certification.
 
 ## 1. Known rights problem
@@ -59,3 +62,16 @@ The `tools/storage_migration_gate.py` sentinel catches *some* obvious errors (ol
 - Preserve publication of existing historical sources/patches as required, but ship no old incompatible bodies inside candidate `flash.bin`.
 - Every meaningful implementation change goes through a readable patch and a reproducible profile-qualified build; avoid a single large unexplained binary.
 - Independent source provenance/legal review must sign off before changing issue #245 to resolved or claiming a “100% GPL” product. Any third-party permission request is separate.
+
+
+## 6. Required restricted-source implementation package
+
+Before implementation, construct a separately hashed, rights-reviewed package with `approved-inputs.json` listing per-file origin, author/grant/notice, allowed function (interface declaration, test, driver source), approved public hardware/ATA/SCSI specification and behavioral observation. Only approved GPL-compatible code/independently written tests and implementation-neutral requirements may be made available to the implementer. **Do not include** Microsoft `classpnp`/`disk` implementation bodies, private-header helper bodies, object archives, disassembly, a clone carrying hidden historical source, or source-generating tests that embed an old function.
+
+Specifically, the existing `patches/roswell/0108-xbox-inactive-completion-clock.patch` created a host `storage-completion` fixture that extracts the complete original `TransferPktComplete` body from `classpnp/xferpkt.c`. That fixture **can remain in the exposed baseline audit environment**, but it must be removed from the independent implementation team's inputs and must not be counted as candidate validation. Independently produce/approve a behavioral test using **the actual new candidate functions** with provenance evidence. Document already-exposed personnel honestly; switching AI conversations does not prove clean-room independence.
+
+## 7. Static source proof and preflight limitations
+
+The current preflight in `tools/storage_migration_gate.py` has known false accepts for `-Wl,-lclasspnp`, `-l:libdisk.a`, comma-grouped `@response` references and fake nm text; tests also need clone suffix and stale-manifest scenarios. The tool must be repaired and bound to actual resolved linker inputs, binary/source-tree/flash hashes before it can be a release precheck. Even a repaired pass cannot identify all inlined/merged code or certify independence. Source function/inline/data attribution and the 22 unresolved SDK/DDK helper rights are a **separate final review**, not a regex check.
+
+The product must retain original license grants and notices for compatible source and its full corresponding-source distribution. Do not promise that the firmware becomes a single-license project or that a performance success validates license compliance. Any final conclusion requires actual code/grant evidence and appropriate independent review.

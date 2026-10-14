@@ -1,5 +1,8 @@
 # GPL-compatible Xbox storage class replacement — implementation dossier
 
+**SINGLE PR DELIVERY:** [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248) owns the entire implementation through final release checks. The authoritative, detailed task list is [IMPLEMENTATION-CHECKLIST.md](IMPLEMENTATION-CHECKLIST.md). Internal P0–P5 checkpoints are commits/reviews *within #248*, not additional PRs. This file describes the boundary; where historical provisional stages conflict, the master checklist takes precedence.
+
+
 **Status:** design / preflight only; **no replacement firmware has been implemented or qualified by this PR**. See [issue #245](https://github.com/Mainkill1/SpiritBoot/issues/245). Do not close the issue based on this document, a successful compile, or a string scan.
 
 ## 0. Scope, release identity, and why a narrow rewrite
@@ -61,6 +64,7 @@ Disk + ClassPnP           NxCdrom + ClassPnP      <-- replace THIS class layer
 | --- | --- | --- |
 | NEW `drivers/storage/class/nxstorage/CMakeLists.txt` | `nxstorage` static library, Xbox-only sources, no ClassPnP linkage; no compulsory dynamic registration | C |
 | NEW `drivers/storage/class/nxstorage/nxstorage.h` | Own narrowly scoped device/request context, geometry, API declarations; avoid copying `classp.h` or `disk.h` private layouts | C |
+| NEW `drivers/storage/class/nxstorage/device.c` | Independently implemented AddDevice, attach/PnP lifecycle, startup failure unwind and resource teardown | C–D |
 | NEW `drivers/storage/class/nxstorage/request.c` | Parent/child IRP lifetime, SRB creation and dispatch, chunking, DMA-boundary rules, exactly-once completion | C |
 | NEW `drivers/storage/class/nxstorage/sense.c` | Error/sense-to-public-status mapping and bounded retry policy; never unbounded or double retries | C |
 | NEW `drivers/storage/class/nxstorage/control.c` | Shared supported disk/optical control requests, capacity/geometry and media/flush helpers | C |
@@ -70,15 +74,18 @@ Disk + ClassPnP           NxCdrom + ClassPnP      <-- replace THIS class layer
 | `drivers/storage/class/CMakeLists.txt` | Register new library; keep baseline targets conditionally during development | C–F |
 | `drivers/storage/ide/atapi/{scsi.c,satl.c}` | **Audit first; patch only if proven necessary** for transport/lifetime bug or required SRB contract; preserve hardware paths | D–E |
 | `drivers/storage/partmgr/{partmgr.c,partition.c}` | **Avoid edit**; adjust only if a tested public contract requires it | D |
+| `ntoskrnl/io/iomgr/driver.c` | **Required:** adapt `IopFoldedInDrivers` registration, driver names, ordering and entry ABI | D–F |
 | `ntoskrnl/xb/devtree.c` | Switch HDD entry symbol to new implementation, preserve `\Driver\Disk`/`\Driver\Cdrom` names and PnP topology | D–F |
+| `ntoskrnl/include/internal/nx-devtree.h` | Audit fixed-tree prototypes and interface assumptions; alter only where necessary | D–F |
 | `ntoskrnl/xb/devnode.c` | Audit ClassPnP-specific fabricated devnode assumptions; remove only proven-dead dependency | F |
 | `ntoskrnl/CMakeLists.txt` | Mutually exclusive legacy or GPL storage libraries; final product link must omit `classpnp` and `disk` | F |
 | `drivers/storage/CMakeLists.txt` | Validate parent discovery and dependency closure | C/F |
 | `sdk/include/...` relevant public storage/WDK declarations | Keep interface facts only with verified rights; replace nontrivial inherited inline bodies | B/F |
-| `tests/host/storage-completion/`, NEW `tests/host/nxstorage/` | Exact real source compiled into bounded host harnesses; reference-model tests on request lifetime | B–E |
+| Existing `tests/host/storage-completion/` and NEW `tests/host/nxstorage/` | Old `storage-completion` extracts Microsoft-derived `TransferPktComplete`: baseline-only, **excluded from isolated implementer inputs**. New test must compile real NEW production functions | B–E |
 | `tests/xbe/storage-contract/`, `fatx-async-lifetime/`, NEW `storage-class-contract/` | Expand black-box public API tests before switching default | B–F |
-| `patches/roswell/0121-*.patch` (number provisional) | Ordered implementation patch(es); **not added in this preparation PR** | C–F |
+| `patches/roswell/<next-unused>-*.patch` | Ordered patches **inside PR #248**; current pinned lock already uses `0121` and runs through `0125a`, so inspect current head for next free suffix | C–F |
 | `sources/firmware-lock.json` | Add path/hash for each patch, preserve complete ordering and base revision | C–F |
+| `scripts/build-firmware.py`, `tools/firmware.py`, `tests/host/test_firmware.py` | Expose explicit backend selection, fail closed on fallback, record requested/actual backend in `build.json` and validate CLI/config/lock behavior | C–F |
 | `tools/storage_migration_gate.py` | Preflight archive/symbol/owner-source sentinel; **not** a license certification | A (this PR) |
 | `tests/host/test_storage_migration_gate.py` | Synthetic tests for the sentinel; regular host CI discovery | A (this PR) |
 | `docs/storage-replacement/*` | Contracts, provenance barriers, test and merge criteria | A (this PR) |
@@ -139,17 +146,17 @@ Full [ABI and request-state specification](ABI-CONTRACT.md) and [test plan](TEST
 - [ ] Verify allocation failures, delayed/inline child completion, cancellation, retry, unmap, and status ownership in isolation.
 - [ ] Add ordered Roswell patch and lock hash; do not enable candidate in release.
 
-**D. HDD parity, opted-in candidate build.**
+**D. HDD parity, internal partial-lab prototype (NOT yet compliant).**
 - [ ] Add new HDD class FDO and dispatch (names preserved), geometry and required IOCTL contract.
 - [ ] Validate raw sector, partition discovery, FATX file and save paths, repeated opens, write/flush.
-- [ ] Enable candidate **only in candidate build**; legacy becomes unlinked in that build, not a dormant embedded fallback.
+- [ ] Enable a **partial-lab-prototype** only in internal diagnostic builds; at this step the optical driver may still depend on old ClassPnP, so do **not** claim the incompatible code is absent. Final `complete-candidate` unlinks both old class archives only after HDD **and** DVD paths are independent.
 
 **E. DVD parity.**
 - [ ] Adapt `nxcdrom` to new transport and remove all ClassPnP callbacks/helper references.
 - [ ] Verify XISO mount, TOC, capacity, READ(10), no-disc, media change, errors, high-offset reads.
 - [ ] Run long/async streaming tests; compare no extra worker/packet allocations.
 
-**F. Full end-to-end cutover / license and performance gate.**
+**F. Full end-to-end cutover / license and performance gate (complete-candidate only).**
 - [ ] Default to candidate only after 64 MiB parity, then all released 128 MiB and upper-RAM-reserved profiles; test 64/128 checked variants as applicable.
 - [ ] Validate actual **link command**, COFF/LTO native+inline source attribution, data and header closure. No MS-PL retained function bodies; independently resolve the 22 SDK/DDK helper identities. Test script alone cannot certify this.
 - [ ] Reproduce firmware `flash.bin`, bootable xemu startup, storage and title suite. Validate release flash-size, peak/resident RAM and code-page layout against baseline.
@@ -158,8 +165,8 @@ Full [ABI and request-state specification](ABI-CONTRACT.md) and [test plan](TEST
 
 ## 6. Review and rollback
 
-This is an **umbrella migration**, with small, reviewable follow-up PRs per boundary; do not combine deep filesystem, memory-manager or ATA rearchitecture with the class-driver rewrite. Candidate and legacy are separate firmware builds until cutover; the public BIOS stays unmodified while any parity check fails. Keep the old GPL-incompatible code in historical source/patch archives only as required by source-distribution obligations; *not* linked into the new shipped image, and do not erase its original notices.
+This is **one implementation PR (#248)** with small, reviewable commits and checkpoint reviews inside that PR. No additional implementation PRs. Do not combine deep filesystem, memory-manager or ATA rearchitecture with the class-driver rewrite. Candidate and legacy are separate firmware builds until cutover; the public BIOS stays unmodified while any parity check fails. Keep the old GPL-incompatible code in historical source/patch archives only as required by source-distribution obligations; *not* linked into the new shipped image, and do not erase its original notices.
 
-This PR does **not** contain the replacement, request a merge of non-working drivers, or resolve #245. It supplies a high-fidelity plan, deterministic initial gates and a checklist a clean-room implementation team can execute and review.
+This PR currently does **not** contain the replacement, request a merge of non-working drivers, or resolve #245. Implementation, candidate qualification, and provenance will be added to **this same PR** until final completion. The task list in `IMPLEMENTATION-CHECKLIST.md` controls promotion.
 
 Related: [provenance protocol](PROVENANCE.md), [ABI contract](ABI-CONTRACT.md), [qualification plan](TEST-PLAN.md), [storage compliance issue #245](https://github.com/Mainkill1/SpiritBoot/issues/245), [documentation PR #246](https://github.com/Mainkill1/SpiritBoot/pull/246).

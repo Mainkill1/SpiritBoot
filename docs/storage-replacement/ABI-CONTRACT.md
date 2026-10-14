@@ -1,5 +1,8 @@
 # Xbox storage class replacement — implementation-neutral ABI contract
 
+**Single PR:** see [PR #248 master implementation checklist](IMPLEMENTATION-CHECKLIST.md) for owner files, performance gates, and completion criteria. This contract must be frozen as observable/public behavior before the implementation team uses it; implementation source from ClassPnP is not an allowed input.
+
+
 This is an **external behavioral specification**, not a porting guide from Microsoft implementation code. Values not established by a cited independent public test remain **verification targets**, not assumptions. Do not use implementation bodies or private logic from ClassPnP/Disk to fill gaps.
 
 ## 1. Existing boundary and proposed implementation
@@ -115,3 +118,16 @@ Not all entries have proven requirements from current native tests; construct a 
 Capture one machine-readable entry per tested operation with: operation and device, input bytes/offset/flags, return value, `IoStatus`, APC/event order, transfer checksum, lower SRB command/length if available from an independent test hook, memory/handle deltas, platform and all build/image hashes. When outcomes differ among Complex, baseline SpiritBoot and candidate, label them rather than quietly choosing one. Implement correctness fixes separately if independent black-box evidence shows current baseline is wrong.
 
 Reference only published hardware/command documentation, compatible source/interfaces with recorded grants, and independent black-box results. Source code or private-header bodies from the original Microsoft implementation are **not** part of this specification.
+
+
+## 9. Critical source-review corrections and explicit new tests
+
+**Boot driver registration (must be implemented):** the folded driver registry is at `ntoskrnl/io/iomgr/driver.c:IopFoldedInDrivers`, not solely `ntoskrnl/xb/devtree.c`. Preserve `\Driver\Disk` and `\Driver\Cdrom` names, `DriverEntry` calling convention, startup order and flags; trace the assembled post-patch code and `AddDevice`/`StartDevice` results, and prove the final device namespace and partition mount hierarchy through native tests.
+
+**Flush != hardware cache synchronization:** in pinned `atapi/scsi.c:AtaReqTranslateRequest`, `SRB_FUNCTION_FLUSH`/SHUTDOWN succeeds without itself issuing cache sync; in Xbox `atapi/satl.c`, `AtaReqScsiReadWrite` clears FUA, while `AtaReqScsiSynchronizeCache` is a separate path with capability-dependent early returns. Confirm the *composed* baseline command sequence, cache-capability detection, write/metadata ordering and errors before implementing new flush. Assert actual expected CDBs/ATA commands and persistence; an apparent speedup caused by missing required flushes is invalid. Emulator process exit is not proof of physical drive-cache power-loss durability.
+
+**Queue forward progress:** pinned `AtaReqCompleteRequest` may requeue, freeze a device queue and report `SRB_STATUS_QUEUE_FROZEN`. Make an explicit policy for class/lower retry ownership, bounded deadline, queue release/unfreeze, sense allocation, pool exhaustion, and mixed outstanding HDD/DVD traffic. Test that requests queued *after* the failing request complete or receive a bounded terminal result. Never introduce an unconditional single-request bottleneck or retry uncertain writes blindly.
+
+**Ownership table required before request.c implementation:** list parent and child IRP, original/partial MDL, owned SRB/sense, buffer, lower device reference, original FATX IRP-owned resource lease, retry generation and completion context, each with allocator/borrower/callback/IRQL/cleanup. The lower driver consumes `Srb->OriginalRequest` and that IRP's `MdlAddress`; ensure the child mapping is valid throughout actual DMA. Caller's `IoStatus.Information`, APC/event and priority boost are independent from child completion return. Verify immediate completion before `IoCallDriver` returns, pending errors, cancellation/issuer exit, close/truncate/delete, lower requeue using same pointer, invalid map, allocation failure, partial segments and double-completion defense. Iterative segment submission must have bounded stack use on a long series of inline-completing children; no recursive per-sector stack growth.
+
+**Fast-path work accounting:** an owned request structure does not justify one heap allocation per pointer or extra worker dispatch. Preserve the optimized FATX IRP-owned lease and conditional completion-clock behavior. Benchmark complete consumer-visible latency rather than just the lower request. Tests must compile independently authored **candidate** production functions, not the old extracted `TransferPktComplete` harness.

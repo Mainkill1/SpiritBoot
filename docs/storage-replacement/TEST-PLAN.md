@@ -1,5 +1,8 @@
 # Storage replacement qualification and performance plan
 
+**Single-PR rule:** all code, measurement infrastructure, test results and fixes live in [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248); see [the executable checklist](IMPLEMENTATION-CHECKLIST.md). These are internal milestones, not separate PRs.
+
+
 **All expected values are evidence-dependent.** No new BIOS or runtime measurements were produced for this preparation PR. This document is a checklist and experiment specification, not a pass report.
 
 ## 1. Identity, candidate isolation and comparison order
@@ -89,7 +92,7 @@ Record per-profile `flash.bin` size, kernel PE and compressed payload bytes, boo
 
 ## 5. Performance benchmarking
 
-Use the existing controlled FATX read replay (two 1,024-read datasets with queue depths 1/4/12, normal and 900-page-pressure configurations; `docs/optimization/FATX_DIRECT_ASYNC_READ.md`). The earlier direct-read candidate improved worker scheduling but still trailed Complex; those values are **previous-version observations**, not targets guaranteed by this rewrite.
+Use the existing controlled FATX read replay (two 1,024-read datasets with queue depths 1/4/12, normal and 900-page-pressure configurations; `docs/optimization/FATX_DIRECT_ASYNC_READ.md`). The earlier direct-read candidate improved worker scheduling but still trailed Complex; those values are **previous-version observations**, not current baseline targets. The composed current baseline also contains the IRP-owned FATX lease / no extra per-read context and conditional idle completion-clock optimizations; do not reintroduce these costs. The existing legacy `storage-completion` host test extracts the original ClassPnP `TransferPktComplete`; it is **baseline-only**, not candidate proof.
 
 Metrics to collect independently from correctness runs:
 - p50/p95/p99 and total guest completion latency for device sector reads/writes; queue delay, SRB submit-to-completion and parent IRP overhead separated by phase.
@@ -99,7 +102,9 @@ Metrics to collect independently from correctness runs:
 - Hot/cold kernel pages, flash bytes attributable to prior/new driver with compiler/linker source attribution; peak + resident RAM by subsystem.
 - HDD throughput at queue depths 1/4/12, DVD sustained streaming and concurrent read with GPU load, write–flush latency/durability.
 
-Test order: independently reboot, identical input streams and overlays, warmup, alternating baseline/candidate order, at least 5 valid paired repetitions (more if variance is high), same CPU governor and xemu binary, instrumentation fully disabled for acceptance. Report distributions and raw measurements, not percentages from dissimilar sessions. Regressions require root cause or explicit user-reviewed trade-off.
+**Measurement contract before implementation:** pin exact baseline ROM/source/build and emulator/media identity; first run A/A (the baseline against independent instances of itself) on Steam Deck and separately i9-12900K. Freeze workload/caching/power controls, validity rules, minimum run count, metric thresholds and comparison method after A/A but before candidate results. Five independent paired runs are only a noise pilot; predetermine a suitably powered confirmatory sample size rather than continuing until results look favorable. Alternate/randomize independent A/B pairs and treat each run/pair as a statistical unit; individual reads/frames from the same run are correlated. Capture cold-ish and warmed guest/host caches separately: independent QCOW2 overlays do not guarantee a cold host cache. Instrumented diagnosis and uninstrumented acceptance runs are distinct.
+
+**Decision rules proposed for calibration (not measured data):** per predeclared primary workload, one-sided upper 95% confidence bound for candidate/baseline batch or end-to-end request latency <= 1.02; corresponding lower confidence bound for throughput >= 0.98; p95/p99 upper bound <= 1.05 with independent tail/run evidence; p95/p99 frame-time upper bound <= 1.03 plus absolute milliseconds and no increased asset deadline misses. Require zero unexplained correctness/durability/queue/progress or MDL/pool regressions; no new per-request allocation, copy or upper worker hop without justification; all firmware envelopes fit and resident/peak RAM may not increase without explicit approval. If intervals overlap any rejection limit, label INCONCLUSIVE rather than PASS. Do not hide individual failed workload results behind a combined mean. The exact current release, not older 124→80 ms observations, is denominator A. Report distributions and raw measurements, not percentages from dissimilar sessions. Regressions require root cause or explicit user-reviewed trade-off.
 
 ## 6. Static dependency and provenance gates
 
