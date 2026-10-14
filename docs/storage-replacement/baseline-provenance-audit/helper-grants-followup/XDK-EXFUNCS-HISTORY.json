@@ -1,0 +1,123 @@
+[
+  {
+    "path": "sdk/include/xdk/exfuncs.h",
+    "url": "https://api.github.com/repos/reactos/reactos/commits?path=sdk/include/xdk/exfuncs.h&per_page=100",
+    "response_sha256": "80b16004b69a4c6061acd00b88232c0d23a6134aa7cc27feeafdf334665ae371",
+    "count": 3,
+    "commits": [
+      {
+        "sha": "d01518da7cebdf87cc38eefdff70aefa289b2f95",
+        "message": "[XDK] Add definitions required for newer storage class drivers (cdrom)\nThat introduced some warnings in the current code which were corrected as well\n\nCORE-17129",
+        "date": "2020-09-24T19:30:52Z"
+      },
+      {
+        "sha": "380cd27cf3dc2286d994d905556e15f2884b9746",
+        "message": "[XDK] Introduce ExAllocate*Zero and ExAllocate*Uninitialized functions\nThese has been first added to DDK 10.0.19041.0 and made backwards-compatible\nwith all Windows versions since Windows 2000.\nOur implementation does not use POOL_ZERO_ALLOCATION flag because it's not\nsupported by ReactOS yet, and thus erases the memory unconditionally.",
+        "date": "2020-07-26T11:10:52Z"
+      },
+      {
+        "sha": "c2c66aff7dacc62d125f2cd61d1167e9a2aa3fd6",
+        "message": "Git conversion: Make reactos the root directory, move rosapps, rostests, wallpapers into modules, and delete rossubsys.",
+        "date": "2017-10-03T07:45:34Z"
+      }
+    ]
+  },
+  {
+    "path": "reactos/include/xdk/exfuncs.h",
+    "url": "https://api.github.com/repos/reactos/reactos/commits?path=reactos/include/xdk/exfuncs.h&per_page=100",
+    "response_sha256": "b9307a0e875b85023a926b7a973dec9904be96e3facee7df4944499fedc4e8cf",
+    "count": 18,
+    "commits": [
+      {
+        "sha": "08a0346e9f1cf3b50370b9274e6d15d5ebb5a34d",
+        "message": "[SDK] One step further towards ReactOS source code tree restructure: the sdk folder that groups includes, libraries and tools. CORE-9111\n\nsvn path=/trunk/; revision=71184",
+        "date": "2016-04-20T12:36:25Z"
+      },
+      {
+        "sha": "0c0c8d637f7c5abe80189698ea100bc8a06f7c87",
+        "message": "[DDK/XDK]\n- Improve definition of ExInterlockedCompareExchange64 and interlocked SList functions and improve some annotations based on native header\n- Update processor feature constants\n\nsvn path=/trunk/; revision=67521",
+        "date": "2015-05-02T22:20:18Z"
+      },
+      {
+        "sha": "44ea2025e2e0edbd20fd1a99b90edafc1ba85a3e",
+        "message": "[INCLUDE]\nFix the Interlocked function mess. Implement all Interlocked functions in xdk/interlocked.h as they exist in native. Use this header to generate wdm.h and winnt.h. Remove Interlocked definitions from winbase.h. Fix definition of ExInterlockedAddLargeInteger.\n\nsvn path=/trunk/; revision=67173",
+        "date": "2015-04-12T12:40:49Z"
+      },
+      {
+        "sha": "05322e37a2c66df9a26d88ff37c6ebb18c67ff3c",
+        "message": "[XDK]\nFix typos, spotted by Thomas.\n\nsvn path=/trunk/; revision=66651",
+        "date": "2015-03-10T09:05:08Z"
+      },
+      {
+        "sha": "4beaf120e736ca4f5864d74a8021d35a462e7f6f",
+        "message": "[DDK/XDK]\n- Fix some prototypes in wdm.h (PMDLX -> PMDL)\n- Fix annotations for ExFreePool(WithTag)\n\nsvn path=/trunk/; revision=66636",
+        "date": "2015-03-10T00:09:20Z"
+      },
+      {
+        "sha": "d4579fbe00a110a801baf7a78975eddf4f627c81",
+        "message": "[DDK]\nExInitializePushLock is NTAPI!\n\nsvn path=/trunk/; revision=65627",
+        "date": "2014-12-13T14:37:34Z"
+      },
+      {
+        "sha": "ee87f2a4f6734b1e980f42f9d2d2147dfe779d11",
+        "message": "[DDK]\n- Fix ExAllocateFromZone. I understand it's deprecated, but it having a broken implementation which can't work at all because the one who coded this function failed to understand basic algorithms of linked lists is nonsense.\n\nsvn path=/trunk/; revision=59494",
+        "date": "2013-07-16T19:57:12Z"
+      },
+      {
+        "sha": "170f86f348d8fb40ff25bd24c84542defcf28c9c",
+        "message": "[INCLUDE]\nUpdate annotations\n\nsvn path=/trunk/; revision=57964",
+        "date": "2012-12-22T10:09:25Z"
+      },
+      {
+        "sha": "7a3aa2082706d84e989df106d6fe280eb2760196",
+        "message": "[XDK]\n* Massive annotations commit. Dedicated to Timo.\n\nsvn path=/trunk/; revision=55067",
+        "date": "2012-01-22T14:43:53Z"
+      },
+      {
+        "sha": "717a7303611b2a12eb50990ec9b63ecb88617ea0",
+        "message": "[XDK]\n- Add some missing NTAPI\n- move some types into appropriate headers\n- make sure $endif is followed by (...)\n\nsvn path=/trunk/; revision=54937",
+        "date": "2012-01-13T17:45:26Z"
+      },
+      {
+        "sha": "e4c98f4e8e73209d1aab912c84fece9c7f94c841",
+        "message": "[DDK/XDK]\nMerge some changes to wdm.h back to xdk\n\nsvn path=/trunk/; revision=52080",
+        "date": "2011-06-04T16:59:09Z"
+      },
+      {
+        "sha": "0fb515fa5b6ca9d965457f65c1ea5d5f2f841066",
+        "message": "[XDK]\n- Introduce some _ANONYMOUS_STRUCT and NONAMELESSUNION based definitions.\n[DDK]\n- Update XDK generated headers to reflect the recent changes.\n- Update some header guards.\n- Add some missing new lines at the end of files.\n- Fix PUSB_DEVICE_HANDLE guard.\n- Introduce some _ANONYMOUS_STRUCT and NONAMELESSUNION based definitions.\n[PSDK]\n- Update some header guards.\n- Add missing new line at the end of driverspecs.h\n[NDIS]\n- Update the ndis header guard.\n\nsvn path=/trunk/; revision=48511",
+        "date": "2010-08-10T13:53:10Z"
+      },
+      {
+        "sha": "750d89765c1585ef8c3ca40c5717dda6d162db54",
+        "message": "[XDK/DDK]\n- Relax INTERLOCKED_RESULT inclusion guard.\n\nsvn path=/trunk/; revision=47756",
+        "date": "2010-06-11T17:00:49Z"
+      },
+      {
+        "sha": "b02092777f146b509adc821211d91c36c6875eae",
+        "message": "Reintegrate header-work branch. Important changes include continued work on headers and progress on compiling for ARM.\n\nsvn path=/trunk/; revision=47727",
+        "date": "2010-06-09T22:24:32Z"
+      },
+      {
+        "sha": "84f23f68d11b6dff6bcbd339d5e118e90630d39c",
+        "message": "- Add -fms-extensions for arm build\n- Add _NT_TIB_KPCR to compensate for a missing NT_TIB (hackfix)\n- add KERNEL_STACK_SIZE & co for arm\n- Add missing KeGetCurrentThread prototype for arm\n- define INTERLOCKED_RESULT for X86 only\n- Add _CONTEXT and _EXCEPTION_RECORD forward declarations\n\nsvn path=/trunk/; revision=46741",
+        "date": "2010-04-06T00:00:00Z"
+      },
+      {
+        "sha": "6a40b4927e4c66957195d7dea008c2ffe00e1f58",
+        "message": "Reintegrate header-branch 3/x\n- Add XDK\n\nsvn path=/trunk/; revision=46547",
+        "date": "2010-03-29T02:38:12Z"
+      },
+      {
+        "sha": "719200874a7bee668bc9dc801c4f075d3ce672db",
+        "message": "Revert r46466 this time for real\n\n\nsvn path=/trunk/; revision=46493",
+        "date": "2010-03-27T18:57:56Z"
+      },
+      {
+        "sha": "d0701d72b7772d3b3a52109f9594b694127e6e77",
+        "message": "Reintegrate header branch\n- DDKAPI -> NTAPI\n- delete duplicate definitions\n- move files to right locations\n- Fix Mm64BitPhysicalAddress definition\n- Add a number of missing definitions\n- add XDK\n\nsvn path=/trunk/; revision=46466",
+        "date": "2010-03-26T13:50:02Z"
+      }
+    ]
+  }
+]

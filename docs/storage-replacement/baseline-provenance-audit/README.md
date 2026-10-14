@@ -15,3 +15,11 @@ Static whole-kernel RAM and compressed payload size are measured here. Native
 storage allocation high-water remains unknown. The final candidate needs actual
 link/source closure and native memory measurements before the license and
 footprint gates can pass.
+
+The [helper-grant follow-up](helper-grants-followup/FOLLOWUP.md) binds all 27
+remaining identities to their import history and records four generated-helper
+source mappings. No compatible original grant for the 27 was established; their
+compiled bodies must disappear or receive separately verified permission. The
+metadata repositories’ MIT notices do not relicense original SDK/WDK headers.
+This evidence is for provenance reviewers and remains outside the approved
+independent-author input packet.
