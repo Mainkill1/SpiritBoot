@@ -15,5 +15,12 @@ the verification command, not firmware implementation or runtime behavior.
 
 The exact locked-patch production check passes with both `CC=gcc` and `CC=clang`,
 including sanitizer fixtures and linked i386 helper validation. Original CI and
-local failure logs remain preserved. Full profile CI must pass again before the
-branch is considered green; this correction does not qualify a complete backend.
+local failure logs remain preserved. [CI run 38571239412](https://github.com/Mainkill1/SpiritBoot/actions/runs/38571239412)
+at exact fix commit `7c54af612ff58ad7dbb4ec4bbc637f28e6fe688c` passed host tests
+and all four release/debug 64/128 firmware jobs. The bounded
+[CI receipt](freestanding-checker-ci.json) retains job identities and result
+hashes. The downloaded release64 artifact contains source tree
+`7e891ec86f42b1313e5cd3453347836ac451ba79`, the completed owned production-check
+log, and actual ROM bytes matching the published `c630d22f…` reference hash.
+These firmware builds select the legacy reference; this correction does
+not qualify a complete backend.
