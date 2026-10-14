@@ -245,7 +245,10 @@ class NativeImporter:
             if key in case:
                 require(expected.get(key) == case[key], "native scheduled request/pressure mapping differs: " + key)
         if "pressure_pages" in case:
-            require(expected.get("pressure_target_pages")==case["pressure_pages"],
+            pressure=case["pressure_pages"]
+            target=expected.get("pressure_target_pages")
+            require(type(pressure) is int and pressure>=0
+                    and (target is None if pressure==0 else type(target) is int and target==pressure),
                     "native pressure allocation target differs from scheduled workload")
         require(attempt.get("tracing_enabled") is False, "traced timing is diagnostic only")
         return job, request
@@ -325,7 +328,9 @@ class NativeImporter:
             raw,result,manifest,cleanup = observed
             case,entry = job["case"],self.schedule["spec"]["artifact_policy"]["cases"][job["case_id"]]
             row.update(functional["native"])
-            row.update(status="ok",error=None,integrity_sha256=functional["integrity"][case["id"]],
+            integrity_sha256=functional["integrity"]["integrity_sha256"]
+            require(integrity_sha256==case["expected_sha256"],"actual inferred integrity differs from scheduled expected bytes")
+            row.update(status="ok",error=None,integrity_sha256=integrity_sha256,
                 operation_bytes=[int(op["information"]) for op in functional["native"]["operation_records"]],
                 started_utc=result["startedUtc"],finished_utc=result["endedUtc"],fresh_process=True,
                 fresh_overlay=False,tracing=attempt["tracing_enabled"],expensive_guest_clocks=False,

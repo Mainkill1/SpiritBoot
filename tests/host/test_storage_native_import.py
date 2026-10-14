@@ -53,11 +53,12 @@ def evaluate(attempt,evidence,observed):
  if result['status']!='completed' or result['exitCode']!=0:raise ValueError('actual failed outcome')
  parsed=native.parse_serial(raw)
  if not parsed['complete']:raise ValueError('actual incomplete serial')
- return dict(parsed=parsed,integrity={attempt['expected_case']['id']:attempt['expected_case']['expected_sha256']},actual_prepared_hdd=manifest['RuntimeFiles'][0],dvd_media=None,functional_scope='invented host interface double')
+ integrity=native.infer_integrity(raw,attempt['expected_case'],manifest,fixture_sha256=attempt['expected_inputs']['storage-perf.iso'],seed_sha256=manifest['RuntimeFiles'][0]['SeedSha256'])
+ return dict(parsed=parsed,integrity=integrity,actual_prepared_hdd=manifest['RuntimeFiles'][0],dvd_media=None,functional_scope='invented host interface double; actual product integrity parser return shape')
 '''
 
 
-def portable_capture(folder, tool, *, kind=None, cache_policy=None):
+def portable_capture(folder, tool, *, kind=None, cache_policy=None, pressure_pages=None):
     """Invented native receipts exercising the general importer in a clean checkout."""
     comp = comparator_fixtures.load_tool()
     (folder / "collector.py").write_text(DOUBLE)
@@ -83,7 +84,8 @@ def portable_capture(folder, tool, *, kind=None, cache_policy=None):
     schedule = comp.make_schedule(spec);schedule["created_utc"]="2026-01-01T00:00:00+00:00"
     comparator_fixtures.reseal_fixture(schedule)
     job = next(job for job in schedule['jobs'] if (kind is None or job['case']['kind']==kind)
-               and (cache_policy is None or job['cache_policy']==cache_policy))
+               and (cache_policy is None or job['cache_policy']==cache_policy)
+               and (pressure_pages is None or job['case'].get('pressure_pages')==pressure_pages))
     case=job["case"];entry=spec["artifact_policy"]["cases"][case["id"]]
     native_id, run = "invented-native-attempt", "invented-native-run"
     binding = {"schema_version":1,"scheduled_attempt_id":job["attempt_id"],
@@ -99,7 +101,9 @@ def portable_capture(folder, tool, *, kind=None, cache_policy=None):
     expected = {"id":case['id'],"kind":case['kind'],"operations":case['operations'],
         "queue_depth":case.get('queue_depth',1),"cache_policy":case['cache_policy'],
         "expected_operation_bytes":[case['bytes_per_operation']]*case['operations'],
+        "bytes_completed_expected":case['bytes_per_operation']*case['operations'],
         "assertions_expected":case['assertions'],"expected_sha256":case['expected_sha256']}
+    if case.get('pressure_pages',0)>0:expected['pressure_target_pages']=case['pressure_pages']
     attempt={"id":native_id,"request_path":"request.json","request_sha256":sha(request),
         "input_directory":"inputs","expected_inputs":{"aa-binding.json":sha(aa),"xemu":job['manifest']['xemu_sha256'],
         "flash.bin":job['manifest']['flash_sha256'],"storage-perf.iso":entry['boot_iso']['sha256']},
@@ -134,7 +138,7 @@ def portable_capture(folder, tool, *, kind=None, cache_policy=None):
     length=case['bytes_per_operation']
     raw+=''.join(f'STORAGE-PERF-OP id={case["id"]} index={i} ticks=183333 status=00000000 io_status=00000000 information={length}\n' for i in range(1024))
     public_fields='flush_calls=1024 persistence=1 read_calls=1024 write_calls=1024 ' if kind=='write-flush' else ''
-    raw+=f'STORAGE-PERF-CASE id={case["id"]} operations=1024 bytes={length*1024} assertions={case["assertions"]} failures=0 ticks=187732992 cache={case["cache_policy"]} qd_actual=1 available_pages=16000 {public_fields}\nSTORAGE-PERF-END cases=1 failures=0\n'
+    raw+=f'STORAGE-PERF-CASE id={case["id"]} operations=1024 bytes={length*1024} assertions={case["assertions"]} failures=0 ticks=187732992 cache={case["cache_policy"]} qd_actual={expected["queue_depth"]} available_pages=16000 {public_fields}\nSTORAGE-PERF-END cases=1 failures=0\n'
     (evidence/'native-serial.log').write_text(raw)
     maps=[dict(path='/usr/lib/libc.so.6',device='00:1a',inode='23',permissions='r-xp',address='1-2'),
         dict(path='[vdso]',device='00:00',inode='0',permissions='r-xp')]
@@ -270,6 +274,25 @@ class PortableNativeImporter(unittest.TestCase):
             self.assertEqual(observed['verification_status'],'failed_verification');self.assertEqual(observed['runner_status'],'crashed');self.assertEqual(observed['raw_exit_code'],17)
             f['ledger'].write_text('{"attempt_id":"lost","attempt_id":"forged"}\n')
             with self.assertRaisesRegex(ValueError,'line 1.*duplicate'):self.importer(f)
+
+    def test_native_pressure_zero_means_absent_target_and_positive_is_exact_integer(self):
+        for pressure in (0,900):
+            with self.subTest(pressure=pressure),tempfile.TemporaryDirectory() as temp:
+                f=portable_capture(pathlib.Path(temp),load_tool(),kind='fatx-read',pressure_pages=pressure)
+                importer=self.importer(f);importer.configure_schedule(f['schedule'],artifact_root=f['folder'],clock_review_sha256=f['clock_review_sha256'])
+                attempt=importer.declared[f['native_id']];manifest=importer.collector.observe(f['evidence'],{})[2]
+                job,_=importer._scheduled_job(attempt,manifest)
+                self.assertEqual(job['case']['pressure_pages'],pressure)
+                # An explicit None also means no clamp. Zero is a conflicting
+                # requested target, rather than a spelling of absent evidence.
+                if pressure==0:
+                    attempt['expected_case']['pressure_target_pages']=None
+                    importer._scheduled_job(attempt,manifest)
+                invalid=(0,-1,True,1,900.0) if pressure==0 else (None,-1,False,900.0,901)
+                for value in invalid:
+                    with self.subTest(invalid_target=value):
+                        attempt['expected_case']['pressure_target_pages']=value
+                        with self.assertRaises(ValueError):importer._scheduled_job(attempt,manifest)
 
 
 class RetainedWindowsClockContext(unittest.TestCase):
