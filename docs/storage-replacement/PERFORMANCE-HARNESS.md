@@ -111,7 +111,16 @@ inputs with the evidence. Hash matching is a record-consistency check, not proof
 that an operator really executed those bytes.
 
 Every case has a unique `id`, `kind`, `cache_policy`, `operations`,
-`bytes_per_operation`, `assertions` and `expected_sha256`. The expected checksum
+`assertions` and `expected_sha256`. Declare exactly one of `bytes_per_operation`
+for uniform requests or `operation_bytes` for the exact issue-order list of
+request lengths. Variable requests use the sum of that list, with no rounded
+average. Their result must retain the corresponding observed `operation_bytes`
+from each completed IOSB. An absent list is incomplete evidence; different
+lengths fail even when their total matches. Any supplied list for a uniform
+case must also match its declared size on every operation. Small HDD cases must match the
+declared `request_bytes` on every operation. See the
+[variable-request fix](BENCHMARK-VARIABLE-REQUESTS-FIX.md).
+The expected checksum
 is computed independently from the owned data that will actually be verified;
 it is never inferred from candidate output. Every case has at least 1,000
 operations to provide per-run tail evidence. All cases are primary decision
@@ -188,6 +197,7 @@ measurements:
 | `cache_preparation` | Object with `success:true`, actual `details`, and `policy_sha256` of the declared cache-policy string |
 | `timing_scope` | Exact value `caller-issue-to-consumer-ready` |
 | `operations_completed`, `bytes_completed` | Actual counts; must equal the frozen operation/byte counts |
+| `operation_bytes` | Required for variable request cases: actual completed IOSB byte counts in issue order |
 | `assertions_executed`, `assertions_failed` | Actual counts; all declared assertions execute and zero fail |
 | `integrity_sha256` | Observed verified data checksum, matching the frozen expectation |
 | `media_sha256` | Actual optical image hash for DVD cases, matching the case |

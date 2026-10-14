@@ -91,8 +91,16 @@ def validate_spec(spec):
         ids.add(case["id"])
         require(case.get("cache_policy") in policies, "case references unknown cache policy")
         require(integer(case.get("operations"), 1000), "each case requires >=1000 operations for p99")
-        require(integer(case.get("bytes_per_operation"), 1) and integer(case.get("assertions"), 1),
-                "pin byte and correctness assertion counts")
+        require(("bytes_per_operation" in case) != ("operation_bytes" in case),
+                "pin exactly one of bytes_per_operation or operation_bytes")
+        if "operation_bytes" in case:
+            lengths = case["operation_bytes"]
+            require(isinstance(lengths, list) and len(lengths) == case["operations"]
+                    and all(integer(length, 1) for length in lengths),
+                    "pin every operation byte count in issue order")
+        else:
+            require(integer(case["bytes_per_operation"], 1), "pin positive operation byte count")
+        require(integer(case.get("assertions"), 1), "pin correctness assertion count")
         require(hash_string(case.get("expected_sha256")), "pin expected checksum")
         kind = case.get("kind")
         require(kind in ("small-hdd-read", "fatx-read", "write-flush", "dvd-xiso", "boundary-sg"),
@@ -102,6 +110,9 @@ def validate_spec(spec):
                     and case["request_bytes"] <= 4096 and case["request_bytes"] % 512 == 0
                     and integer(case.get("alignment_bytes"), 512) and case["alignment_bytes"] % 512 == 0,
                     "small HDD path must be aligned QD1")
+            require((all(length == case["request_bytes"] for length in case["operation_bytes"])
+                     if "operation_bytes" in case else case["bytes_per_operation"] == case["request_bytes"]),
+                    "small HDD byte counts must match its declared request size")
         elif kind == "fatx-read":
             require(case["operations"] == 1024 and case.get("queue_depth") in (1, 4, 12)
                     and case.get("pressure_pages") in (0, 900), "FATX sequences require 1024 reads/QD1,4,12/0,900 pages")
@@ -308,8 +319,22 @@ def inspect_records(schedule, records):
                 require(record.get("media_sha256") == case["iso_sha256"], "optical variant media hash mismatch")
             require(record.get("timing_scope") == "caller-issue-to-consumer-ready", "shorter timing scope")
             require(integer(record.get("operations_completed")), "missing completed operation count")
+            if "operation_bytes" in case or "operation_bytes" in record:
+                expected_lengths = case.get("operation_bytes")
+                if expected_lengths is None:
+                    expected_lengths = [case["bytes_per_operation"]] * case["operations"]
+                observed_lengths = record.get("operation_bytes")
+                require(isinstance(observed_lengths, list) and len(observed_lengths) == case["operations"]
+                        and all(integer(length, 0) for length in observed_lengths),
+                        "missing/invalid per-operation byte evidence")
+                if observed_lengths != expected_lengths:
+                    failures.append(f"{attempt}: per-operation byte counts differ from frozen requests")
+                    continue
+                expected_bytes = sum(expected_lengths)
+            else:
+                expected_bytes = case["operations"] * case["bytes_per_operation"]
             if (record["operations_completed"] != case["operations"]
-                    or record.get("bytes_completed") != case["operations"] * case["bytes_per_operation"]
+                    or record.get("bytes_completed") != expected_bytes
                     or record.get("assertions_executed") != case["assertions"]
                     or record.get("assertions_failed") != 0 or record.get("integrity_sha256") != case["expected_sha256"]):
                 failures.append(f"{attempt}: incomplete operations/assertions, failed assertion or checksum")

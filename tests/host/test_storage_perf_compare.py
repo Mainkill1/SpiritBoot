@@ -185,6 +185,67 @@ class StoragePerformanceDecoding(unittest.TestCase):
         self.assertEqual(digest, hashlib.sha256(raw).hexdigest())
 
 
+class StoragePerformanceVariableRequests(unittest.TestCase):
+    """Unequal native requests cannot be represented by a rounded average."""
+    def schedule(self):
+        tool = load_tool()
+        spec = specification()
+        lengths = [512, 1024] * 511 + [512, 1536]
+        for case in spec["cases"]:
+            if case["kind"] == "fatx-read":
+                del case["bytes_per_operation"]
+                case["operation_bytes"] = list(lengths)
+        schedule = tool.make_schedule(spec)
+        schedule["created_utc"] = "2026-01-01T00:00:00+00:00"
+        reseal_fixture(schedule)
+        records = records_for(schedule)
+        for job, record in zip(schedule["jobs"], records):
+            if "operation_bytes" in job["case"]:
+                record["operation_bytes"] = list(job["case"]["operation_bytes"])
+                record["bytes_completed"] = sum(record["operation_bytes"])
+        return tool, schedule, records
+
+    def test_variable_requests_keep_exact_total_without_integer_average(self):
+        tool, schedule, records = self.schedule()
+        lengths = next(c["operation_bytes"] for c in schedule["spec"]["cases"] if c["kind"] == "fatx-read")
+        self.assertNotEqual(sum(lengths) % len(lengths), 0)
+        metrics, issues, failures, actual = tool.inspect_records(schedule, records)
+        self.assertFalse(issues)
+        self.assertFalse(failures)
+        self.assertEqual(len(metrics), len(schedule["jobs"]))
+        self.assertEqual(len(actual), len(records))
+
+    def test_same_total_with_changed_request_lengths_cannot_pass(self):
+        tool, schedule, records = self.schedule()
+        record = next(r for r in records if "operation_bytes" in r)
+        record["operation_bytes"][0] += 512
+        record["operation_bytes"][1] -= 512
+        _, _, failures, _ = tool.inspect_records(schedule, records)
+        self.assertTrue(any(record["attempt_id"] in failure for failure in failures))
+
+    def test_missing_request_evidence_and_ambiguous_spec_are_rejected(self):
+        tool, schedule, records = self.schedule()
+        record = next(r for r in records if "operation_bytes" in r)
+        del record["operation_bytes"]
+        _, issues, _, _ = tool.inspect_records(schedule, records)
+        self.assertTrue(any(record["attempt_id"] in issue for issue in issues))
+        spec = copy.deepcopy(schedule["spec"])
+        next(c for c in spec["cases"] if c["kind"] == "fatx-read")["bytes_per_operation"] = 768
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            tool.make_schedule(spec)
+
+    def test_uniform_requests_cannot_ignore_supplied_contradictory_iosb_lengths(self):
+        tool = load_tool()
+        schedule = pilot_fixture(tool)
+        records = records_for(schedule)
+        index = next(i for i, job in enumerate(schedule["jobs"]) if job["case"]["kind"] == "small-hdd-read")
+        record = records[index]
+        # Explicitly reported short/oversized reads cannot be hidden by a sum.
+        record["operation_bytes"] = [0, 1024] + [512] * 1022
+        _, _, failures, _ = tool.inspect_records(schedule, records)
+        self.assertTrue(any(record["attempt_id"] in failure for failure in failures))
+
+
 class StoragePerformanceCLI(unittest.TestCase):
     def test_pilot_cli_produces_all_paired_jobs_without_candidate_measurements(self):
         # Catch silently omitting a workload/arm from the executable schedule.
