@@ -1,0 +1,717 @@
+diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
+index 5cb00945..08af1eff 100644
+--- a/drivers/storage/class/nxstorage/CMakeLists.txt
++++ b/drivers/storage/class/nxstorage/CMakeLists.txt
+@@ -1,4 +1,4 @@
+ # Independently authored laboratory primitives; no FDO/IRP adapter yet.
+ # This target is linked only by the explicitly labeled partial prototype.
+-add_library(nxstorage STATIC request.c geometry_composer.c)
++add_library(nxstorage STATIC request.c geometry_composer.c cache_query.c)
+ target_include_directories(nxstorage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+diff --git a/drivers/storage/class/nxstorage/cache_query.c b/drivers/storage/class/nxstorage/cache_query.c
+new file mode 100644
+index 00000000..3a4fcd3b
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/cache_query.c
+@@ -0,0 +1,76 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "cache_query.h"
++
++static uint32_t read_u32(const uint8_t *p)
++{
++    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
++           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
++}
++
++static void write_u32(uint8_t *p, uint32_t v)
++{
++    p[0] = (uint8_t)v;
++    p[1] = (uint8_t)(v >> 8);
++    p[2] = (uint8_t)(v >> 16);
++    p[3] = (uint8_t)(v >> 24);
++}
++
++nx_cache_reply nx_cache_query_encode(nx_cache_snapshot snapshot,
++                                    const void *input, size_t input_bytes,
++                                    void *output, size_t output_bytes)
++{
++    nx_cache_reply r = {NX_CACHE_REPLY_INPUT_SHORT, 0};
++    const uint8_t *in = input;
++    uint8_t *out = output;
++    uint32_t property, query_type, cache_state = 0;
++    int flush_proved = 0;
++
++    if (input_bytes < NX_CACHE_QUERY_BYTES) return r;
++    r.status = NX_CACHE_REPLY_INVALID;
++    if (!in) return r;
++    /* Read both fields before any aliased output byte is changed. */
++    property = read_u32(in + NX_CACHE_OFF_PROPERTY);
++    query_type = read_u32(in + NX_CACHE_OFF_QUERY_TYPE);
++    r.status = NX_CACHE_REPLY_UNSUPPORTED;
++    if (property != NX_CACHE_PROPERTY_ID ||
++        (query_type != NX_CACHE_STANDARD_QUERY && query_type != NX_CACHE_EXISTS_QUERY))
++        return r;
++
++    r.status = NX_CACHE_REPLY_INVALID;
++    if (snapshot.profile > NX_CACHE_PROFILE_OPTICAL ||
++        snapshot.command_sets_known > 1 || snapshot.cache_supported > 1 ||
++        snapshot.cache_active > 1 || snapshot.flush_selection_known > 1 ||
++        (snapshot.selected_flush != NX_CACHE_FLUSH_NONE &&
++         snapshot.selected_flush != NX_CACHE_FLUSH_REGULAR &&
++         snapshot.selected_flush != NX_CACHE_FLUSH_EXTENDED)) return r;
++    r.status = NX_CACHE_REPLY_UNSUPPORTED;
++    if (snapshot.profile != NX_CACHE_PROFILE_ATA) return r;
++    r.status = NX_CACHE_REPLY_OK;
++    if (query_type == NX_CACHE_EXISTS_QUERY) return r;
++
++    r.status = NX_CACHE_REPLY_OUTPUT_SHORT;
++    if (output_bytes < NX_CACHE_HEADER_BYTES) return r;
++    r.status = NX_CACHE_REPLY_INVALID;
++    if (!out) return r;
++
++    /* Supported/active contradictions and absent recognition retain Unknown.
++     * No-command success is never an input to capability qualification. */
++    if (snapshot.command_sets_known && snapshot.cache_supported) {
++        cache_state = snapshot.cache_active ? 2u : 1u;
++        flush_proved = snapshot.flush_selection_known &&
++            snapshot.selected_flush != NX_CACHE_FLUSH_NONE;
++    }
++    r.status = NX_CACHE_REPLY_OK;
++    r.information = output_bytes < NX_CACHE_DESCRIPTOR_BYTES ?
++        NX_CACHE_HEADER_BYTES : NX_CACHE_DESCRIPTOR_BYTES;
++    for (size_t i = 0; i < r.information; ++i) out[i] = 0;
++    /* Version is this structure's byte size; Size includes any appended data.
++     * This fixed profile appends none. Unknown enums and all padding stay zero. */
++    write_u32(out + NX_CACHE_OFF_VERSION, NX_CACHE_DESCRIPTOR_BYTES);
++    write_u32(out + NX_CACHE_OFF_SIZE, NX_CACHE_DESCRIPTOR_BYTES);
++    if (r.information == NX_CACHE_DESCRIPTOR_BYTES) {
++        write_u32(out + NX_CACHE_OFF_ENABLED, cache_state);
++        out[NX_CACHE_OFF_FLUSH] = (uint8_t)flush_proved;
++    }
++    return r;
++}
+diff --git a/drivers/storage/class/nxstorage/cache_query.h b/drivers/storage/class/nxstorage/cache_query.h
+new file mode 100644
+index 00000000..551e418d
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/cache_query.h
+@@ -0,0 +1,77 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_CACHE_QUERY_H
++#define NX_CACHE_QUERY_H
++
++#include <stddef.h>
++#include <stdint.h>
++
++/* Approved Xbox x86 public interface facts; these are byte extents, not structs. */
++enum {
++    NX_CACHE_QUERY_BYTES = 12,
++    NX_CACHE_HEADER_BYTES = 8,
++    NX_CACHE_DESCRIPTOR_BYTES = 28,
++    NX_CACHE_PROPERTY_ID = 4,
++    NX_CACHE_STANDARD_QUERY = 0,
++    NX_CACHE_EXISTS_QUERY = 1,
++    NX_CACHE_OFF_VERSION = 0,
++    NX_CACHE_OFF_SIZE = 4,
++    NX_CACHE_OFF_TYPE = 8,
++    NX_CACHE_OFF_ENABLED = 12,
++    NX_CACHE_OFF_CHANGEABLE = 16,
++    NX_CACHE_OFF_WRITE_THROUGH = 20,
++    NX_CACHE_OFF_FLUSH = 24,
++    NX_CACHE_OFF_POWER = 25,
++    NX_CACHE_OFF_NV = 26,
++    NX_CACHE_OFF_PADDING = 27,
++    NX_CACHE_OFF_PROPERTY = 0,
++    NX_CACHE_OFF_QUERY_TYPE = 4
++};
++
++enum nx_cache_profile {
++    NX_CACHE_PROFILE_UNKNOWN = 0,
++    NX_CACHE_PROFILE_ATA = 1,
++    NX_CACHE_PROFILE_OPTICAL = 2
++};
++
++enum nx_cache_flush {
++    NX_CACHE_FLUSH_NONE = 0,
++    NX_CACHE_FLUSH_REGULAR = 0xe7,
++    NX_CACHE_FLUSH_EXTENDED = 0xea
++};
++
++/* All flags must be exactly zero/one. The future lower glue captures coherent
++ * facts before calling. A selected opcode is the actual retained selector's
++ * result, including its LBA48 requirements, never a guessed support bit. */
++typedef struct nx_cache_snapshot {
++    uint32_t profile;
++    uint32_t command_sets_known;
++    uint32_t cache_supported;
++    uint32_t cache_active;
++    uint32_t flush_selection_known;
++    uint32_t selected_flush;
++} nx_cache_snapshot;
++
++/* Native adapter mapping, in this order: SUCCESS, BUFFER_TOO_SMALL,
++ * NOT_SUPPORTED, INFO_LENGTH_MISMATCH, INVALID_PARAMETER. */
++enum nx_cache_reply_status {
++    NX_CACHE_REPLY_OK = 0,
++    NX_CACHE_REPLY_INPUT_SHORT,
++    NX_CACHE_REPLY_UNSUPPORTED,
++    NX_CACHE_REPLY_OUTPUT_SHORT,
++    NX_CACHE_REPLY_INVALID
++};
++
++typedef struct nx_cache_reply {
++    enum nx_cache_reply_status status;
++    size_t information;
++} nx_cache_reply;
++
++/* Pure bounded encoder. Input/output may alias and may be unaligned. Caller
++ * supplies actual resident readable/writable extents and a coherent snapshot.
++ * No error writes output. Exists returns no bytes; standard returns 8 or 28.
++ * Snapshot/output validity does not certify hardware persistence or FUA. */
++nx_cache_reply nx_cache_query_encode(nx_cache_snapshot snapshot,
++                                    const void *input, size_t input_bytes,
++                                    void *output, size_t output_bytes);
++
++#endif
+diff --git a/tests/host/nxstorage/cache-abi-facts.h b/tests/host/nxstorage/cache-abi-facts.h
+new file mode 100644
+index 00000000..1b7be4bc
+--- /dev/null
++++ b/tests/host/nxstorage/cache-abi-facts.h
+@@ -0,0 +1,69 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Independently collected declaration-only numeric ABI facts, 2026-10-14.
++ * Exact SARCH_XBOX/i386 target; no SDK helper or storage implementation body.
++ * Required interoperability constants/offsets; use to verify approved native declarations.
++ */
++#pragma once
++#define NX_CACHE_ABI_POINTER_SIZE 4u
++#define NX_CACHE_ABI_ULONG_SIZE 4u
++#define NX_CACHE_ABI_NTSTATUS_SIZE 4u
++#define NX_CACHE_ABI_ENUM_TYPE_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_SIZE 28u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_ALIGNMENT 4u
++#define NX_CACHE_ABI_STORAGE_DESCRIPTOR_HEADER_SIZE 8u
++#define NX_CACHE_ABI_STORAGE_DESCRIPTOR_HEADER_ALIGNMENT 4u
++#define NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_SIZE 12u
++#define NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_ALIGNMENT 4u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_VERSION_OFFSET 0u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_VERSION_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_SIZE_OFFSET 4u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_SIZE_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHETYPE_OFFSET 8u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHETYPE_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHEENABLED_OFFSET 12u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHEENABLED_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHECHANGEABLE_OFFSET 16u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHECHANGEABLE_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITETHROUGHSUPPORTED_OFFSET 20u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITETHROUGHSUPPORTED_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_FLUSHCACHESUPPORTED_OFFSET 24u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_FLUSHCACHESUPPORTED_SIZE 1u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_USERDEFINEDPOWERPROTECTION_OFFSET 25u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_USERDEFINEDPOWERPROTECTION_SIZE 1u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_NVCACHEENABLED_OFFSET 26u
++#define NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_NVCACHEENABLED_SIZE 1u
++#define NX_CACHE_ABI_STORAGE_DESCRIPTOR_HEADER_VERSION_OFFSET 0u
++#define NX_CACHE_ABI_STORAGE_DESCRIPTOR_HEADER_VERSION_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_DESCRIPTOR_HEADER_SIZE_OFFSET 4u
++#define NX_CACHE_ABI_STORAGE_DESCRIPTOR_HEADER_SIZE_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_PROPERTYID_OFFSET 0u
++#define NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_PROPERTYID_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_QUERYTYPE_OFFSET 4u
++#define NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_QUERYTYPE_SIZE 4u
++#define NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_ADDITIONALPARAMETERS_OFFSET 8u
++#define NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_ADDITIONALPARAMETERS_SIZE 1u
++#define NX_CACHE_ABI_WRITECACHETYPEUNKNOWN 0u
++#define NX_CACHE_ABI_WRITECACHETYPENONE 1u
++#define NX_CACHE_ABI_WRITECACHETYPEWRITEBACK 2u
++#define NX_CACHE_ABI_WRITECACHETYPEWRITETHROUGH 3u
++#define NX_CACHE_ABI_WRITECACHEENABLEUNKNOWN 0u
++#define NX_CACHE_ABI_WRITECACHEDISABLED 1u
++#define NX_CACHE_ABI_WRITECACHEENABLED 2u
++#define NX_CACHE_ABI_WRITECACHECHANGEUNKNOWN 0u
++#define NX_CACHE_ABI_WRITECACHENOTCHANGEABLE 1u
++#define NX_CACHE_ABI_WRITECACHECHANGEABLE 2u
++#define NX_CACHE_ABI_WRITETHROUGHUNKNOWN 0u
++#define NX_CACHE_ABI_WRITETHROUGHNOTSUPPORTED 1u
++#define NX_CACHE_ABI_WRITETHROUGHSUPPORTED 2u
++#define NX_CACHE_ABI_PROPERTYSTANDARDQUERY 0u
++#define NX_CACHE_ABI_PROPERTYEXISTSQUERY 1u
++#define NX_CACHE_ABI_PROPERTYMASKQUERY 2u
++#define NX_CACHE_ABI_PROPERTYQUERYMAXDEFINED 3u
++#define NX_CACHE_ABI_STORAGEDEVICEPROPERTY 0u
++#define NX_CACHE_ABI_STORAGEADAPTERPROPERTY 1u
++#define NX_CACHE_ABI_STORAGEDEVICEWRITECACHEPROPERTY 4u
++#define NX_CACHE_ABI_STORAGEACCESSALIGNMENTPROPERTY 6u
++#define NX_CACHE_ABI_IOCTL_STORAGE_QUERY_PROPERTY 0x2d1400u
++#define NX_CACHE_ABI_NTDDI_VERSION 0x5020100u
++#define NX_CACHE_ABI_WINVER 1282u
++#define NX_CACHE_ABI__WIN32_WINNT 1282u
+diff --git a/tests/host/nxstorage/cache_abi_assert.c b/tests/host/nxstorage/cache_abi_assert.c
+new file mode 100644
+index 00000000..5759aa4c
+--- /dev/null
++++ b/tests/host/nxstorage/cache_abi_assert.c
+@@ -0,0 +1,52 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "cache_query.h"
++#include "cache-abi-facts.h"
++
++/* The approved input is a numeric declaration packet, with no helper bodies.
++ * This verifies convergence with that packet; native declaration assertions
++ * remain mandatory in any future glue's actual compiler/build environment. */
++#define ABI(a, b) _Static_assert((a) == (b), #a " differs from approved target ABI")
++ABI(NX_CACHE_QUERY_BYTES, NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_SIZE);
++ABI(NX_CACHE_HEADER_BYTES, NX_CACHE_ABI_STORAGE_DESCRIPTOR_HEADER_SIZE);
++ABI(NX_CACHE_DESCRIPTOR_BYTES, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_SIZE);
++ABI(NX_CACHE_PROPERTY_ID, NX_CACHE_ABI_STORAGEDEVICEWRITECACHEPROPERTY);
++ABI(NX_CACHE_STANDARD_QUERY, NX_CACHE_ABI_PROPERTYSTANDARDQUERY);
++ABI(NX_CACHE_EXISTS_QUERY, NX_CACHE_ABI_PROPERTYEXISTSQUERY);
++ABI(NX_CACHE_OFF_PROPERTY, NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_PROPERTYID_OFFSET);
++ABI(NX_CACHE_OFF_QUERY_TYPE, NX_CACHE_ABI_STORAGE_PROPERTY_QUERY_QUERYTYPE_OFFSET);
++ABI(NX_CACHE_OFF_VERSION, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_VERSION_OFFSET);
++ABI(NX_CACHE_OFF_SIZE, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_SIZE_OFFSET);
++ABI(NX_CACHE_OFF_TYPE, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHETYPE_OFFSET);
++ABI(NX_CACHE_OFF_ENABLED, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHEENABLED_OFFSET);
++ABI(NX_CACHE_OFF_CHANGEABLE, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHECHANGEABLE_OFFSET);
++ABI(NX_CACHE_OFF_WRITE_THROUGH, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITETHROUGHSUPPORTED_OFFSET);
++ABI(NX_CACHE_OFF_FLUSH, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_FLUSHCACHESUPPORTED_OFFSET);
++ABI(NX_CACHE_OFF_POWER, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_USERDEFINEDPOWERPROTECTION_OFFSET);
++ABI(NX_CACHE_OFF_NV, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_NVCACHEENABLED_OFFSET);
++ABI(NX_CACHE_OFF_PADDING + 1, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_SIZE);
++ABI(4, NX_CACHE_ABI_ENUM_TYPE_SIZE);
++ABI(4, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_VERSION_SIZE);
++ABI(4, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_SIZE_SIZE);
++ABI(4, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHETYPE_SIZE);
++ABI(4, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHEENABLED_SIZE);
++ABI(4, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITECACHECHANGEABLE_SIZE);
++ABI(4, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_WRITETHROUGHSUPPORTED_SIZE);
++ABI(1, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_FLUSHCACHESUPPORTED_SIZE);
++ABI(1, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_USERDEFINEDPOWERPROTECTION_SIZE);
++ABI(1, NX_CACHE_ABI_STORAGE_WRITE_CACHE_PROPERTY_NVCACHEENABLED_SIZE);
++ABI(0, NX_CACHE_ABI_WRITECACHETYPEUNKNOWN);
++ABI(1, NX_CACHE_ABI_WRITECACHETYPENONE);
++ABI(2, NX_CACHE_ABI_WRITECACHETYPEWRITEBACK);
++ABI(3, NX_CACHE_ABI_WRITECACHETYPEWRITETHROUGH);
++ABI(0, NX_CACHE_ABI_WRITECACHEENABLEUNKNOWN);
++ABI(1, NX_CACHE_ABI_WRITECACHEDISABLED);
++ABI(2, NX_CACHE_ABI_WRITECACHEENABLED);
++ABI(0, NX_CACHE_ABI_WRITECACHECHANGEUNKNOWN);
++ABI(1, NX_CACHE_ABI_WRITECACHENOTCHANGEABLE);
++ABI(2, NX_CACHE_ABI_WRITECACHECHANGEABLE);
++ABI(0, NX_CACHE_ABI_WRITETHROUGHUNKNOWN);
++ABI(1, NX_CACHE_ABI_WRITETHROUGHNOTSUPPORTED);
++ABI(2, NX_CACHE_ABI_WRITETHROUGHSUPPORTED);
++ABI(2, NX_CACHE_ABI_PROPERTYMASKQUERY);
++ABI(3, NX_CACHE_ABI_PROPERTYQUERYMAXDEFINED);
++ABI(0x2d1400u, NX_CACHE_ABI_IOCTL_STORAGE_QUERY_PROPERTY);
+diff --git a/tests/host/nxstorage/cache_query_test.c b/tests/host/nxstorage/cache_query_test.c
+new file mode 100644
+index 00000000..eaa2f68d
+--- /dev/null
++++ b/tests/host/nxstorage/cache_query_test.c
+@@ -0,0 +1,378 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "cache_query.h"
++
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++static unsigned passed;
++static unsigned failed;
++
++#define CHECK(x) do { if (!(x)) { \
++    fprintf(stderr, "%s:%d: assertion failed: %s\n", __func__, __LINE__, #x); \
++    return 0; \
++} } while (0)
++
++/* Literal protocol fixtures, independently derived from the approved field
++ * contract. No production structure overlay/encoder generates expected bytes. */
++static const uint8_t query[12] = {4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
++static const uint8_t unknown_reply[28] = {
++    28, 0, 0, 0, 28, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0
++};
++static const uint8_t enabled_flush_reply[28] = {
++    28, 0, 0, 0, 28, 0, 0, 0,
++    0, 0, 0, 0, 2, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0,
++    1, 0, 0, 0
++};
++static const uint8_t disabled_flush_reply[28] = {
++    28, 0, 0, 0, 28, 0, 0, 0,
++    0, 0, 0, 0, 1, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0,
++    1, 0, 0, 0
++};
++static const uint8_t enabled_no_flush_reply[28] = {
++    28, 0, 0, 0, 28, 0, 0, 0,
++    0, 0, 0, 0, 2, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0
++};
++static const uint8_t disabled_no_flush_reply[28] = {
++    28, 0, 0, 0, 28, 0, 0, 0,
++    0, 0, 0, 0, 1, 0, 0, 0,
++    0, 0, 0, 0, 0, 0, 0, 0,
++    0, 0, 0, 0
++};
++
++static nx_cache_snapshot enabled(void)
++{
++    nx_cache_snapshot s = {1, 1, 1, 1, 1, 0xe7};
++    return s;
++}
++
++static int matches(nx_cache_snapshot s, const uint8_t *expected)
++{
++    uint8_t out[32];
++    nx_cache_reply r;
++    memset(out, 0xa5, sizeof(out));
++    r = nx_cache_query_encode(s, query, sizeof(query), out, sizeof(out));
++    CHECK(r.status == NX_CACHE_REPLY_OK);
++    CHECK(r.information == 28);
++    CHECK(memcmp(out, expected, 28) == 0);
++    for (size_t i = 28; i < sizeof(out); ++i) CHECK(out[i] == 0xa5);
++    return 1;
++}
++
++static int error_untouched(nx_cache_snapshot s, const void *in, size_t in_bytes,
++                           size_t out_bytes, enum nx_cache_reply_status status)
++{
++    uint8_t out[40], before[40];
++    nx_cache_reply r;
++    memset(out, 0xa5, sizeof(out));
++    memcpy(before, out, sizeof(out));
++    r = nx_cache_query_encode(s, in, in_bytes, out + 1, out_bytes);
++    CHECK(r.status == status);
++    CHECK(r.information == 0);
++    CHECK(memcmp(before, out, sizeof(out)) == 0);
++    return 1;
++}
++
++static int enabled_regular(void) { return matches(enabled(), enabled_flush_reply); }
++
++static int enabled_extended(void)
++{
++    nx_cache_snapshot s = enabled();
++    s.selected_flush = 0xea;
++    return matches(s, enabled_flush_reply);
++}
++
++static int disabled_with_flush(void)
++{
++    nx_cache_snapshot s = enabled();
++    s.cache_active = 0;
++    return matches(s, disabled_flush_reply);
++}
++
++static int disabled_without_flush(void)
++{
++    nx_cache_snapshot s = enabled();
++    s.cache_active = 0;
++    s.selected_flush = 0;
++    return matches(s, disabled_no_flush_reply);
++}
++
++static int no_selected_command(void)
++{
++    nx_cache_snapshot s = enabled();
++    s.selected_flush = 0;
++    return matches(s, enabled_no_flush_reply);
++}
++
++static int selector_not_known(void)
++{
++    nx_cache_snapshot s = enabled();
++    s.flush_selection_known = 0;
++    CHECK(matches(s, enabled_no_flush_reply));
++    s.selected_flush = 0xea;
++    CHECK(matches(s, enabled_no_flush_reply));
++    return 1;
++}
++
++static int command_sets_unrecognized(void)
++{
++    nx_cache_snapshot s = enabled();
++    s.command_sets_known = 0;
++    CHECK(matches(s, unknown_reply));
++    s.cache_supported = 0;
++    s.cache_active = 0;
++    CHECK(matches(s, unknown_reply));
++    return 1;
++}
++
++static int unsupported_or_contradictory_cache(void)
++{
++    nx_cache_snapshot s = enabled();
++    s.cache_supported = 0;
++    CHECK(matches(s, unknown_reply));
++    s.cache_active = 0;
++    CHECK(matches(s, unknown_reply));
++    return 1;
++}
++
++static int input_extent(void)
++{
++    for (size_t n = 0; n < 12; ++n) {
++        uint8_t *in = n ? malloc(n) : NULL;
++        if (n) { CHECK(in != NULL); memcpy(in, query, n); }
++        int ok = error_untouched(enabled(), in, n, 28, NX_CACHE_REPLY_INPUT_SHORT);
++        free(in);
++        CHECK(ok);
++    }
++    CHECK(error_untouched(enabled(), NULL, 12, 28, NX_CACHE_REPLY_INVALID));
++    return 1;
++}
++
++static int query_and_property_boundaries(void)
++{
++    const uint32_t bad_properties[] = {0, 1, 2, 3, 5, 6, UINT32_MAX};
++    const uint32_t bad_queries[] = {2, 3, 4, UINT32_MAX};
++    uint8_t in[12];
++    for (size_t j = 0; j < sizeof(bad_properties)/sizeof(bad_properties[0]); ++j) {
++        uint32_t v = bad_properties[j];
++        memcpy(in, query, sizeof(in));
++        for (unsigned i = 0; i < 4; ++i) in[i] = (uint8_t)(v >> (8u * i));
++        CHECK(error_untouched(enabled(), in, sizeof(in), 28, NX_CACHE_REPLY_UNSUPPORTED));
++    }
++    for (size_t j = 0; j < sizeof(bad_queries)/sizeof(bad_queries[0]); ++j) {
++        uint32_t v = bad_queries[j];
++        memcpy(in, query, sizeof(in));
++        for (unsigned i = 0; i < 4; ++i) in[4+i] = (uint8_t)(v >> (8u * i));
++        CHECK(error_untouched(enabled(), in, sizeof(in), 28, NX_CACHE_REPLY_UNSUPPORTED));
++    }
++    return 1;
++}
++
++static int exists_returns_no_bytes(void)
++{
++    uint8_t in[12], out[28];
++    nx_cache_reply r;
++    memcpy(in, query, sizeof(in));
++    in[4] = 1;
++    memset(out, 0xa5, sizeof(out));
++    r = nx_cache_query_encode(enabled(), in, sizeof(in), out, sizeof(out));
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 0);
++    for (size_t i = 0; i < sizeof(out); ++i) CHECK(out[i] == 0xa5);
++    r = nx_cache_query_encode(enabled(), in, sizeof(in), NULL, 0);
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 0);
++    r = nx_cache_query_encode(enabled(), in, sizeof(in), in, sizeof(in));
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 0);
++    CHECK(in[0] == 4 && in[4] == 1);
++    return 1;
++}
++
++static int unsupported_profiles(void)
++{
++    nx_cache_snapshot s = enabled();
++    uint8_t exists[12];
++    memcpy(exists, query, sizeof(exists));
++    exists[4] = 1;
++    for (unsigned p = 0; p <= 2; p += 2) {
++        s.profile = p;
++        CHECK(error_untouched(s, query, sizeof(query), 28, NX_CACHE_REPLY_UNSUPPORTED));
++        CHECK(error_untouched(s, exists, sizeof(exists), 28, NX_CACHE_REPLY_UNSUPPORTED));
++    }
++    return 1;
++}
++
++static int output_negotiation(void)
++{
++    for (size_t n = 0; n < 8; ++n)
++        CHECK(error_untouched(enabled(), query, sizeof(query), n, NX_CACHE_REPLY_OUTPUT_SHORT));
++    for (size_t n = 8; n <= 34; ++n) {
++        size_t bytes = n < 28 ? 8 : 28;
++        uint8_t *out = malloc(n);
++        nx_cache_reply r;
++        CHECK(out != NULL);
++        memset(out, 0xa5, n);
++        r = nx_cache_query_encode(enabled(), query, sizeof(query), out, n);
++        int ok = r.status == NX_CACHE_REPLY_OK && r.information == bytes &&
++                 memcmp(out, enabled_flush_reply, bytes) == 0;
++        for (size_t i = bytes; i < n; ++i) ok = ok && out[i] == 0xa5;
++        free(out);
++        CHECK(ok);
++    }
++    return 1;
++}
++
++static int null_output(void)
++{
++    nx_cache_reply r = nx_cache_query_encode(enabled(), query, sizeof(query), NULL, 0);
++    CHECK(r.status == NX_CACHE_REPLY_OUTPUT_SHORT && r.information == 0);
++    r = nx_cache_query_encode(enabled(), query, sizeof(query), NULL, 8);
++    CHECK(r.status == NX_CACHE_REPLY_INVALID && r.information == 0);
++    r = nx_cache_query_encode(enabled(), query, sizeof(query), NULL, 28);
++    CHECK(r.status == NX_CACHE_REPLY_INVALID && r.information == 0);
++    return 1;
++}
++
++static int alias_full_and_header(void)
++{
++    uint8_t buffer[36];
++    nx_cache_reply r;
++    memset(buffer, 0xa5, sizeof(buffer));
++    memcpy(buffer + 1, query, sizeof(query));
++    r = nx_cache_query_encode(enabled(), buffer + 1, 12, buffer + 1, 28);
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 28);
++    CHECK(memcmp(buffer + 1, enabled_flush_reply, 28) == 0);
++    CHECK(buffer[0] == 0xa5 && buffer[29] == 0xa5);
++    memset(buffer, 0xa5, sizeof(buffer));
++    memcpy(buffer + 1, query, sizeof(query));
++    r = nx_cache_query_encode(enabled(), buffer + 1, 12, buffer + 1, 12);
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 8);
++    CHECK(memcmp(buffer + 1, enabled_flush_reply, 8) == 0);
++    CHECK(memcmp(buffer + 9, query + 8, 4) == 0);
++    CHECK(buffer[0] == 0xa5 && buffer[13] == 0xa5);
++    return 1;
++}
++
++static int partial_overlap_and_unaligned(void)
++{
++    uint8_t buffer[48];
++    nx_cache_reply r;
++    /* Output overwrites input's query fields, so all input must be captured. */
++    memset(buffer, 0xa5, sizeof(buffer));
++    memcpy(buffer + 7, query, sizeof(query));
++    r = nx_cache_query_encode(enabled(), buffer + 7, 12, buffer + 1, 28);
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 28);
++    CHECK(memcmp(buffer + 1, enabled_flush_reply, 28) == 0);
++    CHECK(buffer[0] == 0xa5 && buffer[29] == 0xa5);
++    memset(buffer, 0xa5, sizeof(buffer));
++    memcpy(buffer + 1, query, sizeof(query));
++    r = nx_cache_query_encode(enabled(), buffer + 1, 12, buffer + 5, 28);
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 28);
++    CHECK(memcmp(buffer + 5, enabled_flush_reply, 28) == 0);
++    CHECK(buffer[33] == 0xa5);
++    return 1;
++}
++
++static int malformed_snapshot_flags(void)
++{
++    const uint32_t values[] = {2, UINT32_MAX};
++    for (size_t j = 0; j < sizeof(values)/sizeof(values[0]); ++j) {
++        nx_cache_snapshot s = enabled();
++        s.command_sets_known = values[j];
++        CHECK(error_untouched(s, query, sizeof(query), 28, NX_CACHE_REPLY_INVALID));
++        s = enabled(); s.cache_supported = values[j];
++        CHECK(error_untouched(s, query, sizeof(query), 28, NX_CACHE_REPLY_INVALID));
++        s = enabled(); s.cache_active = values[j];
++        CHECK(error_untouched(s, query, sizeof(query), 28, NX_CACHE_REPLY_INVALID));
++        s = enabled(); s.flush_selection_known = values[j];
++        CHECK(error_untouched(s, query, sizeof(query), 28, NX_CACHE_REPLY_INVALID));
++    }
++    return 1;
++}
++
++static int malformed_snapshot_enums(void)
++{
++    const uint32_t bad_profiles[] = {3, UINT32_MAX};
++    const uint32_t bad_flushes[] = {1, 0xe6, 0xe8, 0xe9, 0xeb, 0xff, UINT32_MAX};
++    for (size_t j = 0; j < sizeof(bad_profiles)/sizeof(bad_profiles[0]); ++j) {
++        nx_cache_snapshot s = enabled();
++        s.profile = bad_profiles[j];
++        CHECK(error_untouched(s, query, sizeof(query), 28, NX_CACHE_REPLY_INVALID));
++    }
++    for (size_t j = 0; j < sizeof(bad_flushes)/sizeof(bad_flushes[0]); ++j) {
++        nx_cache_snapshot s = enabled();
++        s.selected_flush = bad_flushes[j];
++        CHECK(error_untouched(s, query, sizeof(query), 28, NX_CACHE_REPLY_INVALID));
++        s.flush_selection_known = 0;
++        CHECK(error_untouched(s, query, sizeof(query), 28, NX_CACHE_REPLY_INVALID));
++    }
++    return 1;
++}
++
++static int ignored_input_tail_and_large_extents(void)
++{
++    uint8_t in[20], out[28];
++    nx_cache_reply r;
++    memset(in, 0xff, sizeof(in));
++    memcpy(in, query, 8);
++    r = nx_cache_query_encode(enabled(), in, sizeof(in), out, sizeof(out));
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 28);
++    CHECK(memcmp(out, enabled_flush_reply, sizeof(out)) == 0);
++    /* The function's actual touched extent is bounded, irrespective of SIZE_MAX. */
++    r = nx_cache_query_encode(enabled(), in, SIZE_MAX, out, SIZE_MAX);
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 28);
++    CHECK(memcmp(out, enabled_flush_reply, sizeof(out)) == 0);
++    return 1;
++}
++
++static int immutable_inputs(void)
++{
++    nx_cache_snapshot s = enabled(), saved = s;
++    uint8_t in[12], out[28];
++    nx_cache_reply r;
++    memcpy(in, query, sizeof(in));
++    r = nx_cache_query_encode(s, in, sizeof(in), out, sizeof(out));
++    CHECK(r.status == NX_CACHE_REPLY_OK && r.information == 28);
++    CHECK(memcmp(in, query, sizeof(in)) == 0);
++    CHECK(memcmp(&s, &saved, sizeof(s)) == 0);
++    return 1;
++}
++
++static void run(const char *name, int (*test)(void))
++{
++    if (test()) { ++passed; printf("PASS %s\n", name); }
++    else { ++failed; printf("FAIL %s\n", name); }
++}
++
++#define RUN(t) run(#t, t)
++int main(void)
++{
++    RUN(enabled_regular);
++    RUN(enabled_extended);
++    RUN(disabled_with_flush);
++    RUN(disabled_without_flush);
++    RUN(no_selected_command);
++    RUN(selector_not_known);
++    RUN(command_sets_unrecognized);
++    RUN(unsupported_or_contradictory_cache);
++    RUN(input_extent);
++    RUN(query_and_property_boundaries);
++    RUN(exists_returns_no_bytes);
++    RUN(unsupported_profiles);
++    RUN(output_negotiation);
++    RUN(null_output);
++    RUN(alias_full_and_header);
++    RUN(partial_overlap_and_unaligned);
++    RUN(malformed_snapshot_flags);
++    RUN(malformed_snapshot_enums);
++    RUN(ignored_input_tail_and_large_extents);
++    RUN(immutable_inputs);
++    printf("%u passed; %u failed\n", passed, failed);
++    return failed ? EXIT_FAILURE : EXIT_SUCCESS;
++}
+diff --git a/tests/host/nxstorage/check.py b/tests/host/nxstorage/check.py
+index 3456216b..49075f9a 100644
+--- a/tests/host/nxstorage/check.py
++++ b/tests/host/nxstorage/check.py
+@@ -13,15 +13,18 @@ output = Path(sys.argv[1]).resolve()
+ output.mkdir(parents=True, exist_ok=True)
+ cc = os.environ.get("CC", "clang" if shutil.which("clang") else "gcc")
+ flags = ["-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-I" + str(source)]
+-for case, production in (("request_test", "request.c"), ("pthread_ownership_test", "request.c"), ("test_geometry_composer", "geometry_composer.c")):
++for case, production in (("request_test", "request.c"), ("pthread_ownership_test", "request.c"), ("test_geometry_composer", "geometry_composer.c"), ("cache_query_test", "cache_query.c")):
+     executable = output / case
+     subprocess.run([cc] + flags + ["-pthread", str(source / production), str(tests / (case + ".c")), "-o", str(executable)], check=True)
+     subprocess.run([str(executable)], check=True, env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1", UBSAN_OPTIONS="halt_on_error=1"))
+-for production in ("request.c", "geometry_composer.c"):
++for production in ("request.c", "geometry_composer.c", "cache_query.c"):
+     obj = output / (production + ".i386.o")
+     target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
+     subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-I" + str(source), "-c", str(source / production), "-o", str(obj)], check=True)
+     undefined = subprocess.check_output(["nm", "-u", str(obj)], text=True)
+     if undefined.strip():
+         raise SystemExit("Unexpected i386 helpers: " + undefined)
++abi_object = output / "cache-abi-assert.i386.o"
++target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
++subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-I" + str(source), "-I" + str(tests), "-c", str(tests / "cache_abi_assert.c"), "-o", str(abi_object)], check=True)
+ print("Owned nxstorage production checks passed; kernel adapter/native qualification remains open")

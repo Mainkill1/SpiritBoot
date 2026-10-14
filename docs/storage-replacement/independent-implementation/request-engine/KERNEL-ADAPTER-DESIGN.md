@@ -402,3 +402,82 @@ within the prose and declaration fragments identified above):
 This note is the only output changed by this design task. Existing production,
 tests, provenance and their artifact manifest were left unchanged. The note
 hash is reported separately because a file cannot contain its own final hash.
+
+## Approved completion/cache checkpoint addendum
+
+Root subsequently approved COMPLETION-OWNERSHIP.md, CACHE-CAPABILITIES.md,
+TARGET-API-AVAILABILITY.md, target-api-declarations.h and
+LOWER-CACHE-QUERY-PROPOSAL.md. These are behavior/declaration packets with no
+I/O-manager or lower implementation bodies. They update the initial unknowns
+above as follows; the original design/input table remains a historical snapshot.
+
+For the inspected target paths, STATUS_MORE_PROCESSING_REQUIRED stops I/O-manager
+packet processing without later child/stack/MDL access. IofCallDriver does not
+inspect that IRP after lower dispatch returns. The described terminal ATAPI and
+bridge paths no longer access old child/SRB/sense/partial-MDL contents after
+completion; inline remove-lock epilogues retain only an opaque saved IRP tag.
+They still access device/channel state. Fixed child reuse therefore has conditional
+target support: every candidate callback/submission frame must stop touching old
+contents before calling nx_lower_done, copy token/results by value, and preserve
+device references through the older epilogues. No two-bank proof or native
+candidate reuse result is implied. Parent reclaim, cancel crossing completion,
+long asynchronous-to-inline runs and device-rundown tests remain required.
+
+IoReuseIrp also requires no installed cancel callback/thread-list association
+and clears packet state; owned MDL/sense cleanup is separate. IoFreeIrp does not
+free attached MDLs. These supplied facts permit a precise future reset/cleanup
+sequence but do not qualify an unimplemented adapter.
+
+The declaration packet distinguishes linked NTAPI routines and FASTCALL
+IofCallDriver/IofCompleteRequest from header-only operations. The latter must
+not be called as nonexistent standalone symbols or copied from unapproved SDK
+helper bodies. Future local helpers require reviewed public field/atomic facts,
+independent authorship and checks. Missing native types/offsets/calling-convention
+closure remain unapproved; target-api-declarations.h does not supply them.
+
+The current Xbox lower exposes no MODE SENSE caching page, ATA passthrough or
+StorageDeviceWriteCacheProperty. A successful SYNCHRONIZE CACHE can be a no-op
+for unrecognized/disabled cache or for enabled cache with no selected opcode.
+The actual selected 0xE7/0xEA path can issue hardware flush and report eventual
+errors. Discovery must expose recognized enable facts and a selected hardware
+route; query absence/no-command success is not proof of disabled caching.
+
+The read-only lower query proposal still has no installed lower glue. A separate
+bounded pure primitive is now implemented in cache_query.c from the newly
+approved cache declaration-fact packet. It requires a coherent explicit
+capability snapshot, preserves Unknown and unqualified durability, and has no
+ATA/queue/interrupt effects. No full class adapter is authorized before root
+freezes P1. No request-core bytes changed.
+
+## Declaration-fact checkpoint and native assertion strategy
+
+Root subsequently approved CACHE-ABI-FACTS.md/cache-abi-facts.json/h,
+NATIVE-ABI-INVENTORY.md/native-abi-facts.json/h and ABI-PROBE-RECEIPT.json. The
+packet contains numeric sizes, offsets, constants and prototype identities only;
+native type definitions, raw probe/assembly/dependency files and helper bodies
+are still unapproved author inputs. A numeric IRP/MDL size/offset inventory does
+not authorize reconstructing an opaque structure or dereferencing kernel memory
+from guessed fields. Future adapter source still needs interface-only reviewed
+declarations plus independently authored header-only operations and applicable
+grant/field/atomic/calling-convention facts.
+
+The cache primitive now serializes the exact approved 12-byte input minimum,
+8-byte header and 28-byte full descriptor, including byte-27 padding. The public
+Version definition was independently verified on the primary Microsoft Win32
+STORAGE_WRITE_CACHE_PROPERTY page: structure byte size; Size means total returned
+data. Both are 28 in this fixed profile. Host/freestanding tests compare own
+serialization constants with the approved numeric packet without importing SDK
+structures. CACHE-QUERY-DESIGN.md states the required exact native sizeof,
+alignment, offsetof, member-width, enum and IOCTL assertions before lower glue
+can be admitted. Exact compiler/header identities and zero-text assertion-only
+object evidence must be retained; source/body grants cannot be inferred from
+successful compilation.
+
+Native inventory points out a target-specific IRP arrangement (128 bytes,
+alignment 8, MdlAddress 108, SystemBuffer 112, CancelRoutine 116), so neither
+desktop field layout nor unchecked whole-header inclusion is an acceptable
+shortcut. The future adapter must assert its actual declarations against the
+approved native packet for every field it uses, and verify NTAPI/FASTCALL
+callback prototypes on that target. The cache encoder uses none of these
+fields. No native runtime, IRQL/cancel parity, lower integration or physical
+durability qualification is claimed by the pure module's passing tests.

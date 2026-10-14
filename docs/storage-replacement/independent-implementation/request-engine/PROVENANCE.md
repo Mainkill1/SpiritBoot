@@ -353,3 +353,161 @@ freestanding gate passes: text 4569 bytes, ELF file 5192 bytes, no unresolved
 helpers. The initialization ABI requires the new actual-storage-byte argument
 when root refreshes its prototype. All production/test sources, notes, logs and
 artifact hashes are updated only in this independent output directory.
+
+## Additional approved completion/cache packet and design extension
+
+Root explicitly admitted the following new behavior/declaration inputs under
+the existing permitted package; no I/O-manager/lower implementation body was
+exported or inspected by this author:
+
+| Input | SHA-256 |
+| --- | --- |
+| COMPLETION-OWNERSHIP.md | c074d61fbc50079dd0e5b38d81f808a6f23742c5477c677aeb38fca92fe94d6f |
+| CACHE-CAPABILITIES.md | 3ec851eb9f492df664690d661cdd5b7214140a85803f1aa0f377b6b3c1198a40 |
+| TARGET-API-AVAILABILITY.md | f23e255130bc48ead853f689a7445599f9955bcece666649379d506d0cfe5a27 |
+| target-api-declarations.h | a0c7d6a9c24acacfa0f6f58ba95f18678afbef8dbb99db78bac1f82d84788f61 |
+| LOWER-CACHE-QUERY-PROPOSAL.md | ee7a787d0214a53d0dbc629ac498f4b6a6f67555b03c6ae26c47ca9fbb3a4169 |
+| updated approved-inputs.json | 9a56bd594159806de82f3a091aebcbaf88d624792bcec667933423f1540c5411 |
+| updated SHA256SUMS | 831cc977ff010fe1d1b11640aa9a0d0b690aa27ec769aa4ff8f59877ed26fce8 |
+
+The reviewed declaration-only target packet hash matched its manifest entry.
+Narrow query/header/enum declarations in the already approved public-domain
+ntddstor.h were additionally read (same pinned a79bf9a5... input); no transitive
+includes or private native layouts were viewed. The updated manifest names a
+geometry-wrapper packet, but that packet's contents were not studied in this
+task. No other source/export is implicitly admitted from a file-name listing.
+
+Primary public STORAGE_WRITE_CACHE_PROPERTY, WRITE_CACHE_ENABLE and WRITE_THROUGH
+documentation on Microsoft Learn was read for public semantic facts; their URLs
+are linked in CACHE-QUERY-DESIGN.md. No example/implementation body was copied.
+The previous input/exposure record remains intact; no old class implementation,
+history, binary/disassembly, product tree or native header closure was studied.
+
+KERNEL-ADAPTER-DESIGN.md now records conditional target stopped-completion/reuse
+support, continued device/channel epilogue lifetime, actual API availability
+including header-only helpers, absent cache discovery paths, and successful
+no-command SYNCHRONIZE CACHE branches. These supplied source-observed facts do
+not imply a tested adapter or physical durability result.
+
+CACHE-QUERY-DESIGN.md freezes a separately scoped consistent-snapshot, read-only
+response primitive: recognized enabled/disabled states, explicit selected real
+flush, conservative Unknown/no native FUA/configurability/power credit, descriptor
+negotiation and bounded acceptance cases. It has no implementation yet. The
+proposal supplies ordinary x86 full size 28 but the approved packet does not
+yet supply the exact serialization offsets/widths, header/query minimum extents
+and version/enum ABI facts needed to implement and assert a native response
+without using unapproved headers. Precise behavior-only ABI facts were requested
+from root; its instruction explicitly permits finishing design only when target
+structure facts are missing. No guessed encoder/no-op shell or new pass evidence
+is claimed while those facts remain unavailable.
+
+The request core and all existing tests remain frozen and unchanged. No new
+build/test/native run was needed for these prose changes. The existing 50-case
+engine evidence is historical/current engine evidence only, not cache-query
+qualification. Only own design/provenance/manifest outputs changed; no product,
+Git, VM, ATA/IRQ/queue or full adapter mutation occurred. P1 and actual native
+type/helper/callback qualification gates remain in effect.
+
+## Separate cache encoder: approved declaration facts and final freeze
+
+Root explicitly approved CACHE-ABI-FACTS.md, cache-abi-facts.json/h,
+NATIVE-ABI-INVENTORY.md, native-abi-facts.json/h and ABI-PROBE-RECEIPT.json for
+this bounded task. The approved manifests and these declaration-only packets
+were read; their numeric native inventory was delivered in a combined output
+that truncated some numeric rows. No native type/header closure, probe source,
+object/assembly/dependency artifact, SDK helper or old storage body was viewed.
+Only cache ABI facts are used by production/test assertions; native numeric
+facts are discussed for future assertion requirements. New input identities:
+
+| Input | SHA-256 |
+| --- | --- |
+| CACHE-ABI-FACTS.md, initial read | d0b6c7ae3494a1353b33f6df7373aa1a8c5f96781fdc5573900e5a30c08ba38f |
+| CACHE-ABI-FACTS.md, public Version clarification | 62bc52dd83250de3b69221751d00f00baa36bb0eeb1943fdecef6f87fa88de46 |
+| cache-abi-facts.json | 7e06c069f14ec8aa5fd9b88dae5d1a39a97339c713a957459886b1da4c094ecb |
+| cache-abi-facts.h | 19b20d0ffbc993fa6120702d6f6559a7efa4364e5bc6dc24df97d74d0e6ed816 |
+| NATIVE-ABI-INVENTORY.md | 2190a939e1a450128594f6c147be6177c41f7a000767b615966c50db217c5ec1 |
+| native-abi-facts.json | 874a5625ac7e3191104fefa024e84cbd51eb2a47cf6157cdaa56c6082a5dc519 |
+| native-abi-facts.h | cede9c2da88bbd9f896444ce6699391aee1c9b432984bc36e8b876439b2b484d |
+| ABI-PROBE-RECEIPT.json, initial read | 15e9d163c044d54ce8e53966e3620b7eca64f5f95f4da199e8b12ca11b419f5b |
+| ABI-PROBE-RECEIPT.json, public Version clarification | 361305fabcc7388fd934af230e959dccac76dea05207df266141904f5b4ed8ca |
+| approved-inputs.json | fe9c8f587f041249cd121f27828c6608b94c098a6af285a65f2d178aabbe84fc |
+| SHA256SUMS, clarified packet | 7058b4a6e863813de84e5557695de4e4a8cf1f20dc7d184a4d3ae53e8c2ae1f0 |
+
+The cache proposal and numeric header were reread, along with own existing
+design/provenance/test scripts. The native fact header was additionally searched
+for status constants (no matches); no external source/header was opened for
+them. tests/cache-input-validation.log verifies selected new input hashes
+against the updated SHA/index and verifies the frozen engine source/test bytes.
+The entire listed source closure was not read or implicitly approved by this
+manifest review.
+
+The DDI Version description did not establish a numeric convention. The
+investigator supplied a primary-source clarification; this author independently
+opened [Microsoft's Win32 STORAGE_WRITE_CACHE_PROPERTY page](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ns-winioctl-storage_write_cache_property).
+It defines Version as structure byte size and Size as total descriptor bytes.
+That page's public declaration/semantic facts were visible, with no implementation
+sample/helper body used. Combining those semantics with the exact measured
+target 28-byte layout gives Version=Size=28 for this fixed response. The
+investigator then updated the prose/receipt; the numeric packet did not change.
+No desktop layout was substituted for the target measurements.
+
+cache_query.h/test fixtures were authored before functional production code.
+A documented temporary red-only production scaffold returned Unsupported/0 for
+all inputs. tests/cache-query-red.log records its real strict-warning ASan/UBSan
+execution: 18 expected assertion failures, two unsupported-path passes, exit 1,
+and no sanitizer findings. The scaffold was replaced by real independently
+authored bounded C. No historical source-shaped test, source-text grep or
+expected-output encoder/structure overlay was used. The red scaffold was not
+presented as an implemented query and no final implementation remains a no-op.
+
+tests/cache-query-green.log records all 20 fixture groups passing under Debian
+clang 19.1.7 with ASan/leak detection and UBSan halt-on-error. These include
+literal expected enabled/disabled/Unknown bytes, E7/EA/None/unknown selector,
+unsupported and contradictory cache facts, no native-FUA/type/configurability/
+power/NV credit, every output padding byte, input 0..11 and output 0..34 bounds,
+null pointers, Exists/standard and enum/property boundaries, malformed snapshot
+Boolean/profile/opcode values, unaligned/full/partial input-output aliasing,
+oversized/SIZE_MAX extents, untouched error/tail canaries, and immutable inputs.
+SIZE_MAX tests use small backing storage to verify actual accesses remain
+bounded; production still requires truthful resident readable/writable extents.
+There are 20 named groups, many containing multiple boundary fixtures, not 20
+native device cases. No known failing test or sanitizer finding remains.
+
+The production module reads only public query fields and its by-value coherent
+snapshot, writes exactly 0/8/28 response bytes, and has no callback, allocation,
+clock, worker or hardware interface. It conservatively preserves unknown/
+unflushable capability. Error precedence and rejecting malformed snapshot enums
+are explicit candidate policies. Pure result enum values are not NTSTATUS;
+future glue must map the documented symbolic statuses/actual Information.
+Passing a selected opcode requires genuine retained-selector proof; the module
+does not parse IDENTIFY or establish that a physical drive durably flushes.
+
+tests/cache-query-i386.log records strict-warning freestanding i386 compilation
+of real new production C: 442 text bytes, 972-byte ELF file, no data/BSS and no
+unresolved symbols. A separate independently authored assertion-only test
+includes the explicitly approved constant-only cache-abi-facts.h packet;
+its object has zero text and passes all required field/enum/extent comparisons.
+This is comparison against numeric facts, not an actual native type build.
+CACHE-QUERY-DESIGN.md and KERNEL-ADAPTER-DESIGN.md specify mandatory assertions
+against reviewed native sizeof/alignment/offsetof/width/enum/prototype declarations
+under the exact target build before any glue is admitted.
+
+At root's follow-up, a design-only lower glue plan was added from the already
+approved behavior/declaration facts. No new lower body was read. The plan
+separates coherent retained state/actual E7-EA selection from successful
+disabled/unknown/no-op synchronization, defines status/Information mapping,
+and lists the missing native declarations, cached-field/mutability/lock/IRQL/
+rundown facts. It does not install a property handler, alter ATA/IRQ/queue/cache
+state or implement the full adapter. New pure production is unlinked from the
+product; native P1 and major integration gates remain with root.
+
+Frozen request.c/h, request_test.c, pthread_ownership_test.c and run.sh hashes
+remain exactly their prior identities. A single verification run, recorded in
+tests/cache-task-engine-green.log, passes all 42 deterministic and eight real
+pthread engine scenarios under the existing sanitizers. The unchanged engine
+i386 verification remains 4569 text bytes with no unresolved symbols, recorded
+in tests/cache-task-engine-i386.log. These results are engine evidence only and
+do not substitute for native cache glue, IRQL/cancellation or physical durability
+acceptance. No product/Git/VM mutation or full adapter work occurred. All new
+sources/tests/design/logs/provenance/freeze records stay within this author's
+own output directory. This record makes no personnel/legal certification.
