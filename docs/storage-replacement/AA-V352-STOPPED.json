@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-14T22:53:13.229113+00:00",
+  "status": "INCONCLUSIVE_STOPPED",
+  "ledger_sha256": "8b6662d14a597c772c67366a4ba22de944500e67f6351f4bd1559110a484a32a",
+  "planned_jobs": 360,
+  "completed_native_jobs": 89,
+  "failed_preflight_attempts": 1,
+  "not_attempted_jobs": 270,
+  "last_failure": {
+    "schema_version": 1,
+    "attempt_id": "pr248-native-deck-v352-aa-a089",
+    "host": "deck",
+    "plan_sha256": "a5ce80c05e5be7458a52d5b52e481f0593cafc1c2232531bd6f285987c488451",
+    "parser_sha256": "1d8bae049e2058f1b788c828f9bedf9062532a6a110d6e40e4cbb13492d71184",
+    "collector_sha256": "4c64d1f83854941ddfc6af20673f7b32552155c39e86b588bf0acff98f81ed9b",
+    "expected_case_id": "fatx-d0-q12-p900-synthetic.cold-ish",
+    "phase": "AA",
+    "recorded_utc": "2026-10-14T22:48:06.494609+00:00",
+    "tracing_enabled": false,
+    "performance_acceptance_eligible": false,
+    "acceptance_eligible": false,
+    "timing_calibration_eligible": true,
+    "timing_scope": "within-host-relative-AA",
+    "status": "failed_qualification",
+    "error": "The package did not pass preflight."
+  },
+  "preflight_receipt_sha256": "21f773c5bcef59ddfdc115af3f909c854875ab8d3874591a2aa185d3c6838467",
+  "preflight_reason": {
+    "check": "free_space",
+    "available_bytes": 984801280,
+    "required_bytes": 1073741824,
+    "guest_started": false
+  },
+  "first_cycle": {
+    "records": 72,
+    "ledger_sha256": "ad7b818a5ffe90a69451e01de5a448063602c938d5d823f7469b110d77be788c",
+    "import_sha256": "70738c086e853b459bf3c941fc3a8d9992ea4867f6ca79fe85a90e32493896db",
+    "importer_timing_flags_true": 72,
+    "comparator_valid_non_dvd_records": 64,
+    "comparator_rejected_dvd_records": 8,
+    "dvd_error": "optical variant media hash mismatch: importer omitted media_sha256",
+    "inspection_sha256": "8b85c5827ca380f707e766cd2808cdc71d5c013d80e7389b7ab12a05ddb95810",
+    "descriptive_non_dvd_ratios": {
+      "latency": {
+        "single_pairs": 32,
+        "inside_declared_margin_observed": 21,
+        "minimum_ratio": 0.7667132348355322,
+        "maximum_ratio": 1.1828668452681834
+      },
+      "throughput": {
+        "single_pairs": 32,
+        "inside_declared_margin_observed": 21,
+        "minimum_ratio": 0.8454036935774258,
+        "maximum_ratio": 1.3042686033905626
+      },
+      "p95": {
+        "single_pairs": 32,
+        "inside_declared_margin_observed": 24,
+        "minimum_ratio": 0.7694146950733994,
+        "maximum_ratio": 1.385236419640113
+      },
+      "p99": {
+        "single_pairs": 32,
+        "inside_declared_margin_observed": 26,
+        "minimum_ratio": 0.9387356203216585,
+        "maximum_ratio": 1.213544227528312
+      }
+    },
+    "variance_scope": "One pair per32 non-DVD cases, both arms identical baseline firmware. Exploratory variation only; not candidate performance, a causal diagnosis or a full A/A noise estimate."
+  },
+  "full_ledger_import": {
+    "importer_sha256": "f63ce574b94c16efbfd1a89427d49a776fa061a0c00512c86a7d82983d9ceaf0",
+    "exit_code": 1,
+    "error": "duplicate or missing actual native run",
+    "output_written": false,
+    "interpretation": "failed preflight has no actual run identity; failure preserved, no rows silently removed"
+  },
+  "planning_design": {
+    "best_case_trials": [
+      {
+        "all_successes_assumed": true,
+        "cap": 2000,
+        "compute_seconds": 0.5628145650262013,
+        "error": "planned confirmatory sample exceeds predeclared cap; improve controls or extend A/A",
+        "inside_margin": 5,
+        "pilot_pairs": 5,
+        "planning_probability_lower": 0.5492802716530589,
+        "supported": false
+      },
+      {
+        "all_successes_assumed": true,
+        "cap": 2000,
+        "compute_seconds": 0.059909080038778484,
+        "confirmatory_pairs": 928,
+        "inside_margin": 6,
+        "pilot_pairs": 6,
+        "planning_probability_lower": 0.6069622310029172,
+        "supported": true
+      }
+    ],
+    "cases": 36,
+    "comparator_sha256": "f611fc0653e944459f30cf12e378c6e6d284aaaac4c754750787d4ac7eea21b1",
+    "created_utc": "2026-10-14T22:43:36.369245+00:00",
+    "five_pair_uncapped_diagnostic": {
+      "acceptance_eligible": false,
+      "compute_seconds": 2.633036702987738,
+      "diagnostic_search_cap": 20000,
+      "frozen_cap_violated": true,
+      "minimum_confirmatory_pairs": 4427,
+      "planning_probability_lower": 0.5492802716530589
+    },
+    "frozen_spec_parameters": {
+      "limits": {
+        "latency": 1.02,
+        "p95": 1.05,
+        "p99": 1.05,
+        "throughput": 0.98
+      },
+      "maximum_confirmatory_pairs": 2000,
+      "minimum_confirmatory_pairs": 30,
+      "pilot_pairs": 5,
+      "planning_confidence": 0.95,
+      "planning_power": 0.8
+    },
+    "gates": 144,
+    "metrics": [
+      "latency",
+      "throughput",
+      "p95",
+      "p99"
+    ],
+    "minimum_best_case_pilot_pairs_under_original_cap": 6,
+    "one_sided_alpha": 0.00017361111111111112,
+    "per_gate_planning_power": 0.9986111111111111,
+    "schema_version": 1,
+    "scope": "best-case design arithmetic only; no mutable ledger/timing reads; no calibration or rule change"
+  },
+  "independent_planning_review": {
+    "reviewer": "/root/pr248_frozen_preparation_review",
+    "finding": "Confirmed five-pair best case cannot meet original cap2000",
+    "method": "Independent exact integer binomial ranks and recurrence-tail sweep30..2000",
+    "maximum_attainable_per_gate_power": 0.7973870368,
+    "required_per_gate_power": 0.9986111111111111
+  },
+  "cohort_resumed": false,
+  "rules_relaxed": false,
+  "calibration_complete": false,
+  "p1_pass": false,
+  "candidate_performance_qualified": false
+}

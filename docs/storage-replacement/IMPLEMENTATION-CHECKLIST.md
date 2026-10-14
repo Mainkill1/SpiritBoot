@@ -8,6 +8,8 @@ Native rig correction (operator approved 2026-10-14): primary Steam Deck `10.0.0
 
 See [current implementation evidence](IMPLEMENTATION-EVIDENCE.md) for completed work and remaining gates.
 
+Latest native status: [V352 stopped report](AA-V352-STOPPED.json) preserves 89 completed reference runs and a preflight disk-space failure before the next guest started. The first-cycle comparator also exposed a missing DVD media-hash field; the [reviewed importer correction](BENCHMARK-NATIVE-DVD-FIELDS-FIX.md) passes 18 tests and requires a newly frozen verifier contract. It does not promote the stopped cohort. Independent review confirmed that five pilot pairs cannot satisfy the frozen planning cap even in the best case. No calibration or P1 pass is claimed. The [Windows36 preparation](WINDOWS-V362-PREPARATION.json) is reviewed, but its runner currently times out before submission.
+
 ## Full task contract
 
 **Status: DRAFT / IMPLEMENTATION REQUIRED.** This is **the one PR** for the complete replacement, its tests, migration tooling, benchmarks, and release verification. **Do not open follow-up implementation PRs.** Implement in focused commits and check off the tasks **here**, with evidence attached to this PR. Preserve today's product BIOS until the *complete candidate* passes; no partial builds marketed as a compliant release.
