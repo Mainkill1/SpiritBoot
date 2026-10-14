@@ -36,3 +36,10 @@ allocation sharing the source PDE. The fixture now initializes every covering
 PDE and explicitly sets the source cache attributes. This fixes the model;
 firmware bytes remain unchanged. Exact logs, analyzers and every cohort are
 retained in the remaining-memory qualification evidence.
+
+The complete seven-pair API removal control now validates all 14 runs. Every
+634 enabled assertion passes in both ROMs. Removing only this patch does not
+consistently eliminate the earlier four slow signals, and all four control
+ranges overlap. The full table still retains flush and reopen trends; this
+acceptance is limited to correct lifetime/fallback behavior and the repeated
+large-transfer gain, not a universal I/O improvement.
