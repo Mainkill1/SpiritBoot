@@ -181,7 +181,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '7e891ec86f42b1313e5cd3453347836ac451ba79', result
+          assert result['source_tree'] == '8231cceb5e3ecd578499fa0d2fbf421f0143642c', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
