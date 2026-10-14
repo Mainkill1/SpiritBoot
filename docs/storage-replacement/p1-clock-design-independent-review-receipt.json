@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "status": "reviewed_no_critical_or_important_design_findings",
+  "reviewed_utc": "2026-10-14T19:26:48.360881+00:00",
+  "draft_path": ".scratch/pr248-native-baseline/P1-CLOCK-QUALIFICATION-DRAFT.md",
+  "draft_sha256": "b1d13c15ed73c9028c5d630dd365bc50b3cad4bfe9303ba890cbafeeeb14fc69",
+  "scope": "Conditional clock method and exact numerical budget design only, before importer/A/A implementation; no native qualification",
+  "findings": {
+    "critical": [],
+    "important": []
+  },
+  "source_packets": [
+    {
+      "path": ".scratch/pr248-clock-backend-audit/RECEIPT.json",
+      "sha256": "48fd04a69e83c6bf48d68f6fc88a749d6e6f5fd5d591e23267bd3e8287c4643c"
+    },
+    {
+      "path": ".scratch/pr248-clock-affinity-audit/RECEIPT.json",
+      "sha256": "e3bd4f9ce066795f4bf7694e68d08b41e78af7aa6034d29dbfa8cde872fe843e"
+    },
+    {
+      "path": ".scratch/pr248-windows-clock-affinity-audit/RECEIPT.json",
+      "sha256": "033ae387b520ccb27dcf8909f539e5a7e6dfdee96b63e7599e9ec55976448bb2"
+    }
+  ],
+  "source_review_scope": {
+    "Deck_backend_and_affinity_source_and_compiled_ranges": "previous independent exact bindings retained",
+    "Windows_artifacts_verified": 17,
+    "Windows_source_files_verified": 9,
+    "Windows_source_ranges_verified": 10,
+    "Windows_PE_ranges_verified": 16,
+    "independent_fraction_rounding_cases": 10000
+  },
+  "approved_design": {
+    "compiled_affine_rate_hz": 733333333,
+    "Deck_and_Windows_integer_error_seconds": "strictly less than 1/733333333",
+    "Windows_fallback_error_seconds": "strictly less than 1/1000000000 + 1/733333333",
+    "Windows_fallback_required_frequency_domain": "actual positive QPF <= UINT32_MAX",
+    "paired_metric_conversion_budget": "at most 1/1000 relative deviation at each exact ratio endpoint",
+    "short_or_zero_lower_endpoint_handling": "entire paired metric INCONCLUSIVE, all original observations retained",
+    "percentiles": "nearest rank on all lower/upper endpoints separately",
+    "throughput": "reciprocal batch duration endpoints",
+    "runtime_branch_inference": "conditional construction-based startup/provider/clock-mode/lifetime argument; not observation of internal variables",
+    "controlled_lab_assumptions": "declare no intervention and runner-denied pause/input/reset, retain available operation evidence, stop on observed violations; continuous exclusion unobserved",
+    "historical_counter_metadata": "retain original frequency-derived milliseconds and actual min/median/max aggregates; five raw anchors were not retained"
+  },
+  "limits": {
+    "native_actions_by_reviewer": 0,
+    "runtime_clock_qualified": false,
+    "actual_Windows_QPF_observed": false,
+    "host_provider_context_qualified": false,
+    "importer_qualified": false,
+    "AA_calibration_qualified": false,
+    "native_performance_accepted": false,
+    "physical_durability_qualified": false,
+    "private_structural_telemetry_qualified": false,
+    "P1_accepted": false
+  },
+  "remaining_requirements": "Qualify actual per-host executable/provider/startup/lifetime/control context, freeze the exact conversion/ratio policy before A/A, review the importer/statistical endpoint use, and retain complete actual A/A/confirmation plus separate durability/structural evidence."
+}
