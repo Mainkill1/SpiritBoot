@@ -1123,7 +1123,7 @@ local evidence locations, not claims of published or committed artifact access.
 
 ## Frozen full functional recorder preparation (V2.8.3)
 
-The Deck plan now declares four separately named released-DVD method pilots
+The preserved V2.8.3 Deck plan declared four separately named released-DVD method pilots
 followed by36 functional leaves: two small HDD reads,24 public replay/QD/pressure
 variants, two API-write/flush/reopen variants, four scatter/gather variants and
 four released-DVD/cache variants. Each leaf has1,024 exact scheduled operations
@@ -1187,8 +1187,11 @@ approved outer file paths, hashes and lengths before any runner API call. Eight
 missing/mismatched/tampered identity faults reject with zero dispatch.
 The exact positive approved351-file identity check also passes.
 
-This is prepared evidence awaiting independent review and parent-authorized
-native execution. It grants no full36 qualification, timing calibration, A/A
+Independent review completed, but the first native DVD method attempt failed
+and stopped that plan. The separately preserved remount diagnostic and HDD-first
+method also failed to establish a usable optical path. The new fixed-wrapper
+functional pilot is described in [DVD method qualification](DVD-METHOD-QUALIFICATION.md).
+These attempts grant no full36 qualification, timing calibration, A/A
 planning count, P1 or full replacement acceptance. Public API flush/reopen
 byte-fill can be observed; real device flush, physical durability and private
 structural counters remain unknown. All future actual outcomes and cleanup

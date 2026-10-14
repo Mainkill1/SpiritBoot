@@ -56,6 +56,16 @@ The bounded V2.4 Deck clock diagnostic completed all 50 samples with verified ex
 
 The stdlib comparison harness freezes counts from a complete pilot ledger, re-derives calibration planning instead of trusting a mutable count, rejects future/error captures, and reports PASS/REGRESSION/INCONCLUSIVE using run pairs and simultaneous bounds. The native recorder must still complete fresh-process-per-case cache-controlled A/A and frozen confirmatory schedules. Actual lower commands/IRQs/allocations cannot be invented from public API counts; missing diagnostic structural evidence stays missing.
 
+The [public timing correction](BENCHMARK-PUBLIC-TIMING-FIX.md) separates API
+flush/reopen timing from physical durability and explicitly labels fixed guest
+workloads as metadata-only seeds. Its [independent review](p1-public-timing-independent-review.json)
+verified the final raw tick/frequency mapping, malformed-value rejection and
+legacy controls. Required physical write gates remain INCONCLUSIVE. The
+[exact counter arithmetic](COUNTER-INTERVAL-ARITHMETIC.md) preserves conversion
+uncertainty through durations, throughput, quantiles and ratios; its bounds do
+not establish host clock resolution or accuracy. Native per-case artifact
+bindings, runtime clock qualification and actual A/A still remain open.
+
 The declaration-only target probes verified 63 cache and 250 native ABI facts with zero executable `.text`, including the measured 28-byte cache descriptor and 12-byte query. Xbox IRP/device/driver layouts differ materially from desktop assumptions. See the [cache ABI facts](clean-room-inputs/CACHE-ABI-FACTS.md), [native inventory](clean-room-inputs/NATIVE-ABI-INVENTORY.md) and probe receipt; these approve numeric/declaration facts, not unchecked transitive SDK helper bodies.
 
 The independently reviewed [boot dependency audit](boot-dependency-audit/README.md) binds 25 source files and 62 ranges to current assembled tree `7e891ec86f42b1313e5cd3453347836ac451ba79`. It verifies nine folded entries, Disk/Cdrom object names, NTAPI entry declarations, kernel-owned boot-node interfaces and the post-boot PnP sealing boundary. It also identifies a repeated START caller requirement through partmgr and corrects stale references to excluded Xbox power-management paths. This closes P0's missing boot-file inspection only. The exposed investigation packet is archived for review and has not been added to independent-author inputs; actual P3 entry ABI, initialization outcomes, retained callback lifetime and native memory remain open.

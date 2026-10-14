@@ -18,6 +18,22 @@ class DvdRouteTests(unittest.TestCase):
     self.assertIn('MOCK-DVD-POWEROFF last_delay_100ns=-'+str(ticks),raw)
     self.assertLess(raw.index('STORAGE-PERF-END'),raw.index('MOCK-DVD-POWEROFF'))
     self.assertIn('operations=1024 bytes=4194304',raw)
+    fixed=subprocess.run([str(executable),'fixed-route'],check=True,capture_output=True,text=True).stdout
+    self.assertIn('MOCK-FIXED-ROUTE target_opens=1 dismount_calls=0',fixed)
+    self.assertIn('operations=1024 bytes=4194304',fixed)
+
+ @unittest.skipUnless(shutil.which('cc'),'actual query count test requires host compiler')
+ def test_short_preflight_query_count_refuses_to_start_measurement(self):
+  fixture=SOURCE.parent
+  with tempfile.TemporaryDirectory(prefix='pr248-dvd-query-count-') as work:
+   directory=pathlib.Path(work);shutil.copy2(fixture/'dvd.c',directory/'owned-dvd.c')
+   (directory/'dvd-metadata-reference.h').write_text('static const UCHAR dvd_clean_header[4096]={0};\nstatic const UCHAR dvd_performance_header[4096]={0};\n#define DVD_CLEAN_FILE_BYTES 565248\n#define DVD_PERFORMANCE_FILE_BYTES 573440\n')
+   executable=directory/'query-count'
+   subprocess.run(['cc','-std=gnu11','-O0','-I'+str(directory),'-I'+str(fixture/'host-mock'),'-I'+str(fixture),str(fixture/'host-mock/dvd-mock.c'),'-o',str(executable)],check=True,capture_output=True)
+   raw=subprocess.run([str(executable),'query-short'],check=True,capture_output=True,text=True).stdout
+   self.assertIn('STORAGE-PERF-ERROR stage=wrapper-target-length',raw)
+   self.assertNotIn('STORAGE-PERF-CASE',raw)
+   self.assertNotIn('STORAGE-PERF-END',raw)
 
  def test_unique_actual_removable_route_and_exact_owned_source(self):
   self.assertTrue(SOURCE.exists(),'owned managed DVD receipt guard missing');m=subject()

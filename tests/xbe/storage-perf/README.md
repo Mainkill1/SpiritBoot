@@ -40,23 +40,41 @@ ISO lineage. Only the first4,096 public header bytes are read; the declared
 section table must fit within that read extent and section data must begin after
 it. The generated header/manifest are build outputs and remain ignored.
 
-The separate functional DVD method builds with
-`DVD_POST_END_GRACE_100NS=200000000` to keep its owned process alive for20s
-after `STORAGE-PERF-END`. The default remains500ms. This changes the untimed
-shutdown delay; generation2 per-read byte comparisons and recorded measurement
-endpoints are unchanged. Preserve and pin the resulting variant separately.
-Its managed runner plan waits for the exact selected `STORAGE-DVD-READY`, records
-`query-block`, verifies the owned process/CWD and both input files through
-`dvd-route-observer.py`, performs the declared readonly typed medium change,
-then records and verifies the final route. The route name is a hypothesis until
-the actual unique removable device agrees. The observer opens no QMP connection
-and performs no media or process mutation. Final guards may overlap retained
-fixture durations, so this functional method grants no performance acceptance.
+The current DVD recorder reads `target.xbe` from a fixed wrapper. Build the
+recorder with `DVD_POST_END_GRACE_100NS=200000000` for the separately pinned
+functional method's20s post-END grace. The default remains500ms. `make MODE=dvd`
+produces the recorder XBE; its automatically generated recorder-only ISO is not
+the DVD workload because it does not contain `target.xbe`. Pack the actual mounted
+wrapper explicitly, using a new owned output directory and verified recorder pin:
 
-Run its host faults from the product root with
-`python3 -B -m unittest discover -s tests/host -p test_storage_dvd_route.py`.
-They use invented QMP receipts, an owned host child, synthetic public headers and
-the actual DVD C body; no runner or native guest launch is performed.
+```sh
+python3 -B make-dvd-wrapper.py --kind clean \
+  --source-iso /absolute/path/to/api-leaf-clean.iso \
+  --recorder bin-dvd/default.xbe --recorder-sha256 EXACT_RECORDER_SHA256 \
+  --extractor /absolute/path/to/extract-xiso --extractor-sha256 EXACT_EXTRACTOR_SHA256 \
+  --output /absolute/path/to/new-owned-clean-wrapper
+```
+
+Use `--kind performance` with its exact released ISO for the distinct performance
+wrapper. The builder freshly extracts the opaque original `default.xbe`, copies
+it unchanged as `target.xbe`, and independently validates both wrapper extents.
+The output receipt binds original ISO, complete payload, public header, recorder,
+mounted wrapper and layout separately. No generated wrapper or executable bytes
+are committed. Exact-original-media parity remains open.
+
+The functional runner plan waits for the selected `STORAGE-DVD-READY`, records
+initial `query-block` and `dvd-fixed-route-observer.py`, waits for successful
+`STORAGE-PERF-END`, then records final query/guard. Both routes must identify the
+same exact wrapper. The observer opens no QMP connection and performs no media or
+process mutation. Initial guards may overlap retained fixture durations; all
+functional method timings are ineligible for performance comparison. The older
+swap and HDD-first failures are retained in
+[DVD method qualification](../../../docs/storage-replacement/DVD-METHOD-QUALIFICATION.md).
+
+Run the focused source faults from the product root with
+`python3 -B -m unittest discover -s tests/host -p 'test_storage_dvd_*.py'`.
+They exercise invented typed receipts, an owned host child, synthetic headers and
+the actual DVD C body. No runner/native launch is performed by these tests.
 
 For `families`, first run `python3 make-data.py` to create the owned optical
 payload. It has SHA-256
