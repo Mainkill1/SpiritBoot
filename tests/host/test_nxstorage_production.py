@@ -1,6 +1,7 @@
 """Run new production code from its exact locked patch, never old body extraction."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -20,7 +21,8 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0130-independent-geometry-owner-adapter.patch",
                      "0131-independent-cache-publication-primitive.patch",
                      "0132-nxstorage-freestanding-gcc-checks.patch",
-                     "0133-independent-zero-domain-mdl.patch"):
+                     "0133-independent-zero-domain-mdl.patch",
+                     "0134-independent-native-packet-primitive.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -44,3 +46,10 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertIn('16 adapter scenarios, 61973 checks', result.stdout)
             self.assertIn('32 passed; 0 failed', result.stdout)
             self.assertIn('production checks passed', result.stdout)
+            packet = subprocess.run([sys.executable, str(source / 'tests/host/nxstorage/check_packet.py'),
+                                     str(Path(temporary) / 'packet-output')], text=True,
+                                    capture_output=True, timeout=120,
+                                    env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
+            self.assertEqual(packet.returncode, 0, packet.stdout + packet.stderr)
+            self.assertIn('packet-plain: ', packet.stdout)
+            self.assertIn('packet-sanitized: ', packet.stdout)
