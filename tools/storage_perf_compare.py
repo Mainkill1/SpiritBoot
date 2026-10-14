@@ -30,6 +30,8 @@ STRUCTURAL_UNITS = {
     "lower_commands": "physical-command-issue-attempts",
     "interrupts": "storage-isr-entries",
 }
+WORKLOAD_FIELDS = ("workload_seed_semantics", "workload_policy_sha256", "workload_identity_sha256")
+PUBLIC_TIMING_REL_TOL = 8 * sys.float_info.epsilon
 
 
 def require(condition, message):
@@ -85,6 +87,26 @@ def validate_spec(spec):
             require(hash_string(policy["collector_sha256"]), "invalid optional structural collector pin")
         require(policy.get("counter_units") == STRUCTURAL_UNITS,
                 "structural counter units must preserve all five healthy-path gates")
+    if "durability_policy" in spec:
+        policy = spec["durability_policy"]
+        require(isinstance(policy, dict) and policy.get("schema_version") == 1
+                and policy.get("mode") == "diagnostic-companion"
+                and policy.get("timing_workload") == "public-api-flush-reopen"
+                and policy.get("persistence_scope") == "device-cache-sync-and-persistence",
+                "unknown separated durability policy")
+        require(isinstance(policy.get("method"), str) and policy["method"].strip(), "pin physical method")
+        for field in ("coverage_plan_sha256", "correspondence_rules_sha256"):
+            require(hash_string(policy.get(field)), f"pin durability {field}")
+        if "collector_sha256" in policy:
+            require(hash_string(policy["collector_sha256"]), "invalid optional physical collector pin")
+        validate_descriptor(policy.get("timing_contract"))
+    if "workload_policy" in spec:
+        policy = spec["workload_policy"]
+        require(isinstance(policy, dict) and policy.get("schema_version") == 1
+                and policy.get("mode") == "fixture-fixed" and policy.get("seed_semantics") == "METADATA_ONLY"
+                and policy.get("fixture_sha256") == spec["baseline"]["fixture_sha256"],
+                "fixed workload requires exact fixture and METADATA_ONLY semantics")
+        validate_descriptor(policy.get("fixture_contract"))
     require(hash_string(spec.get("runner_sha256")), "pin runner_sha256")
     require(isinstance(spec.get("seeds"), dict)
             and all(integer(spec["seeds"].get(key)) for key in ("workload", "schedule")), "pin seeds")
@@ -144,6 +166,10 @@ def validate_spec(spec):
             require(previous == case["sequence_sha256"], "sequence hash changed between cases")
         elif kind == "write-flush":
             require(integer(case.get("real_flushes"), 1), "write case requires actual device flushes")
+            if "durability_policy" in spec:
+                require(integer(case.get("api_flush_calls"), 1) and case["api_flush_calls"] == case["operations"]
+                        and case["assertions"] == 11 * case["operations"],
+                        "generation2 public timing requires every API flush and all eleven checks per operation")
         else:
             require(isinstance(case.get("variant"), str) and case["variant"], "pin workload variant")
             if kind == "dvd-xiso":
@@ -168,6 +194,19 @@ def validate_spec(spec):
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
                                      allow_nan=False).encode()).hexdigest()
+
+
+def validate_descriptor(value):
+    require(isinstance(value, dict) and hash_string(value.get("sha256"))
+            and isinstance(value.get("path"), str) and value["path"].strip()
+            and not Path(value["path"]).is_absolute(), "policy artifact needs relative path and hash")
+
+
+def fixed_workload_fields(spec, case):
+    policy = spec["workload_policy"]
+    return {"workload_seed_semantics": "METADATA_ONLY", "workload_policy_sha256": digest(policy),
+            "workload_identity_sha256": digest({"policy_sha256": digest(policy),
+                                               "fixture_sha256": policy["fixture_sha256"], "case": case})}
 
 
 def seal(value):
@@ -287,11 +326,11 @@ def validate_schedule(schedule):
     require(schedule["jobs"] == rebuilt["jobs"], "jobs changed deterministic paired schedule")
 
 
-def inspect_records(schedule, records):
+def inspect_records(schedule, records, *, evidence_root=None):
     """Return valid run metrics and explicit issues; never drop a failed attempt."""
     validate_schedule(schedule)
     expected = {job["attempt_id"]: job for job in schedule["jobs"]}
-    actual, issues, failures, metrics = {}, [], [], {}
+    actual, issues, failures, metrics, evidence_cache = {}, [], [], {}, {}
     inspected_utc = datetime.datetime.now(datetime.timezone.utc)
     for record in records:
         require(isinstance(record, dict), "result must be an object")
@@ -314,6 +353,9 @@ def inspect_records(schedule, records):
                                   **{key: job[key] for key in ("ordinal", "pair_index", "arm", "case_id",
                                                                "manifest_sha256", "workload_seed", "overlay_id")}}.items():
                 require(record.get(field) == wanted, f"{field} mismatch")
+            for field in WORKLOAD_FIELDS:
+                if field in job:
+                    require(record.get(field) == job[field], f"{field} mismatch")
             start, end = utc(record.get("started_utc")), utc(record.get("finished_utc"))
             require(end > start and start >= utc(schedule["created_utc"]), "invalid attempt time range")
             require(end <= inspected_utc, "attempt finish timestamp is in the future")
@@ -337,6 +379,8 @@ def inspect_records(schedule, records):
                 failures.append(f"{attempt}: successful status contradicts recorded error: {record['error']}")
                 continue
             case = job["case"]
+            if "workload_policy" in schedule["spec"]:
+                validate_public_contract(schedule, job, "workload_policy", record, evidence_root, evidence_cache)
             if case["kind"] == "dvd-xiso":
                 require(record.get("media_sha256") == case["iso_sha256"], "optical variant media hash mismatch")
             require(record.get("timing_scope") == "caller-issue-to-consumer-ready", "shorter timing scope")
@@ -361,10 +405,15 @@ def inspect_records(schedule, records):
                     or record.get("assertions_failed") != 0 or record.get("integrity_sha256") != case["expected_sha256"]):
                 failures.append(f"{attempt}: incomplete operations/assertions, failed assertion or checksum")
                 continue
-            if case["kind"] == "write-flush" and (record.get("flushes_completed") != case["real_flushes"]
-                                                   or record.get("durability_verified") is not True):
-                failures.append(f"{attempt}: real flush or persistence verification missing")
-                continue
+            if case["kind"] == "write-flush":
+                if "durability_policy" in schedule["spec"]:
+                    problem = validate_public_write(schedule, job, record, evidence_root, evidence_cache)
+                    if problem:
+                        failures.append(f"{attempt}: {problem}")
+                        continue
+                elif record.get("flushes_completed") != case["real_flushes"] or record.get("durability_verified") is not True:
+                    failures.append(f"{attempt}: real flush or persistence verification missing")
+                    continue
             require(number(record.get("elapsed_ms")), "invalid end-to-end batch latency")
             require(record["elapsed_ms"] <= (end - start).total_seconds() * 1000,
                     "batch latency exceeds attempt wall time")
@@ -430,10 +479,10 @@ def derive_planning(spec, ratios):
     return count, planning
 
 
-def calibrate(schedule, records, results_sha256):
+def calibrate(schedule, records, results_sha256, *, evidence_root=None):
     require(schedule.get("phase") == "AA", "calibration requires A/A only")
     require(hash_string(results_sha256), "pin raw pilot results hash")
-    run_metrics, issues, failures, _ = inspect_records(schedule, records)
+    run_metrics, issues, failures, _ = inspect_records(schedule, records, evidence_root=evidence_root)
     require(not issues and not failures, "A/A invalid: " + "; ".join((issues + failures)[:10]))
     require(max(utc(record["finished_utc"]) for record in records)
             <= datetime.datetime.now(datetime.timezone.utc), "A/A timestamps extend beyond calibration time")
@@ -502,6 +551,113 @@ def read_structural_artifact(descriptor, evidence_root, cache, as_json=False):
     return descriptor["sha256"]
 
 
+def validate_public_contract(schedule, job, policy_key, record, evidence_root, cache):
+    """Check frozen public fixture facts; factual independent review remains external."""
+    policy = schedule["spec"][policy_key]
+    public = policy_key == "durability_policy"
+    descriptor = policy["timing_contract" if public else "fixture_contract"]
+    contract = read_structural_artifact(descriptor, evidence_root, cache, as_json=True)
+    require(isinstance(contract, dict) and contract.get("schema_version") == 1
+            and contract.get("contract") == ("public-api-flush-reopen" if public else "fixture-fixed")
+            and contract.get("fixture_sha256") == job["manifest"]["fixture_sha256"]
+            and contract.get("method_qualified") is True, "public fixture contract mismatch or unqualified")
+    require(utc(contract.get("reviewed_utc")) < utc(record["started_utc"]), "public contract reviewed after capture")
+    require(contract.get("cases") == {case["id"]: digest(case) for case in schedule["spec"]["cases"]},
+            "public contract changed frozen case/request identities")
+    require(read_structural_artifact(contract.get("fixture_artifact"), evidence_root, cache)
+            == job["manifest"]["fixture_sha256"], "public contract fixture bytes differ")
+    sources = contract.get("source_artifacts")
+    require(isinstance(sources, list) and sources, "public fixture source artifacts missing")
+    for source in sources:
+        read_structural_artifact(source, evidence_root, cache)
+    if public:
+        require(contract.get("fixture_generation") == 2 and contract.get("assertions_per_operation") == 11,
+                "public readback requires generation2 full comparison semantics")
+        require(contract.get("timing_conversion") == "recorded-rdtsc-frequency",
+                "public timing conversion missing or unsupported")
+        read_structural_artifact(contract.get("parser_artifact"), evidence_root, cache)
+        for field in ("coverage_plan", "correspondence_rules"):
+            require(read_structural_artifact(contract.get(field), evidence_root, cache) == policy[field + "_sha256"],
+                    "public contract changed frozen physical plan/rules")
+    else:
+        require(contract.get("seed_semantics") == "METADATA_ONLY", "fixed label cannot claim a guest seed")
+    return contract
+
+
+def native_integer(value, base=10):
+    pattern = r"[0-9]+" if base == 10 else r"[0-9a-fA-F]{8}"
+    require(isinstance(value, str) and re.fullmatch(pattern, value) is not None,
+            "raw public integer missing or invalid; no default values")
+    return int(value, base)
+
+
+def validate_public_milliseconds(observed, ticks, frequency):
+    require(0 < ticks < 2**64 and 0 < frequency < 2**64, "public raw counter/frequency outside positive uint64")
+    expected = ticks * 1000 / frequency
+    try:
+        consistent = number(observed) and math.isclose(observed, expected, rel_tol=PUBLIC_TIMING_REL_TOL, abs_tol=0.0)
+    except OverflowError:
+        consistent = False  # A malformed reported JSON integer remains attributable unknown evidence.
+    require(number(expected) and consistent,
+            "public timing does not map raw ticks through recorded RDTSC frequency")
+
+
+def validate_public_write(schedule, job, record, evidence_root, cache):
+    """Qualify API timing only; never infer a physical cache-sync or persistence fact."""
+    policy, case = schedule["spec"]["durability_policy"], job["case"]
+    require(record.get("durability_policy_sha256") == digest(policy), "durability policy mismatch")
+    contract = validate_public_contract(schedule, job, "durability_policy", record, evidence_root, cache)
+    ledger = read_structural_artifact(record.get("api_timing_provenance"), evidence_root, cache, as_json=True)
+    require(isinstance(ledger, dict) and ledger.get("schema_version") == 1, "public raw ledger missing")
+    wanted = {"case_sha256": digest(case), "fixture_sha256": job["manifest"]["fixture_sha256"],
+              "parser_sha256": contract["parser_artifact"]["sha256"],
+              "durability_policy_sha256": digest(policy), "timing_contract_sha256": policy["timing_contract"]["sha256"],
+              "timing_sha256": digest({key: record.get(key) for key in ("elapsed_ms", "latencies_ms", "timing_scope")}),
+              **{key: record[key] for key in ("attempt_id", "schedule_sha256", "manifest_sha256",
+                                             "environment_sha256", "runner_sha256")},
+              **{key: job[key] for key in WORKLOAD_FIELDS if key in job}}
+    require(all(key in ledger and ledger[key] == value for key, value in wanted.items()),
+            "public raw ledger identity/timing mapping mismatch")
+    meta, summary, end = (ledger.get(key) for key in ("meta", "summary", "end"))
+    require(isinstance(meta, dict) and meta.get("version") == "1" and meta.get("fixture_generation") == "2"
+            and meta.get("counter") == "rdtsc" and native_integer(meta.get("frequency")) > 0,
+            "public raw generation/counter metadata missing")
+    frequency = native_integer(meta["frequency"])
+    require(isinstance(summary, dict) and summary.get("id") == case["id"]
+            and summary.get("cache") == case["cache_policy"] and isinstance(end, dict)
+            and native_integer(end.get("cases")) == 1, "public raw complete case/end evidence missing")
+    lengths = case.get("operation_bytes", [case.get("bytes_per_operation")] * case["operations"])
+    require(native_integer(summary.get("operations")) == case["operations"]
+            and native_integer(summary.get("bytes")) == sum(lengths)
+            and native_integer(summary.get("assertions")) == case["assertions"]
+            and native_integer(summary.get("ticks")) > 0, "public raw operation/byte/assertion mapping differs")
+    validate_public_milliseconds(record.get("elapsed_ms"), native_integer(summary["ticks"]), frequency)
+    flushes = native_integer(summary.get("flush_calls"))  # Never use the native parser's absent-field default.
+    require(integer(record.get("flush_api_calls_completed")) and record["flush_api_calls_completed"] == flushes,
+            "public flush count lacks matching raw observation")
+    require(summary.get("persistence") in ("0", "1")
+            and type(record.get("reopen_readback_verified")) is bool
+            and record["reopen_readback_verified"] == (summary["persistence"] == "1"),
+            "public reopen comparison missing or contradictory")
+    operations = ledger.get("operations")
+    require(isinstance(operations, list) and len(operations) == case["operations"],
+            "public raw operations incomplete")
+    samples = record.get("latencies_ms")
+    require(isinstance(samples, list) and len(samples) == case["operations"], "public operation timings missing")
+    bad = native_integer(summary.get("failures")) != 0 or native_integer(end.get("failures")) != 0
+    for index, (operation, length) in enumerate(zip(operations, lengths)):
+        require(isinstance(operation, dict) and operation.get("id") == case["id"]
+                and native_integer(operation.get("index")) == index
+                and native_integer(operation.get("ticks")) > 0, "public raw operation order/timing incomplete")
+        validate_public_milliseconds(samples[index], native_integer(operation["ticks"]), frequency)
+        bad |= (native_integer(operation.get("status"), 16) != 0
+                or native_integer(operation.get("io_status"), 16) != 0
+                or native_integer(operation.get("information")) != length)
+    if bad or flushes != case["api_flush_calls"] or not record["reopen_readback_verified"]:
+        return "observed public write/API-flush/reopen operation or integrity failure"
+    return None
+
+
 def validate_structural_row(schedule, job, row, timing, evidence_root, cache, embedded,
                             acceptance_overlays, acceptance_ids):
     """Validate declared native evidence; a reviewer still owns its factual qualification."""
@@ -522,6 +678,7 @@ def validate_structural_row(schedule, job, row, timing, evidence_root, cache, em
         "memory_profile": schedule["spec"]["environment"]["memory_profile"],
         "acceptance_manifest_sha256": job["manifest_sha256"], "case_sha256": digest(job["case"]),
         **{key: job[key] for key in ("case_id", "pair_index", "arm", "workload_seed")},
+        **{key: job[key] for key in WORKLOAD_FIELDS if key in job},
     }
     for field, value in wanted.items():
         require(row.get(field) == value, f"structural {field} mismatch")
@@ -742,8 +899,9 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
             "A/B rules/count changed after calibration")
     require(utc(schedule["created_utc"]) >= utc(calibration["created_utc"]), "A/B precedes frozen calibration")
     require(hash_string(results_sha256), "pin raw candidate results hash")
-    run_metrics, issues, failures, actual = inspect_records(schedule, records)
+    run_metrics, issues, failures, actual = inspect_records(schedule, records, evidence_root=evidence_root)
     separated = "structural_policy" in schedule["spec"]
+    separated_durability = "durability_policy" in schedule["spec"]
     if structural_records is not None:
         require(separated and isinstance(structural_records, list) and hash_string(structural_results_sha256),
                 "structural companions require predeclared policy and pinned raw JSONL")
@@ -805,7 +963,7 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
                             verdicts.append("REGRESSION")
             failures.extend(increased)
             structural_failures.extend(increased)
-            if separated:
+            if separated or separated_durability:
                 complete_pairs = sum(set(arms) == {"A", "B"} for arms in paired.values())
                 structural_verdict = verdict_for((["REGRESSION"] if increased else [])
                                                 + (["INCONCLUSIVE"] if complete_pairs != schedule["pairs"] else []))
@@ -823,8 +981,13 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
         case_verdict = verdict_for(verdicts)
         cases.append({"case_id": case["id"], "cache_policy": case["cache_policy"],
                       "verdict": case_verdict, "metrics": metrics, "failures": case_failures, "issues": case_issues})
-        if separated:
+        durability_verdict = "INCONCLUSIVE" if separated_durability and case["kind"] == "write-flush" else "NOT_REQUIRED"
+        if durability_verdict == "INCONCLUSIVE":
+            verdicts.append(durability_verdict)
+        if separated or separated_durability:
             cases[-1].update(timing_verdict=timing_verdict, structural_verdict=structural_verdict)
+            cases[-1]["durability_verdict"] = durability_verdict
+            cases[-1]["verdict"] = verdict_for(verdicts)
     issues.extend(structural_issues)
     verdicts = [case["verdict"] for case in cases]
     verdict = "REGRESSION" if failures or "REGRESSION" in verdicts else "INCONCLUSIVE" if issues or "INCONCLUSIVE" in verdicts else "PASS"
@@ -849,6 +1012,18 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
                       structural_results_sha256=structural_results_sha256,
                       structural_issues=structural_issues, structural_failures=structural_failures,
                       structural_evidence=structural_evidence, structural_attempts=structural_attempts)
+    if separated_durability:
+        report.update(timing_verdict=verdict_for(timing_decisions), durability_verdict="INCONCLUSIVE",
+                      structural_verdict=verdict_for(structural_decisions),
+                      durability_policy_sha256=digest(schedule["spec"]["durability_policy"]),
+                      durability_issues=[f"{case['id']}: qualified physical cache-sync/persistence evidence unavailable"
+                                         for case in schedule["spec"]["cases"] if case["kind"] == "write-flush"],
+                      durability_attempts=[{key: row[key] for key in ("attempt_id", "case_id", "status", "error",
+                                               "flush_api_calls_completed", "reopen_readback_verified",
+                                               "flushes_completed", "durability_verified", "api_timing_provenance")
+                                            if key in row}
+                                           for job in schedule["jobs"] if job["case"]["kind"] == "write-flush"
+                                           for row in [actual.get(job["attempt_id"], {})]])
     return report
 
 
@@ -871,9 +1046,11 @@ def make_schedule(spec, phase="AA", pairs=None, candidate=None, calibration=None
                              "case_id": case["id"], "case": case,
                              "manifest": manifests[arm], "manifest_sha256": digest(manifests[arm]),
                              "cache_policy": case["cache_policy"],
-                             "workload_seed": spec["seeds"]["workload"] + pair,
+                             "workload_seed": spec["seeds"]["workload"] + (0 if "workload_policy" in spec else pair),
                              "overlay_id": f"{phase}-{ordinal:06d}",
                              "fresh_process_required": True})
+                if "workload_policy" in spec:
+                    jobs[-1].update(fixed_workload_fields(spec, case))
     return seal({"schema_version": 1, "phase": phase, "machine_id": spec["machine_id"],
                  "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                  "spec": spec, "pairs": pairs or spec["pilot_pairs"],
@@ -921,6 +1098,7 @@ def main(argv=None):
     freeze.add_argument("--schedule", required=True)
     freeze.add_argument("--results", required=True)
     freeze.add_argument("--output", required=True)
+    freeze.add_argument("--evidence-dir", help="directory containing frozen public fixture/operation evidence")
     confirm = commands.add_parser("confirmatory", help="bind candidate identity after calibration")
     confirm.add_argument("--calibration", required=True)
     confirm.add_argument("--candidate", required=True)
@@ -930,7 +1108,8 @@ def main(argv=None):
     analyze.add_argument("--schedule", required=True)
     analyze.add_argument("--results", required=True)
     analyze.add_argument("--structural-results", help="separate diagnostic companion JSONL; requires frozen policy")
-    analyze.add_argument("--structural-evidence-dir", help="directory containing hashed companion evidence files")
+    analyze.add_argument("--structural-evidence-dir", "--evidence-dir", dest="evidence_dir",
+                         help="directory containing hashed public/companion evidence files")
     analyze.add_argument("--output", help="exclusive output file; default stdout")
     args = parser.parse_args(argv)
     try:
@@ -938,7 +1117,7 @@ def main(argv=None):
             write_json(args.output, make_schedule(read_json(args.spec)))
         elif args.command == "calibrate":
             records, raw_hash = read_results(args.results)
-            write_json(args.output, calibrate(read_json(args.schedule), records, raw_hash))
+            write_json(args.output, calibrate(read_json(args.schedule), records, raw_hash, evidence_root=args.evidence_dir))
         elif args.command == "confirmatory":
             write_json(args.output, make_confirmatory(read_json(args.calibration), read_json(args.candidate)))
         else:
@@ -947,7 +1126,7 @@ def main(argv=None):
                                            if args.structural_results else (None, None))
             report = compare(read_json(args.calibration), read_json(args.schedule), records, raw_hash,
                              structural_records=structural, structural_results_sha256=structural_hash,
-                             evidence_root=args.structural_evidence_dir)
+                             evidence_root=args.evidence_dir)
             if args.output:
                 write_json(args.output, report)
             else:

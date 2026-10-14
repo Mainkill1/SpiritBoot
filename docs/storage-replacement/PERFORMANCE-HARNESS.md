@@ -403,6 +403,119 @@ can invalidate other overlapping diagnostics' structural context; neither side
 may supply qualified counts. This consistency check does not replace factual native confirmation of
 the host/run intervals.
 
+## Public API timing with physical durability still unavailable
+
+The optional `spec.durability_policy` separates generation2 public
+write/API-flush/close/reopen/read/full-comparison timing from the required real
+device cache-sync and persistence gate. It is explicit opt-in; an absent policy
+keeps the earlier strict write requirement. Every write case still declares
+positive `real_flushes`, and the full36 matrix still includes writes under both
+cache policies. In this first checkpoint there is no physical evidence parser:
+every required write durability verdict remains INCONCLUSIVE. Supplied physical
+counts or `durability_verified:true` cannot close that gate.
+
+The policy has `schema_version:1`, `mode:"diagnostic-companion"`,
+`timing_workload:"public-api-flush-reopen"`, a nonempty physical `method`,
+`persistence_scope:"device-cache-sync-and-persistence"`, frozen
+`coverage_plan_sha256` and `correspondence_rules_sha256`, and a
+`timing_contract:{path,sha256}` descriptor. An optional `collector_sha256` may
+remain unset during timing A/A planning. Before any physical capture, actual
+collector implementation/source and independent qualification must be bound;
+the method/coverage/correspondence rules cannot change after candidate values.
+
+Each write case additionally declares `api_flush_calls == operations` and
+`assertions == 11 * operations`, the complete generation2 public workload.
+These public calls are distinct from the retained physical `real_flushes`.
+Each public timing row supplies `flush_api_calls_completed`,
+`reopen_readback_verified`, `durability_policy_sha256` and an
+`api_timing_provenance:{path,sha256}` descriptor. All existing operation, byte,
+assertion, integrity, clock, process/cache/host, order and untraced scope gates
+remain. Durability-only separation also retains the earlier healthy-path
+counter requirement unless a separate structural policy is present.
+
+The readable timing contract binds schema1 `public-api-flush-reopen`, exact
+fixture identity and readable `fixture_artifact`, `parser_artifact` and nonempty
+`source_artifacts`, the full frozen case-to-request hash map, generation2,
+eleven assertions per operation, independently reviewed method qualification
+before capture, and readable coverage-plan/correspondence-rule descriptors
+matching their policy hashes. Existing confined artifact verification checks
+all bytes; it does not authenticate reviewers or prove that measurements
+occurred. Actual factual independent review remains required.
+The contract explicitly declares
+`timing_conversion:"recorded-rdtsc-frequency"`, the currently supported
+historical generation2 parser conversion. Missing or different conversion rules
+remain unknown. Future source-informed conversion requires its separate frozen
+importer/mapping work and cannot silently replace this rule or raw metadata.
+
+The raw public JSON ledger binds schema1, scheduled attempt/schedule/manifest,
+environment/runner, case/fixture/parser, durability policy and timing contract,
+the timing row's latency/scope digest, and any fixed workload identities. Its
+`meta`, `summary`, `end` and ordered `operations` retain the actual generation2
+native fields. Require complete case/end framing, exact case/cache/count/byte/
+assertion mapping, every initialized operation status/IOSB/information/tick,
+actual successful flush-call count and complete reopen comparison. Integer
+fields come from explicit native strings. In particular, missing raw
+`summary.flush_calls` cannot acquire the parser's historical default zero.
+Missing or contradictory proof remains unknown; observed zero/wrong API counts,
+failed operations/assertions/data or a definite failed reopen comparison remain
+REGRESSION. No missing value becomes false, true or zero.
+
+Every batch and operation latency must numerically match
+`raw_ticks * 1000 / raw_meta_frequency` milliseconds. Both raw ticks and
+frequency must be positive uint64 values; derived and reported values must be
+positive and finite. The exact representation allowance is relative tolerance
+`8 * sys.float_info.epsilon` (approximately `1.7763568394002505e-15`) with zero
+absolute tolerance, applied by `math.isclose`. This handles numeric representation
+only and is not a native precision/clock qualification. Rehashed raw counter or
+frequency changes cannot keep unrelated reported timing, and a row self-hash is
+not a conversion proof. Zero/malformed/out-of-range values remain attributable
+unknown evidence.
+
+Every raw operation must also identify the exact scheduled case, rather than
+borrowing another case's operations under a matching summary. These ledgers
+depend on qualified upstream native parser/importer mapping to the actual raw
+capture. Hash equality and native-shaped JSON do not authenticate a capture,
+establish its lifetime/route, or make invented rows native evidence.
+
+Use `--evidence-dir` with `calibrate` or `compare`; compare's existing
+`--structural-evidence-dir` remains an alias. API timing can feed complete A/A
+count planning and its independent `timing_verdict`. The report adds
+`durability_verdict`, `durability_policy_sha256`, `durability_issues` and
+`durability_attempts`, preserving supplied public and physical fields and raw
+descriptor references. Unknown physical durability keeps combined P1
+INCONCLUSIVE; a public correctness failure remains REGRESSION. Reported timing
+describes the public flush/reopen workload and does not claim device-durable
+latency. Diagnostic timing cannot substitute for the accepted public rows.
+
+## Fixed fixture workloads and metadata labels
+
+The current suite consumes case/cache selection and runs fixed request/data
+artifacts. It does not consume the scheduler's numeric workload seed. For those
+fixtures, optional `spec.workload_policy` declares schema1 `fixture-fixed`,
+`seed_semantics:"METADATA_ONLY"`, exact `fixture_sha256` matching the baseline
+manifest, and a readable `fixture_contract:{path,sha256}` descriptor. That
+contract binds the exact fixture/source artifacts, full case/request hash map,
+the same explicit semantics and method qualification before capture.
+
+All independent pairs then retain one constant metadata
+`workload_seed = spec.seeds.workload`, accompanied by
+`workload_seed_semantics:"METADATA_ONLY"`, `workload_policy_sha256` and a fixed
+per-case `workload_identity_sha256` binding policy, fixture and full declared
+case/request. Timing and structural rows bind these identities. The label is
+never described as a guest-consumed PRNG input; pair index and schedule seed
+still control independent process pairing and declared launch order. Without
+this policy, legacy base-plus-pair seeds remain unchanged. Policies and request
+identities freeze before A/A and cannot be grafted onto old rows. Results cover
+the declared fixed workloads, not a varied request population.
+
+The native full36 adapter remains separate work. Its suite/DVD XBE artifacts,
+per-case optical ISOs, original HDD seed lineage and actual prepared media bytes
+need an explicit reviewed artifact-set/per-case identity mapping. A manifest's
+file hash must not be replaced by an invented identity or a different lineage
+hash to fit the analyzer. This checkpoint implements analysis of declared
+evidence; it does not certify the native adapter, physical durability, clocks,
+counter collector or P1 acceptance.
+
 ## Confidence and sample-size method
 
 The statistical unit is an independent **run pair**, never an individual read
