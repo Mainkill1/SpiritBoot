@@ -1,8 +1,10 @@
 # Minimal future platform inputs
 
-No platform adapter or owner synchronization code is implemented here.
-The parent has held adapter expansion while the native A/A baseline freeze
-remains incomplete. This document describes the future boundary only.
+This document preserves the first composer's proposed integration boundary.
+A later authorized bounded task added geometry_owner_adapter.c under a new
+ordinary C entrypoint. GEOMETRY-ADAPTER-SPECIFICATION.md records its exact
+owner/query policy; ADAPTER-PROVENANCE.md records the new approved facts and
+tests. Native integration and full backend qualification remain separate.
 
 The retained adapter would supply:
 
@@ -53,4 +55,6 @@ Native integration still needs identity/checksum availability, BRFR caller
 mapping, full detection-byte expectations, and unmeasured boundary queries.
 DetectNone remains a declared policy choice and does not preserve a real
 lower BIOS detection record. Native boot/partition behavior and full parity
-have not been qualified. No native adapter exists in this package.
+have not been qualified. The narrow owner adapter requires approved actual
+platform types and mandatory target assertions; it is not linked or natively
+qualified in this package.

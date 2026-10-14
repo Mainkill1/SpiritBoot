@@ -1,0 +1,6 @@
+COMMAND: cc -std=c11 -Wall -Wextra -Werror -pedantic -include geometry_host_platform.h -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined geometry_composer.c geometry_owner_adapter.c test_geometry_owner_adapter.c -o test-owner-adapter-sanitized
+EXIT: 0
+
+COMMAND: ./test-owner-adapter-sanitized
+EXIT: 0
+PASS: 16 adapter scenarios, 61973 checks
