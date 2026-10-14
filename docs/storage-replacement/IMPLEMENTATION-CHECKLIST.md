@@ -75,6 +75,8 @@ Maintain guest-visible names (`\Driver\Disk`, `\Driver\Cdrom`, `\Device\Harddisk
 - [x] Protected PowerShell desktop pipe proof and first owned graphical guest on Windows Codex/session1; earlier direct launches remain provisional evidence.
 - [x] Source-only public-API fixtures and paired-run analysis toolkit: reviewed clean DVD metadata generation, isolated Windows wrapper mock build and strict JSON/serial evidence decoding; initial toolkit checks passed 250 host tests with three skips. Corrected Deck and [Windows V27](WINDOWS-NATIVE-QUALIFICATION.md) qualify bounded byte-fill/public-query/owned-deadline/post-deadline checks; the original Windows V23 failed deadline is retained. Full P1 recorder/control/clock/calibration/count gates and native full-class qualification remain open.
 
+- [x] Qualify the complete 36-case Deck functional matrix on the published reference64 BIOS: all 36,864 operations and 188,416 assertions passed, with raw evidence and cleanup retained in the [full36 receipt](FULL36-FUNCTIONAL-QUALIFICATION.md). This closes functional method coverage only; all rows remain performance-ineligible, Windows full36 and P1 remain open.
+
 ## P1 — Performance baseline and regression decision rules (must precede major driver work)
 
 - [ ] Reconstruct current optimized product, **not an older pre-optimization candidate**. Preserve existing IRP-owned FATX lease, eliminated per-I/O completion context, conditional idle-clock sampling, direct-read mapping, gather-write and DMA bounce/interrupt behavior. Verify the final composition before benchmarking.
