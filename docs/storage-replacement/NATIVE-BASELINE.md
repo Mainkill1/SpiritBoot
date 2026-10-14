@@ -1,5 +1,9 @@
 # Native storage baseline evidence, 2026-10-14
 
+The [complete V32 Deck functional sweep](FULL36-FUNCTIONAL-QUALIFICATION.md)
+passed all 36 declared cases, 36,864 operations and 188,416 assertions. This
+closes the functional cohort only; every row remains performance-ineligible.
+
 **P1 remains INCONCLUSIVE.** These are real published-ROM observations and
 measurement-method pilots, not an accepted full-matrix calibration or candidate
 performance result. No full replacement candidate performance run was executed;
