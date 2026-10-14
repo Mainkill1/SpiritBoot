@@ -584,6 +584,15 @@ prove that nobody previously looked at candidate measurements.
 
 ## Authorship and host verification
 
+The opt-in per-case artifact schema is described in
+[BENCHMARK-PER-CASE-ARTIFACTS.md](BENCHMARK-PER-CASE-ARTIFACTS.md). It resolves actual
+recorder and media file hashes while keeping the original released ISO and HDD
+seed separate from wrapper and prepared-image identities. It is a schema/resolver
+checkpoint: the actual native receipt importer and its pinned verification are
+still required before native calibration. The declared importer boolean and
+receipt hash strings alone do not qualify native evidence. Legacy single-fixture
+inputs, recorded-frequency conversion and statistical decisions are unchanged.
+
 This tool and its tests were independently authored from the implementation-
 neutral requirements in this directory and ordinary Python/statistical
 interfaces. No ClassPnP/Disk implementation, private helper body, source patch,

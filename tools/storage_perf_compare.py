@@ -52,9 +52,12 @@ def number(value, minimum=0, inclusive=False):
             and (value >= minimum if inclusive else value > minimum))
 
 
-def validate_manifest(value):
+def validate_manifest(value, *, per_case=False):
     require(isinstance(value, dict), "manifest must be an object")
     for field in MANIFEST_HASHES:
+        if per_case and field in ("fixture_sha256", "iso_sha256"):
+            require(field not in value, "per-case manifest cannot also declare a global fixture/ISO")
+            continue
         require(hash_string(value.get(field)), f"manifest needs pinned {field}")
     for field in ("product_commit", "roswell_base", "source_tree"):
         require(hash_string(value.get(field), (40, 64)), f"manifest needs pinned {field}")
@@ -69,7 +72,12 @@ def validate_spec(spec):
     require(not any(key.startswith("candidate") for key in spec), "calibration cannot include candidate inputs")
     require(isinstance(spec.get("machine_id"), str) and spec["machine_id"].strip(), "pin machine_id")
     require(spec.get("machine_role") in ("primary", "secondary"), "set machine_role")
-    validate_manifest(spec.get("baseline"))
+    if "artifact_policy" in spec:
+        policy = spec["artifact_policy"]
+        require(isinstance(policy, dict) and policy.get("schema_version") == 1
+                and policy.get("mode") == "per-case", "unknown artifact policy")
+        validate_descriptor(policy.get("artifact_set"))
+    validate_manifest(spec.get("baseline"), per_case="artifact_policy" in spec)
     env = spec.get("environment", {})
     require(isinstance(env, dict) and all(env.get(key) for key in ENVIRONMENT_FIELDS),
             "pin emulator, storage, power, thermal, memory and CPU/GPU controls")
@@ -102,9 +110,13 @@ def validate_spec(spec):
         validate_descriptor(policy.get("timing_contract"))
     if "workload_policy" in spec:
         policy = spec["workload_policy"]
+        identity_field = "artifact_set_sha256" if "artifact_policy" in spec else "fixture_sha256"
+        identity = (spec["artifact_policy"]["artifact_set"]["sha256"] if "artifact_policy" in spec
+                    else spec["baseline"]["fixture_sha256"])
         require(isinstance(policy, dict) and policy.get("schema_version") == 1
                 and policy.get("mode") == "fixture-fixed" and policy.get("seed_semantics") == "METADATA_ONLY"
-                and policy.get("fixture_sha256") == spec["baseline"]["fixture_sha256"],
+                and policy.get(identity_field) == identity
+                and ("artifact_policy" not in spec or "fixture_sha256" not in policy),
                 "fixed workload requires exact fixture and METADATA_ONLY semantics")
         validate_descriptor(policy.get("fixture_contract"))
     require(hash_string(spec.get("runner_sha256")), "pin runner_sha256")
@@ -189,6 +201,8 @@ def validate_spec(spec):
                 "both XISO variants required")
         require({"split", "fragmented"}.issubset({case["variant"] for case in selected
                                                   if case["kind"] == "boundary-sg"}), "missing boundary/fragmented SG cases")
+    if "artifact_policy" in spec:
+        validate_artifact_policy(spec)
 
 
 def digest(value):
@@ -202,11 +216,73 @@ def validate_descriptor(value):
             and not Path(value["path"]).is_absolute(), "policy artifact needs relative path and hash")
 
 
+def validate_artifact_policy(spec):
+    """Freeze honest per-case file roles; actual native receipt checking belongs to the importer."""
+    policy = spec["artifact_policy"]
+    require(isinstance(policy, dict) and policy.get("schema_version") == 1
+            and policy.get("mode") == "per-case", "unknown artifact policy")
+    validate_descriptor(policy.get("artifact_set"))
+    require("workload_policy" in spec and "durability_policy" in spec,
+            "per-case generation2 artifacts require fixed metadata labels and separated physical durability")
+    entries = policy.get("cases")
+    require(isinstance(entries, dict) and set(entries) == {case["id"] for case in spec["cases"]},
+            "artifact set must cover exactly all frozen cases")
+    for case in spec["cases"]:
+        entry = entries[case["id"]]
+        require(isinstance(entry, dict), "case artifact must be an object")
+        seed, prep = entry.get("hdd_seed"), entry.get("preparation")
+        require(isinstance(seed, dict) and seed.get("sha256") == spec["baseline"]["hdd_seed_sha256"]
+                and isinstance(seed.get("asset_id"), str) and seed["asset_id"].strip(), "case source seed mismatch")
+        require(isinstance(prep, dict) and prep.get("mode") in ("prepared_xiso", "direct_copy"),
+                "pin case preparation mode")
+        descriptors = [entry.get(key) for key in ("recorder_xbe", "recorder_source", "recorder_build",
+                                                  "boot_iso", "measured_media_iso")]
+        descriptors += [prep.get("recipe"), prep.get("request_contract")]
+        if case["kind"] == "dvd-xiso":
+            descriptors += [entry.get(key) for key in ("original_released_iso", "extracted_target_xbe", "reference_header")]
+        for descriptor in descriptors:
+            validate_descriptor(descriptor)
+            require(integer(descriptor.get("bytes"), 1), "case artifact needs actual byte length")
+        if case["kind"] == "dvd-xiso":
+            filename, path = entry.get("request_filename"), entry.get("request_path")
+            require(isinstance(entry.get("source_filename"), str) and entry["source_filename"].strip()
+                    and isinstance(filename, str) and filename.strip() and "\\" not in filename and "/" not in filename
+                    and isinstance(path, str) and path.endswith("\\" + filename)
+                    and case.get("request_path") == path
+                    and case["iso_sha256"] == entry["measured_media_iso"].get("sha256"),
+                    "DVD source filename, actual request path or measured image mismatch")
+            vectors = case.get("request_vectors")
+            lengths = case.get("operation_bytes", [case.get("bytes_per_operation")] * case["operations"])
+            require(isinstance(vectors, list) and len(vectors) == case["operations"]
+                    and all(isinstance(row, dict) and row.get("file") == filename
+                            and integer(row.get("index")) and row["index"] == i
+                            and integer(row.get("offset")) and integer(row.get("bytes"), 1)
+                            and row["bytes"] == lengths[i] for i, row in enumerate(vectors)),
+                    "DVD request vectors must bind every actual target request")
+
+
+def resolve_case_manifest(spec, manifest, case):
+    if "artifact_policy" not in spec:
+        return manifest
+    entry = spec["artifact_policy"]["cases"][case["id"]]
+    return dict(manifest, fixture_sha256=entry["recorder_xbe"]["sha256"],
+                iso_sha256=entry["measured_media_iso"]["sha256"])
+
+
+def case_artifact_fields(spec, case):
+    if "artifact_policy" not in spec:
+        return {}
+    policy = spec["artifact_policy"]
+    return {"artifact_set_sha256": policy["artifact_set"]["sha256"],
+            "case_artifact_sha256": digest(policy["cases"][case["id"]])}
+
+
 def fixed_workload_fields(spec, case):
     policy = spec["workload_policy"]
+    fixture = case_artifact_fields(spec, case) if "artifact_policy" in spec else {"fixture_sha256": policy["fixture_sha256"]}
     return {"workload_seed_semantics": "METADATA_ONLY", "workload_policy_sha256": digest(policy),
             "workload_identity_sha256": digest({"policy_sha256": digest(policy),
-                                               "fixture_sha256": policy["fixture_sha256"], "case": case})}
+                                               **fixture, "case": case})}
 
 
 def seal(value):
@@ -310,14 +386,24 @@ def validate_schedule(schedule):
         overlays.add(job["overlay_id"])
         validate_manifest(job["manifest"])
         require(job["manifest_sha256"] == digest(job["manifest"]), "job manifest hash mismatch")
+        common = job["manifest"]
+        if "artifact_policy" in schedule["spec"]:
+            require(all(job.get(key) == value for key, value in
+                        case_artifact_fields(schedule["spec"], job["case"]).items()),
+                    "scheduled case artifact labels mismatch")
+            common = {key: value for key, value in common.items() if key not in ("fixture_sha256", "iso_sha256")}
+            require(job["manifest"] == resolve_case_manifest(schedule["spec"], common, job["case"]),
+                    "resolved case manifest changed actual recorder/media")
         if job["arm"] == "A" or schedule["phase"] == "AA":
-            require(job["manifest"] == schedule["spec"]["baseline"], "A/A must use exact baseline only")
+            require(common == schedule["spec"]["baseline"], "A/A must use exact baseline only")
         else:
             if candidate_manifest is None:
-                candidate_manifest = job["manifest"]
-            require(job["manifest"] == candidate_manifest, "candidate manifest changed across scheduled jobs")
+                candidate_manifest = common
+            require(common == candidate_manifest, "candidate manifest changed across scheduled jobs")
             for field in FIXED_MANIFEST_FIELDS:
-                require(job["manifest"][field] == schedule["spec"]["baseline"][field],
+                if "artifact_policy" in schedule["spec"] and field in ("fixture_sha256", "iso_sha256"):
+                    continue
+                require(common[field] == schedule["spec"]["baseline"][field],
                         f"candidate manifest changed pinned {field}")
     if schedule["phase"] == "AA":
         require(schedule["pairs"] == schedule["spec"]["pilot_pairs"], "A/A pair count changed")
@@ -379,6 +465,8 @@ def inspect_records(schedule, records, *, evidence_root=None):
                 failures.append(f"{attempt}: successful status contradicts recorded error: {record['error']}")
                 continue
             case = job["case"]
+            if "artifact_policy" in schedule["spec"]:
+                validate_case_artifacts(schedule, job, record, evidence_root, evidence_cache)
             if "workload_policy" in schedule["spec"]:
                 validate_public_contract(schedule, job, "workload_policy", record, evidence_root, evidence_cache)
             if case["kind"] == "dvd-xiso":
@@ -523,9 +611,12 @@ def validate_calibration(calibration):
 
 def make_confirmatory(calibration, candidate):
     validate_calibration(calibration)
-    validate_manifest(candidate)
+    per_case = "artifact_policy" in calibration["spec"]
+    validate_manifest(candidate, per_case=per_case)
     baseline = calibration["spec"]["baseline"]
     for field in FIXED_MANIFEST_FIELDS:
+        if per_case and field in ("fixture_sha256", "iso_sha256"):
+            continue
         require(candidate[field] == baseline[field], f"candidate changed pinned {field}")
     return make_schedule(calibration["spec"], "AB", calibration["confirmatory_pairs"], candidate, calibration["sha256"])
 
@@ -546,9 +637,47 @@ def read_structural_artifact(descriptor, evidence_root, cache, as_json=False):
         raw = path.read_bytes()
         require(hashlib.sha256(raw).hexdigest() == descriptor["sha256"], "structural artifact hash mismatch")
         cache[key] = raw
+    if "bytes" in descriptor:
+        require(integer(descriptor["bytes"], 1) and len(cache[key]) == descriptor["bytes"],
+                "structural artifact byte length mismatch")
     if as_json:
         return json.loads(cache[key].decode("utf-8-sig"), object_pairs_hook=unique_json_object)
     return descriptor["sha256"]
+
+
+def validate_case_artifacts(schedule, job, record, evidence_root, cache):
+    policy = schedule["spec"]["artifact_policy"]
+    wanted = case_artifact_fields(schedule["spec"], job["case"])
+    require(all(record.get(key) == value for key, value in wanted.items()), "case artifact identity mismatch")
+    artifact_set = read_structural_artifact(policy["artifact_set"], evidence_root, cache, as_json=True)
+    require(artifact_set == {"schema_version": 1, "cases": policy["cases"]}, "artifact set bytes differ from frozen map")
+    entry = policy["cases"][job["case_id"]]
+    for key in ("recorder_xbe", "recorder_source", "recorder_build", "boot_iso", "measured_media_iso",
+                "original_released_iso", "extracted_target_xbe", "reference_header"):
+        if key in entry:
+            read_structural_artifact(entry[key], evidence_root, cache)
+    prep = entry["preparation"]
+    read_structural_artifact(prep["recipe"], evidence_root, cache)
+    contract = read_structural_artifact(prep["request_contract"], evidence_root, cache, as_json=True)
+    require(isinstance(contract, dict) and contract.get("case_sha256") == digest(job["case"]),
+            "preparation request contract changed frozen case")
+    bindings = record.get("artifact_bindings")
+    require(isinstance(bindings, dict) and bindings.get("verified_by_native_importer") is True,
+            "native artifact receipt verification missing")
+    expected = {"case_artifact_sha256": wanted["case_artifact_sha256"],
+                "source_seed_sha256": entry["hdd_seed"]["sha256"],
+                "source_seed_asset_id": entry["hdd_seed"]["asset_id"], "preparation_mode": prep["mode"],
+                "eeprom_source_sha256": job["manifest"]["eeprom_sha256"],
+                **{key + "_sha256": entry[key]["sha256"] for key in ("recorder_xbe", "boot_iso", "measured_media_iso")}}
+    require(all(bindings.get(key) == value for key, value in expected.items()), "native artifact/source role mismatch")
+    require(all(hash_string(bindings.get(key)) for key in
+                ("request_sha256", "input_manifest_sha256", "preparation_receipt_sha256")),
+            "native request/input/preparation receipt pins missing")
+    prepared = bindings.get("prepared_image")
+    require(isinstance(prepared, dict) and hash_string(prepared.get("sha256"))
+            and integer(prepared.get("bytes"), 1), "actual prepared image hash/bytes missing")
+    require((prepared["sha256"] == entry["hdd_seed"]["sha256"]) == (prep["mode"] == "direct_copy"),
+            "original source seed cannot replace prepared image identity")
 
 
 def validate_public_contract(schedule, job, policy_key, record, evidence_root, cache):
@@ -559,13 +688,18 @@ def validate_public_contract(schedule, job, policy_key, record, evidence_root, c
     contract = read_structural_artifact(descriptor, evidence_root, cache, as_json=True)
     require(isinstance(contract, dict) and contract.get("schema_version") == 1
             and contract.get("contract") == ("public-api-flush-reopen" if public else "fixture-fixed")
-            and contract.get("fixture_sha256") == job["manifest"]["fixture_sha256"]
             and contract.get("method_qualified") is True, "public fixture contract mismatch or unqualified")
     require(utc(contract.get("reviewed_utc")) < utc(record["started_utc"]), "public contract reviewed after capture")
     require(contract.get("cases") == {case["id"]: digest(case) for case in schedule["spec"]["cases"]},
             "public contract changed frozen case/request identities")
-    require(read_structural_artifact(contract.get("fixture_artifact"), evidence_root, cache)
-            == job["manifest"]["fixture_sha256"], "public contract fixture bytes differ")
+    if "artifact_policy" in schedule["spec"]:
+        require(contract.get("artifact_set_sha256") == job["artifact_set_sha256"]
+                and "fixture_sha256" not in contract and "fixture_artifact" not in contract,
+                "public contract must bind artifact set without inventing one fixture")
+    else:
+        require(contract.get("fixture_sha256") == job["manifest"]["fixture_sha256"]
+                and read_structural_artifact(contract.get("fixture_artifact"), evidence_root, cache)
+                == job["manifest"]["fixture_sha256"], "public contract fixture bytes differ")
     sources = contract.get("source_artifacts")
     require(isinstance(sources, list) and sources, "public fixture source artifacts missing")
     for source in sources:
@@ -1005,6 +1139,12 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
                                         if job["attempt_id"] in actual)],
             "issues": issues, "failures": failures, "cases": cases,
             "units": {"latency": "ms per batch", "throughput": "bytes/ms", "p95": "ms per request", "p99": "ms per request"}}
+    if "artifact_policy" in schedule["spec"]:
+        report.update(artifact_set_sha256=schedule["spec"]["artifact_policy"]["artifact_set"]["sha256"],
+                      artifact_attempts=[{key: row[key] for key in
+                                         ("artifact_set_sha256", "case_artifact_sha256", "artifact_bindings") if key in row}
+                                         | {"attempt_id": job["attempt_id"]}
+                                         for job in schedule["jobs"] for row in [actual.get(job["attempt_id"], {})]])
     if separated:
         report.update(timing_verdict=verdict_for(timing_decisions),
                       structural_verdict=verdict_for(structural_decisions),
@@ -1029,6 +1169,8 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
 
 def make_schedule(spec, phase="AA", pairs=None, candidate=None, calibration=None):
     validate_spec(spec)
+    if "artifact_policy" in spec and candidate is not None:
+        validate_manifest(candidate, per_case=True)
     rng = random.Random(spec["seeds"]["schedule"])
     manifests = {"A": spec["baseline"], "B": candidate or spec["baseline"]}
     jobs = []
@@ -1041,14 +1183,16 @@ def make_schedule(spec, phase="AA", pairs=None, candidate=None, calibration=None
         for case in cases:
             for arm in arms:
                 ordinal = len(jobs)
+                manifest = resolve_case_manifest(spec, manifests[arm], case)
                 jobs.append({"attempt_id": f"{phase}-{pair}-{case['id']}-{arm}",
                              "ordinal": ordinal, "pair_index": pair, "arm": arm,
                              "case_id": case["id"], "case": case,
-                             "manifest": manifests[arm], "manifest_sha256": digest(manifests[arm]),
+                             "manifest": manifest, "manifest_sha256": digest(manifest),
                              "cache_policy": case["cache_policy"],
                              "workload_seed": spec["seeds"]["workload"] + (0 if "workload_policy" in spec else pair),
                              "overlay_id": f"{phase}-{ordinal:06d}",
                              "fresh_process_required": True})
+                jobs[-1].update(case_artifact_fields(spec, case))
                 if "workload_policy" in spec:
                     jobs[-1].update(fixed_workload_fields(spec, case))
     return seal({"schema_version": 1, "phase": phase, "machine_id": spec["machine_id"],
