@@ -73,6 +73,7 @@ Maintain guest-visible names (`\Driver\Disk`, `\Driver\Cdrom`, `\Device\Harddisk
 - [x] Read-only baseline provenance/footprint audit: 22 SDK/DDK helpers plus five additional SCSI utilities and exact compiled occurrences are recorded. Grants/removal and native storage allocation high-water remain open.
 - [x] Actual CLI/CMake missing/unknown selection and absent complete adapter rejection; real reference64/reference128/reserved128 release ROMs reproduce published hashes. Final full profile matrix remains open.
 - [x] Protected PowerShell desktop pipe proof and first owned graphical guest on Windows Codex/session1; earlier direct launches remain provisional evidence.
+- [x] Source-only public-API fixtures and paired-run analysis toolkit: reviewed clean DVD metadata generation, isolated Windows wrapper mock build and strict JSON/serial evidence decoding; 250 host tests with three skips. Bounded corrected Deck observations are recorded. Full P1 recorder/control/calibration/count gates and Windows native qualification remain open.
 
 ## P1 — Performance baseline and regression decision rules (must precede major driver work)
 
