@@ -88,6 +88,7 @@ hashes are not evidence; the recorder must independently verify the actual files
 | `planning_confidence` | Exploratory per-gate A/A planning confidence, strictly between `.5` and `1` |
 | `limits` | Exactly `latency`, `throughput`, `p95`, `p99` ratio thresholds |
 | `cases` | The full predeclared case list |
+| `structural_policy` | Optional explicit diagnostic companion contract described below; omission retains the original strict same-run counter contract |
 
 Initial proposed limits are `{"latency":1.02,"throughput":0.98,"p95":1.05,
 "p99":1.05}`. They are proposed tolerances, not measured results. Freeze/revise
@@ -204,7 +205,7 @@ measurements:
 | `flushes_completed`, `durability_verified` | Actual flush count and `true` persistence verification for write cases |
 | `elapsed_ms` | Actual complete batch latency, positive and no longer than the enclosing attempt |
 | `latencies_ms` | Positive per-operation latencies; exactly one entry per declared completed operation |
-| `counters` | Actual workload-window counters; healthy small-HDD cases require `upper_worker_hops`, `allocations`, `bounce_copies`, `lower_commands`, `interrupts` |
+| `counters` | Actual workload-window counters; the original contract requires all five healthy small-HDD counts. With `structural_policy`, missing counts do not invalidate timing; qualified structural evidence remains a separate required gate |
 
 For unsuccessful attempts preserve partial counts/checksums and error evidence;
 missing latency samples are expected. All identity/setup/time fields still
@@ -253,6 +254,154 @@ The adapter in this example is an operator-owned capture implementation, not a
 script shipped by this change. An interrupted adapter leaves a partial JSONL;
 that file must be retained and cannot pass. Place independent recordings and
 raw artifact logs outside source-controlled fixtures.
+
+## Separate structural diagnostic evidence
+
+The published reference remains the exact untraced ROM. A public API recorder
+cannot derive private worker, pool, bounce, transport-command or IRQ counts from
+read-call totals. Before the pilot, opt into `structural_policy` to preserve
+otherwise valid timing evidence while those counts remain unavailable. The
+policy, workload and statistical planning rules are frozen with the A/A spec;
+the derived confirmatory count is still rebuilt from complete untraced A/A
+timings. The counter collector itself can be completed later, but its exact
+implementation/source and independent qualification must be pinned and reviewed
+before each structural capture. See [the fix writeup](BENCHMARK-STRUCTURAL-COMPANIONS-FIX.md).
+
+The policy requires `schema_version:1`, `mode:diagnostic-companion`, a nonempty
+`method` and `route_id`, actual `coverage_plan_sha256` and
+`correspondence_rules_sha256` pins, and this exact `counter_units` mapping:
+
+| Counter | Frozen unit |
+| --- | --- |
+| `upper_worker_hops` | `upper-request-worker-executions` |
+| `allocations` | `successful-new-storage-pool-allocations` |
+| `bounce_copies` | `bounce-copy-operations` |
+| `lower_commands` | `physical-command-issue-attempts` |
+| `interrupts` | `storage-isr-entries` |
+
+The method/coverage plan must define actual storage ownership and the complete
+caller-issue-to-consumer-ready window. A lookaside checkout is distinct from a
+new pool allocation. Count executed upper worker requests, including overflow
+and stack-overflow routes, rather than worker thread creation or enqueue calls
+alone. Count physical command issue attempts rather than SRBs or DMA callbacks;
+identify accepted/rejected/retried commands in supporting evidence. ISR entries
+are distinct from serviced/spurious interrupts and polling. Count actual bounce
+copy operations and bytes separately from cache/PIO/other copies. The fixed units
+prevent a cheaper logical count from replacing a healthy structural gate.
+An optional `collector_sha256` in the policy also freezes a collector already
+available before A/A; otherwise the reviewed sidecar binds the later collector.
+
+The analysis accepts separate companion JSONL with these additional arguments:
+
+```sh
+python3 tools/storage_perf_compare.py compare \
+  --calibration evidence/deck/frozen.json --schedule evidence/deck/ab-schedule.json \
+  --results evidence/deck/ab.jsonl \
+  --structural-results evidence/deck/ab-structural.jsonl \
+  --structural-evidence-dir evidence/deck/structural \
+  --output evidence/deck/report.json
+```
+
+Each companion joins one scheduled healthy small-HDD attempt using
+`timing_attempt_id`; list order does not choose the join. It is a distinct run,
+with `schema_version:1`, `capture_mode:diagnostic-companion`, `diagnostic:true`,
+and a unique independent `capture_run_id` and overlay. It must not reuse any
+scheduled timing attempt/overlay identity. Declare a fresh process and overlay; captures must
+follow the scheduled healthy-case order without overlapping. Bind these fields:
+
+| Fields | Required binding |
+| --- | --- |
+| `schedule_sha256`, `calibration_sha256` | Exact A/B schedule and frozen calibration |
+| `policy_sha256`, `method` | Canonical policy hash and declared method |
+| `collector_sha256`, `collector_implementation` | Actual collector hash and hashed relative-path descriptor for its executable/script bytes |
+| `machine_id`, `environment_sha256`, `memory_profile` | Actual declared host, controls and memory profile |
+| `acceptance_manifest_sha256`, `capture_manifest` | Scheduled untraced source/ROM identity and full actual diagnostic build manifest |
+| `case_id`, `case_sha256`, `pair_index`, `arm`, `workload_seed` | Exact case including request widths/order/depth, paired arm and seed |
+| `route_id`, `route_sha256` | Declared route and hashed actual runtime route proof |
+| `started_utc`, `finished_utc` | Valid completed capture interval after schedule creation |
+| `cache_preparation` | Successful actual preparation, details and the same declared policy hash |
+| `counter_scope` | `caller-issue-to-consumer-ready` |
+| `status`, `error` | Explicit `ok` and `null` for qualified captures; failed/partial/missing outcomes remain recorded and cannot supply qualified counts |
+| `counters` | Actual nonnegative integer values for all five gates; booleans and missing values are invalid |
+| `coverage` | `complete:true`, integer zero `lost_events`, `overflows`, `ambiguous_events`; exact `operations_observed`; all five names in `counter_keys` |
+| `raw_artifacts`, `qualification` | Readable file-hash-bound evidence and independently reviewed qualification described below |
+
+Diagnostic product/source/patch/PE/ROM identities may differ. Roswell base,
+toolchain, xemu, EEPROM and media remain the pinned values. A changed diagnostic
+fixture requires qualified workload correspondence; its times never replace
+acceptance data. Even if a companion uses the identical ROM, debugger stops,
+tracing and observer interference make its timing diagnostic.
+
+Every artifact descriptor has `path` relative to the evidence directory and
+actual lowercase `sha256`. Absolute/missing/outside-directory paths and hash
+mismatches make the affected structural evidence unavailable. `raw_artifacts`
+contains exactly one `counter-ledger`, one `route-proof` and at least one
+`qualification-support` role, with distinct paths. Other raw artifacts may be
+retained. The counter ledger is JSON with `schema_version:1` and exact copies of
+`capture_run_id`, `timing_attempt_id`, `schedule_sha256`, `policy_sha256`,
+`counter_scope`, `counters`, `coverage`, `route_sha256`, `status` and `error`. It records observations
+from the qualified collector, not values reconstructed from public read counts.
+The route-proof JSON has `schema_version:1`, the same `capture_run_id`, actual
+`capture_manifest_sha256`, declared `route_id` and `route_verified:true`.
+The collector method must justify that runtime route verification in retained
+evidence; a static route assumption alone does not qualify it.
+
+The `qualification` descriptor references a reviewed JSON sidecar with
+`schema_version:1` and exact `policy_sha256`, `method`, `collector_sha256`,
+`capture_manifest_sha256`, `acceptance_manifest_sha256`, `case_sha256`,
+`environment_sha256`, `capture_mode`, and `route_id` bindings. It includes a
+readable/hash-verified `collector_source` descriptor for the exact source or
+source inventory, readable `coverage_plan` and `correspondence_rules` descriptors
+whose hashes equal the predeclared policy pins, `reviewed_utc` no later than capture start, and explicit true
+`method_qualified`, `coverage_qualified`, `correspondence_qualified` and
+`interference_qualified`. Its nonempty `support_sha256s` exactly names the
+verified qualification-support artifacts. These cover compiled/inlined route
+coverage, allocation/IRP generation and lifetime attribution, absence of event
+loss, and whether diagnostic observations can support the untraced structural
+claim. The methodology must not be changed after viewing candidate values.
+
+The validator checks declared bindings and actual artifact bytes. It cannot
+prove that qualification assertions are true, authenticate the reviewer, or
+turn an invented fixture into a native observation. Independent factual review
+of the method and supporting evidence remains required. No collector or native
+structural measurements are supplied by this analysis change.
+
+Valid actual same-run counts can instead use an acceptance row's
+`structural_evidence` object with this full contract. Set `capture_mode:same-run`
+and `diagnostic:false`; capture run, overlay, full manifest, time window and
+counts must equal that acceptance row. The row must already be a valid untraced
+timing attempt. Its cheap counting method still needs the verified implementation,
+source, coverage, route and pre-capture qualification. Unqualified same-run
+integers cannot bypass the separate-evidence gate. Supplying both an embedded
+and separate companion for one attempt, duplicates or unscheduled companions is
+an invalid experiment, rather than an opportunity to select favorable evidence.
+
+In this explicit mode, reports include independent `timing_verdict` and
+`structural_verdict`, case-level decisions, structural issues/failures, actual
+qualified count evidence, policy hash and raw companion JSONL hash. Missing,
+incomplete, lost, overflowed, ambiguous or unqualified evidence produces
+structural INCONCLUSIVE while valid timing/calibration remains usable. No missing
+count is filled with zero. An observed increase in any qualified paired healthy
+count remains REGRESSION, even if other companions are unavailable. Every
+required structural pair must qualify for combined PASS. Diagnostic latency
+fields are ignored; acceptance correctness/durability failures and timing
+regressions remain failures independently. Broader persistent/peak memory,
+ROM-size, frame/streaming and P3 gates still require their separate evidence.
+
+The report's `structural_attempts` preserves supplied capture outcomes, including
+the distinction between missing `error` and explicit `error:null`. A failed or
+partial diagnostic does not by itself invalidate unrelated valid timing data.
+However, a same-host diagnostic interval overlapping an acceptance interval
+invalidates that diagnostic's structural context, the affected timing's
+untraced controls and any embedded same-run counts for that contaminated run.
+Those timing rows are retained as attempts but removed from
+qualified metrics, with attributable issues and INCONCLUSIVE timing decisions;
+unaffected valid timing remains extractable. Touching interval endpoints do not
+overlap. All declared same-host diagnostic lifetimes also participate in a
+separate overlap check before capture qualification. Failed or partial captures
+can invalidate other overlapping diagnostics' structural context; neither side
+may supply qualified counts. This consistency check does not replace factual native confirmation of
+the host/run intervals.
 
 ## Confidence and sample-size method
 

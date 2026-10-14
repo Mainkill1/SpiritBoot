@@ -3,6 +3,7 @@
 # Copyright (C) 2026 SpiritBoot contributors
 """Independent paired storage experiment scheduling and recorded-result analysis."""
 import argparse
+import bisect
 import datetime
 import hashlib
 import functools
@@ -22,6 +23,13 @@ MANIFEST_HASHES = ("pe_sha256", "flash_sha256", "xemu_sha256", "fixture_sha256",
                    "eeprom_sha256", "hdd_seed_sha256", "iso_sha256")
 FIXED_MANIFEST_FIELDS = ("roswell_base", "toolchain_revision", "xemu_sha256", "fixture_sha256",
                          "eeprom_sha256", "hdd_seed_sha256", "iso_sha256")
+STRUCTURAL_UNITS = {
+    "upper_worker_hops": "upper-request-worker-executions",
+    "allocations": "successful-new-storage-pool-allocations",
+    "bounce_copies": "bounce-copy-operations",
+    "lower_commands": "physical-command-issue-attempts",
+    "interrupts": "storage-isr-entries",
+}
 
 
 def require(condition, message):
@@ -63,6 +71,20 @@ def validate_spec(spec):
     env = spec.get("environment", {})
     require(isinstance(env, dict) and all(env.get(key) for key in ENVIRONMENT_FIELDS),
             "pin emulator, storage, power, thermal, memory and CPU/GPU controls")
+    if "structural_policy" in spec:
+        policy = spec["structural_policy"]
+        require(isinstance(policy, dict) and policy.get("schema_version") == 1
+                and policy.get("mode") == "diagnostic-companion", "unknown structural policy")
+        require(isinstance(policy.get("method"), str) and policy["method"].strip(),
+                "pin structural capture method")
+        require(isinstance(policy.get("route_id"), str) and policy["route_id"].strip(),
+                "pin structural route_id")
+        for field in ("coverage_plan_sha256", "correspondence_rules_sha256"):
+            require(hash_string(policy.get(field)), f"pin structural {field}")
+        if "collector_sha256" in policy:
+            require(hash_string(policy["collector_sha256"]), "invalid optional structural collector pin")
+        require(policy.get("counter_units") == STRUCTURAL_UNITS,
+                "structural counter units must preserve all five healthy-path gates")
     require(hash_string(spec.get("runner_sha256")), "pin runner_sha256")
     require(isinstance(spec.get("seeds"), dict)
             and all(integer(spec["seeds"].get(key)) for key in ("workload", "schedule")), "pin seeds")
@@ -351,9 +373,9 @@ def inspect_records(schedule, records):
                     and all(number(value) and value <= record["elapsed_ms"] for value in samples),
                     "missing/invalid operation latency evidence")
             counters = record.get("counters", {})
-            if case["kind"] == "small-hdd-read":
+            if case["kind"] == "small-hdd-read" and "structural_policy" not in schedule["spec"]:
                 require(isinstance(counters, dict) and all(integer(counters.get(key)) for key in
-                        ("upper_worker_hops", "allocations", "bounce_copies", "lower_commands", "interrupts")),
+                        STRUCTURAL_UNITS),
                         "missing healthy-path structural counters")
             ordered = sorted(samples)
             metrics[attempt] = {"latency": record["elapsed_ms"],
@@ -459,7 +481,260 @@ def make_confirmatory(calibration, candidate):
     return make_schedule(calibration["spec"], "AB", calibration["confirmatory_pairs"], candidate, calibration["sha256"])
 
 
-def compare(calibration, schedule, records, results_sha256):
+def read_structural_artifact(descriptor, evidence_root, cache, as_json=False):
+    """Verify immutable companion evidence inside the supplied evidence directory."""
+    require(isinstance(descriptor, dict) and hash_string(descriptor.get("sha256")),
+            "structural artifact lacks hash")
+    name = descriptor.get("path")
+    require(isinstance(name, str) and name.strip() and not Path(name).is_absolute(),
+            "structural artifact requires relative path")
+    require(evidence_root is not None, "structural evidence directory missing")
+    root = Path(evidence_root).resolve()
+    path = (root / name).resolve()
+    require(path.is_relative_to(root) and path.is_file(), "structural artifact outside evidence directory or missing")
+    key = (path, descriptor["sha256"])
+    if key not in cache:
+        raw = path.read_bytes()
+        require(hashlib.sha256(raw).hexdigest() == descriptor["sha256"], "structural artifact hash mismatch")
+        cache[key] = raw
+    if as_json:
+        return json.loads(cache[key].decode("utf-8-sig"), object_pairs_hook=unique_json_object)
+    return descriptor["sha256"]
+
+
+def validate_structural_row(schedule, job, row, timing, evidence_root, cache, embedded,
+                            acceptance_overlays, acceptance_ids):
+    """Validate declared native evidence; a reviewer still owns its factual qualification."""
+    policy = schedule["spec"]["structural_policy"]
+    require(isinstance(row, dict) and row.get("schema_version") == 1, "structural schema_version must be 1")
+    require(row.get("status") == "ok" and "error" in row and row["error"] is None,
+            "structural capture outcome is failed/partial/missing or contradictory")
+    mode = "same-run" if embedded else "diagnostic-companion"
+    require(row.get("capture_mode") == mode and row.get("diagnostic") is (not embedded),
+            "structural capture must explicitly identify diagnostic versus same-run evidence")
+    wanted = {
+        "timing_attempt_id": job["attempt_id"], "schedule_sha256": schedule["sha256"],
+        "calibration_sha256": schedule["calibration_sha256"], "policy_sha256": digest(policy),
+        "method": policy["method"],
+        "route_id": policy["route_id"],
+        "machine_id": schedule["machine_id"],
+        "environment_sha256": digest(schedule["spec"]["environment"]),
+        "memory_profile": schedule["spec"]["environment"]["memory_profile"],
+        "acceptance_manifest_sha256": job["manifest_sha256"], "case_sha256": digest(job["case"]),
+        **{key: job[key] for key in ("case_id", "pair_index", "arm", "workload_seed")},
+    }
+    for field, value in wanted.items():
+        require(row.get(field) == value, f"structural {field} mismatch")
+    require(hash_string(row.get("collector_sha256")), "structural actual collector hash missing")
+    if "collector_sha256" in policy:
+        require(row["collector_sha256"] == policy["collector_sha256"], "structural frozen collector mismatch")
+    require(integer(row.get("pair_index")) and integer(row.get("workload_seed")),
+            "structural pair/seed must be integers")
+    run = row.get("capture_run_id")
+    require(isinstance(run, str) and run.strip(), "structural capture_run_id missing")
+    capture = row.get("capture_manifest")
+    validate_manifest(capture)
+    for field in FIXED_MANIFEST_FIELDS:
+        # A diagnostic fixture may add markers, but its workload mapping needs qualified correspondence.
+        if field != "fixture_sha256":
+            require(capture[field] == job["manifest"][field], f"structural capture changed pinned {field}")
+    start, end = utc(row.get("started_utc")), utc(row.get("finished_utc"))
+    require(end > start and start >= utc(schedule["created_utc"])
+            and end <= datetime.datetime.now(datetime.timezone.utc), "invalid structural capture time range")
+    if embedded:
+        require(capture == job["manifest"] and run == job["attempt_id"]
+                and row.get("overlay_id") == job["overlay_id"], "same-run structural identity mismatch")
+        require(row.get("started_utc") == timing.get("started_utc")
+                and row.get("finished_utc") == timing.get("finished_utc")
+                and row.get("counters") == timing.get("counters"), "same-run structural window/count mismatch")
+    else:
+        require(run not in acceptance_ids, "diagnostic capture cannot claim any scheduled timing identity")
+        overlay = row.get("overlay_id")
+        require(isinstance(overlay, str) and overlay.strip()
+                and overlay not in acceptance_overlays,
+                "diagnostic requires a separate overlay identity")
+    require(row.get("fresh_process") is True and row.get("fresh_overlay") is True,
+            "structural capture requires fresh process and overlay")
+    prep = row.get("cache_preparation")
+    require(isinstance(prep, dict) and prep.get("success") is True
+            and isinstance(prep.get("details"), str) and prep["details"].strip()
+            and prep.get("policy_sha256") == digest(schedule["spec"]["cache_policies"][job["cache_policy"]]),
+            "structural cache preparation missing or changed")
+    require(row.get("counter_scope") == "caller-issue-to-consumer-ready", "structural window is incomplete")
+    coverage = row.get("coverage")
+    require(isinstance(coverage, dict) and coverage.get("complete") is True
+            and all(integer(coverage.get(key)) and coverage[key] == 0
+                    for key in ("lost_events", "overflows", "ambiguous_events"))
+            and integer(coverage.get("operations_observed"))
+            and coverage["operations_observed"] == job["case"]["operations"]
+            and isinstance(coverage.get("counter_keys"), list)
+            and len(coverage["counter_keys"]) == len(STRUCTURAL_UNITS)
+            and set(coverage["counter_keys"]) == set(STRUCTURAL_UNITS),
+            "structural coverage incomplete/lost/overflowed/ambiguous")
+    counters = row.get("counters")
+    require(isinstance(counters, dict) and all(integer(counters.get(key)) for key in STRUCTURAL_UNITS),
+            "structural counter missing/invalid; unavailable is not zero")
+    artifacts = row.get("raw_artifacts")
+    require(isinstance(artifacts, list) and artifacts and all(isinstance(item, dict) for item in artifacts),
+            "structural raw evidence missing")
+    ledgers = [item for item in artifacts if item.get("role") == "counter-ledger"]
+    support = [item for item in artifacts if item.get("role") == "qualification-support"]
+    routes = [item for item in artifacts if item.get("role") == "route-proof"]
+    require(len(ledgers) == 1 and len(routes) == 1 and support
+            and len({item.get("path") for item in artifacts}) == len(artifacts),
+            "structural evidence needs one counter ledger, one route proof and distinct qualification support")
+    hashes = {read_structural_artifact(item, evidence_root, cache) for item in artifacts}
+    implementation = row.get("collector_implementation")
+    require(isinstance(implementation, dict) and implementation.get("sha256") == row["collector_sha256"],
+            "structural collector implementation hash mismatch")
+    read_structural_artifact(implementation, evidence_root, cache)
+    require(row.get("route_sha256") == routes[0]["sha256"], "structural route proof hash mismatch")
+    route = read_structural_artifact(routes[0], evidence_root, cache, as_json=True)
+    require(isinstance(route, dict) and route.get("schema_version") == 1
+            and route.get("route_verified") is True and route.get("route_id") == policy["route_id"]
+            and route.get("capture_run_id") == run and route.get("capture_manifest_sha256") == digest(capture),
+            "structural runtime route unverified or mismatched")
+    ledger = read_structural_artifact(ledgers[0], evidence_root, cache, as_json=True)
+    require(isinstance(ledger, dict) and ledger.get("schema_version") == 1,
+            "structural counter ledger schema mismatch")
+    for field in ("capture_run_id", "timing_attempt_id", "schedule_sha256", "counter_scope", "policy_sha256",
+                  "counters", "coverage", "route_sha256", "status", "error"):
+        require(field in ledger, f"structural counter ledger {field} missing")
+        require(ledger.get(field) == row.get(field), f"structural counter ledger {field} mismatch")
+    qualification = read_structural_artifact(row.get("qualification"), evidence_root, cache, as_json=True)
+    require(isinstance(qualification, dict) and qualification.get("schema_version") == 1,
+            "structural qualification schema mismatch")
+    for field, value in {
+        "policy_sha256": digest(policy), "capture_manifest_sha256": digest(capture),
+        "acceptance_manifest_sha256": job["manifest_sha256"], "case_sha256": digest(job["case"]),
+        "environment_sha256": wanted["environment_sha256"], "capture_mode": mode,
+        "route_id": policy["route_id"],
+        "method": policy["method"], "collector_sha256": row["collector_sha256"],
+    }.items():
+        require(qualification.get(field) == value, f"structural qualification {field} mismatch")
+    require(utc(qualification.get("reviewed_utc")) <= start, "structural qualification postdates capture")
+    read_structural_artifact(qualification.get("collector_source"), evidence_root, cache)
+    for field in ("coverage_plan", "correspondence_rules"):
+        descriptor = qualification.get(field)
+        require(isinstance(descriptor, dict) and descriptor.get("sha256") == policy[field + "_sha256"],
+                f"structural {field} differs from frozen policy")
+        read_structural_artifact(descriptor, evidence_root, cache)
+    require(all(qualification.get(key) is True for key in
+                ("method_qualified", "coverage_qualified", "correspondence_qualified", "interference_qualified")),
+            "structural method/coverage/correspondence/interference not qualified")
+    pinned_support = qualification.get("support_sha256s")
+    require(isinstance(pinned_support, list) and pinned_support
+            and all(hash_string(value) for value in pinned_support)
+            and set(pinned_support) == {item["sha256"] for item in support}
+            and set(pinned_support).issubset(hashes), "structural qualification support mismatch")
+    return {key: counters[key] for key in STRUCTURAL_UNITS}
+
+
+def inspect_structural(schedule, actual, valid_timing, records, evidence_root):
+    """Join independent diagnostics by scheduled identity, never by list position."""
+    expected = {job["attempt_id"]: job for job in schedule["jobs"] if job["case"]["kind"] == "small-hdd-read"}
+    selected, embedded, issues, counts, evidence, cache = {}, set(), [], {}, [], {}
+    acceptance_overlays = {job["overlay_id"] for job in schedule["jobs"]}
+    acceptance_ids = {job["attempt_id"] for job in schedule["jobs"]}
+    for row in records or []:
+        require(isinstance(row, dict) and row.get("timing_attempt_id") in expected,
+                "unscheduled structural companion")
+        attempt = row["timing_attempt_id"]
+        require(attempt not in selected, "duplicate structural companion; no favorable replacements")
+        selected[attempt] = row
+    for attempt in expected:
+        if attempt in valid_timing and "structural_evidence" in actual.get(attempt, {}):
+            require(attempt not in selected, "ambiguous same-run and companion structural evidence")
+            selected[attempt] = actual[attempt]["structural_evidence"]
+            embedded.add(attempt)
+    windows = []
+    for attempt, timing in actual.items():
+        if timing.get("machine_id") != schedule["machine_id"]:
+            continue
+        try:
+            start, end = utc(timing.get("started_utc")), utc(timing.get("finished_utc"))
+            if end > start:
+                windows.append((start, end, attempt))
+        except (ValueError, TypeError):
+            continue  # The normal timing validator already records invalid timestamps.
+    windows.sort()
+    prefix_ends = []
+    for _, end, _ in windows:
+        prefix_ends.append(max(end, prefix_ends[-1]) if prefix_ends else end)
+    overlaps, timing_issues, contaminated, attempts = {}, [], set(), []
+    diagnostic_windows = []
+    for attempt, row in selected.items():
+        if not isinstance(row, dict):
+            continue
+        attempts.append({key: row[key] for key in
+                         ("timing_attempt_id", "capture_run_id", "capture_mode", "started_utc", "finished_utc",
+                          "status", "error") if key in row})
+        if attempt in embedded or row.get("machine_id") != schedule["machine_id"]:
+            continue
+        try:
+            start, end = utc(row.get("started_utc")), utc(row.get("finished_utc"))
+            if end <= start:
+                continue
+            diagnostic_windows.append((start, end, attempt))
+            index = bisect.bisect_right(prefix_ends, start)
+            while index < len(windows) and windows[index][0] < end:
+                if windows[index][1] > start:
+                    timing_id = windows[index][2]
+                    overlaps.setdefault(attempt, []).append(timing_id)
+                    contaminated.add(timing_id)
+                    timing_issues.append(f"{timing_id}: overlapping diagnostic {row.get('capture_run_id')} "
+                                         "invalidates untraced timing")
+                index += 1
+        except (ValueError, TypeError):
+            continue
+    # Recorded occupancy matters even when a capture's counters/outcome cannot qualify.
+    # The furthest prior end detects every overlapping member without filtering status.
+    diagnostic_windows.sort()
+    diagnostic_overlaps = set()
+    furthest_end, furthest_attempt = None, None
+    for start, end, attempt in diagnostic_windows:
+        if furthest_end is not None and start < furthest_end:
+            diagnostic_overlaps.update((attempt, furthest_attempt))
+        if furthest_end is None or end > furthest_end:
+            furthest_end, furthest_attempt = end, attempt
+    run_ids, overlays = set(), set()
+    previous_end = None
+    for attempt, job in expected.items():
+        row = selected.get(attempt)
+        if row is None:
+            issues.append(f"{attempt}: missing qualified structural evidence")
+            continue
+        try:
+            require(attempt not in overlaps and attempt not in diagnostic_overlaps
+                    and not (attempt in embedded and attempt in contaminated),
+                    "structural capture overlapped diagnostic/acceptance execution on this host")
+            observed = validate_structural_row(schedule, job, row, actual.get(attempt), evidence_root, cache,
+                                               attempt in embedded, acceptance_overlays, acceptance_ids)
+            require(row["capture_run_id"] not in run_ids, "structural capture_run_id reused")
+            require(row["overlay_id"] not in overlays, "structural overlay reused")
+            if attempt not in embedded:
+                start, end = utc(row["started_utc"]), utc(row["finished_utc"])
+                require(previous_end is None or start >= previous_end, "diagnostic captures overlapped or ignored order")
+                previous_end = end
+            run_ids.add(row["capture_run_id"])
+            overlays.add(row["overlay_id"])
+            counts[attempt] = observed
+            evidence.append({"timing_attempt_id": attempt, "capture_run_id": row["capture_run_id"],
+                             "capture_mode": row["capture_mode"], "counters": observed,
+                             "capture_manifest_sha256": digest(row["capture_manifest"]),
+                             "raw_artifacts": row["raw_artifacts"], "qualification": row["qualification"]})
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            issues.append(f"{attempt}: {error}")
+    return counts, issues, evidence, timing_issues, contaminated, attempts
+
+
+def verdict_for(verdicts):
+    return ("REGRESSION" if "REGRESSION" in verdicts else
+            "INCONCLUSIVE" if "INCONCLUSIVE" in verdicts else "PASS")
+
+
+def compare(calibration, schedule, records, results_sha256, *, structural_records=None,
+            structural_results_sha256=None, evidence_root=None):
     validate_calibration(calibration)
     require(schedule.get("phase") == "AB" and schedule.get("calibration_sha256") == calibration["sha256"],
             "A/B schedule must bind frozen calibration")
@@ -468,8 +743,25 @@ def compare(calibration, schedule, records, results_sha256):
     require(utc(schedule["created_utc"]) >= utc(calibration["created_utc"]), "A/B precedes frozen calibration")
     require(hash_string(results_sha256), "pin raw candidate results hash")
     run_metrics, issues, failures, actual = inspect_records(schedule, records)
+    separated = "structural_policy" in schedule["spec"]
+    if structural_records is not None:
+        require(separated and isinstance(structural_records, list) and hash_string(structural_results_sha256),
+                "structural companions require predeclared policy and pinned raw JSONL")
+    else:
+        require(structural_results_sha256 is None, "structural hash supplied without records")
+    timing_failures = list(failures)
+    structural_counts, structural_issues, structural_evidence = ({}, [], [])
+    structural_attempts = []
+    if separated:
+        (structural_counts, structural_issues, structural_evidence, contamination_issues,
+         contaminated, structural_attempts) = inspect_structural(schedule, actual, run_metrics,
+                                                                structural_records, evidence_root)
+        issues.extend(contamination_issues)
+        for attempt in contaminated:
+            run_metrics.pop(attempt, None)
+    timing_issues = list(issues)
     ratios = pair_metrics(schedule, run_metrics)
-    cases = []
+    cases, timing_decisions, structural_decisions, structural_failures = [], [], [], []
     for case in schedule["spec"]["cases"]:
         metrics, verdicts = {}, []
         jobs = [job for job in schedule["jobs"] if job["case_id"] == case["id"]]
@@ -491,31 +783,52 @@ def compare(calibration, schedule, records, results_sha256):
                                "ratios": values, "baseline_runs": raw["A"], "candidate_runs": raw["B"],
                                "baseline_median": statistics.median(raw["A"]) if raw["A"] else None,
                                "candidate_median": statistics.median(raw["B"]) if raw["B"] else None}
+        prefixes = tuple(job["attempt_id"] + ":" for job in jobs)
+        timing_case_failures = [value for value in timing_failures if value.startswith(prefixes)]
+        timing_case_issues = [value for value in timing_issues if value.startswith(prefixes)]
+        timing_verdict = verdict_for(verdicts + (["REGRESSION"] if timing_case_failures else [])
+                                    + (["INCONCLUSIVE"] if timing_case_issues else []))
+        timing_decisions.append(timing_verdict)
+        structural_verdict = "NOT_REQUIRED"
         if case["kind"] == "small-hdd-read":
-            paired = {}
+            paired, increased = {}, []
             for job in jobs:
-                if job["attempt_id"] in run_metrics:
+                if separated and job["attempt_id"] in structural_counts:
+                    paired.setdefault(job["pair_index"], {})[job["arm"]] = structural_counts[job["attempt_id"]]
+                elif not separated and job["attempt_id"] in run_metrics:
                     paired.setdefault(job["pair_index"], {})[job["arm"]] = actual[job["attempt_id"]]["counters"]
             for pair, arms in paired.items():
                 if set(arms) == {"A", "B"}:
-                    for counter in ("upper_worker_hops", "allocations", "bounce_copies", "lower_commands", "interrupts"):
+                    for counter in STRUCTURAL_UNITS:
                         if arms["B"][counter] > arms["A"][counter]:
-                            failures.append(f"{case['id']}/pair-{pair}: increased {counter}")
+                            increased.append(f"{case['id']}/pair-{pair}: increased {counter}")
                             verdicts.append("REGRESSION")
-        prefixes = tuple(job["attempt_id"] + ":" for job in jobs)
+            failures.extend(increased)
+            structural_failures.extend(increased)
+            if separated:
+                complete_pairs = sum(set(arms) == {"A", "B"} for arms in paired.values())
+                structural_verdict = verdict_for((["REGRESSION"] if increased else [])
+                                                + (["INCONCLUSIVE"] if complete_pairs != schedule["pairs"] else []))
+                structural_decisions.append(structural_verdict)
+                verdicts.append(structural_verdict)
         case_failures = [failure for failure in failures
                          if failure.startswith(prefixes) or failure.startswith(case["id"] + "/pair-")]
         case_issues = [issue for issue in issues if issue.startswith(prefixes)]
+        if separated:
+            case_issues += [issue for issue in structural_issues if issue.startswith(prefixes)]
         if case_failures:
             verdicts.append("REGRESSION")
         if case_issues:
             verdicts.append("INCONCLUSIVE")
-        case_verdict = "REGRESSION" if "REGRESSION" in verdicts else "INCONCLUSIVE" if "INCONCLUSIVE" in verdicts else "PASS"
+        case_verdict = verdict_for(verdicts)
         cases.append({"case_id": case["id"], "cache_policy": case["cache_policy"],
                       "verdict": case_verdict, "metrics": metrics, "failures": case_failures, "issues": case_issues})
+        if separated:
+            cases[-1].update(timing_verdict=timing_verdict, structural_verdict=structural_verdict)
+    issues.extend(structural_issues)
     verdicts = [case["verdict"] for case in cases]
     verdict = "REGRESSION" if failures or "REGRESSION" in verdicts else "INCONCLUSIVE" if issues or "INCONCLUSIVE" in verdicts else "PASS"
-    return {"schema_version": 1, "verdict": verdict, "machine_id": schedule["machine_id"],
+    report = {"schema_version": 1, "verdict": verdict, "machine_id": schedule["machine_id"],
             "machine_role": schedule["spec"]["machine_role"], "method": calibration["method"],
             "family_confidence": calibration["family_confidence"], "one_sided_alpha": calibration["one_sided_alpha"],
             "calibration_sha256": calibration["sha256"], "schedule_sha256": schedule["sha256"],
@@ -529,6 +842,14 @@ def compare(calibration, schedule, records, results_sha256):
                                         if job["attempt_id"] in actual)],
             "issues": issues, "failures": failures, "cases": cases,
             "units": {"latency": "ms per batch", "throughput": "bytes/ms", "p95": "ms per request", "p99": "ms per request"}}
+    if separated:
+        report.update(timing_verdict=verdict_for(timing_decisions),
+                      structural_verdict=verdict_for(structural_decisions),
+                      structural_policy_sha256=digest(schedule["spec"]["structural_policy"]),
+                      structural_results_sha256=structural_results_sha256,
+                      structural_issues=structural_issues, structural_failures=structural_failures,
+                      structural_evidence=structural_evidence, structural_attempts=structural_attempts)
+    return report
 
 
 def make_schedule(spec, phase="AA", pairs=None, candidate=None, calibration=None):
@@ -608,6 +929,8 @@ def main(argv=None):
     analyze.add_argument("--calibration", required=True)
     analyze.add_argument("--schedule", required=True)
     analyze.add_argument("--results", required=True)
+    analyze.add_argument("--structural-results", help="separate diagnostic companion JSONL; requires frozen policy")
+    analyze.add_argument("--structural-evidence-dir", help="directory containing hashed companion evidence files")
     analyze.add_argument("--output", help="exclusive output file; default stdout")
     args = parser.parse_args(argv)
     try:
@@ -620,7 +943,11 @@ def main(argv=None):
             write_json(args.output, make_confirmatory(read_json(args.calibration), read_json(args.candidate)))
         else:
             records, raw_hash = read_results(args.results)
-            report = compare(read_json(args.calibration), read_json(args.schedule), records, raw_hash)
+            structural, structural_hash = (read_results(args.structural_results)
+                                           if args.structural_results else (None, None))
+            report = compare(read_json(args.calibration), read_json(args.schedule), records, raw_hash,
+                             structural_records=structural, structural_results_sha256=structural_hash,
+                             evidence_root=args.structural_evidence_dir)
             if args.output:
                 write_json(args.output, report)
             else:
