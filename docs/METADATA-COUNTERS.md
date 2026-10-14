@@ -8,7 +8,7 @@ Normal builds default to counters disabled. Request an instrumented firmware
 explicitly:
 
 ```sh
-python3 scripts/build-firmware.py --source .reference/roswell \
+python3 scripts/build-firmware.py --storage-backend legacy-reference --source .reference/roswell \
   --output artifacts/metadata --metadata-counters
 ```
 

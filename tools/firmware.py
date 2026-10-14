@@ -15,6 +15,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LOCK = ROOT / "sources/firmware-lock.json"
 FLASH_SIZES = {"release": 256 * 1024, "debug": 512 * 1024}
+STORAGE_BACKENDS = ("legacy-reference", "partial-lab-prototype", "complete-candidate")
 
 
 def firmware_profile(variant, memory_mib):
@@ -98,7 +99,8 @@ def patch_inputs(patches):
 
 def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                    media_policy="emulator-file-media", metadata_counters=False,
-                   memory_mib=128, reserve_upper_ram=False, pool_audit=False):
+                   memory_mib=128, reserve_upper_ram=False, pool_audit=False,
+                   storage_backend=None):
     source, output = Path(source).resolve(), Path(output).resolve()
     if variant not in ("release", "debug"):
         raise ValueError("variant must be release or debug")
@@ -114,9 +116,16 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
         raise ValueError("upper RAM reservation must be a boolean")
     if reserve_upper_ram and memory_mib != 128:
         raise ValueError("upper RAM reservation requires 128 MiB")
+    if storage_backend not in STORAGE_BACKENDS:
+        raise ValueError("explicit storage backend must be one of " + ", ".join(STORAGE_BACKENDS))
     profile = firmware_profile(variant, memory_mib)
     if output == source or source.is_relative_to(output) or output.is_relative_to(source):
         raise ValueError("source and output directories must not overlap")
+    previous = output / "build.json"
+    if previous.exists():
+        prior = json.loads(previous.read_text(encoding="utf-8"))
+        if prior.get("storage_backend") != storage_backend:
+            raise ValueError("use a separate output directory for each storage backend")
     output.mkdir(parents=True, exist_ok=True)
     published = output / "flash.bin"
     published.unlink(missing_ok=True)
@@ -126,6 +135,7 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                 "rom_kernel": profile["rom_kernel"],
                 "metadata_counters": metadata_counters,
                 "pool_audit": pool_audit,
+                "storage_backend": storage_backend,
                 "source": str(source), "source_directory": str(source), "output_directory": str(output),
                 "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "commands": []}
@@ -188,9 +198,15 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
                     run(source_git(actual_source) + ["apply", "--check", "--index", str(snapshot)])
                     run(source_git(actual_source) + ["apply", "--index", str(snapshot)])
             manifest["source_tree"] = checked_output(source_git(actual_source) + ["write-tree"])
+            from .storage_build_evidence import verify_source
+            manifest["source_worktree_sha256"] = verify_source(actual_source, manifest["source_tree"])["worktree_sha256"]
             run(["cmake", "-G", "Ninja", "-S", str(actual_source), "-B", str(build),
                  f"-DCMAKE_TOOLCHAIN_FILE={actual_source / 'toolchain-gcc.cmake'}",
                  "-DCMAKE_BUILD_TYPE=Release", f"-DDBG={int(variant == 'debug')}", "-DKDBG=FALSE",
+                 f"-DNXK_STORAGE_BACKEND={storage_backend}",
+                 f"-DNXK_STORAGE_SOURCE_TREE={manifest['source_tree']}",
+                 f"-DNXK_LINK_RECORDER={ROOT / 'tools/storage_link_record.py'}",
+                 f"-DNXK_ARTIFACT_RECORDER={ROOT / 'tools/storage_artifact_record.py'}",
                  f"-DXBOX_RAM_MIB={memory_mib}",
                  "-DXBOX_RESERVE_UPPER_RAM=" + ("ON" if reserve_upper_ram else "OFF"),
                  "-DNXK_ROM_KERNEL=" + ("ON" if profile["rom_kernel"] else "OFF"),
@@ -210,8 +226,27 @@ def build_firmware(source, output, variant="release", lock_path=DEFAULT_LOCK,
         if image.stat().st_size != profile["flash_size"]:
             raise ValueError(f"invalid flash size: expected {profile['flash_size']} bytes")
         shutil.copyfile(image, published)
-        manifest.update(status="built", flash_size=published.stat().st_size,
-                        flash_sha256=sha256(published))
+        manifest.update(flash_size=published.stat().st_size, flash_sha256=sha256(published))
+        from .storage_build_evidence import capture_build_evidence
+        from .storage_migration_gate import check as storage_check
+        cache = (build / "CMakeCache.txt").read_text(encoding="utf-8")
+        configured = re.findall(r"^NXK_STORAGE_BACKEND:STRING=(.+)$", cache, re.MULTILINE)
+        if configured != [storage_backend]:
+            raise ValueError("actual configured storage backend differs from explicit request")
+        evidence = capture_build_evidence(manifest)
+        libraries = set(evidence["linked_libraries"])
+        if storage_backend == "partial-lab-prototype":
+            if "nxstorage" not in libraries:
+                raise ValueError("partial storage backend has no actual replacement engine")
+        else:
+            result = storage_check(actual_source, dict(manifest, status="built"),
+                                   Path(manifest["storage_link_command"]["path"]).read_text(),
+                                   Path(manifest["storage_symbols"]["path"]).read_text(),
+                                   "baseline" if storage_backend == "legacy-reference" else "candidate")
+            if not result["passed"]:
+                raise ValueError("actual linked storage backend failed migration preflight")
+            manifest["storage_preflight"] = result
+        manifest.update(storage_backend_actual=storage_backend, storage_evidence=evidence, status="built")
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         published.unlink(missing_ok=True)
         manifest["error"] = str(error)

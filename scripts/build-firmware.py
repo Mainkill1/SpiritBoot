@@ -7,13 +7,15 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.firmware import DEFAULT_LOCK, build_firmware
+from tools.firmware import DEFAULT_LOCK, STORAGE_BACKENDS, build_firmware
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--storage-backend", choices=STORAGE_BACKENDS, required=True,
+                        help="explicit class implementation; use separate output directories")
     parser.add_argument("--variant", choices=("release", "debug"), default="release")
     parser.add_argument("--memory-mib", type=int, choices=(64, 128), default=128,
                         help="firmware RAM layout; default: 128 MiB")
@@ -34,7 +36,8 @@ def main():
                                 metadata_counters=args.metadata_counters,
                                 memory_mib=args.memory_mib,
                                 reserve_upper_ram=args.reserve_upper_ram,
-                                pool_audit=args.pool_audit)
+                                pool_audit=args.pool_audit,
+                                storage_backend=args.storage_backend)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"build failed: {error}", file=sys.stderr)
         return 1

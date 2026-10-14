@@ -1,0 +1,53 @@
+write_through_inline_chunks_then_sync:529: p.completions==1 && p.bytes==1536 && f.commands==4 && f.retires==4 && f.max_depth==1
+write_through_delayed_sync_holds_parent:544: nx_start(&f.dev,&r,&h)==NX_PENDING
+write_through_sync_error_preserves_data:556: nx_start(&f.dev,&r,&h)==(delayed ? NX_PENDING:NX_IO_ERROR)
+write_through_cancel_during_sync_waits:582: nx_start(&f.dev,&r,&h)==NX_PENDING
+write_through_cancel_before_sync_keeps_data_count:597: !p.completions && f.commands==2 && !f.resource_live[h.slot]
+write_through_orders_following_write_allows_read:607: nx_start(&f.dev,&r,&h)==NX_PENDING
+write_through_sync_waits_for_prior_write:624: !p.completions && f.commands==2
+write_through_disabled_cache_still_orders:637: !p.completions && f.commands==2
+write_through_duplicate_data_and_sync_are_ignored:647: !p.completions && f.commands==2
+write_through_zero_and_invalid_flags:672: nx_start(&f.dev,&r,&h)==cases[i].want
+write_through_sync_prepare_failure_preserves_data:683: nx_start(&f.dev,&r,&h)==NX_NO_MEMORY
+PASS rejects_invalid_input
+PASS zero_has_no_transport
+PASS one_inline_read_owns_until_return
+PASS pending_duplicate_generation
+PASS inline_pending_still_marks_parent
+PASS long_inline_sequence_is_iterative
+PASS respects_page_and_block_limits
+PASS partial_error_stops_without_fabrication
+PASS short_and_overreport_are_bounded
+PASS low_memory_cleans_and_allows_next_parent
+PASS cancellation_waits_for_lower_ownership
+PASS initial_cancel_and_inline_cancel
+PASS flush_is_real_ordered_cache_sync
+PASS cache_capability_is_visible
+PASS frozen_queue_uses_bounded_release
+PASS concurrent_slots_and_optical_policy
+PASS address_and_cdb_overflow_are_rejected
+PASS missing_terminal_does_not_release_pages
+PASS cancellation_during_preparation_retires_without_submit
+PASS duplicate_segment_is_ignored
+PASS odd_optical_buffer_reaches_transport
+PASS cdb_count_splits_at_65535_blocks
+PASS invalid_parent_has_no_delivery
+PASS failed_recovery_cancels_live_and_finishes_waiters
+PASS sector_sizes_preserve_high_offset_cdb
+PASS final_lba_and_exact_capacity_end
+PASS sector_alignment_remainders_are_rejected
+PASS sector_configuration_rejects_nonpowers
+PASS mdl_offsets_keep_their_full_width
+FAIL write_through_inline_chunks_then_sync
+FAIL write_through_delayed_sync_holds_parent
+FAIL write_through_sync_error_preserves_data
+PASS write_through_partial_data_stops
+FAIL write_through_cancel_during_sync_waits
+FAIL write_through_cancel_before_sync_keeps_data_count
+FAIL write_through_orders_following_write_allows_read
+FAIL write_through_sync_waits_for_prior_write
+FAIL write_through_disabled_cache_still_orders
+FAIL write_through_duplicate_data_and_sync_are_ignored
+FAIL write_through_zero_and_invalid_flags
+FAIL write_through_sync_prepare_failure_preserves_data
+41 tests, 11 failures

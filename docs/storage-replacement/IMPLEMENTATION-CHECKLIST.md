@@ -1,8 +1,12 @@
 # Single-PR implementation checklist — SpiritBoot storage replacement
 
-> **Canonical task list for [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248).** All steps are internal checkpoints of the same PR, not separate implementation PRs. The PR description and this document are intended to be kept synchronized; when implementation updates require a change, update both. Nothing in this plan is a claim that replacement code already exists.
+> **Canonical task list for [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248).** All steps are internal checkpoints of the same PR, not separate implementation PRs. The PR description and this document are intended to be kept synchronized; when implementation updates require a change, update both. Bounded independently authored primitives now exist; the full replacement and native qualification remain unfinished.
 
 ---
+
+Native rig correction (operator approved 2026-10-14): primary Steam Deck `10.0.0.42`; secondary Windows `10.0.7.1`, observed Ryzen 9 6900HX. Launch/control Windows graphics through the logged-in Codex PowerShell desktop pipe. Keep machines separate.
+
+See [current implementation evidence](IMPLEMENTATION-EVIDENCE.md) for completed work and remaining gates.
 
 ## Full task contract
 
@@ -19,7 +23,7 @@
 - **Preserve:** I/O manager, FATX/`vfatfs`, XDVDFS, cache, `partmgr`, `mountmgr`, `atapi`, `pciide`/`pciidex`, IRQ/DMA, XBE ABI/loader, original supported physical Xbox behavior, current asynchronous FATX fast path and write-through contracts.
 - **Replace:** incorporated `drivers/storage/class/{classpnp,disk}` implementations, including surviving inline/private helper bodies where required by rights review; make `nxcdrom` independent of ClassPnP.
 - **Implementation source:** use independently authored/public behavioral specifications and permitted source only. No translation, rename, or reformat of MS-PL driver bodies into GPL.
-- Current preparation commit and existing 64/128 debug/release CI exercise the **old** driver. They do not qualify a replacement. PR remains draft.
+- Current 64/128 debug/release CI builds the **old** driver and tests bounded independently authored primitives on the host. They do not qualify a replacement. PR remains draft.
 
 ## Architecture to build (all components stay inside the BIOS)
 
@@ -51,18 +55,25 @@ Maintain guest-visible names (`\Driver\Disk`, `\Driver\Cdrom`, `\Device\Harddisk
 - [ ] Select the exact **current** baseline composition; reproduce the matching ROM/source and record toolchain, patch hashes, source tree, PE, flash, xemu, EEPROM, HDD/ISO and test-fixture hashes.
 - [ ] Inspect the current *assembled* Roswell source and produce a caller→callee/device dependency matrix. Confirm class / disk / optical dependencies, lower SRB support, PnP, partition controls and persistent memory footprint by actual compiled attribution; the 139 count is **not** a size estimate.
 - [ ] **Add missing boot file** `ntoskrnl/io/iomgr/driver.c`: review `IopFoldedInDrivers` table, function declarations/`DriverEntry` calling convention, names and order. Review `ntoskrnl/xb/devtree.c`, `ntoskrnl/xb/devnode.c` and `ntoskrnl/include/internal/nx-devtree.h`; CMake + devtree alone are insufficient.
-- [ ] Define exact build states `legacy-reference`, `partial-lab-prototype`, `complete-candidate`. Add explicit backend option CLI → `tools/firmware.py` → CMake → actual linker graph → `build.json` → tests/CI; reject missing/unknown setting and **silent fallback**. Keep separate output directories.
-- [ ] Current lock already contains `0121` and runs through `0125a`. Inspect current head then use the **next available** ordered Roswell patch filename(s); update `sources/firmware-lock.json` SHA256 without reordering/overwriting prior patches.
-- [ ] Produce an approved clean-room inputs manifest identifying authorship/licensing/hashes and allowed public tests/standards. Separate implementer access from legacy-source review; **do not** hand the implementer the unfiltered assembled Roswell tree, patch history, old code, disassembly, private helpers or generated old-source tests. Record any prior exposure; an AI session boundary alone is not license proof.
+- [x] Define exact build states `legacy-reference`, `partial-lab-prototype`, `complete-candidate`. Add explicit backend option CLI → `tools/firmware.py` → CMake → actual linker graph → `build.json` → tests/CI; reject missing/unknown setting and **silent fallback**. Keep separate output directories.
+- [x] Current lock already contains `0121` and runs through `0125a`. Inspect current head then use the **next available** ordered Roswell patch filename(s); update `sources/firmware-lock.json` SHA256 without reordering/overwriting prior patches.
+- [x] Produce an approved clean-room inputs manifest identifying authorship/licensing/hashes and allowed public tests/standards. Separate implementer access from legacy-source review; **do not** hand the implementer the unfiltered assembled Roswell tree, patch history, old code, disassembly, private helpers or generated old-source tests. Record any prior exposure; an AI session boundary alone is not license proof.
 - [ ] Investigate/resolve rights for 19 `srbhelper.h` + 3 `classpnp.h` inlines **before** importing headers/functions, and enumerate other compiled copied/unknown helpers. Keep original notices and separate acceptable interface facts from protected implementations.
 - [ ] Replace / segregate the legacy `tests/host/storage-completion/check.py` test created by patch `0108`: it extracts **old** `TransferPktComplete` source. Keep only as exposed baseline test; new candidate tests execute **new production code** and disclose their compiled source provenance.
-- [ ] **Fix the current migration preflight parser before promoting it to a release gate**. Regression tests must reject `-Wl,-lclasspnp`, `-l:libdisk.a`, grouped hidden `@response` files, non-nm garbage, `_TransferPktComplete.constprop.0` identity, stale/mismatched source/PE/flash evidence. Consume actual resolved linker inputs/map rather than a lenient guessed invocation; preserve `PRECHECK_ONLY_NOT_LICENSE_CERTIFICATION`.
-- [ ] Record an approved functional contract matrix before implementation: status/bytes/IRP/MDL/lower CDB/IOCTL/error/namespace behavior, explicitly distinguishing observed vs inferred/unknown. Host and public-XBE probes must not copy MS-PL logic.
+- [x] **Fix the current migration preflight parser before promoting it to a release gate**. Regression tests must reject `-Wl,-lclasspnp`, `-l:libdisk.a`, grouped hidden `@response` files, non-nm garbage, `_TransferPktComplete.constprop.0` identity, stale/mismatched source/PE/flash evidence. Consume actual resolved linker inputs/map rather than a lenient guessed invocation; preserve `PRECHECK_ONLY_NOT_LICENSE_CERTIFICATION`.
+- [x] Record an approved functional contract matrix before implementation: status/bytes/IRP/MDL/lower CDB/IOCTL/error/namespace behavior, explicitly distinguishing observed vs inferred/unknown. Host and public-XBE probes must not copy MS-PL logic.
+
+### Completed bounded preparation, still outside candidate qualification
+
+- [x] Independently authored request core: 42 deterministic + 8 controlled real-thread ownership scenarios; sanitizer and i386 helper checks. Native IRP/MDL/cancel/rundown adapter remains open.
+- [x] Independently authored geometry composer: 13 scenarios / 6,001 checks; measured count-compatible initialized-prefix policy and remaining native parity gaps. Retained partmgr adapter remains open.
+- [x] Actual CLI/CMake missing/unknown selection and absent complete adapter rejection; real reference64/reference128/reserved128 release ROMs reproduce published hashes. Final full profile matrix remains open.
+- [x] Protected PowerShell desktop pipe proof and first owned graphical guest on Windows Codex/session1; earlier direct launches remain provisional evidence.
 
 ## P1 — Performance baseline and regression decision rules (must precede major driver work)
 
 - [ ] Reconstruct current optimized product, **not an older pre-optimization candidate**. Preserve existing IRP-owned FATX lease, eliminated per-I/O completion context, conditional idle-clock sampling, direct-read mapping, gather-write and DMA bounce/interrupt behavior. Verify the final composition before benchmarking.
-- [ ] **Run A/A first**: current baseline against independent instances of itself. Determine normal run-to-run variance separately on Steam Deck (**primary**) and i9-12900K (**secondary**); no cross-machine averaging. Pin xemu/Vulkan config, host SSD, CPU governor, power/thermal policy, guest/host caches, HDD base+independent overlays and test seeds.
+- [ ] **Run A/A first**: current baseline against independent instances of itself. Determine normal run-to-run variance separately on Steam Deck (**primary**) and Windows Ryzen 9 6900HX at `10.0.7.1` (**secondary**); no cross-machine averaging. Pin xemu/Vulkan config, host SSD, CPU governor, power/thermal policy, guest/host caches, HDD base+independent overlays and test seeds.
 - [ ] Freeze *predeclared* primary workloads: aligned small HDD read QD1; both existing 1,024-read FATX sequences at QD1/4/12 and memory pressure; write+real cache flush; DVD/XISO reads; boundary split/fragmented SG. Add warm/cold-ish preparation as separate cases. Then expand to actual game streaming.
 - [ ] Implement/report deterministic automated A/A and paired A/B run harness (proposed `tools/storage_perf_compare.py` + host tests): pin manifest, record all attempts/timeouts, checksums, operations completed, cache preparation, run pairs, latency distribution/throughput/tail and run-level confidence intervals; emit `PASS` / `REGRESSION` / `INCONCLUSIVE`. **Do not invent baseline numbers.**
 - [ ] Use five independent pairs only as an initial noise pilot; freeze a sufficient independent confirmatory count from A/A (often more than five) **before candidate values are reviewed**. Alternate/randomize A/B, analyze pair as statistical unit; do not treat thousands of correlated operations within one run as independent samples.
@@ -116,7 +127,7 @@ Tasks:
 - [ ] Preserve existing `storage-contract` 48 checks, `fatx-async-lifetime` 7,833 checks (documented QMP throttle **correctness only**), `save-path-separators` 34 checks, DMA/SG, cache/async/metadata/writeback, interrupt/APC and XDVDFS tests; ensure test source includes **new** candidate code rather than extracted old `TransferPktComplete`.
 - [ ] Run full API and both XISO variants at milestone checkpoints, not after every small edit. Verify data byte-for-byte, status/event/APC order and stable memory/MDL pool after repeated reads/writes/resets.
 - [ ] Game probes: DOA Xtreme create/save/reset/reload; Forza Motorsport scenery-streaming and asset-ready; Halo/Halo 2 boot/load; Conker scene transitions. Captures need test/run image hashes and, for streaming, p95/p99 frame milliseconds not just mean FPS. No game content committed.
-- [ ] A/B on Steam Deck and i9 independently, both with untraced release builds, identical binary/settings except class implementation, frozen run count, paired distributions, matched caches and sector bytes. Report **every** primary workload, confidence bound, errors and regression root cause.
+- [ ] A/B on Steam Deck and Windows Ryzen independently, both with untraced release builds, identical binary/settings except class implementation, frozen run count, paired distributions, matched caches and sector bytes. Report **every** primary workload, confidence bound, errors and regression root cause.
 - [ ] Run 64/128 MiB release + checked/debug and supported upper-RAM-reserved profile. Measure compressed kernel bytes vs fixed `flash.bin` envelope, linker section/page hotness, INIT discard, resident RAM and per-device high-water. Physical console IDE/DMA/optical/cache tests when available; xemu pass is not hardware proof.
 
 ## P5 — Static-license closure, final validation and merge gate
@@ -136,4 +147,4 @@ Tasks:
 - This document is the synchronized single-PR implementation checklist.
 - Current read-only non-certifying checker: `tools/storage_migration_gate.py` and its host regression tests.
 
-**Definition of done:** one self-contained original-Xbox BIOS with independently implemented and verified storage class functionality, preserved behavior and saved games, no identified incompatible implementation included, full source/licensing closure, and measured non-regression on the frozen Steam Deck + i9 workloads. No follow-up implementation PR is required or requested. The **single PR remains draft until all tasks finish.**
+**Definition of done:** one self-contained original-Xbox BIOS with independently implemented and verified storage class functionality, preserved behavior and saved games, no identified incompatible implementation included, full source/licensing closure, and measured non-regression on the frozen Steam Deck + Windows Ryzen workloads. No follow-up implementation PR is required or requested. The **single PR remains draft until all tasks finish.**

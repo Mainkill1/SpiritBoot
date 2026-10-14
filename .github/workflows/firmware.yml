@@ -41,7 +41,7 @@ jobs:
       - name: Build flash
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-            spiritboot-toolchain python3 scripts/build-firmware.py \
+            spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend legacy-reference \
             --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
             --variant ${{ matrix.variant }} --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
       - name: Check the built source identity and actual kernel work
@@ -55,7 +55,8 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 3c23ea01cf43c2979c4c3ef247236e03d079f465
+            test "$actual_tree" = 09c33a8e198446e428e16854eaa0bfc0b89c942c
+            python3 "$GUEST_SOURCE/tests/host/nxstorage/check.py" "$output/nxstorage" >"$output/nxstorage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -123,6 +124,8 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/performance-counter/check.py" "$output/performance-counter" >"$output/performance-counter.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/vm-query-fastpath/check.py" "$GUEST_SOURCE" "$output/vm-query-fastpath" >"$output/vm-query-fastpath.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/immediate-delay/check.py" "$GUEST_SOURCE" "$output/immediate-delay" >"$output/immediate-delay.log" 2>&1
+            # This extracts the legacy sample body; baseline qualification only.
+            test "$(sed -n 's/^NXK_STORAGE_BACKEND:STRING=//p' "$GUEST_BUILD/CMakeCache.txt")" = legacy-reference
             python3 "$GUEST_SOURCE/tests/host/storage-completion/check.py" "$GUEST_SOURCE" "$output/storage-completion" >"$output/storage-completion.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/interrupt-static/check.py" "$GUEST_SOURCE" "$output/interrupt-static" >"$output/interrupt-static.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/interrupt-static/check-built.py" "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/interrupt-static-built.log" 2>&1
@@ -170,7 +173,7 @@ jobs:
         if: matrix.variant == 'release' && matrix.memory_mib == 128
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-            spiritboot-toolchain python3 scripts/build-firmware.py \
+            spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend legacy-reference \
             --source .reference/roswell --output artifacts/firmware-upper-reserve \
             --variant release --memory-mib 128 --reserve-upper-ram ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
           python3 - <<'PY'
@@ -178,13 +181,13 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '3c23ea01cf43c2979c4c3ef247236e03d079f465', result
+          assert result['source_tree'] == '09c33a8e198446e428e16854eaa0bfc0b89c942c', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-            spiritboot-toolchain python3 scripts/build-firmware.py \
+            spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend legacy-reference \
             --source .reference/roswell --output artifacts/firmware-repeat --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
           cmp artifacts/firmware-release-${{ matrix.memory_mib }}mib/flash.bin artifacts/firmware-repeat/flash.bin
       - name: Prepare pinned open runtime fixtures

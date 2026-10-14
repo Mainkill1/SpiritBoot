@@ -1,0 +1,35 @@
+rejects_invalid_input:143: nx_start(&f.dev,&r,&h)==cases[i].want
+zero_has_no_transport:153: nx_start(&f.dev,&r,&h)==NX_OK
+one_inline_read_owns_until_return:161: nx_start(&f.dev,&r,&h)==NX_OK
+pending_duplicate_generation:175: nx_start(&f.dev,&r,&h)==NX_PENDING
+inline_pending_still_marks_parent:191: nx_start(&f.dev,&r,&h)==NX_PENDING
+long_inline_sequence_is_iterative:199: nx_start(&f.dev,&r,&h)==NX_OK
+respects_page_and_block_limits:210: nx_start(&f.dev,&r,&h)==NX_OK
+partial_error_stops_without_fabrication:221: nx_start(&f.dev,&r,&h)==NX_IO_ERROR
+short_and_overreport_are_bounded:232: nx_start(&f.dev,&r,&h)==statuses[i]
+low_memory_cleans_and_allows_next_parent:242: nx_start(&f.dev,&r,&h)==NX_NO_MEMORY
+cancellation_waits_for_lower_ownership:253: nx_start(&f.dev,&r,&h)==NX_PENDING
+initial_cancel_and_inline_cancel:263: nx_start(&f.dev,&r,&h)==NX_CANCELLED
+flush_is_real_ordered_cache_sync:273: nx_start(&f.dev,&r,&wh)==NX_PENDING
+cache_capability_is_visible:292: nx_start(&f.dev,&r,&h)==want
+frozen_queue_uses_bounded_release:302: nx_start(&f.dev,&r,&h)==NX_IO_ERROR
+concurrent_slots_and_optical_policy:319: nx_start(&f.dev,&r,&h[i])==(i==4 ? NX_NO_MEMORY:NX_PENDING)
+address_and_cdb_overflow_are_rejected:336: nx_start(&f.dev,&r,&h)==NX_RANGE
+FAIL rejects_invalid_input
+FAIL zero_has_no_transport
+FAIL one_inline_read_owns_until_return
+FAIL pending_duplicate_generation
+FAIL inline_pending_still_marks_parent
+FAIL long_inline_sequence_is_iterative
+FAIL respects_page_and_block_limits
+FAIL partial_error_stops_without_fabrication
+FAIL short_and_overreport_are_bounded
+FAIL low_memory_cleans_and_allows_next_parent
+FAIL cancellation_waits_for_lower_ownership
+FAIL initial_cancel_and_inline_cancel
+FAIL flush_is_real_ordered_cache_sync
+FAIL cache_capability_is_visible
+FAIL frozen_queue_uses_bounded_release
+FAIL concurrent_slots_and_optical_policy
+FAIL address_and_cdb_overflow_are_rejected
+17 tests, 17 failures

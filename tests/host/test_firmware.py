@@ -35,10 +35,12 @@ class BuildTests(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         cmake = self.bin / "cmake"
-        cmake.write_text("#!" + sys.executable + "\n" + '''
+        cmake.write_text("#!" + sys.executable + "\n" + r'''
 import json, os, pathlib, sys
 if '--version' in sys.argv:
     print('cmake fixture 1.0')
+elif '--defined-only' in sys.argv:
+    print('84001000 T _ClassInitialize@12')
 elif '-B' in sys.argv:
     p = pathlib.Path(sys.argv[sys.argv.index('-B') + 1]); p.mkdir(parents=True, exist_ok=True)
     source = pathlib.Path(sys.argv[sys.argv.index('-S') + 1])
@@ -46,7 +48,7 @@ elif '-B' in sys.argv:
         'path': str(source), 'fixture': (source / 'fixture.txt').read_text(),
         'new_guest': (source / 'tests/xbe/probe.c').exists()}))
     if not (p / 'CMakeCache.txt').exists():
-        (p / 'CMakeCache.txt').write_text('clean flags')
+        (p / 'CMakeCache.txt').write_text('NXK_STORAGE_BACKEND:STRING=' + os.environ.get('STORAGE_ACTUAL', 'legacy-reference') + '\n')
 elif '--build' in sys.argv:
     print('epoch=' + os.environ.get('SOURCE_DATE_EPOCH', 'unset'))
     if os.environ.get('FAIL_BUILD'):
@@ -54,17 +56,32 @@ elif '--build' in sys.argv:
         sys.exit(3)
     p = pathlib.Path(sys.argv[2]); p.mkdir(parents=True, exist_ok=True)
     byte = b'E' if 'EVIL' in (p / 'CMakeCache.txt').read_text() else b'X'
+    from storage_evidence_fixture import capture_fixture
+    source = pathlib.Path(json.loads((p / 'configured-source.json').read_text())['path'])
+    (p / 'ntoskrnl').mkdir()
+    capture_fixture(p / 'ntoskrnl', source, {},
+                    'gcc -o ntoskrnl/xboxkrnl.exe libclasspnp.a libdisk.a libnxcdrom.a',
+                    '84001000 T _ClassInitialize@12\n')
+    run = p / 'ntoskrnl/storage-link-run.json'
+    record = json.loads(run.read_text()); record['cwd'] = str(p); run.write_text(json.dumps(record))
     (p / 'flash.bin').write_bytes(byte * int(os.environ.get('FLASH_SIZE', '262144')))
+    from storage_evidence_fixture import hash_file
+    pack_path = p / 'ntoskrnl/storage-pack-run.json'
+    pack = json.loads(pack_path.read_text())
+    pack['flash'] = {'path': str(p / 'flash.bin'), 'sha256': hash_file(p / 'flash.bin')}
+    pack['output'] = pack['flash']
+    (p / 'storage-pack-run.json').write_text(json.dumps(pack))
 ''')
         cmake.chmod(0o755)
-        for name in ("ninja", "i686-w64-mingw32-gcc", "i686-w64-mingw32-g++"):
+        for name in ("ninja", "i686-w64-mingw32-gcc", "i686-w64-mingw32-g++", "i686-w64-mingw32-nm"):
             (self.bin / name).symlink_to(cmake)
-        self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ["PATH"])
+        self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
+                        PYTHONPATH=str(ROOT / "tests/host") + os.pathsep + str(ROOT))
 
     def build(self, **env):
         return subprocess.run([sys.executable, str(ROOT / "scripts/build-firmware.py"),
                                "--source", str(self.source), "--output", str(self.output),
-                               "--lock", str(self.lock)], env=dict(self.env, **env),
+                               "--lock", str(self.lock), "--storage-backend", "legacy-reference"], env=dict(self.env, **env),
                               capture_output=True, text=True)
 
     def test_build_records_image_hash_and_revision(self):
@@ -79,6 +96,50 @@ elif '--build' in sys.argv:
         self.assertEqual(manifest["patches"], [])
         self.assertTrue((self.output / "build.log").exists())
 
+    def test_storage_backend_must_be_explicit_and_unknown_is_rejected(self):
+        from tools.firmware import build_firmware
+        self.output.mkdir()
+        image = self.output / "flash.bin"
+        image.write_bytes(b"previous image")
+        for backend in (None, "stock", "", "complete_candidate"):
+            with self.subTest(backend=backend), self.assertRaisesRegex(ValueError, "storage backend"):
+                build_firmware(self.source, self.output, lock_path=self.lock,
+                               storage_backend=backend)
+            self.assertEqual(image.read_bytes(), b"previous image")
+
+    def test_cli_rejects_missing_backend_before_touching_output(self):
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/build-firmware.py"),
+                                 "--source", str(self.source), "--output", str(self.output)],
+                                env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--storage-backend", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_requested_backend_is_bound_to_configuration_and_actual_libraries(self):
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.output / "build.json").read_text())
+        self.assertEqual(manifest["storage_backend"], "legacy-reference")
+        self.assertEqual(manifest["storage_backend_actual"], "legacy-reference")
+        self.assertIn("classpnp", manifest["storage_evidence"]["linked_libraries"])
+        self.assertIn("-DNXK_STORAGE_BACKEND=legacy-reference", manifest["commands"][-2])
+
+    def test_other_backend_cannot_overwrite_an_existing_output_directory(self):
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        from tools.firmware import build_firmware
+        original = (self.output / "flash.bin").read_bytes()
+        with self.assertRaisesRegex(ValueError, "separate output"):
+            build_firmware(self.source, self.output, lock_path=self.lock,
+                           storage_backend="complete-candidate")
+        self.assertEqual((self.output / "flash.bin").read_bytes(), original)
+
+    def test_configuration_cannot_fall_back_to_legacy_for_candidate(self):
+        result = self.build(STORAGE_ACTUAL="complete-candidate")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("backend", result.stderr)
+        self.assertFalse((self.output / "flash.bin").exists())
+
     def test_metadata_diagnostic_is_explicit_and_recorded(self):
         default = self.build()
         self.assertEqual(default.returncode, 0, default.stderr)
@@ -89,7 +150,7 @@ elif '--build' in sys.argv:
         enabled = subprocess.run(
             [sys.executable, str(ROOT / "scripts/build-firmware.py"),
              "--source", str(self.source), "--output", str(self.output),
-             "--lock", str(self.lock), "--metadata-counters"],
+             "--lock", str(self.lock), "--storage-backend", "legacy-reference", "--metadata-counters"],
             env=self.env, capture_output=True, text=True)
         self.assertEqual(enabled.returncode, 0, enabled.stderr)
         manifest = json.loads((self.output / "build.json").read_text())
@@ -109,7 +170,7 @@ elif '--build' in sys.argv:
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/build-firmware.py"),
              "--source", str(self.source), "--output", str(self.output),
-             "--lock", str(self.lock), "--memory-mib", "64"],
+             "--lock", str(self.lock), "--storage-backend", "legacy-reference", "--memory-mib", "64"],
             env=dict(self.env, FLASH_SIZE=str(512 * 1024)),
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -141,7 +202,7 @@ elif '--build' in sys.argv:
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/build-firmware.py"),
              "--source", str(self.source), "--output", str(self.output),
-             "--lock", str(self.lock), "--reserve-upper-ram"],
+             "--lock", str(self.lock), "--storage-backend", "legacy-reference", "--reserve-upper-ram"],
             env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         manifest = json.loads((self.output / "build.json").read_text())
@@ -174,7 +235,7 @@ elif '--build' in sys.argv:
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/build-firmware.py"),
              "--source", str(self.source), "--output", str(self.output),
-             "--lock", str(self.lock), "--media-policy", "strict"],
+             "--lock", str(self.lock), "--storage-backend", "legacy-reference", "--media-policy", "strict"],
             env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         manifest = json.loads((self.output / "build.json").read_text())
@@ -274,7 +335,7 @@ elif '--build' in sys.argv:
     def build_direct(self):
         from tools.firmware import build_firmware
         with mock.patch("tools.firmware.ROOT", self.root), mock.patch.dict(os.environ, self.env):
-            return build_firmware(self.source, self.output, lock_path=self.lock)
+            return build_firmware(self.source, self.output, lock_path=self.lock, storage_backend="legacy-reference")
 
     def assert_patch_failure(self, pattern):
         self.output.mkdir(exist_ok=True)

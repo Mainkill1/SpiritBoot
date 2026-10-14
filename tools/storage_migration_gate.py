@@ -13,6 +13,11 @@ import re
 import shlex
 import sys
 
+if __package__:
+    from .storage_build_evidence import verify_build_identity
+else:
+    from storage_build_evidence import verify_build_identity
+
 REQUIRED_BASELINE = frozenset({"classpnp", "disk", "nxcdrom"})
 REQUIRED_CANDIDATE = frozenset({
     "nxstorage", "nxcdrom", "atapi", "pciide", "pciidex",
@@ -31,7 +36,7 @@ OWNED_SOURCE = (
     "drivers/storage/class/nxcdrom/nxcdrom.c",
 )
 NO_PRIVATE_HEADER = re.compile(
-    r'^\s*#\s*include\s*[<"](?:[^>"]*/)?(?:classpnp|classp|disk)\.h[>"]',
+    r'^\s*#\s*include\s*[<"](?:[^>"]*/)?(?:classpnp|classp|disk|srbhelper)\.h[>"]',
     re.MULTILINE | re.IGNORECASE,
 )
 NO_CLASS_CALL = re.compile(r"\bClass[A-Z]\w*\s*\(")
@@ -44,29 +49,53 @@ def linked_archives(command):
     args = shlex.split(command, posix=True)
     if not args:
         raise ValueError("empty linker invocation")
-    archives = set()
+    # GCC's comma forwarding and separate -Xlinker operands reach the same ld
+    # option namespace. Inspect each operand, including group members.
+    operands = []
     for arg in args:
-        if "@" in arg and (arg.startswith("@") or arg.startswith("-Wl,@")):
+        operands.extend(arg[4:].split(",") if arg.startswith("-Wl,") else [arg])
+    archives = set()
+    need_library = False
+    for arg in operands:
+        if arg.startswith("@"):
             raise ValueError("link command contains an opaque @response file: expand it first")
-        if arg.startswith("-l") and len(arg) > 2 and not arg.startswith("-link"):
-            archives.add(arg[2:])
+        if arg == "-Xlinker":
+            continue
+        if arg in ("-l", "--library"):
+            need_library = True
+            continue
+        library = arg if need_library else None
+        need_library = False
+        if arg.startswith("--library="):
+            library = arg.split("=", 1)[1]
+        elif arg.startswith("-l") and len(arg) > 2 and not arg.startswith("-link"):
+            library = arg[2:]
+        if library is not None:
+            if not library or library.startswith("-"):
+                raise ValueError("missing linker library operand")
+            if library.startswith(":"):
+                arg = library[1:]
+            else:
+                archives.add(library)
         name = Path(arg.replace("\\", "/")).name
         match = re.fullmatch(r"lib([a-zA-Z0-9_+.-]+)\.a", name)
         if match:
             archives.add(match.group(1))
+    if need_library:
+        raise ValueError("missing linker library operand")
     return archives
 
 
 def exported_names(table):
-    """Normalise familiar COFF nm names. NOT a full attribution parser."""
+    """Validate GNU nm -n --defined-only records and normalize COFF clones."""
     names = set()
-    for line in table.splitlines():
-        fields = line.split()
-        if len(fields) < 2:
+    for number, line in enumerate(table.splitlines(), 1):
+        if not line.strip():
             continue
-        raw = fields[-1]
-        if raw.endswith(":") or raw.startswith("("):
-            continue
+        match = re.fullmatch(r"\s*[0-9a-fA-F]{8,16}\s+[aAbBcCdDgGiInNpPrRsStTvVwW?]\s+(\S+)\s*", line)
+        if not match:
+            raise ValueError(f"invalid defined-only nm record at line {number}")
+        raw = re.sub(r"\.(?:constprop|isra|part|lto_priv)\.\d+(?:\.[\w.]+)?$|\.cold(?:\.\d+)?$", "", match[1])
         names.add(re.sub(r"@\d+$", "", raw).lstrip("_"))
     return names
 
@@ -117,16 +146,22 @@ def check(source, manifest, link_command, nm_table, mode):
         raise ValueError("build manifest lacks validated assembled source_tree")
     if not HASH64.fullmatch(str(manifest.get("flash_sha256", ""))):
         raise ValueError("build manifest lacks validated flash_sha256")
-    libraries = linked_archives(link_command)
+    command_libraries = linked_archives(link_command)
     names = exported_names(nm_table)
     if not names:
         raise ValueError("empty symbol table; require an unstripped kernel listing")
+    evidence = verify_build_identity(source, manifest, nm_table, link_command)
+    libraries = set(evidence["linked_libraries"])
+    # Inspect the actual PE as well: a shortened but syntactically valid nm
+    # listing cannot conceal a legacy symbol present in the image.
+    names.update(exported_names("\n".join(
+        "00000000 T " + name for name in evidence["actual_symbol_names"])))
     findings = []
     required = REQUIRED_BASELINE if mode == "baseline" else REQUIRED_CANDIDATE
     missing = sorted(required - libraries)
     findings.append({"check": "expected_libraries", "pass": not missing, "detail": missing})
     if mode == "candidate":
-        forbidden = sorted(FORBIDDEN_CANDIDATE & libraries)
+        forbidden = sorted(FORBIDDEN_CANDIDATE & (libraries | command_libraries))
         present = sorted(LEGACY_IDENTITIES & names)
         source_errors = candidate_source_findings(source)
         findings.extend((
@@ -142,6 +177,8 @@ def check(source, manifest, link_command, nm_table, mode):
         "flash_sha256": manifest["flash_sha256"],
         "linked_libraries": sorted(libraries),
         "checks": findings,
+        "build_evidence": {k: v for k, v in evidence.items()
+                           if k not in ("actual_symbol_names", "linked_libraries")},
         "passed": all(item["pass"] for item in findings),
         "limitations": [
             "Build command and symbol listing must come from the same exact recorded build.",

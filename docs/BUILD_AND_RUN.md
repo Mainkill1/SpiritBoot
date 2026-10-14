@@ -21,10 +21,10 @@ git clone https://github.com/mborgerson/roswell.git .reference/roswell
 git -C .reference/roswell checkout 1569e2e89fb47cc72b9c704a8884f98200432bd4
 docker build -f tools/Dockerfile.firmware -t spiritboot-toolchain .
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-  spiritboot-toolchain python3 scripts/build-firmware.py \
+  spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend legacy-reference \
   --source .reference/roswell --output artifacts/firmware-release
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-  spiritboot-toolchain python3 scripts/build-firmware.py \
+  spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend legacy-reference \
   --source .reference/roswell --output artifacts/firmware-debug --variant debug
 ```
 

@@ -1,0 +1,167 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3a6c7b1a..4ef0910a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -30,6 +30,22 @@ endif()
+ project(REACTOS)
+ 
+ if(SARCH STREQUAL "xbox")
++    set(NXK_STORAGE_BACKEND "" CACHE STRING "Explicit SpiritBoot storage backend")
++    set_property(CACHE NXK_STORAGE_BACKEND PROPERTY STRINGS
++        "legacy-reference" "partial-lab-prototype" "complete-candidate")
++    if(NOT NXK_STORAGE_BACKEND MATCHES "^(legacy-reference|partial-lab-prototype|complete-candidate)$")
++        message(FATAL_ERROR "NXK_STORAGE_BACKEND must explicitly select a supported backend")
++    endif()
++    set(NXK_STORAGE_SOURCE_TREE "" CACHE STRING "Assembled source tree recorded by the product builder")
++    string(LENGTH "${NXK_STORAGE_SOURCE_TREE}" _storage_tree_length)
++    if(NOT _storage_tree_length EQUAL 40 OR NOT NXK_STORAGE_SOURCE_TREE MATCHES "^[0-9a-f]+$")
++        message(FATAL_ERROR "NXK_STORAGE_SOURCE_TREE must identify the assembled indexed source")
++    endif()
++    set(NXK_LINK_RECORDER "" CACHE FILEPATH "Executed linker evidence launcher")
++    set(NXK_ARTIFACT_RECORDER "" CACHE FILEPATH "Kernel/flash assembly evidence launcher")
++    if(NOT EXISTS "${NXK_LINK_RECORDER}" OR NOT EXISTS "${NXK_ARTIFACT_RECORDER}")
++        message(FATAL_ERROR "Product build requires the owned link/artifact recorders")
++    endif()
+     set(XBOX_RAM_MIB "128" CACHE STRING "Xbox RAM capacity for this firmware (64 or 128 MiB)")
+     set_property(CACHE XBOX_RAM_MIB PROPERTY STRINGS "64" "128")
+     if(NOT XBOX_RAM_MIB STREQUAL "64" AND NOT XBOX_RAM_MIB STREQUAL "128")
+diff --git a/boot/nxldr/CMakeLists.txt b/boot/nxldr/CMakeLists.txt
+index 862e63a3..79830e60 100644
+--- a/boot/nxldr/CMakeLists.txt
++++ b/boot/nxldr/CMakeLists.txt
+@@ -149,7 +149,10 @@ if(SARCH STREQUAL "xbox")
+     set(_startup_bin ${NXLDR_OUT_DIR}/nxldr.bin)
+     add_custom_command(
+         OUTPUT ${_flash_bin}
+-        COMMAND ${NXLDR_SRC_DIR}/gen-flash-bin.py
++        COMMAND python3 "${NXK_ARTIFACT_RECORDER}" pack
++                --record "${CMAKE_BINARY_DIR}/storage-pack-run.json"
++                --source "${REACTOS_SOURCE_DIR}" --source-tree "${NXK_STORAGE_SOURCE_TREE}"
++                -- ${NXLDR_SRC_DIR}/gen-flash-bin.py
+                 --out     ${_flash_bin}
+                 --nxldr   ${_startup_bin}
+                 --kernel  $<TARGET_FILE:ntoskrnl>
+@@ -157,6 +160,7 @@ if(SARCH STREQUAL "xbox")
+         DEPENDS ntoskrnl nxldr
+                 $<TARGET_FILE:ntoskrnl> ${_startup_bin}
+                 ${NXLDR_SRC_DIR}/gen-flash-bin.py
++                ${NXK_ARTIFACT_RECORDER}
+                 ${NXLDR_SRC_DIR}/warm-handoff.h
+         COMMENT "Assembling Xbox flash image (gen-flash-bin.py)"
+         VERBATIM)
+diff --git a/drivers/storage/class/CMakeLists.txt b/drivers/storage/class/CMakeLists.txt
+index 71142489..b53c170f 100644
+--- a/drivers/storage/class/CMakeLists.txt
++++ b/drivers/storage/class/CMakeLists.txt
+@@ -1,8 +1,27 @@
+ # the stock cdrom driver is KMDF (32 KLOC, pulls in wdf01000/wdfldr);
+ # nxcdrom is a minimal classpnp-based replacement folded into the kernel.
+-add_subdirectory(nxcdrom)
+-add_subdirectory(classpnp)
+-add_subdirectory(disk)
++if(NXK_STORAGE_BACKEND STREQUAL "legacy-reference")
++    add_subdirectory(nxcdrom)
++    add_subdirectory(classpnp)
++    add_subdirectory(disk)
++elseif(NXK_STORAGE_BACKEND STREQUAL "partial-lab-prototype")
++    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/nxstorage/CMakeLists.txt")
++        message(FATAL_ERROR "Partial backend requires actual independently authored nxstorage sources")
++    endif()
++    add_subdirectory(nxstorage)
++    # Laboratory-only hybrid; old class behavior remains until the vertical slice.
++    add_subdirectory(nxcdrom)
++    add_subdirectory(classpnp)
++    add_subdirectory(disk)
++elseif(NXK_STORAGE_BACKEND STREQUAL "complete-candidate")
++    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/nxstorage/driver.c")
++        message(FATAL_ERROR "Complete backend has no implemented independent kernel adapter")
++    endif()
++    add_subdirectory(nxstorage)
++    add_subdirectory(nxcdrom)
++else()
++    message(FATAL_ERROR "Missing/unknown storage backend; refusing implicit legacy fallback")
++endif()
+ if(NOT SARCH STREQUAL "xbox")
+     add_subdirectory(ramdisk)
+ endif()
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+index 51a4c95d..90ebb3ee 100644
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -298,16 +298,16 @@ target_link_options(ntoskrnl PRIVATE
+ # that names each boot-only function's section inside the discardable INIT
+ # section -- no source CODE_SEG tags.  init-ref-check (below) gates it.
+ if(SARCH STREQUAL "xbox" AND NOT MSVC)
+-    target_link_options(ntoskrnl PRIVATE -ffunction-sections)
++    target_link_options(ntoskrnl PRIVATE -ffunction-sections "-Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/storage-kernel.map")
+     set_target_properties(ntoskrnl PROPERTIES RULE_LAUNCH_LINK
+-        "${CMAKE_COMMAND} -E env LTO_INIT_FINDTOOL=${REACTOS_SOURCE_DIR}/tools/find-init-candidates.py DEF=${CMAKE_CURRENT_BINARY_DIR}/xboxkrnl.def NM=${CMAKE_NM} OBJDUMP=${CMAKE_OBJDUMP} AR=${CMAKE_AR} python3 ${REACTOS_SOURCE_DIR}/tools/lto-init-relink.py")
++        "${CMAKE_COMMAND} -E env \"NXK_STORAGE_LINK_RECORDER=${NXK_LINK_RECORDER}\" \"NXK_STORAGE_LINK_RECORD=${CMAKE_CURRENT_BINARY_DIR}/storage-link-run.json\" \"NXK_STORAGE_SOURCE=${REACTOS_SOURCE_DIR}\" \"NXK_STORAGE_SOURCE_TREE=${NXK_STORAGE_SOURCE_TREE}\" \"LTO_INIT_FINDTOOL=${REACTOS_SOURCE_DIR}/tools/find-init-candidates.py\" \"DEF=${CMAKE_CURRENT_BINARY_DIR}/xboxkrnl.def\" \"NM=${CMAKE_NM}\" \"OBJDUMP=${CMAKE_OBJDUMP}\" \"AR=${CMAKE_AR}\" python3 ${REACTOS_SOURCE_DIR}/tools/lto-init-relink.py")
+     # RULE_LAUNCH_LINK is only a command prefix -- CMake does not treat the
+     # scripts/data it names as inputs, so editing them would not relink the
+     # kernel (and flash.bin would stay stale).  Declare them as LINK_DEPENDS so
+     # a change to the INIT-placement logic or the force-resident list forces a
+     # relink like any other build input.
+     set_target_properties(ntoskrnl PROPERTIES LINK_DEPENDS
+-        "${REACTOS_SOURCE_DIR}/tools/lto-init-relink.py;${REACTOS_SOURCE_DIR}/tools/find-init-candidates.py;${REACTOS_SOURCE_DIR}/tools/init-force-resident.list")
++        "${REACTOS_SOURCE_DIR}/tools/lto-init-relink.py;${REACTOS_SOURCE_DIR}/tools/find-init-candidates.py;${REACTOS_SOURCE_DIR}/tools/init-force-resident.list;${NXK_LINK_RECORDER};${NXK_ARTIFACT_RECORDER}")
+ endif()
+ 
+ # The kernel ships as xboxkrnl.exe.  Target stays "ntoskrnl" so reactos's
+@@ -346,9 +346,14 @@ if(SARCH STREQUAL "xbox" AND NOT MSVC)
+     # builds the PE export directory inside the reserved NxkExportDirectory
+     # array and fills every ordinal's RVA from the final symbol values.
+     add_custom_command(TARGET ntoskrnl POST_BUILD
+-        COMMAND ${CMAKE_OBJCOPY} --remove-section=.reloc $<TARGET_FILE:ntoskrnl>
+-        COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/xb/fix-edata.py
+-                $<TARGET_FILE:ntoskrnl> ${CMAKE_CURRENT_BINARY_DIR}/xboxkrnl.def)
++        COMMAND python3 "${NXK_ARTIFACT_RECORDER}" postprocess
++                --record "${CMAKE_CURRENT_BINARY_DIR}/storage-postprocess-run.json"
++                --source "${REACTOS_SOURCE_DIR}" --source-tree "${NXK_STORAGE_SOURCE_TREE}"
++                --objcopy "${CMAKE_OBJCOPY}"
++                --fix-exports "${CMAKE_CURRENT_SOURCE_DIR}/xb/fix-edata.py"
++                --exports "${CMAKE_CURRENT_BINARY_DIR}/xboxkrnl.def"
++                --kernel $<TARGET_FILE:ntoskrnl>
++        VERBATIM)
+ endif()
+ 
+ # Strip debug symbols from xboxkrnl.exe before it's appended to freeldr and
+@@ -410,7 +415,16 @@ source_group(TREE ${REACTOS_SOURCE_DIR}/ntoskrnl PREFIX "Source Files" FILES ${N
+ # thunks) was removed -- Xbox has no PC BIOS; x86bios.c is stubbed in
+ # hal/halx86/legacy/.  vfatfs handles both FAT32 and FATX (the Xbox HDD
+ # format), so it stays.
+-target_link_libraries(ntoskrnl ntoskrnl_vista cportlib csq ${PSEH_LIB} rtl ${ROSSYM_LIB} libcntpr setjmp kdcom xboxbvid halxbox pci pciidex pciide atapi classpnp disk nxcdrom partmgr mountmgr xdvdfs vfatfs)
++if(NXK_STORAGE_BACKEND STREQUAL "legacy-reference")
++    set(_nx_storage_classes classpnp disk nxcdrom)
++elseif(NXK_STORAGE_BACKEND STREQUAL "partial-lab-prototype")
++    set(_nx_storage_classes nxstorage classpnp disk nxcdrom)
++elseif(NXK_STORAGE_BACKEND STREQUAL "complete-candidate")
++    set(_nx_storage_classes nxstorage nxcdrom)
++else()
++    message(FATAL_ERROR "Unknown storage backend in kernel link")
++endif()
++target_link_libraries(ntoskrnl ntoskrnl_vista cportlib csq ${PSEH_LIB} rtl ${ROSSYM_LIB} libcntpr setjmp kdcom xboxbvid halxbox pci pciidex pciide atapi ${_nx_storage_classes} partmgr mountmgr xdvdfs vfatfs)
+ 
+ if(STACK_PROTECTOR)
+     target_link_libraries(ntoskrnl gcc_ssp_nt)
+diff --git a/tools/lto-init-relink.py b/tools/lto-init-relink.py
+index f38583f9..afe3de15 100755
+--- a/tools/lto-init-relink.py
++++ b/tools/lto-init-relink.py
+@@ -53,6 +53,16 @@ WILDCARD = re.compile(r"[*?\[\]]")
+ 
+ 
+ def run(cmd):
++    # Observe each actually executed GCC pass while preserving the existing
++    # INIT placement and original compiler argv. The last successful pass is
++    # the kernel consumed by the unchanged post-link/export pipeline.
++    recorder = os.environ.get("NXK_STORAGE_LINK_RECORDER")
++    if recorder and out and os.path.basename(out) == "xboxkrnl.exe":
++        cmd = [sys.executable, recorder,
++               "--record", os.environ["NXK_STORAGE_LINK_RECORD"],
++               "--source", os.environ["NXK_STORAGE_SOURCE"],
++               "--source-tree", os.environ["NXK_STORAGE_SOURCE_TREE"],
++               "--"] + cmd
+     return subprocess.run(cmd).returncode
+ 
+ 
