@@ -50,12 +50,16 @@ $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', $env:PR248_NATIVE_PIPE_NAME,
     $writer.WriteLine(($operation+'|'+$env:PR248_NATIVE_PIPE_NONCE))
     $done = $reader.ReadLineAsync()
     if (!$done.Wait(145000)) { throw 'Owned graphical guest completion timeout' }
-    $status = $done.Result.Split('|')
-    if ($status.Count -ne 3 -or $status[0] -ne 'DONE') { throw 'Unexpected desktop pipe completion' }
+    # EOF can arrive from the server's finally block before PowerShell writes
+    # its terminating error. Preserve that exact error before interpreting DONE
+    # or entering cleanup, which would otherwise kill the unwinding server.
     if (!$server.WaitForExit(5000)) { throw 'Owned pipe server exit timeout' }
     if (!$serverOut.Wait(3000) -or !$serverErr.Wait(3000)) { throw 'Owned server output drain timeout' }
     [IO.File]::WriteAllText([IO.Path]::Combine($env:PR248_NATIVE_EVIDENCE,'native-pipe-server-stdout.log'),$serverOut.Result)
     [IO.File]::WriteAllText([IO.Path]::Combine($env:PR248_NATIVE_EVIDENCE,'native-pipe-server-stderr.log'),$serverErr.Result)
+    if ($null -eq $done.Result) { throw 'Owned desktop pipe server ended without DONE; see preserved server error' }
+    $status = $done.Result.Split('|')
+    if ($status.Count -ne 3 -or $status[0] -ne 'DONE') { throw 'Unexpected desktop pipe completion' }
     if ([int]$status[1] -ne $server.ExitCode) { throw 'Pipe/server completion mismatch' }
     exit $server.ExitCode
 } finally {
