@@ -593,6 +593,16 @@ still required before native calibration. The declared importer boolean and
 receipt hash strings alone do not qualify native evidence. Legacy single-fixture
 inputs, recorded-frequency conversion and statistical decisions are unchanged.
 
+The optional source-fixed counter mode is described in
+[BENCHMARK-SOURCE-FIXED-COUNTERS.md](BENCHMARK-SOURCE-FIXED-COUNTERS.md). It preserves
+historical reported frequency/milliseconds and derives separately labeled exact
+intervals from raw ticks at R=733333333. A readable predeclared source/context/
+verifier contract and per-run evidence bindings are required; the factual native
+importer remains a separate prerequisite. Endpoint successes feed the existing
+count planner and exact endpoint comparisons feed the existing order ranks.
+The 0.1% paired conversion budget is an arithmetic gate, not provider precision.
+Legacy behavior applies when this explicit policy is absent.
+
 This tool and its tests were independently authored from the implementation-
 neutral requirements in this directory and ordinary Python/statistical
 interfaces. No ClassPnP/Disk implementation, private helper body, source patch,

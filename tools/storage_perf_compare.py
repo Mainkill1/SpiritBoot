@@ -7,12 +7,14 @@ import bisect
 import datetime
 import hashlib
 import functools
+import importlib.util
 import json
 import math
 import random
 import re
 import sys
 import statistics
+from fractions import Fraction
 from pathlib import Path
 
 METRICS = ("latency", "throughput", "p95", "p99")
@@ -81,6 +83,15 @@ def validate_spec(spec):
     env = spec.get("environment", {})
     require(isinstance(env, dict) and all(env.get(key) for key in ENVIRONMENT_FIELDS),
             "pin emulator, storage, power, thermal, memory and CPU/GPU controls")
+    if "counter_policy" in spec:
+        policy = spec["counter_policy"]
+        require(isinstance(policy, dict) and policy.get("schema_version") == 1
+                and policy.get("conversion") == "source-fixed-rdtsc"
+                and type(policy.get("counter_hz")) is int and policy["counter_hz"] == 733333333
+                and policy.get("platform") in ("deck", "windows"), "unsupported source-fixed counter policy")
+        require(exact_fraction(policy.get("paired_conversion_budget")) == Fraction(1, 1000),
+                "source-fixed policy requires paired 0.1% conversion budget")
+        validate_descriptor(policy.get("context_contract"))
     if "structural_policy" in spec:
         policy = spec["structural_policy"]
         require(isinstance(policy, dict) and policy.get("schema_version") == 1
@@ -520,7 +531,18 @@ def inspect_records(schedule, records, *, evidence_root=None):
                                 "p50": ordered[math.ceil(len(samples) * .5) - 1],
                                 "p95": ordered[math.ceil(len(samples) * .95) - 1],
                                 "p99": ordered[math.ceil(len(samples) * .99) - 1]}
+            if "counter_policy" in schedule["spec"]:
+                converted, problem = validate_counter_capture(schedule, job, record, evidence_root, evidence_cache)
+                if problem:
+                    failures.append(f"{attempt}: {problem}")
+                    del metrics[attempt]
+                    continue
+                require(converted["latency"].center <= Fraction(str((end - start).total_seconds())) * 1000,
+                        "source-fixed batch latency exceeds attempt wall time")
+                metrics[attempt] = {key: float(value.center) for key, value in converted.items()}
+                metrics[attempt]["intervals"] = converted
         except (ValueError, KeyError, TypeError) as error:
+            metrics.pop(attempt, None)
             issues.append(f"{attempt}: {error}")
     return metrics, issues, failures, actual
 
@@ -538,7 +560,44 @@ def pair_metrics(schedule, run_metrics):
     return result
 
 
-def derive_planning(spec, ratios):
+def paired_counter_facts(schedule, run_metrics):
+    facts = {case["id"]: {metric: [] for metric in METRICS} for case in schedule["spec"]["cases"]}
+    grouped = {}
+    for job in schedule["jobs"]:
+        if job["attempt_id"] in run_metrics:
+            grouped.setdefault((job["case_id"], job["pair_index"]), {})[job["arm"]] = run_metrics[job["attempt_id"]]["intervals"]
+    for (case_id, _), arms in sorted(grouped.items()):
+        if set(arms) == {"A", "B"}:
+            for metric in METRICS:
+                pair = counter_math().paired_interval(arms["A"][metric], arms["B"][metric])
+                facts[case_id][metric].append({"center": rational(pair.center), "lower": rational(pair.lower),
+                                               "upper": None if pair.upper is None else rational(pair.upper)})
+    return facts
+
+
+def rational(value):
+    return {"numerator": value.numerator, "denominator": value.denominator}
+
+
+def exact_fraction(value):
+    require(isinstance(value, dict) and set(value) == {"numerator", "denominator"}
+            and type(value["numerator"]) is int and integer(value["denominator"], 1), "invalid exact rational")
+    result = Fraction(value["numerator"], value["denominator"])
+    require(rational(result) == value, "exact rational must be reduced")
+    return result
+
+
+def counter_ratio_bounds(facts):
+    require(isinstance(facts, dict) and set(facts) == {"center", "lower", "upper"}, "invalid paired counter facts")
+    center, lower = exact_fraction(facts["center"]), exact_fraction(facts["lower"])
+    upper = None if facts["upper"] is None else exact_fraction(facts["upper"])
+    require(center > 0 and 0 <= lower <= center and (upper is None or upper >= center), "unordered paired counter bounds")
+    qualified = (lower > 0 and upper is not None and (center - lower) / center <= Fraction(1, 1000)
+                 and (upper - center) / center <= Fraction(1, 1000))
+    return center, lower, upper, qualified
+
+
+def derive_planning(spec, ratios, interval_facts=None):
     """Rebuild every planning gate exclusively from complete baseline A/A facts."""
     require(isinstance(ratios, dict) and set(ratios) == {case["id"] for case in spec["cases"]},
             "A/A planning facts must cover every case")
@@ -547,6 +606,8 @@ def derive_planning(spec, ratios):
     gate_power = 1 - (1 - spec["planning_power"]) / tests
     count = spec["minimum_confirmatory_pairs"]
     planning = []
+    if "counter_policy" in spec:
+        require(isinstance(interval_facts, dict) and set(interval_facts) == set(ratios), "missing complete A/A counter intervals")
     for case in spec["cases"]:
         case_ratios = ratios[case["id"]]
         require(isinstance(case_ratios, dict) and set(case_ratios) == set(METRICS),
@@ -556,7 +617,24 @@ def derive_planning(spec, ratios):
             require(isinstance(values, list) and len(values) == spec["pilot_pairs"]
                     and all(number(value) for value in values), "A/A planning ratio count/values invalid")
             limit = spec["limits"][metric]
-            successes = sum(value >= limit if metric == "throughput" else value <= limit for value in values)
+            if "counter_policy" in spec:
+                require(isinstance(interval_facts[case["id"]], dict)
+                        and set(interval_facts[case["id"]]) == set(METRICS), "missing A/A metric intervals")
+                bounds = interval_facts[case["id"]][metric]
+                require(isinstance(bounds, list) and len(bounds) == len(values), "incomplete A/A paired counter metric")
+                decoded = [counter_ratio_bounds(value) for value in bounds]
+                require(all(qualified for _, _, _, qualified in decoded), "A/A paired conversion endpoints exceed budget or include zero")
+                try:
+                    centers_match = all(float(center) == value for (center, _, _, _), value in zip(decoded, values))
+                except OverflowError:
+                    centers_match = False
+                require(centers_match,
+                        "A/A central ratios differ from exact counter facts")
+                exact_limit = Fraction(str(limit))
+                successes = sum(lower >= exact_limit if metric == "throughput" else upper <= exact_limit
+                                for _, lower, upper, _ in decoded)
+            else:
+                successes = sum(value >= limit if metric == "throughput" else value <= limit for value in values)
             needed, probability = planned_pairs(successes, len(values), spec["planning_confidence"], gate_power,
                                                  alpha, spec["minimum_confirmatory_pairs"],
                                                  spec["maximum_confirmatory_pairs"])
@@ -564,6 +642,8 @@ def derive_planning(spec, ratios):
             planning.append({"case_id": case["id"], "metric": metric, "pilot_pairs": len(values),
                              "ratios": list(values), "inside_margin": successes, "planning_probability_lower": probability,
                              "recommended_pairs": needed})
+            if "counter_policy" in spec:
+                planning[-1]["ratio_intervals"] = bounds
     return count, planning
 
 
@@ -576,7 +656,11 @@ def calibrate(schedule, records, results_sha256, *, evidence_root=None):
             <= datetime.datetime.now(datetime.timezone.utc), "A/A timestamps extend beyond calibration time")
     spec = schedule["spec"]
     ratios = pair_metrics(schedule, run_metrics)
-    count, planning = derive_planning(spec, ratios)
+    interval_facts = paired_counter_facts(schedule, run_metrics) if "counter_policy" in spec else None
+    if interval_facts is not None:
+        ratios = {case: {metric: [float(exact_fraction(value["center"])) for value in values]
+                         for metric, values in metrics.items()} for case, metrics in interval_facts.items()}
+    count, planning = derive_planning(spec, ratios, interval_facts)
     return seal({"schema_version": 1, "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                  "machine_id": spec["machine_id"], "spec": spec,
                  "pilot_schedule_sha256": schedule["sha256"], "pilot_results_sha256": results_sha256,
@@ -584,6 +668,7 @@ def calibrate(schedule, records, results_sha256, *, evidence_root=None):
                  "one_sided_alpha": .05 / (2 * len(spec["cases"]) * len(METRICS)),
                  "method": METHOD,
                  "pilot_ratios": ratios, "planning": planning,
+                 **({"pilot_intervals": interval_facts} if interval_facts is not None else {}),
                  "planning_warning": "Exploratory per-gate pilot probability bounds; projected power is not guaranteed."})
 
 
@@ -601,7 +686,7 @@ def validate_calibration(calibration):
     require(hash_string(calibration.get("pilot_schedule_sha256"))
             and hash_string(calibration.get("pilot_results_sha256")), "calibration lacks pilot identities")
     try:
-        count, planning = derive_planning(spec, calibration.get("pilot_ratios"))
+        count, planning = derive_planning(spec, calibration.get("pilot_ratios"), calibration.get("pilot_intervals"))
     except ValueError as error:
         raise ValueError(f"calibration pilot facts invalid: {error}") from error
     require(calibration.get("planning") == planning, "calibration planning derivation missing or inconsistent")
@@ -680,6 +765,102 @@ def validate_case_artifacts(schedule, job, record, evidence_root, cache):
             "original source seed cannot replace prepared image identity")
 
 
+@functools.lru_cache(maxsize=1)
+def counter_math():
+    path = Path(__file__).with_name("storage_counter_intervals.py")
+    spec = importlib.util.spec_from_file_location("spiritboot_storage_counter_intervals", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    raw = path.read_bytes()
+    # Execute the exact owned helper bytes whose hash is checked against the contract.
+    exec(compile(raw, str(path), "exec"), module.__dict__)
+    module.source_sha256 = hashlib.sha256(raw).hexdigest()
+    return module
+
+
+def validate_counter_capture(schedule, job, record, evidence_root, cache):
+    """Consume a reviewed importer interface; do not independently authenticate native facts."""
+    policy, case = schedule["spec"]["counter_policy"], job["case"]
+    contract = read_structural_artifact(policy["context_contract"], evidence_root, cache, as_json=True)
+    wanted = {"schema_version": 1, "conversion": policy["conversion"], "counter_hz": policy["counter_hz"],
+              "platform": policy["platform"], "xemu_sha256": job["manifest"]["xemu_sha256"],
+              "environment_sha256": digest(schedule["spec"]["environment"])}
+    require(isinstance(contract, dict) and all(contract.get(key) == value for key, value in wanted.items()),
+            "clock contract changed frozen source/platform/environment")
+    require(isinstance(contract.get("assumptions"), list) and contract["assumptions"]
+            and all(isinstance(value, str) and value.strip() for value in contract["assumptions"]),
+            "clock construction/control assumptions missing")
+    for key in ("source_binding", "verifier_artifact", "interval_helper"):
+        read_structural_artifact(contract.get(key), evidence_root, cache)
+    require(contract["interval_helper"]["sha256"] == counter_math().source_sha256,
+            "clock contract interval helper differs from executed bytes")
+    review = read_structural_artifact(contract.get("review_receipt"), evidence_root, cache, as_json=True)
+    require(isinstance(review, dict) and review.get("status") == "reviewed_for_conditional_arithmetic"
+            and review.get("contract_facts_sha256") == digest({key: value for key, value in contract.items() if key != "review_receipt"})
+            and utc(review.get("reviewed_utc")) < utc(schedule["created_utc"]), "clock contract unreviewed or review binding changed")
+    raw_descriptor = record.get("counter_provenance")
+    raw = read_structural_artifact(raw_descriptor, evidence_root, cache, as_json=True)
+    proof = read_structural_artifact(record.get("clock_provenance"), evidence_root, cache, as_json=True)
+    require(isinstance(proof, dict) and proof.get("schema_version") == 1
+            and proof.get("verification_status") == "verified_by_pinned_importer", "clock importer proof missing or unverified")
+    require(isinstance(record.get("native_run_id"), str) and record["native_run_id"].strip()
+            and proof.get("native_run_id") == record["native_run_id"], "native clock run identity mismatch")
+    bindings = {"attempt_id": job["attempt_id"], "schedule_sha256": schedule["sha256"],
+                "manifest_sha256": job["manifest_sha256"], "case_sha256": digest(case),
+                "environment_sha256": wanted["environment_sha256"], "runner_sha256": schedule["spec"]["runner_sha256"]}
+    require(all(proof.get(key) == value for key, value in
+                {**bindings, "context_contract_sha256": policy["context_contract"]["sha256"],
+                 "verifier_sha256": contract["verifier_artifact"]["sha256"], "raw_counter_sha256": raw_descriptor["sha256"]}.items()),
+            "clock proof job/context/verifier/raw binding mismatch")
+    evidence = proof.get("native_evidence")
+    roles = {"request", "result", "input_manifest", "guard", "host_context"}
+    if "artifact_policy" in schedule["spec"]:
+        roles.add("preparation_receipt")
+    require(isinstance(evidence, dict) and roles.issubset(evidence), "actual native clock evidence files missing")
+    for role in roles:
+        read_structural_artifact(evidence[role], evidence_root, cache)
+    if "artifact_policy" in schedule["spec"]:
+        require(all(evidence[role]["sha256"] == record["artifact_bindings"][role + "_sha256"]
+                    for role in ("request", "input_manifest", "preparation_receipt")),
+                "clock and artifact importer receipts differ")
+    require(isinstance(raw, dict) and raw.get("schema_version") == 1
+            and all(raw.get(key) == value for key, value in bindings.items())
+            and raw.get("timing_sha256") == digest({key: record.get(key) for key in ("elapsed_ms", "latencies_ms", "timing_scope")}),
+            "raw counter job/reported-timing binding mismatch")
+    meta, summary, end, operations = (raw.get(key) for key in ("meta", "summary", "end", "operations"))
+    require(isinstance(meta, dict) and meta.get("counter") == "rdtsc" and isinstance(summary, dict)
+            and summary.get("id") == case["id"] and isinstance(end, dict) and native_integer(end.get("cases")) == 1,
+            "raw counter framing incomplete")
+    require(isinstance(operations, list) and len(operations) == case["operations"], "raw counter operations incomplete")
+    frequency, batch = native_integer(meta.get("frequency")), native_integer(summary.get("ticks"))
+    validate_public_milliseconds(record.get("elapsed_ms"), batch, frequency)
+    lengths = case.get("operation_bytes", [case.get("bytes_per_operation")] * case["operations"])
+    bad = (native_integer(summary.get("failures")) != 0 or native_integer(end.get("failures")) != 0
+           or native_integer(summary.get("operations")) != case["operations"]
+           or native_integer(summary.get("bytes")) != sum(lengths))
+    ticks = []
+    for index, (operation, length) in enumerate(zip(operations, lengths)):
+        require(isinstance(operation, dict) and operation.get("id") == case["id"]
+                and native_integer(operation.get("index")) == index, "raw counter operation identity/order mismatch")
+        delta = native_integer(operation.get("ticks"))
+        validate_public_milliseconds(record["latencies_ms"][index], delta, frequency)
+        ticks.append(delta)
+        bad |= (native_integer(operation.get("status"), 16) != 0 or native_integer(operation.get("io_status"), 16) != 0
+                or native_integer(operation.get("information")) != length)
+    if bad:
+        return None, "observed raw counter operation or integrity failure"
+    require(0 < record["bytes_completed"] < 2**64, "raw completed bytes outside positive uint64")
+    converted = counter_math().counter_intervals(ticks, batch, record["bytes_completed"],
+                                                 platform=policy["platform"], qpf_hz=contract.get("qpf_hz"))
+    intervals = {}
+    for metric in METRICS:
+        value = getattr(converted, metric)
+        scale = Fraction(1, 1000) if metric == "throughput" else Fraction(1000)
+        intervals[metric] = counter_math().Interval(value.center * scale, value.lower * scale,
+                                                     None if value.upper is None else value.upper * scale)
+    return intervals, None
+
+
 def validate_public_contract(schedule, job, policy_key, record, evidence_root, cache):
     """Check frozen public fixture facts; factual independent review remains external."""
     policy = schedule["spec"][policy_key]
@@ -707,7 +888,10 @@ def validate_public_contract(schedule, job, policy_key, record, evidence_root, c
     if public:
         require(contract.get("fixture_generation") == 2 and contract.get("assertions_per_operation") == 11,
                 "public readback requires generation2 full comparison semantics")
-        require(contract.get("timing_conversion") == "recorded-rdtsc-frequency",
+        conversion = schedule["spec"].get("counter_policy", {}).get("conversion", "recorded-rdtsc-frequency")
+        require(contract.get("timing_conversion") == conversion
+                and (conversion == "recorded-rdtsc-frequency"
+                     or contract.get("reported_timing_conversion") == "recorded-rdtsc-frequency"),
                 "public timing conversion missing or unsupported")
         read_structural_artifact(contract.get("parser_artifact"), evidence_root, cache)
         for field in ("coverage_plan", "correspondence_rules"):
@@ -1053,6 +1237,10 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
             run_metrics.pop(attempt, None)
     timing_issues = list(issues)
     ratios = pair_metrics(schedule, run_metrics)
+    interval_facts = paired_counter_facts(schedule, run_metrics) if "counter_policy" in schedule["spec"] else None
+    if interval_facts is not None:
+        ratios = {case: {metric: [float(exact_fraction(value["center"])) for value in values]
+                         for metric, values in metrics.items()} for case, metrics in interval_facts.items()}
     cases, timing_decisions, structural_decisions, structural_failures = [], [], [], []
     for case in schedule["spec"]["cases"]:
         metrics, verdicts = {}, []
@@ -1061,8 +1249,25 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
             values = ratios[case["id"]][metric]
             lower, upper = median_bounds(values, calibration["one_sided_alpha"]) if values else (None, None)
             limit = calibration["spec"]["limits"][metric]
+            exact_bounds = None
+            if interval_facts is not None:
+                decoded = [counter_ratio_bounds(value) for value in interval_facts[case["id"]][metric]]
+                rank = order_rank(len(decoded), calibration["one_sided_alpha"])
+                if len(decoded) == calibration["confirmatory_pairs"] and rank and all(value[3] for value in decoded):
+                    exact_bounds = (sorted(value[1] for value in decoded)[rank - 1],
+                                    sorted(value[2] for value in decoded)[len(decoded) - rank])
+                    lower, upper = (float(value) for value in exact_bounds)
+                else:
+                    lower, upper = None, None
             if len(values) != calibration["confirmatory_pairs"] or lower is None:
                 verdict = "INCONCLUSIVE"
+            elif exact_bounds is not None:
+                exact_lower, exact_upper = exact_bounds
+                exact_limit = Fraction(str(limit))
+                if metric == "throughput":
+                    verdict = "PASS" if exact_lower >= exact_limit else "REGRESSION" if exact_upper < exact_limit else "INCONCLUSIVE"
+                else:
+                    verdict = "PASS" if exact_upper <= exact_limit else "REGRESSION" if exact_lower > exact_limit else "INCONCLUSIVE"
             elif metric == "throughput":
                 verdict = "PASS" if lower >= limit else "REGRESSION" if upper < limit else "INCONCLUSIVE"
             else:
@@ -1075,6 +1280,11 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
                                "ratios": values, "baseline_runs": raw["A"], "candidate_runs": raw["B"],
                                "baseline_median": statistics.median(raw["A"]) if raw["A"] else None,
                                "candidate_median": statistics.median(raw["B"]) if raw["B"] else None}
+            if interval_facts is not None:
+                metrics[metric].update(ratio_intervals=interval_facts[case["id"]][metric],
+                                      lower_exact=None if exact_bounds is None else rational(exact_bounds[0]),
+                                      upper_exact=None if exact_bounds is None else rational(exact_bounds[1]),
+                                      conversion_verdict="WITHIN_BUDGET" if exact_bounds is not None else "INCONCLUSIVE")
         prefixes = tuple(job["attempt_id"] + ":" for job in jobs)
         timing_case_failures = [value for value in timing_failures if value.startswith(prefixes)]
         timing_case_issues = [value for value in timing_issues if value.startswith(prefixes)]
@@ -1145,6 +1355,17 @@ def compare(calibration, schedule, records, results_sha256, *, structural_record
                                          ("artifact_set_sha256", "case_artifact_sha256", "artifact_bindings") if key in row}
                                          | {"attempt_id": job["attempt_id"]}
                                          for job in schedule["jobs"] for row in [actual.get(job["attempt_id"], {})]])
+    if interval_facts is not None:
+        report["counter_conversion"] = {
+            "policy_sha256": digest(schedule["spec"]["counter_policy"]),
+            "conversion": "source-fixed-rdtsc", "counter_hz": 733333333,
+            "context_contract": schedule["spec"]["counter_policy"]["context_contract"],
+            "arithmetic_envelope_only": True,
+            "decision_arithmetic": "exact-rational-canonical-frozen-decimal-limits",
+            "attempts": [{"attempt_id": job["attempt_id"], **{key: row[key] for key in
+                         ("native_run_id", "counter_provenance", "clock_provenance", "elapsed_ms") if key in row}}
+                         for job in schedule["jobs"] for row in [actual.get(job["attempt_id"], {})]],
+        }
     if separated:
         report.update(timing_verdict=verdict_for(timing_decisions),
                       structural_verdict=verdict_for(structural_decisions),
