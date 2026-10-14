@@ -3,6 +3,8 @@ MODE ?= pilot
 GEN_XISO = $(XBE_TITLE)-$(MODE).iso
 ifeq ($(MODE),dvd)
 OUTPUT_DIR = bin-dvd
+DVD_POST_END_GRACE_100NS ?= 5000000
+CFLAGS += -DSTORAGE_DVD_POST_END_GRACE_100NS=$(DVD_POST_END_GRACE_100NS)
 endif
 NXDK_DIR ?= /home/codex/src/nxdk
 ifeq ($(MODE),suite)

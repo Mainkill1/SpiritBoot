@@ -1120,3 +1120,76 @@ per-job requests/receipts, `evidence/RUN_ID` serial/TAP/config/input/state/host
 records, per-host `*-pilot-native.jsonl`, `*-pilot-summary.json`,
 `*-query-v2-raw.txt`, replay/family parsed records and pipe proof. These paths are
 local evidence locations, not claims of published or committed artifact access.
+
+## Frozen full functional recorder preparation (V2.8.3)
+
+The Deck plan now declares four separately named released-DVD method pilots
+followed by36 functional leaves: two small HDD reads,24 public replay/QD/pressure
+variants, two API-write/flush/reopen variants, four scatter/gather variants and
+four released-DVD/cache variants. Each leaf has1,024 exact scheduled operations
+and runs in its own fresh process/private HDD and EEPROM. Workloads and generated
+data are fixed; no varying pair seed is claimed as consumed by the guest. Warm
+uses one complete matching verified warmup. Cold-ish uses no intentional read
+warmup and does not establish physical cold media. The two auxiliary generated
+optical leaves are excluded from these36 primary leaves.
+
+The unchanged V2 suite remains pinned. A separate DVD recorder changes only the
+untimed post-END delay to20s so the final owned route guard can observe a live
+process. Its measurement-loop source matches V2 byte for byte. A clean source
+NXDK build produced ISO
+`8eb70664b84ad49a50e50c38adc87bd3fb3d2076e66ac3ce76dab82f8f18d842`
+and XBE
+`b66ea98086a8d52ca25ac1b5ad9a3196f15ff6bf509c690a8d5f101e81072731`.
+Original V2 source/binaries and all older attempts are preserved.
+
+The declared method waits for the exact selected READY marker, uses the runner's
+typed initial `query-block`, runs a read-only source/target/process/CWD guard,
+changes only the owned declared removable medium through a typed readonly
+request, then retains the final query and guard. `ide0-cd1` is a construction
+hypothesis until actual query-block proves the exact unique removable route.
+There is no direct QMP client, shared media mutation or Windows CWD assumption.
+Windows uses its separately reviewed desktop guard and absolute media paths.
+The guards may overlap retained fixture durations; those durations are ineligible
+for performance comparison under this functional plan.
+
+Freeze: `.scratch/pr248-native-baseline/frozen-fixture-v283`,351 pinned files,
+including its required nested source manifest. Plan SHA
+`b1ee0924463849be412dd6012fc5ab69b91dd52e3676ee667fe1e86a86341c77`;
+outer manifest SHA
+`cef0c8923c7aa124e3f04e0567b4142bc3d09b94f4215d94a66655260a756592`;
+caller SHA
+`7e8d32d8e9d6a247b54827221e96229d4025c410c7baeb959ef716d7661efbb0`.
+The parser remains
+`1d8bae049e2058f1b788c828f9bedf9062532a6a110d6e40e4cbb13492d71184`.
+Host checks validate40 exact leaf bindings and reject438 width/APC/QD/pressure/
+seed/status/hash/flush faults. Five actual source/guard tests,18 caller/ledger
+faults and three raw-failure-retention faults pass without native execution.
+Previous qualified rows must retain exact method identity and unchanged raw
+hashes and pass actual reanalysis before they can satisfy DVD prerequisites.
+Any prior failure stops dispatch; no same-ID replay is allowed.
+
+The unlaunched V2.8 freeze remains preserved. Its direct frozen host-test layout
+omitted helper/ABI dependencies; a reconstruction using the older V2 mock then
+failed because that mock lacks the current signed64 type. Those failed checks
+are retained. V2.8.1 includes the exact complete current test dependency layout
+and passes the five tests directly from the freeze. Native fixture/ISO/parser
+and guard behavior are unchanged; every attempt has a new identity.
+The next unlaunched revision, V2.8.1, also remains preserved: its caller expected
+diagnostic event detail strings, while actual retained V2.6.4 runner events use
+objects containing Id/Type/Reason. V2.8.2 binds that exact request-defined object
+and validates actual event/run timestamps and ordering. The actual-format check
+and16 malformed/intervention mutations pass. No older failed check is erased.
+The current product host suite passes304 tests with9 skips.
+V2.8.2 remains unlaunched: its review gate did not enforce the approved caller
+and outer manifest hashes. Independent mocked-dispatch probes reproduced both
+gaps. V2.8.3 checks exact plan/parser/caller/manifest receipt bindings and all
+approved outer file paths, hashes and lengths before any runner API call. Eight
+missing/mismatched/tampered identity faults reject with zero dispatch.
+The exact positive approved351-file identity check also passes.
+
+This is prepared evidence awaiting independent review and parent-authorized
+native execution. It grants no full36 qualification, timing calibration, A/A
+planning count, P1 or full replacement acceptance. Public API flush/reopen
+byte-fill can be observed; real device flush, physical durability and private
+structural counters remain unknown. All future actual outcomes and cleanup
+receipts must be retained before grading, including method failures.

@@ -8,12 +8,15 @@
 #include "dvd-metadata-reference.h"
 #define OPS 1024u
 #define BYTES 4096u
+#ifndef STORAGE_DVD_POST_END_GRACE_100NS
+#define STORAGE_DVD_POST_END_GRACE_100NS 5000000
+#endif
 static char config[131073],selected[80],cache[16];
 static UCHAR *buffer;
 static ULONGLONG latency[OPS];
 static ULONG status[OPS],iosb[OPS],information[OPS];
 static ULONGLONG tick(void){ULONG a,d;__asm__ __volatile__("rdtsc":"=a"(a),"=d"(d)::"memory");return((ULONGLONG)d<<32)|a;}
-static __attribute__((noreturn)) void off(void){tap_drain();LARGE_INTEGER d={.QuadPart=-5000000};KeDelayExecutionThread(KernelMode,FALSE,&d);HalWriteSMBusValue(0x20,0x02,FALSE,0x80);for(;;)__asm__ __volatile__("hlt");}
+static __attribute__((noreturn)) void off(void){tap_drain();LARGE_INTEGER d={.QuadPart=-(LONGLONG)STORAGE_DVD_POST_END_GRACE_100NS};KeDelayExecutionThread(KernelMode,FALSE,&d);HalWriteSMBusValue(0x20,0x02,FALSE,0x80);for(;;)__asm__ __volatile__("hlt");}
 static void error(const char *stage){tap_comment("STORAGE-PERF-ERROR stage=%s",stage);off();}
 static NTSTATUS open_file(const char *path,HANDLE *h){ANSI_STRING n={(USHORT)strlen(path),(USHORT)(strlen(path)+1),(PCHAR)path};OBJECT_ATTRIBUTES a={0};IO_STATUS_BLOCK io;memset(&io,0x5a,sizeof(io));a.ObjectName=&n;a.Attributes=OBJ_CASE_INSENSITIVE;return NtCreateFile(h,GENERIC_READ|SYNCHRONIZE,&a,&io,NULL,0,FILE_SHARE_READ,FILE_OPEN,FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE|(strstr(path,"CdRom0")?FILE_NO_INTERMEDIATE_BUFFERING:0));}
 static ULONGLONG frequency(void){ULONGLONG v[5],qhz=KeQueryPerformanceFrequency();for(ULONG i=0;i<5;i++){LARGE_INTEGER d={.QuadPart=-1000000};ULONGLONG q=KeQueryPerformanceCounter(),a=tick();KeDelayExecutionThread(KernelMode,FALSE,&d);ULONGLONG b=tick(),r=KeQueryPerformanceCounter();v[i]=(b-a)*qhz/(r-q);}for(ULONG i=0;i<5;i++)for(ULONG j=i+1;j<5;j++)if(v[j]<v[i]){ULONGLONG t=v[i];v[i]=v[j];v[j]=t;}tap_comment("STORAGE-PERF-CLOCK min=%llu median=%llu max=%llu",v[0],v[2],v[4]);return v[2];}
