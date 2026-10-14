@@ -20,9 +20,16 @@ the last observation that lacks the marker and the first that contains it.
 An absence observation supplies its read-start time as the conservative lower
 bound; a presence observation supplies its read-end time as the upper bound.
 The read's own linearization point must lie between those timestamps.
+Here appearance means the complete, uniquely identified framed marker,
+including its final delimiter. First-byte observations are a different event
+and cannot share the same guest bracket without a separate proof.
 Absence must be established by draining the owned file through EOF at the
 expected byte position. A partial read, a stale size snapshot or a buffered
 decoder that has not consumed available bytes cannot supply that lower bound.
+The implementation must retain the actual unbuffered read/EOF call's monotonic
+start/end timestamps and byte offsets, rather than timestamps assigned later
+while parsing buffered text. An absent marker uses the relevant EOF-call start;
+its first complete presence uses the containing read-call end.
 
 Let marker `i` have guest counter bracket `[G_i_before, G_i_after]` and host
 appearance bracket `[H_i_before, H_i_after]`, with host values in nanoseconds.

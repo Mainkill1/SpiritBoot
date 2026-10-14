@@ -1,0 +1,283 @@
+{
+  "schema": "pr248-causal-clock-design-toy-cases-v1",
+  "reviewed_document": {
+    "path": "docs/storage-replacement/CLOCK-MEASUREMENT-PLAN.md",
+    "sha256": "d7ae5266dcf062218ff526e6e212aac04ecaba1dbc303b26f7a0ff6cf136317b",
+    "bytes": 4351,
+    "product_head": "a6088dfb5a07b56d2bc5f629e5a514b4cdedc76c"
+  },
+  "created_utc": "2026-10-14T14:30:03.333011+00:00",
+  "arithmetic": "Python Fraction; all displayed rates remain exact rational values",
+  "cases": [
+    {
+      "id": "nonlinear-monotonic",
+      "counter_definition": "floor(2*t) for t<=8 seconds; 16+floor(20*(t-8)) afterward",
+      "guest_0": [
+        0,
+        6
+      ],
+      "guest_1": [
+        16,
+        76
+      ],
+      "host_0_ns": [
+        1000000000,
+        2000000000
+      ],
+      "host_1_ns": [
+        9000000000,
+        10000000000
+      ],
+      "actual_host_appearances_ns": [
+        1500000000,
+        9500000000
+      ],
+      "actual_counter_values": [
+        3,
+        46
+      ],
+      "actual_ticks_per_second": {
+        "numerator": 43,
+        "denominator": 8
+      },
+      "calculation": {
+        "D_min": 10,
+        "D_max": 76,
+        "T_min_ns": 7000000000,
+        "T_max_ns": 9000000000,
+        "status": "VALID_BOUNDS_UNDER_CAUSAL_ASSUMPTIONS",
+        "lower_ticks_per_second": {
+          "numerator": 10,
+          "denominator": 9
+        },
+        "upper_ticks_per_second": {
+          "numerator": 76,
+          "denominator": 7
+        }
+      },
+      "result": "Safe bounds despite a tenfold change in local counter slope."
+    },
+    {
+      "id": "delayed-write-within-brackets",
+      "last_absence_reads_ns": [
+        [
+          100,
+          140
+        ],
+        [
+          300,
+          340
+        ]
+      ],
+      "absence_read_linearization_ns": [
+        130,
+        330
+      ],
+      "first_presence_reads_ns": [
+        [
+          150,
+          190
+        ],
+        [
+          350,
+          390
+        ]
+      ],
+      "actual_complete_marker_appearance_ns": [
+        135,
+        375
+      ],
+      "guest_0": [
+        10,
+        20
+      ],
+      "guest_1": [
+        50,
+        60
+      ],
+      "actual_counter_values": [
+        15,
+        55
+      ],
+      "calculation": {
+        "D_min": 30,
+        "D_max": 50,
+        "T_min_ns": 110,
+        "T_max_ns": 290,
+        "status": "VALID_BOUNDS_UNDER_CAUSAL_ASSUMPTIONS",
+        "lower_ticks_per_second": {
+          "numerator": 3000000000,
+          "denominator": 29
+        },
+        "upper_ticks_per_second": {
+          "numerator": 5000000000,
+          "denominator": 11
+        }
+      },
+      "actual_ticks_per_second": {
+        "numerator": 500000000,
+        "denominator": 3
+      },
+      "result": "Read-start lower bounds and read-end upper bounds are safe. Using the first absence read-end 140 excludes the true appearance 135. Using the second presence read-start 350 excludes the true appearance 375.",
+      "presence_read_linearization_ns": [
+        160,
+        380
+      ]
+    },
+    {
+      "id": "overlapping-host-brackets",
+      "guest_0": [
+        0,
+        10
+      ],
+      "guest_1": [
+        20,
+        30
+      ],
+      "host_0_ns": [
+        0,
+        100
+      ],
+      "host_1_ns": [
+        80,
+        160
+      ],
+      "calculation": {
+        "D_min": 10,
+        "D_max": 30,
+        "T_min_ns": -20,
+        "T_max_ns": 160,
+        "status": "INCONCLUSIVE",
+        "lower_ticks_per_second": null,
+        "upper_ticks_per_second": null
+      },
+      "result": "The proposed rule correctly rejects these brackets. Ordering alone supplies no strictly positive duration lower bound."
+    },
+    {
+      "id": "tight-polls-with-invalid-causal-link",
+      "counter_definition": "2000 ticks per host second, monotonic",
+      "guest_read_0_host_ns": [
+        0,
+        1000000
+      ],
+      "guest_0": [
+        0,
+        2
+      ],
+      "marker_0_host_appearance_ns": 10000000,
+      "guest_read_1_host_ns": [
+        20000000,
+        21000000
+      ],
+      "guest_1": [
+        40,
+        42
+      ],
+      "marker_1_host_appearance_ns": 20500000,
+      "host_0_ns": [
+        9900000,
+        10100000
+      ],
+      "host_1_ns": [
+        20400000,
+        20600000
+      ],
+      "mechanical_calculation_must_not_be_accepted": {
+        "D_min": 38,
+        "D_max": 42,
+        "T_min_ns": 10300000,
+        "T_max_ns": 10700000,
+        "status": "VALID_BOUNDS_UNDER_CAUSAL_ASSUMPTIONS",
+        "lower_ticks_per_second": {
+          "numerator": 380000,
+          "denominator": 107
+        },
+        "upper_ticks_per_second": {
+          "numerator": 420000,
+          "denominator": 103
+        }
+      },
+      "actual_ticks_per_second": {
+        "numerator": 2000,
+        "denominator": 1
+      },
+      "result": "Tight poll brackets cannot prove a synchronous backend. Marker 0 appears after the guest after-reading. Mechanical bounds exclude the true rate because the causal precondition is false."
+    },
+    {
+      "id": "perfect-long-average-does-not-qualify-short-requests",
+      "counter_definition": "floor(500000000*t) for the first host second; 500000000+floor(500000000*(t-1)/9) through second 10",
+      "idealized_exact_guest_0": [
+        0,
+        0
+      ],
+      "idealized_exact_guest_1": [
+        1000000000,
+        1000000000
+      ],
+      "host_0_ns": [
+        0,
+        0
+      ],
+      "host_1_ns": [
+        10000000000,
+        10000000000
+      ],
+      "calculation": {
+        "D_min": 1000000000,
+        "D_max": 1000000000,
+        "T_min_ns": 10000000000,
+        "T_max_ns": 10000000000,
+        "status": "VALID_BOUNDS_UNDER_CAUSAL_ASSUMPTIONS",
+        "lower_ticks_per_second": {
+          "numerator": 100000000,
+          "denominator": 1
+        },
+        "upper_ticks_per_second": {
+          "numerator": 100000000,
+          "denominator": 1
+        }
+      },
+      "first_second_ticks_per_second": {
+        "numerator": 500000000,
+        "denominator": 1
+      },
+      "remaining_nine_seconds_ticks_per_second": {
+        "numerator": 500000000,
+        "denominator": 9
+      },
+      "result": "A mathematically exact 100 MHz long-run average coexists with a 500 MHz first-second rate. It is not a valid uniform short-request calibration."
+    },
+    {
+      "id": "incomplete-eof-observation",
+      "actual_file_length_bytes": 1020,
+      "complete_marker_span_half_open_bytes": [
+        1000,
+        1020
+      ],
+      "read_cursor_before": 980,
+      "bytes_consumed_by_decoder": 10,
+      "read_cursor_after": 990,
+      "stale_size_limit_bytes": 1000,
+      "observed_zero_byte_eof": false,
+      "result": "No lower bound: the marker already exists beyond both the consumed prefix and stale size limit. Local decoder absence or reaching the stale size is not an EOF absence observation."
+    },
+    {
+      "id": "partial-marker-definition",
+      "first_marker_byte_appearance_ns": 10,
+      "complete_marker_appearance_ns": 20,
+      "absence_poll_through_eof_ns": 15,
+      "bytes_present_at_eof": "prefix only",
+      "result": "A full-marker absence at 15 can bracket complete appearance at 20, but cannot lower-bound first-byte appearance at 10. Reject this partial observation under the stated plan, or define complete-framed-record appearance and separately prove that event semantics."
+    }
+  ],
+  "native_runs": 0,
+  "performance_qualified": false,
+  "implementation_qualified": false,
+  "initial_reviewed_document": {
+    "path": "docs/storage-replacement/CLOCK-MEASUREMENT-PLAN.md",
+    "sha256": "4b26cbad78f9a3c3369f6f34ff04d07ab98da31b829c35a5a3bf6eda1ead8760",
+    "bytes": 3838,
+    "product_head": "a6088dfb5a07b56d2bc5f629e5a514b4cdedc76c"
+  },
+  "current_revision_re_read": "Adds explicit complete-framed-marker appearance and actual unbuffered read/EOF timestamp/offset requirements. These address two design wording clarifications without proving any implemented collector or native causal link."
+}
