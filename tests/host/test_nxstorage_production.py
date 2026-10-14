@@ -18,7 +18,8 @@ class NxStorageProductionTests(unittest.TestCase):
         patches = []
         for name in ("0127-independent-storage-primitives.patch", "0129-independent-cache-query-primitive.patch",
                      "0130-independent-geometry-owner-adapter.patch",
-                     "0131-independent-cache-publication-primitive.patch"):
+                     "0131-independent-cache-publication-primitive.patch",
+                     "0132-nxstorage-freestanding-gcc-checks.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
