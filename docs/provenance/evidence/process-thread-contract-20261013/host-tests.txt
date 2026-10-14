@@ -1,0 +1,46 @@
+Baseline production adapter fixture (before production changes):
+  list: failed count(found == 1), because public process list was empty
+  inherit: failed b.BasePriority == 9 && b.Priority == 9 (native remained 8)
+  process: failed a.BasePriority == 9 && b.BasePriority == 9
+The reference native guest independently reproduced the observed failures.
+
+Additional production scheduler regression tests:
+  offset: failed KeSetBasePriorityThread(&b, 2) == 0 before process-relative base
+  terminal: failed base query == 0 after unlink while process base was 9
+  same: failed retained Quantum == 17 and PriorityDecrement == 1 before no-op
+
+Final source adapter fixture:
+  PASS list
+  PASS inherit
+  PASS process
+  PASS lifecycle
+  PASS offset
+  PASS same
+  PASS terminal
+Compiled -m32, ASan+UBSan; production procobj.c, native base setter/query,
+public termination publisher and exact native start-address classification; only IRQ/list/dispatcher services are shims.
+
+Related source fixtures:
+  registry_checks=138797, irq_sections=165380 passed
+  wait_adapter_checks=448384 passed
+  irp_thread_checks=69 passed, completion_callbacks=8 cancel_callbacks=4
+  thread-shadow production live stack bounds passed
+  immediate-delay checks=6084 failures=0
+  thread-object wait adapter 223 cases, references/pool balanced
+
+Product host suite: 134 tests passed with 3 environment-dependent skips.
+  test_root_build_accepts_foreign_owned_pristine_checkout requires root CI
+  test_existing_evidence_and_invalid_options_are_rejected requires QEMU headers
+  test_production_callbacks_track_modified_code_and_overflow requires QEMU headers
+
+Commands, inside existing spiritboot-toolchain container:
+  python3 tests/host/process-threads/check.py <output>
+  python3 tests/host/thread-view/check-registry.py <output>
+  python3 tests/host/thread-view/check-wait-adapter.py <output>
+  python3 tests/host/thread-view/check-irp.py <output>
+  python3 tests/host/thread-shadow/check.py <output>
+  python3 tests/host/immediate-delay/check.py <source> <output>
+  python3 tests/host/thread-wait/check.py <output>
+
+Product command:
+  python3 -m unittest discover -s tests/host -v

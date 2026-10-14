@@ -1,0 +1,131 @@
+diff --git a/ntoskrnl/xb/crypto.c b/ntoskrnl/xb/crypto.c
+index 103d05a6..37f6f71c 100644
+--- a/ntoskrnl/xb/crypto.c
++++ b/ntoskrnl/xb/crypto.c
+@@ -348,29 +348,34 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
+     ULONG MInv = 0;
+     ULONG ExpBits;
+     BOOLEAN Odd;
+-    ULONG i;
++    ULONG i, N, BaseWords;
+ 
+     if (Words == 0 || Words > BN_MAX_WORDS)
+         return 0;
+ 
+-    /* A zero modulus has nothing to reduce against. */
+-    for (i = 0; i < Words; i++)
+-        if (Modulus[i] != 0)
+-            break;
+-    if (i == Words)
++    /* Zero padding does not increase the modulus' arithmetic width. Keep
++     * Words for the exponent scan and caller output, which may be wider. */
++    N = Words;
++    while (N > 0 && Modulus[N - 1] == 0)
++        N--;
++    if (N == 0)
+         return 0;
+ 
+     Pool = ExAllocatePoolWithTag(NonPagedPool,
+-                                 (5 * Words + 2) * sizeof(ULONG), 'pXcX');
++                                 (5 * N + 2) * sizeof(ULONG), 'pXcX');
+     if (Pool == NULL)
+         return 0;
+     Acc = Pool;
+-    Val = Acc + Words;
+-    Tmp = Val + Words;                  /* N + 2 words */
+-    Scratch = Tmp + Words + 2;          /* 2N words */
++    Val = Acc + N;
++    Tmp = Val + N;                  /* N + 2 words */
++    Scratch = Tmp + N + 2;          /* 2N words */
+ 
+     Odd = (BOOLEAN)(Modulus[0] & 1);
+-    BnReduce(Val, Base, Words, Modulus, Words);
++    /* Skip padding here, keeping the shared reducer's instruction layout. */
++    BaseWords = Words;
++    while (BaseWords > 0 && Base[BaseWords - 1] == 0)
++        BaseWords--;
++    BnReduce(Val, Base, BaseWords, Modulus, N);
+ 
+     if (Odd)
+     {
+@@ -384,20 +389,20 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
+         /* Acc = 2^32N mod Modulus is the Montgomery form of one, reached
+          * by doubling up from one; doubling it out again gives the
+          * conversion factor that puts the base in the same form. */
+-        RtlZeroMemory(Acc, Words * sizeof(ULONG));
++        RtlZeroMemory(Acc, N * sizeof(ULONG));
+         Acc[0] = 1;
+-        for (i = 0; i < Words * 32; i++)
+-            BnDoubleMod(Acc, 0, Modulus, Words);
+-        RtlCopyMemory(Scratch, Acc, Words * sizeof(ULONG));
+-        for (i = 0; i < Words * 32; i++)
+-            BnDoubleMod(Scratch, 0, Modulus, Words);
+-
+-        BnMontMul(Tmp, Val, Scratch, Modulus, MInv, Words);
+-        RtlCopyMemory(Val, Tmp, Words * sizeof(ULONG));
++        for (i = 0; i < N * 32; i++)
++            BnDoubleMod(Acc, 0, Modulus, N);
++        RtlCopyMemory(Scratch, Acc, N * sizeof(ULONG));
++        for (i = 0; i < N * 32; i++)
++            BnDoubleMod(Scratch, 0, Modulus, N);
++
++        BnMontMul(Tmp, Val, Scratch, Modulus, MInv, N);
++        RtlCopyMemory(Val, Tmp, N * sizeof(ULONG));
+     }
+     else
+     {
+-        RtlZeroMemory(Acc, Words * sizeof(ULONG));
++        RtlZeroMemory(Acc, N * sizeof(ULONG));
+         Acc[0] = 1;
+     }
+ 
+@@ -414,36 +419,39 @@ XcpModExp(_Out_ PULONG Result, _In_ PULONG Base, _In_ PULONG Exponent,
+         if ((Exponent[i / 32] >> (i % 32)) & 1)
+         {
+             if (Odd)
+-                BnMontMul(Tmp, Acc, Val, Modulus, MInv, Words);
++                BnMontMul(Tmp, Acc, Val, Modulus, MInv, N);
+             else
+-                BnMulMod(Tmp, Acc, Val, Modulus, Scratch, Words);
+-            RtlCopyMemory(Acc, Tmp, Words * sizeof(ULONG));
++                BnMulMod(Tmp, Acc, Val, Modulus, Scratch, N);
++            RtlCopyMemory(Acc, Tmp, N * sizeof(ULONG));
+         }
+         /* Val is only consumed by a later exponent bit. Conversion below
+          * overwrites it on the odd path; the even result consumes Acc only. */
+         if (i + 1 < ExpBits)
+         {
+             if (Odd)
+-                BnMontMul(Tmp, Val, Val, Modulus, MInv, Words);
++                BnMontMul(Tmp, Val, Val, Modulus, MInv, N);
+             else
+-                BnMulMod(Tmp, Val, Val, Modulus, Scratch, Words);
+-            RtlCopyMemory(Val, Tmp, Words * sizeof(ULONG));
++                BnMulMod(Tmp, Val, Val, Modulus, Scratch, N);
++            RtlCopyMemory(Val, Tmp, N * sizeof(ULONG));
+         }
+     }
+ 
+     if (Odd)
+     {
+         /* Leave Montgomery form by multiplying by one. */
+-        RtlZeroMemory(Val, Words * sizeof(ULONG));
++        RtlZeroMemory(Val, N * sizeof(ULONG));
+         Val[0] = 1;
+-        BnMontMul(Tmp, Acc, Val, Modulus, MInv, Words);
+-        RtlCopyMemory(Result, Tmp, Words * sizeof(ULONG));
++        BnMontMul(Tmp, Acc, Val, Modulus, MInv, N);
++        RtlCopyMemory(Result, Tmp, N * sizeof(ULONG));
+     }
+     else
+     {
+-        RtlCopyMemory(Result, Acc, Words * sizeof(ULONG));
++        RtlCopyMemory(Result, Acc, N * sizeof(ULONG));
+     }
+ 
++    /* Defer every output write until all operands have been consumed. This
++     * also preserves whole and shifted Result aliases of any operand. */
++    RtlZeroMemory(Result + N, (Words - N) * sizeof(ULONG));
+     ExFreePool(Pool);
+     return 1;
+ }

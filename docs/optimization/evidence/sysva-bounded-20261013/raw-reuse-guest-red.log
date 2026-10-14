@@ -1,0 +1,25 @@
+not ok 4 new left page contains 4096 zero bytes
+not ok 5 new middle page contains 4096 zero bytes
+not ok 6 new right page contains 4096 zero bytes
+not ok 10 dirty recycled page contains 4096 zero bytes
+not ok 17 new left page contains 4096 zero bytes
+not ok 18 new middle page contains 4096 zero bytes
+not ok 19 new right page contains 4096 zero bytes
+not ok 23 dirty recycled page contains 4096 zero bytes
+not ok 30 new left page contains 4096 zero bytes
+not ok 31 new middle page contains 4096 zero bytes
+not ok 32 new right page contains 4096 zero bytes
+not ok 36 dirty recycled page contains 4096 zero bytes
+not ok 43 new left page contains 4096 zero bytes
+not ok 44 new middle page contains 4096 zero bytes
+not ok 45 new right page contains 4096 zero bytes
+not ok 49 dirty recycled page contains 4096 zero bytes
+fixture: artifacts/sysva-evidence/raw-reuse-guest-red/fixture.c:223: main: Assertion `failures==(old ? 4 : 0)' failed.
+Traceback (most recent call last):
+  File "/home/codex/xemu-shader-workbench-handoff/.scratch/remaining-sysva-audit-20261013/artifacts/sysva-retirement-source/tests/host/zero-reuse/check.py", line 146, in <module>
+    subprocess.run([str(binary),str(fault),str(level),str(int(a.expect_old))],check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['artifacts/sysva-evidence/raw-reuse-guest-red/fixture', '0', '0', '0']' died with <Signals.SIGABRT: 6>.

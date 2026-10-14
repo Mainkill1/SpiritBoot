@@ -1,0 +1,103 @@
+diff --git a/tests/host/pool-negative/cases.c b/tests/host/pool-negative/cases.c
+new file mode 100644
+index 00000000..89a3ef7d
+--- /dev/null
++++ b/tests/host/pool-negative/cases.c
+@@ -0,0 +1,62 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++static void equivalence(void) {
++#ifdef NXP_EMPTY_DOMAIN_COUNT
++ unsigned expected[NXP_EMPTY_DOMAIN_COUNT]={0};
++ for(unsigned i=0;i<NXK_POOL_WINDOW_PAGES;i++)if(NxpPageState[i]==0) {
++  NXP_HEADER *h=(NXP_HEADER *)(arena+i*PAGE_SIZE);
++  assert(h->Magic==NXP_MAGIC_FREE&&h->ClassIndex<NXP_BUCKET_LISTS);
++  expected[NXP_EMPTY_DOMAIN(h->ClassIndex)]++;
++ }
++ for(unsigned i=0;i<NXP_EMPTY_DOMAIN_COUNT;i++)assert(expected[i]==NxpEmptyPageCount[i]);
++#endif
++}
++static void reset(void) {
++ assert(!pool_lock_held);memset(used,0,sizeof(used));memset(runs,0,sizeof(runs));
++ memset(NxpFreeLists,0,sizeof(NxpFreeLists));memset(&NxpPoolAudit,0,sizeof(NxpPoolAudit));
++ committed=peak=allocations=releases=0;allow_pages=1;page_limit=NXK_POOL_WINDOW_PAGES;
++ InitializePool(NonPagedPool,0);equivalence();
++}
++int main(void) {
++ arena=aligned_alloc(PAGE_SIZE,NXK_POOL_WINDOW_PAGES*PAGE_SIZE);assert(arena);
++ reset();void *a=ExAllocatePoolWithTag(NonPagedPool,64,7);assert(a);
++ if(NxpPoolAudit.FallbackCalls!=0 || NxpPoolAudit.PagesExamined!=0) {
++  fprintf(stderr,"FAIL no compatible empty bucket page: reuse scanned %u pages instead of skipping the proved negative\n",NxpPoolAudit.PagesExamined);return 2;
++ }
++ equivalence();ExFreePoolWithTag(a,7);equivalence();
++ a=ExAllocatePoolWithTag(NonPagedPool,64,7);assert(a);equivalence();ExFreePoolWithTag(a,7);equivalence();
++ a=ExAllocatePoolWithTag(NonPagedPool,1024,8);assert(a&&committed==1);equivalence();ExFreePoolWithTag(a,8);equivalence();
++ assert(NxpReclaimEmptyBucketPages()==1&&committed==0);equivalence();
++ puts("PASS negative scan skipped, same-class activation and cross-class detach preserve empty counts");
++ reset();void *objects[34];
++ for(unsigned i=0;i<34;i++){objects[i]=ExAllocatePoolWithTag(NonPagedPool,64,7);assert(objects[i]);equivalence();}
++ for(unsigned i=0;i<32;i++){ExFreePoolWithTag(objects[i],7);equivalence();}
++ ExFreePoolWithTag(objects[32],7);equivalence();
++ memset(&NxpPoolAudit,0,sizeof(NxpPoolAudit));a=ExAllocatePoolWithTag(NonPagedPool,1024,8);assert(a);equivalence();
++ assert(NxpPoolAudit.FallbackCalls==1&&NxpPoolAudit.FallbackHits==1);
++ assert(NxpPoolAudit.PagesExamined==NXK_POOL_WINDOW_PAGES/2+1);
++ ExFreePoolWithTag(objects[33],7);ExFreePoolWithTag(a,8);equivalence();assert(NxpReclaimEmptyBucketPages()==2);equivalence();
++ puts("PASS hidden compatible empty page still uses the authoritative fallback scan");
++#if XBOX_RESERVE_UPPER_RAM
++ reset();a=ExAllocatePoolWithTag(NonPagedPool,64,7);ExFreePoolWithTag(a,7);equivalence();
++ memset(&NxpPoolAudit,0,sizeof(NxpPoolAudit));void *b=NxTitleAllocatePoolWithTag(1024,8);assert(b&&committed==2);equivalence();
++ assert(NxpPoolAudit.FallbackCalls==0&&NxpPoolAudit.PagesExamined==0);
++ ExFreePoolWithTag(b,8);equivalence();allow_pages=0;
++ a=ExAllocatePoolWithTag(NonPagedPool,256,9);b=NxTitleAllocatePoolWithTag(64,10);assert(a&&b&&committed==2);equivalence();
++ ExFreePoolWithTag(a,9);ExFreePoolWithTag(b,10);equivalence();assert(NxpReclaimEmptyBucketPages()==2);equivalence();
++ puts("PASS incompatible domain empties do not force a negative window scan or lose eligibility");
++#endif
++ reset();page_limit=1;a=ExAllocatePoolWithTag(NonPagedPool,64,7);assert(a);
++ assert(ExAllocatePoolWithTag(NonPagedPool,1024,8)==NULL&&committed==1);equivalence();
++ ExFreePoolWithTag(a,7);equivalence();a=ExAllocatePoolWithTag(NonPagedPool,4096,9);assert(a&&committed==1);equivalence();
++ assert(NxpPageState[NXP_PAGE_INDEX(a)]==NXP_NOT_BUCKET);ExFreePoolWithTag(a,9);equivalence();
++ puts("PASS supplier failure and pressure reclaim preserve empty counts without rollback drift");
++ reset();
++ for(unsigned round=0;round<10000;round++) {
++  unsigned c=round%NXP_CLASSES;a=ExAllocatePoolWithTag(NonPagedPool,NxpClassSize[c]-8,7);assert(a&&committed==1);equivalence();
++  ExFreePoolWithTag(a,7);equivalence();
++ }
++ assert(NxpPoolAudit.FallbackCalls==0&&NxpPoolAudit.PagesExamined==0);
++ assert(NxpReclaimEmptyBucketPages()==1);equivalence();
++ puts("PASS 10000 refill/retype cycles maintain exact empty-state equivalence");
++ free(arena);return 0;
++}
+diff --git a/tests/host/pool-negative/check.py b/tests/host/pool-negative/check.py
+new file mode 100644
+index 00000000..c395d23d
+--- /dev/null
++++ b/tests/host/pool-negative/check.py
+@@ -0,0 +1,29 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Execute real pool empty transitions and skip scans only when absence is proved."""
++import importlib.util
++import subprocess
++import sys
++from pathlib import Path
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++spec = importlib.util.spec_from_file_location("extract", root / "tests/host/kernel-performance/check.py")
++m = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(m)
++pool = (root / "ntoskrnl/xb/mm/pool.c").read_text()
++macros = pool[pool.index("#ifdef NXK_MM_POOLPAGES"):pool.index("/* SIZE CLASSES")]
++definitions = pool[pool.index("static const USHORT NxpClassSize"):pool.index("/* BIG-BLOCK TABLE")]
++names = ["InitializePool", "NxpAllocFailed", "NxpDetachEmptyBucketPage", "NxpReuseEmptyBucketPage", "NxpAllocatePoolWithTag", "ExAllocatePoolWithTag", "NxTitleAllocatePoolWithTag", "ExFreePoolWithTag", "NxpReclaimEmptyBucketPages", "ExQueryPoolBlockSize"]
++bodies = "".join(m.function(pool, n) for n in names)
++audit = root / "ntoskrnl/xb/mm/pool-audit.h"
++# Before implementation this fallback lets the real behavior run and makes
++# missing accounting fail an assertion, rather than a compiler diagnostic.
++header = audit.read_text().replace("#pragma once", "") if audit.exists() else "typedef struct {unsigned SearchCalls, HeadChecks, HeadHits, FallbackCalls, PagesExamined, MaxPagesExamined, FallbackHits, NotFound, Reclaims;} NXP_POOL_AUDIT; static NXP_POOL_AUDIT NxpPoolAudit;"
++for reserve in (0, 1):
++    src = out / f"audit-{reserve}.c"
++    src.write_text((root / "tests/host/pool-refill/shim.c").read_text() + f"\n#define XBOX_RESERVE_UPPER_RAM {reserve}\n#define NXK_POOL_AUDIT 1\n" + header + "\n" + macros + definitions + "\nULONG NxpReclaimEmptyBucketPages(void);\n" + bodies + (root / "tests/host/pool-negative/cases.c").read_text())
++    exe = src.with_suffix("")
++    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unknown-pragmas", "-g", "-fsanitize=address,undefined", str(src), "-o", str(exe)], check=True)
++    subprocess.run([str(exe)], check=True)

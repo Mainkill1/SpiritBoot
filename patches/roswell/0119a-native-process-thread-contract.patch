@@ -1,0 +1,394 @@
+diff --git a/tests/xbe/process-thread-contract/Makefile b/tests/xbe/process-thread-contract/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..414a1f776bddf2f5efbca54034a5e1894e7d354b
+--- /dev/null
++++ b/tests/xbe/process-thread-contract/Makefile
+@@ -0,0 +1,6 @@
++XBE_TITLE = PROCESS-THREAD-CONTRACT
++GEN_XISO = process-thread-contract-v3.iso
++SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c
++NXDK_DIR ?= $(CURDIR)/../../../.reference/nxdk
++NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/process-thread-contract/main.c b/tests/xbe/process-thread-contract/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..89452a1cc9a72d6f33664cc12259ffdd14fea0fc
+--- /dev/null
++++ b/tests/xbe/process-thread-contract/main.c
+@@ -0,0 +1,125 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Public nxdk ABI only. Observes creation, priority, membership and retirement.
++ */
++#include <windows.h>
++#include <xboxkrnl/xboxkrnl.h>
++#include <stddef.h>
++#include "regression.h"
++#define TIMEOUT -50000000LL
++#define CASES 3
++static PKPROCESS process;
++typedef struct Case {
++ KEVENT entered,release;
++ PKTHREAD current;
++ PETHREAD created;
++ HANDLE id;
++ LONG create_base,create_priority,entry_base,entry_priority;
++ ULONG create_member,exit_member,created_count,exit_count;
++} Case;
++static Case cases[CASES];
++static volatile LONG creating=-1;
++static ULONG membership(PKTHREAD target,ULONG *total) {
++ PLIST_ENTRY head=&process->ThreadListHead,entry;
++ ULONG count=0,found=0;
++ KIRQL old=KeRaiseIrqlToDpcLevel();entry=head->Flink;
++ while(entry!=head && count<4096) {
++  if(!entry || !entry->Flink || !entry->Blink || entry->Flink->Blink!=entry || entry->Blink->Flink!=entry){found=0xffffffff;break;}
++  if(entry==&target->ThreadListEntry)found++;
++  count++;entry=entry->Flink;
++ }
++ if(count==4096)found=0xffffffff;
++ KfLowerIrql(old);if(total)*total=count;return found;
++}
++static VOID NTAPI notify(PETHREAD thread,HANDLE id,BOOLEAN create) {
++ Case *c=NULL;
++ if(create && creating>=0 && creating<CASES)c=&cases[creating];
++ else for(ULONG i=0;i<CASES;i++)if(cases[i].id==id)c=&cases[i];
++ if(!c)return;
++ if(create) {
++  c->created=thread;c->create_base=thread->Tcb.BasePriority;c->create_priority=thread->Tcb.Priority;
++  c->create_member=membership(&thread->Tcb,NULL);c->created_count++;
++ } else {c->exit_member=membership(&thread->Tcb,NULL);c->exit_count++;}
++}
++static VOID NTAPI worker(PVOID context) {
++ Case *c=context;c->current=KeGetCurrentThread();
++ c->entry_base=c->current->BasePriority;c->entry_priority=c->current->Priority;
++ KeSetEvent(&c->entered,0,FALSE);
++ LARGE_INTEGER timeout={.QuadPart=TIMEOUT};
++ KeWaitForSingleObject(&c->release,Executive,KernelMode,FALSE,&timeout);
++}
++static VOID NTAPI startup(PKSTART_ROUTINE start,PVOID context){start(context);PsTerminateSystemThread(0x4321);}
++static HANDLE spawn(ULONG i,BOOLEAN suspended,BOOLEAN simple) {
++ Case *c=&cases[i];HANDLE h=NULL;
++ KeInitializeEvent(&c->entered,NotificationEvent,FALSE);KeInitializeEvent(&c->release,NotificationEvent,FALSE);
++ creating=i;
++ NTSTATUS status=simple?PsCreateSystemThread(&h,&c->id,worker,c,FALSE):PsCreateSystemThreadEx(&h,0,16384,0,&c->id,worker,c,suspended,FALSE,startup);
++ creating=-1;
++ regression_require(status==0&&h!=NULL,"create zero-TLS title thread");
++ tap_comment("create case=%lu suspended=%u simple=%u base=%ld priority=%ld member=%lu",i,suspended,simple,c->create_base,c->create_priority,c->create_member);
++ regression_check(c->created_count==1,"creation callback runs once");
++ regression_check(c->create_base==process->BasePriority&&c->create_priority==process->BasePriority,"creation callback observes inherited process priority");
++ regression_check(c->create_member==1,"creation callback observes public process membership");return h;
++}
++static void entered(ULONG i) {
++ LARGE_INTEGER timeout={.QuadPart=TIMEOUT};Case *c=&cases[i];
++ regression_require(KeWaitForSingleObject(&c->entered,Executive,KernelMode,FALSE,&timeout)==0,"worker reaches its first title instruction");
++ tap_comment("entry case=%lu base=%ld priority=%ld member=%lu",i,c->entry_base,c->entry_priority,membership(c->current,NULL));
++ regression_check(c->entry_base==process->BasePriority&&c->entry_priority==process->BasePriority,"new title thread inherits current process priority");
++ regression_check(c->current==&c->created->Tcb,"create and current pointers share public identity");
++ regression_check(c->current->ApcState.Process==process,"worker names the same process");
++}
++static void retire(ULONG i,HANDLE h) {
++ PETHREAD t=NULL;Case *c=&cases[i];
++ regression_require(ObReferenceObjectByHandle(h,&PsThreadObjectType,(PVOID *)&t)==0,"reference retiring public thread");
++ KeSetEvent(&c->release,0,FALSE);LARGE_INTEGER timeout={.QuadPart=TIMEOUT};
++ regression_require(KeWaitForSingleObject(t,Executive,KernelMode,FALSE,&timeout)==0,"wait for worker retirement");
++ tap_comment("retire case=%lu member=%lu exit_notify_member=%lu exit_count=%lu links_self=%u",i,membership(&t->Tcb,NULL),c->exit_member,c->exit_count,t->Tcb.ThreadListEntry.Flink==&t->Tcb.ThreadListEntry&&t->Tcb.ThreadListEntry.Blink==&t->Tcb.ThreadListEntry);
++ regression_check(membership(&t->Tcb,NULL)==0,"terminated referenced thread leaves process list");
++ regression_check(c->exit_count==1,"termination callback runs once");
++ regression_check(c->exit_member==1,"termination callback precedes process list removal");
++ LONG terminal_increment=KeQueryBasePriorityThread(&t->Tcb);
++ tap_comment("terminal_priority case=%lu process_base=%d thread_base=%d query_increment=%ld",i,process->BasePriority,t->Tcb.BasePriority,terminal_increment);
++ regression_check(terminal_increment==0&&t->Tcb.BasePriority==process->BasePriority,"referenced terminated thread keeps its process-relative base query");
++ NtClose(h);ObfDereferenceObject(t);
++}
++int main(void) {
++ regression_begin();PKTHREAD self=KeGetCurrentThread();process=self->ApcState.Process;
++ regression_require(process!=NULL,"current thread names public process");
++ regression_check(sizeof(KPROCESS)==0x1c&&offsetof(KPROCESS,ThreadListHead)==8&&offsetof(KTHREAD,ThreadListEntry)==0x104,"process and thread links use public nxdk ABI");
++ ULONG initial_count=0;
++ regression_check(membership(self,&initial_count)==1,"running title thread belongs to its process");
++ tap_comment("initial process_base=%d current_base=%d current_priority=%d thread_count=%lu stack_count=%lu",process->BasePriority,self->BasePriority,self->Priority,initial_count,process->StackCount);
++ regression_require(PsSetCreateThreadNotifyRoutine(notify)==0,"register creation and exit observer");
++ LONG original=process->BasePriority;regression_require(original>=2&&original<=12,"process base permits in-range priority probes");
++ regression_check(KeSetPriorityProcess(process,original+1)==original,"process setter reports previous base");
++ HANDLE first=spawn(0,TRUE,FALSE);PETHREAD suspended=NULL;
++ regression_require(ObReferenceObjectByHandle(first,&PsThreadObjectType,(PVOID *)&suspended)==0,"reference suspended zero-TLS thread");
++ regression_check(membership(&suspended->Tcb,NULL)==1,"suspended zero-TLS thread is already a process member");
++ regression_check(suspended->Tcb.BasePriority==original+1,"suspended thread inherits before it runs");
++ regression_require(NtResumeThread(first,NULL)==0,"resume first title thread");entered(0);
++ LONG offset=KeSetBasePriorityThread(cases[0].current,2);
++ LONG worker_before=cases[0].current->BasePriority;
++ regression_check(offset==0&&worker_before==original+3,"thread base increment is relative to public process");
++ regression_check(KeQueryBasePriorityThread(cases[0].current)==2,"thread base query reports its public process increment");
++ KeSetPriorityProcess(process,original+2);
++ tap_comment("priority_offset old_increment=%ld worker_before=%ld process_before=%ld process_after=%d worker_after=%d current_after=%d",offset,worker_before,original+1,process->BasePriority,cases[0].current->BasePriority,self->BasePriority);
++ regression_check(cases[0].current->BasePriority==original+4&&self->BasePriority==original+2,"process change preserves individual thread base increment");
++ KeSetPriorityProcess(process,original+1);
++ KeSetBasePriorityThread(cases[0].current,0);
++ HANDLE second=spawn(1,FALSE,FALSE);entered(1);
++ HANDLE third=spawn(2,FALSE,TRUE);entered(2);
++ ULONG active_count=0;membership(self,&active_count);
++ tap_comment("active process_threads=%lu initial=%lu stack_count=%lu",active_count,initial_count,process->StackCount);
++ regression_check(active_count==initial_count+CASES,"public list adds only created title threads");
++ KeSetPriorityProcess(process,original+2);
++ regression_check(cases[1].current->BasePriority==original+2&&cases[2].current->BasePriority==original+2,"process priority follows already running title threads");
++ KeSetPriorityProcess(process,original);
++ regression_check(self->BasePriority==original,"caller native base restores with process");
++ KeSetPriorityProcess(process,original+1);
++ ObfDereferenceObject(suspended);retire(0,first);retire(1,second);retire(2,third);
++ KeSetPriorityProcess(process,original);
++ ULONG final_count=0;membership(self,&final_count);
++ regression_check(final_count==initial_count,"retirement restores original public list count");
++ tap_comment("final process_threads=%lu stack_count=%lu",final_count,process->StackCount);
++ regression_finish();
++}
+diff --git a/tests/xbe/process-thread-contract/regression.h b/tests/xbe/process-thread-contract/regression.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..305b1f1f784d9d30bea5eaa6655a9cc5c27365ab
+--- /dev/null
++++ b/tests/xbe/process-thread-contract/regression.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#pragma once
++#include "tap.h"
++#include <xboxkrnl/xboxkrnl.h>
++
++static unsigned regression_checks, regression_failures;
++
++static void regression_begin(void)
++{
++    tap_version(14);
++}
++
++static void regression_check(int passed, const char *description)
++{
++    ++regression_checks;
++    if (passed) {
++        tap_ok(regression_checks, description);
++    } else {
++        ++regression_failures;
++        tap_not_ok(regression_checks, description);
++    }
++}
++
++static void regression_finish(void) __attribute__((noreturn));
++static void regression_finish(void)
++{
++    LARGE_INTEGER delay = { .QuadPart = -5000000 };
++    tap_comment("checks=%u failures=%u", regression_checks, regression_failures);
++    tap_plan(regression_checks);
++    tap_drain();
++    KeDelayExecutionThread(KernelMode, FALSE, &delay);
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    /* A failed shutdown remains a timeout, never a passing capture. */
++    for (;;) __asm__ __volatile__("hlt");
++}
++
++static inline void regression_require(int passed, const char *description)
++{
++    regression_check(passed, description);
++    if (!passed) regression_finish();
++}
+diff --git a/tests/xbe/process-thread-contract/tap.c b/tests/xbe/process-thread-contract/tap.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..009bb8a8830628d841948a31ee334b71be3c981e
+--- /dev/null
++++ b/tests/xbe/process-thread-contract/tap.c
+@@ -0,0 +1,166 @@
++/*
++ * TAP 14 emitter.  Bytes go out the LPC47M157 SuperIO's COM1 at 115200 8N1
++ * (I/O 0x3F8).  We program the UART ourselves at first call so the suite
++ * works against both nxkrnl (which already programs it for DbgPrint) and
++ * the retail kernel (which doesn't).  isa-debugcon (port 0xE9) was the
++ * historical target but the upstream xemu AppImage builds without it.
++ */
++
++#include "tap.h"
++#include <stdio.h>
++#include <stdarg.h>
++
++#define COM1     0x3F8
++#define COM1_THR (COM1 + 0)
++#define COM1_DLL (COM1 + 0)
++#define COM1_IER (COM1 + 1)
++#define COM1_DLH (COM1 + 1)
++#define COM1_LCR (COM1 + 3)
++#define COM1_MCR (COM1 + 4)
++#define COM1_LSR (COM1 + 5)
++
++#define LSR_THRE 0x20  /* transmit holding register empty */
++#define LSR_TEMT 0x40  /* transmitter empty (shift + holding both drained) */
++#define LCR_DLAB 0x80
++#define LCR_8N1  0x03
++
++static inline void outb(unsigned short port, unsigned char val)
++{
++    __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
++}
++
++static inline unsigned char inb(unsigned short port)
++{
++    unsigned char ret;
++    __asm__ __volatile__("inb %1, %0" : "=a"(ret) : "Nd"(port));
++    return ret;
++}
++
++/* Xbox is single-CPU: prevent a scheduled kernel/debug writer from entering
++ * between bytes. Restore the caller's full flags, including an already-clear
++ * IF. Formatting stays outside this span; no kernel-private lock is borrowed. */
++static inline unsigned int tap_irq_save(void)
++{
++    unsigned int flags;
++    __asm__ __volatile__("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
++    return flags;
++}
++
++static inline void tap_irq_restore(unsigned int flags)
++{
++    __asm__ __volatile__("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
++}
++
++static void com_init(void)
++{
++    static int initialized = 0;
++    if (initialized) return;
++    initialized = 1;
++    outb(COM1_IER, 0x00);             /* disable all interrupts */
++    outb(COM1_LCR, LCR_DLAB);         /* DLAB=1 to set divisor */
++    outb(COM1_DLL, 0x01);             /* 115200 baud (1.8432 MHz / 16 / 1) */
++    outb(COM1_DLH, 0x00);
++    outb(COM1_LCR, LCR_8N1);          /* DLAB=0, 8N1 */
++    /* Retain the existing FIFO mode and queued bytes. THRE polling works
++     * with either the reset/default UART or a kernel-configured FIFO; changing
++     * FIFO enable or clearing it could discard the preceding debug message. */
++    outb(COM1_MCR, 0x0B);             /* DTR + RTS + OUT2 */
++}
++
++static void com_putc(char c)
++{
++    while ((inb(COM1_LSR) & LSR_THRE) == 0) { }
++    outb(COM1_THR, (unsigned char)c);
++}
++
++void tap_drain(void)
++{
++    while ((inb(COM1_LSR) & LSR_TEMT) == 0) { }
++}
++
++static void com_puts(const char *s)
++{
++    unsigned int flags = tap_irq_save();
++    com_init();
++    while (*s) com_putc(*s++);
++    tap_irq_restore(flags);
++}
++
++static void com_vprintf(const char *fmt, va_list ap)
++{
++    char buf[256];
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_puts(buf);
++}
++
++static void com_printf(const char *fmt, ...)
++{
++    va_list ap;
++    va_start(ap, fmt);
++    com_vprintf(fmt, ap);
++    va_end(ap);
++}
++
++void tap_puts(const char *s)
++{
++    com_puts(s);
++}
++
++void tap_version(unsigned int v)
++{
++    com_printf("TAP version %u\n", v);
++}
++
++void tap_plan(unsigned int n)
++{
++    com_printf("1..%u\n", n);
++}
++
++void tap_ok(unsigned int n, const char *desc)
++{
++    com_printf("ok %u - %s\n", n, desc);
++}
++
++void tap_not_ok(unsigned int n, const char *desc)
++{
++    com_printf("not ok %u - %s\n", n, desc);
++}
++
++void tap_diag_begin(void)
++{
++    com_puts("  ---\n");
++}
++
++void tap_diag_end(void)
++{
++    com_puts("  ...\n");
++}
++
++void tap_diag_kv(const char *key, const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("  %s: %s\n", key, buf);
++}
++
++void tap_comment(const char *fmt, ...)
++{
++    char buf[192];
++    va_list ap;
++    va_start(ap, fmt);
++    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
++    va_end(ap);
++    if (n < 0) return;
++    if (n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
++    buf[n] = 0;
++    com_printf("# %s\n", buf);
++}
+diff --git a/tests/xbe/process-thread-contract/tap.h b/tests/xbe/process-thread-contract/tap.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..0f39d98a46afd4ebc013b785b7292172d58a1371
+--- /dev/null
++++ b/tests/xbe/process-thread-contract/tap.h
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include <stdarg.h>
++#include <stdbool.h>
++
++void tap_version(unsigned int v);
++void tap_plan(unsigned int n);
++void tap_ok(unsigned int n, const char *desc);
++void tap_not_ok(unsigned int n, const char *desc);
++
++/* Open / close a YAML diagnostic block underneath a `not ok` line. */
++void tap_diag_begin(void);
++void tap_diag_end(void);
++void tap_diag_kv(const char *key, const char *fmt, ...);
++
++void tap_comment(const char *fmt, ...);
++
++/* Drop a raw string verbatim (no formatting / framing).  Used for the
++ * "== api-regression begin ==" / "== ... end ==" markers in main.c so
++ * the runner can slice the TAP block out of the surrounding kernel
++ * debug stream. */
++void tap_puts(const char *s);
++
++/* Block until the UART transmitter is fully drained.  Call before
++ * issuing an SMC shutdown so the final bytes aren't lost. */
++void tap_drain(void);

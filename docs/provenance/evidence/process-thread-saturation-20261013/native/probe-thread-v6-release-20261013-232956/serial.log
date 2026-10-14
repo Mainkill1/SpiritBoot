@@ -1,0 +1,253 @@
+TAP version 14
+ok 1 - current thread names public process
+ok 2 - process and thread links use public nxdk ABI
+ok 3 - running title thread belongs to its process
+# initial process_base=8 current_base=8 current_priority=8 thread_count=1 stack_count=1
+ok 4 - register creation and exit observer
+ok 5 - process base permits in-range priority probes
+ok 6 - process setter reports previous base
+ok 7 - create zero-TLS title thread
+# create case=0 suspended=1 simple=0 base=9 priority=9 member=1
+ok 8 - creation callback runs once
+ok 9 - creation callback observes inherited process priority
+ok 10 - creation callback observes public process membership
+ok 11 - reference suspended zero-TLS thread
+ok 12 - suspended zero-TLS thread is already a process member
+ok 13 - suspended thread inherits before it runs
+ok 14 - resume first title thread
+ok 15 - worker reaches its first title instruction
+# entry case=0 base=9 priority=9 member=1
+ok 16 - new title thread inherits current process priority
+ok 17 - create and current pointers share public identity
+ok 18 - worker names the same process
+ok 19 - thread base increment is relative to public process
+ok 20 - thread base query reports its public process increment
+# priority_offset old_increment=0 worker_before=11 process_before=9 process_after=10 worker_after=12 current_after=10
+ok 21 - process change preserves individual thread base increment
+ok 22 - create zero-TLS title thread
+# create case=1 suspended=0 simple=0 base=9 priority=9 member=1
+ok 23 - creation callback runs once
+ok 24 - creation callback observes inherited process priority
+ok 25 - creation callback observes public process membership
+ok 26 - worker reaches its first title instruction
+# entry case=1 base=9 priority=9 member=1
+ok 27 - new title thread inherits current process priority
+ok 28 - create and current pointers share public identity
+ok 29 - worker names the same process
+ok 30 - create zero-TLS title thread
+# create case=2 suspended=0 simple=1 base=9 priority=9 member=1
+ok 31 - creation callback runs once
+ok 32 - creation callback observes inherited process priority
+ok 33 - creation callback observes public process membership
+ok 34 - worker reaches its first title instruction
+# entry case=2 base=9 priority=9 member=1
+ok 35 - new title thread inherits current process priority
+ok 36 - create and current pointers share public identity
+ok 37 - worker names the same process
+# active process_threads=4 initial=1 stack_count=4
+ok 38 - public list adds only created title threads
+ok 39 - process priority follows already running title threads
+ok 40 - caller native base restores with process
+ok 41 - positive saturation setter reports previous increment
+ok 42 - negative saturation setter reports previous increment
+ok 43 - positive saturation query before process move
+ok 44 - negative saturation query before process move
+# saturation process=9->10 positive_base=15 query=16 negative_base=1 query=-16
+ok 45 - saturation process setter publishes new base and returns old base
+ok 46 - positive saturated thread stays at class maximum
+ok 47 - negative saturated thread stays at class minimum
+ok 48 - process move preserves positive saturation increment
+ok 49 - process move preserves negative saturation increment
+# saturation process=10->16 positive_base=31 query=16 negative_base=16 query=-16
+ok 50 - saturation process setter publishes new base and returns old base
+ok 51 - positive saturated thread stays at class maximum
+ok 52 - negative saturated thread stays at class minimum
+ok 53 - process move preserves positive saturation increment
+ok 54 - process move preserves negative saturation increment
+# saturation process=16->20 positive_base=31 query=16 negative_base=16 query=-16
+ok 55 - saturation process setter publishes new base and returns old base
+ok 56 - positive saturated thread stays at class maximum
+ok 57 - negative saturated thread stays at class minimum
+ok 58 - process move preserves positive saturation increment
+ok 59 - process move preserves negative saturation increment
+# saturation process=20->31 positive_base=31 query=16 negative_base=16 query=-16
+ok 60 - saturation process setter publishes new base and returns old base
+ok 61 - positive saturated thread stays at class maximum
+ok 62 - negative saturated thread stays at class minimum
+ok 63 - process move preserves positive saturation increment
+ok 64 - process move preserves negative saturation increment
+# saturation process=31->15 positive_base=15 query=16 negative_base=1 query=-16
+ok 65 - saturation process setter publishes new base and returns old base
+ok 66 - positive saturated thread stays at class maximum
+ok 67 - negative saturated thread stays at class minimum
+ok 68 - process move preserves positive saturation increment
+ok 69 - process move preserves negative saturation increment
+# saturation process=15->2 positive_base=15 query=16 negative_base=1 query=-16
+ok 70 - saturation process setter publishes new base and returns old base
+ok 71 - positive saturated thread stays at class maximum
+ok 72 - negative saturated thread stays at class minimum
+ok 73 - process move preserves positive saturation increment
+ok 74 - process move preserves negative saturation increment
+# saturation process=2->9 positive_base=15 query=16 negative_base=1 query=-16
+ok 75 - saturation process setter publishes new base and returns old base
+ok 76 - positive saturated thread stays at class maximum
+ok 77 - negative saturated thread stays at class minimum
+ok 78 - process move preserves positive saturation increment
+ok 79 - process move preserves negative saturation increment
+ok 80 - reference retiring public thread
+ok 81 - wait for worker retirement
+# retire case=0 member=0 exit_notify_member=1 exit_count=1 links_self=1
+ok 82 - terminated referenced thread leaves process list
+ok 83 - termination callback runs once
+ok 84 - termination callback precedes process list removal
+# terminal_priority case=0 process_base=9 thread_base=9 query_increment=0
+ok 85 - referenced terminated thread keeps its process-relative base query
+ok 86 - reference retiring public thread
+ok 87 - wait for worker retirement
+# retire case=1 member=0 exit_notify_member=1 exit_count=1 links_self=1
+ok 88 - terminated referenced thread leaves process list
+ok 89 - termination callback runs once
+ok 90 - termination callback precedes process list removal
+# terminal_priority case=1 process_base=9 thread_base=9 query_increment=0
+ok 91 - referenced terminated thread keeps its process-relative base query
+ok 92 - reference retiring public thread
+ok 93 - wait for worker retirement
+# retire case=2 member=0 exit_notify_member=1 exit_count=1 links_self=1
+ok 94 - terminated referenced thread leaves process list
+ok 95 - termination callback runs once
+ok 96 - termination callback precedes process list removal
+# terminal_priority case=2 process_base=9 thread_base=9 query_increment=0
+ok 97 - referenced terminated thread keeps its process-relative base query
+ok 98 - inheritance matrix process setter publishes chosen base
+# inheritance process=16 suspended=0
+ok 99 - create zero-TLS title thread
+# create case=0 suspended=0 simple=0 base=16 priority=16 member=1
+ok 100 - creation callback runs once
+ok 101 - creation callback observes inherited process priority
+ok 102 - creation callback observes public process membership
+ok 103 - worker reaches its first title instruction
+# entry case=0 base=16 priority=16 member=1
+ok 104 - new title thread inherits current process priority
+ok 105 - create and current pointers share public identity
+ok 106 - worker names the same process
+ok 107 - reference retiring public thread
+ok 108 - wait for worker retirement
+# retire case=0 member=0 exit_notify_member=1 exit_count=1 links_self=1
+ok 109 - terminated referenced thread leaves process list
+ok 110 - termination callback runs once
+ok 111 - termination callback precedes process list removal
+# terminal_priority case=0 process_base=16 thread_base=16 query_increment=0
+ok 112 - referenced terminated thread keeps its process-relative base query
+# inheritance process=16 suspended=1
+ok 113 - create zero-TLS title thread
+# create case=0 suspended=1 simple=0 base=16 priority=16 member=1
+ok 114 - creation callback runs once
+ok 115 - creation callback observes inherited process priority
+ok 116 - creation callback observes public process membership
+ok 117 - reference inheritance matrix suspended thread
+ok 118 - inheritance matrix suspended thread belongs to public process
+ok 119 - inheritance matrix suspended thread inherits selected process base
+ok 120 - resume inheritance matrix suspended thread
+ok 121 - worker reaches its first title instruction
+# entry case=0 base=16 priority=16 member=1
+ok 122 - new title thread inherits current process priority
+ok 123 - create and current pointers share public identity
+ok 124 - worker names the same process
+ok 125 - reference retiring public thread
+ok 126 - wait for worker retirement
+# retire case=0 member=0 exit_notify_member=1 exit_count=1 links_self=1
+ok 127 - terminated referenced thread leaves process list
+ok 128 - termination callback runs once
+ok 129 - termination callback precedes process list removal
+# terminal_priority case=0 process_base=16 thread_base=16 query_increment=0
+ok 130 - referenced terminated thread keeps its process-relative base query
+ok 131 - inheritance matrix process setter publishes chosen base
+# inheritance process=31 suspended=0
+ok 132 - create zero-TLS title thread
+# create case=0 suspended=0 simple=0 base=31 priority=31 member=1
+ok 133 - creation callback runs once
+ok 134 - creation callback observes inherited process priority
+ok 135 - creation callback observes public process membership
+ok 136 - worker reaches its first title instruction
+# entry case=0 base=31 priority=31 member=1
+ok 137 - new title thread inherits current process priority
+ok 138 - create and current pointers share public identity
+ok 139 - worker names the same process
+ok 140 - reference retiring public thread
+ok 141 - wait for worker retirement
+# retire case=0 member=0 exit_notify_member=1 exit_count=1 links_self=1
+ok 142 - terminated referenced thread leaves process list
+ok 143 - termination callback runs once
+ok 144 - termination callback precedes process list removal
+# terminal_priority case=0 process_base=31 thread_base=31 query_increment=0
+ok 145 - referenced terminated thread keeps its process-relative base query
+# inheritance process=31 suspended=1
+ok 146 - create zero-TLS title thread
+# create case=0 suspended=1 simple=0 base=31 priority=31 member=1
+ok 147 - creation callback runs once
+ok 148 - creation callback observes inherited process priority
+ok 149 - creation callback observes public process membership
+ok 150 - reference inheritance matrix suspended thread
+ok 151 - inheritance matrix suspended thread belongs to public process
+ok 152 - inheritance matrix suspended thread inherits selected process base
+ok 153 - resume inheritance matrix suspended thread
+ok 154 - worker reaches its first title instruction
+# entry case=0 base=31 priority=31 member=1
+ok 155 - new title thread inherits current process priority
+ok 156 - create and current pointers share public identity
+ok 157 - worker names the same process
+ok 158 - reference retiring public thread
+ok 159 - wait for worker retirement
+# retire case=0 member=0 exit_notify_member=1 exit_count=1 links_self=1
+ok 160 - terminated referenced thread leaves process list
+ok 161 - termination callback runs once
+ok 162 - termination callback precedes process list removal
+# terminal_priority case=0 process_base=31 thread_base=31 query_increment=0
+ok 163 - referenced terminated thread keeps its process-relative base query
+ok 164 - inheritance matrix process setter publishes chosen base
+# inheritance process=1 suspended=0
+ok 165 - create zero-TLS title thread
+# create case=0 suspended=0 simple=0 base=1 priority=1 member=1
+ok 166 - creation callback runs once
+ok 167 - creation callback observes inherited process priority
+ok 168 - creation callback observes public process membership
+ok 169 - worker reaches its first title instruction
+# entry case=0 base=1 priority=1 member=1
+ok 170 - new title thread inherits current process priority
+ok 171 - create and current pointers share public identity
+ok 172 - worker names the same process
+ok 173 - reference retiring public thread
+ok 174 - wait for worker retirement
+# retire case=0 member=0 exit_notify_member=1 exit_count=1 links_self=1
+ok 175 - terminated referenced thread leaves process list
+ok 176 - termination callback runs once
+ok 177 - termination callback precedes process list removal
+# terminal_priority case=0 process_base=1 thread_base=1 query_increment=0
+ok 178 - referenced terminated thread keeps its process-relative base query
+# inheritance process=1 suspended=1
+ok 179 - create zero-TLS title thread
+# create case=0 suspended=1 simple=0 base=1 priority=1 member=1
+ok 180 - creation callback runs once
+ok 181 - creation callback observes inherited process priority
+ok 182 - creation callback observes public process membership
+ok 183 - reference inheritance matrix suspended thread
+ok 184 - inheritance matrix suspended thread belongs to public process
+ok 185 - inheritance matrix suspended thread inherits selected process base
+ok 186 - resume inheritance matrix suspended thread
+ok 187 - worker reaches its first title instruction
+# entry case=0 base=1 priority=1 member=1
+ok 188 - new title thread inherits current process priority
+ok 189 - create and current pointers share public identity
+ok 190 - worker names the same process
+ok 191 - reference retiring public thread
+ok 192 - wait for worker retirement
+# retire case=0 member=0 exit_notify_member=1 exit_count=1 links_self=1
+ok 193 - terminated referenced thread leaves process list
+ok 194 - termination callback runs once
+ok 195 - termination callback precedes process list removal
+# terminal_priority case=0 process_base=1 thread_base=1 query_increment=0
+ok 196 - referenced terminated thread keeps its process-relative base query
+ok 197 - retirement restores original public list count
+# final process_threads=1 stack_count=1
+# checks=197 failures=0
+1..197

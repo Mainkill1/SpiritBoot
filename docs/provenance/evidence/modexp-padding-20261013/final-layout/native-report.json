@@ -1,0 +1,2100 @@
+{
+  "schema": 1,
+  "kernel_candidate_sha256": "80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36",
+  "kernel_prefix": "probe-crypto-layout",
+  "validated_kernel_runs": 21,
+  "workloads_per_run": 40,
+  "samples_per_workload": {
+    "object-cold-64": 1,
+    "others": 3
+  },
+  "contracts": [
+    {
+      "run": "probe-crypto-contract-complex-20261013-233013",
+      "side": "complex",
+      "tap": {
+        "passed": false,
+        "plan": 364,
+        "ran": 364,
+        "errors": [],
+        "ok": 357,
+        "failed": 7,
+        "todo": 0,
+        "skipped": 0
+      },
+      "failures": [
+        [
+          "282",
+          "modexp matches fixed independent residue across full output width"
+        ],
+        [
+          "286",
+          "modexp matches fixed independent residue across full output width"
+        ],
+        [
+          "290",
+          "modexp matches fixed independent residue across full output width"
+        ],
+        [
+          "294",
+          "modexp matches fixed independent residue across full output width"
+        ],
+        [
+          "298",
+          "modexp matches fixed independent residue across full output width"
+        ],
+        [
+          "302",
+          "modexp matches fixed independent residue across full output width"
+        ],
+        [
+          "306",
+          "modexp matches fixed independent residue across full output width"
+        ]
+      ],
+      "vector10": [
+        [
+          "10",
+          "512",
+          "0",
+          "1",
+          "00000000",
+          "00000004"
+        ],
+        [
+          "10",
+          "512",
+          "1",
+          "1",
+          "00000000",
+          "00000004"
+        ],
+        [
+          "10",
+          "512",
+          "2",
+          "1",
+          "00000000",
+          "00000004"
+        ],
+        [
+          "10",
+          "512",
+          "3",
+          "1",
+          "00000000",
+          "00000004"
+        ],
+        [
+          "10",
+          "512",
+          "4",
+          "1",
+          "00000000",
+          "00000004"
+        ],
+        [
+          "10",
+          "512",
+          "5",
+          "1",
+          "00000000",
+          "00000004"
+        ],
+        [
+          "10",
+          "512",
+          "6",
+          "1",
+          "00000000",
+          "00000004"
+        ]
+      ]
+    },
+    {
+      "run": "probe-crypto-contract-baseline-20261013-233018",
+      "side": "baseline",
+      "tap": {
+        "passed": true,
+        "plan": 364,
+        "ran": 364,
+        "errors": [],
+        "ok": 364,
+        "failed": 0,
+        "todo": 0,
+        "skipped": 0
+      },
+      "failures": [],
+      "vector10": [
+        [
+          "10",
+          "512",
+          "0",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "1",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "2",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "3",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "4",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "5",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "6",
+          "1",
+          "00000000",
+          "0000000d"
+        ]
+      ]
+    },
+    {
+      "run": "probe-crypto-contract-crypto-20261013-233032",
+      "side": "crypto",
+      "tap": {
+        "passed": true,
+        "plan": 364,
+        "ran": 364,
+        "errors": [],
+        "ok": 364,
+        "failed": 0,
+        "todo": 0,
+        "skipped": 0
+      },
+      "failures": [],
+      "vector10": [
+        [
+          "10",
+          "512",
+          "0",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "1",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "2",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "3",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "4",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "5",
+          "1",
+          "00000000",
+          "0000000d"
+        ],
+        [
+          "10",
+          "512",
+          "6",
+          "1",
+          "00000000",
+          "0000000d"
+        ]
+      ]
+    }
+  ],
+  "frequencies_hz": {
+    "complex": 3375000,
+    "baseline": 3374488,
+    "crypto": 3374488
+  },
+  "aggregate_all_recorded_workload_samples": {
+    "complex": {
+      "median_us": 150834.37037037036,
+      "min_us": 148206.22222222222,
+      "max_us": 158438.8148148148,
+      "raw_totals_exact": [
+        {
+          "numerator": 1370512,
+          "denominator": 9
+        },
+        {
+          "numerator": 4036712,
+          "denominator": 27
+        },
+        {
+          "numerator": 4022744,
+          "denominator": 27
+        },
+        {
+          "numerator": 1407080,
+          "denominator": 9
+        },
+        {
+          "numerator": 4072528,
+          "denominator": 27
+        },
+        {
+          "numerator": 4277848,
+          "denominator": 27
+        },
+        {
+          "numerator": 1333856,
+          "denominator": 9
+        }
+      ]
+    },
+    "baseline": {
+      "median_us": 1492736.6759046114,
+      "min_us": 1478919.7650132405,
+      "max_us": 1520208.399022311,
+      "raw_totals_exact": [
+        {
+          "numerator": 624604875000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 623824625000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 48863375000,
+          "denominator": 32447
+        },
+        {
+          "numerator": 632597125000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 626516750000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 629652750000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 641240625000,
+          "denominator": 421811
+        }
+      ]
+    },
+    "crypto": {
+      "median_us": 423194.57055411075,
+      "min_us": 417253.8174680129,
+      "max_us": 436120.38329962944,
+      "raw_totals_exact": [
+        {
+          "numerator": 176002250000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 178197125000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 178508125000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 183960375000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 178361750000,
+          "denominator": 421811
+        },
+        {
+          "numerator": 14030250000,
+          "denominator": 32447
+        },
+        {
+          "numerator": 178892250000,
+          "denominator": 421811
+        }
+      ]
+    },
+    "median_change_percent": -71.64975059665824,
+    "lower_pairs": 7,
+    "higher_pairs": 0,
+    "range_class": "lower disjoint ranges",
+    "exact_median_difference_us": {
+      "numerator": 451144625000,
+      "denominator": 421811
+    }
+  },
+  "workloads": [
+    {
+      "workload": "empty",
+      "complex_median_us": 0.20533333333333334,
+      "complex_min_us": 0.18874074074074074,
+      "complex_max_us": 0.32296296296296295,
+      "baseline_median_us": 0.20091936910132738,
+      "baseline_min_us": 0.184916941473788,
+      "baseline_max_us": 0.20684619414856417,
+      "crypto_median_us": 0.1988449803347945,
+      "crypto_min_us": 0.19499254405409058,
+      "crypto_max_us": 0.22462666929027456,
+      "median_change_percent": -1.0324483775811208,
+      "lower_pairs": 4,
+      "higher_pairs": 3,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": 875,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 0.9684008782538693
+    },
+    {
+      "workload": "pin-1",
+      "complex_median_us": 0.6100740740740741,
+      "complex_min_us": 0.5931851851851851,
+      "complex_max_us": 0.6287407407407407,
+      "baseline_median_us": 1.028600486947946,
+      "baseline_min_us": 0.9868163703649264,
+      "baseline_max_us": 1.2775271389318914,
+      "crypto_median_us": 1.0294895107050315,
+      "crypto_min_us": 1.0102273293015118,
+      "crypto_max_us": 1.045195597080209,
+      "median_change_percent": 0.08643042350907519,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -375,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 1.6874828065223317
+    },
+    {
+      "workload": "pin-16",
+      "complex_median_us": 0.8005925925925926,
+      "complex_min_us": 0.7881481481481482,
+      "complex_max_us": 0.8616296296296296,
+      "baseline_median_us": 6.841334152025433,
+      "baseline_min_us": 6.563366057310027,
+      "baseline_max_us": 7.159604657062049,
+      "crypto_median_us": 6.810514661779802,
+      "crypto_min_us": 6.715092778519289,
+      "crypto_max_us": 7.090260804009379,
+      "median_change_percent": -0.45048947414017154,
+      "lower_pairs": 4,
+      "higher_pairs": 3,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": 1000,
+        "denominator": 32447
+      },
+      "crypto_over_complex": 8.506841962807858
+    },
+    {
+      "workload": "pin-64",
+      "complex_median_us": 1.3125925925925925,
+      "complex_min_us": 1.28,
+      "complex_max_us": 1.3392592592592591,
+      "baseline_median_us": 25.58017690387401,
+      "baseline_min_us": 24.47186062004073,
+      "baseline_max_us": 26.51957867386104,
+      "crypto_median_us": 25.360884377126247,
+      "crypto_min_us": 24.943043211296054,
+      "crypto_max_us": 26.0454326700821,
+      "median_change_percent": -0.8572752548656163,
+      "lower_pairs": 4,
+      "higher_pairs": 3,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": 92500,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 19.32121552433433
+    },
+    {
+      "workload": "pin-65",
+      "complex_median_us": 1.3096296296296297,
+      "complex_min_us": 1.277037037037037,
+      "complex_max_us": 1.3214814814814815,
+      "baseline_median_us": 31.210660698748967,
+      "baseline_min_us": 29.68153983656187,
+      "baseline_max_us": 32.55012315942448,
+      "crypto_median_us": 30.83430730824943,
+      "crypto_min_us": 30.179393140529765,
+      "crypto_max_us": 32.055233267980206,
+      "median_change_percent": -1.2058488416255222,
+      "lower_pairs": 4,
+      "higher_pairs": 3,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": 158750,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 23.54429573876512
+    },
+    {
+      "workload": "pin-256",
+      "complex_median_us": 3.4444444444444446,
+      "complex_min_us": 3.3425925925925926,
+      "complex_max_us": 3.5925925925925926,
+      "baseline_median_us": 119.67556263350174,
+      "baseline_min_us": 114.79519263366768,
+      "baseline_max_us": 121.11096557462939,
+      "crypto_median_us": 118.81432086882513,
+      "crypto_min_us": 117.48078523319685,
+      "crypto_max_us": 121.12022623876571,
+      "median_change_percent": -0.7196471407567903,
+      "lower_pairs": 4,
+      "higher_pairs": 3,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": 1453125,
+        "denominator": 1687244
+      },
+      "crypto_over_complex": 34.494480252239555
+    },
+    {
+      "workload": "pin-4096",
+      "complex_median_us": 45.48148148148148,
+      "complex_min_us": 44.44444444444444,
+      "complex_max_us": 58.888888888888886,
+      "baseline_median_us": 1883.3968293856726,
+      "baseline_min_us": 1837.538020582678,
+      "baseline_max_us": 1923.551069080702,
+      "crypto_median_us": 1888.730971928186,
+      "crypto_min_us": 1849.8361825556944,
+      "crypto_max_us": 1983.634257997065,
+      "median_change_percent": 0.28321925890960586,
+      "lower_pairs": 4,
+      "higher_pairs": 3,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -2250000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 41.52747250982168
+    },
+    {
+      "workload": "pin-reject-0",
+      "complex_median_us": 0.43792592592592594,
+      "complex_min_us": 0.42785185185185187,
+      "complex_max_us": 0.4622222222222222,
+      "baseline_median_us": 0.5085215890529171,
+      "baseline_min_us": 0.48540697136869354,
+      "baseline_max_us": 0.5523800944024694,
+      "crypto_median_us": 0.506743541538746,
+      "crypto_min_us": 0.49726062146316713,
+      "crypto_max_us": 0.5120776840812591,
+      "median_change_percent": -0.34965034965034963,
+      "lower_pairs": 5,
+      "higher_pairs": 2,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": 750,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 1.1571444199548497
+    },
+    {
+      "workload": "pin-reject-32",
+      "complex_median_us": 0.6044444444444445,
+      "complex_min_us": 0.5896296296296296,
+      "complex_max_us": 0.6162962962962963,
+      "baseline_median_us": 6.315032087830806,
+      "baseline_min_us": 6.101666386130281,
+      "baseline_max_us": 6.421714938681068,
+      "crypto_median_us": 6.341702800543371,
+      "crypto_min_us": 6.240946774740346,
+      "crypto_max_us": 6.424678351204687,
+      "median_change_percent": 0.4223369310183013,
+      "lower_pairs": 4,
+      "higher_pairs": 2,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -11250,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 10.491787721487196
+    },
+    {
+      "workload": "pin-reject-64",
+      "complex_median_us": 0.7881481481481482,
+      "complex_min_us": 0.7614814814814815,
+      "complex_max_us": 0.802962962962963,
+      "baseline_median_us": 12.126284046646484,
+      "baseline_min_us": 11.729186768481618,
+      "baseline_max_us": 12.304088798063587,
+      "crypto_median_us": 12.215186422355035,
+      "crypto_min_us": 11.915881757469577,
+      "crypto_max_us": 12.321869273205298,
+      "median_change_percent": 0.7331378299120235,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -37500,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 15.498591795281296
+    },
+    {
+      "workload": "pin-reject-65",
+      "complex_median_us": 0.794074074074074,
+      "complex_min_us": 0.7644444444444445,
+      "complex_max_us": 0.8118518518518518,
+      "baseline_median_us": 12.259637610209312,
+      "baseline_min_us": 11.909954932422341,
+      "baseline_max_us": 12.455222836768126,
+      "crypto_median_us": 12.360393636012338,
+      "crypto_min_us": 12.090723096363064,
+      "crypto_max_us": 12.517454499764112,
+      "median_change_percent": 0.8218515832729031,
+      "lower_pairs": 2,
+      "higher_pairs": 5,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -42500,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 15.565794224455836
+    },
+    {
+      "workload": "pool-1",
+      "complex_median_us": 2.287037037037037,
+      "complex_min_us": 2.0833333333333335,
+      "complex_max_us": 2.4537037037037037,
+      "baseline_median_us": 2.907848538800553,
+      "baseline_min_us": 2.6439196109157894,
+      "baseline_max_us": 3.2967964325254675,
+      "crypto_median_us": 3.088431489458549,
+      "crypto_min_us": 2.9124788708687066,
+      "crypto_max_us": 4.218232514088063,
+      "median_change_percent": 6.210191082802548,
+      "lower_pairs": 1,
+      "higher_pairs": 6,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -46875,
+        "denominator": 259576
+      },
+      "crypto_over_complex": 1.3504072909373412
+    },
+    {
+      "workload": "pool-16",
+      "complex_median_us": 9.555555555555555,
+      "complex_min_us": 8.796296296296296,
+      "complex_max_us": 11.0,
+      "baseline_median_us": 14.650370663638455,
+      "baseline_min_us": 14.298465426458769,
+      "baseline_max_us": 15.00227590081814,
+      "crypto_median_us": 15.298617153179979,
+      "crypto_min_us": 14.854105274637218,
+      "crypto_max_us": 17.798996469983003,
+      "median_change_percent": 4.424778761061947,
+      "lower_pairs": 0,
+      "higher_pairs": 6,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -546875,
+        "denominator": 843622
+      },
+      "crypto_over_complex": 1.6010180741699978
+    },
+    {
+      "workload": "pool-256",
+      "complex_median_us": 99.18518518518519,
+      "complex_min_us": 98.0,
+      "complex_max_us": 100.88888888888889,
+      "baseline_median_us": 167.9514047760727,
+      "baseline_min_us": 160.24653221466485,
+      "baseline_max_us": 170.09987885569603,
+      "crypto_median_us": 168.76634322006777,
+      "crypto_min_us": 167.43280758443947,
+      "crypto_max_us": 182.5462114548933,
+      "median_change_percent": 0.48522276135862374,
+      "lower_pairs": 2,
+      "higher_pairs": 5,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -343750,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 1.701527732241161
+    },
+    {
+      "workload": "pool-1024",
+      "complex_median_us": 372.44444444444446,
+      "complex_min_us": 363.55555555555554,
+      "complex_max_us": 429.9259259259259,
+      "baseline_median_us": 649.8763664295146,
+      "baseline_min_us": 624.0946774740346,
+      "baseline_max_us": 654.9141677196659,
+      "crypto_median_us": 657.8775802432843,
+      "crypto_min_us": 647.2092951582581,
+      "crypto_max_us": 781.1555412258097,
+      "median_change_percent": 1.231190150478796,
+      "lower_pairs": 0,
+      "higher_pairs": 7,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -3375000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 1.7663777512498684
+    },
+    {
+      "workload": "sysva-1",
+      "complex_median_us": 1.8518518518518519,
+      "complex_min_us": 1.6666666666666667,
+      "complex_max_us": 2.6296296296296298,
+      "baseline_median_us": 12.798237836376956,
+      "baseline_min_us": 12.390768614379425,
+      "baseline_max_us": 13.474266318327402,
+      "crypto_median_us": 12.788977172240648,
+      "crypto_min_us": 12.742673851559111,
+      "crypto_max_us": 22.373764553318903,
+      "median_change_percent": -0.0723589001447178,
+      "lower_pairs": 3,
+      "higher_pairs": 3,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": 15625,
+        "denominator": 1687244
+      },
+      "crypto_over_complex": 6.90604767300995
+    },
+    {
+      "workload": "sysva-16",
+      "complex_median_us": 9.703703703703704,
+      "complex_min_us": 9.518518518518519,
+      "complex_max_us": 10.074074074074074,
+      "baseline_median_us": 54.34157715185237,
+      "baseline_min_us": 53.37846808167639,
+      "baseline_max_us": 93.86609168561274,
+      "crypto_median_us": 56.934563110018466,
+      "crypto_min_us": 52.044932446048115,
+      "crypto_max_us": 63.676326601250324,
+      "median_change_percent": 4.771642808452625,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -1093750,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 5.867302305230911
+    },
+    {
+      "workload": "sysva-1024",
+      "complex_median_us": 605.6296296296297,
+      "complex_min_us": 598.5185185185185,
+      "complex_max_us": 689.1851851851852,
+      "baseline_median_us": 2784.7187484442084,
+      "baseline_min_us": 2708.2627053348538,
+      "baseline_max_us": 2833.0223725791884,
+      "crypto_median_us": 2802.499223585919,
+      "crypto_min_us": 2734.044394290334,
+      "crypto_max_us": 3412.073179694223,
+      "median_change_percent": 0.6385016494625945,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -7500000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 4.627414324658746
+    },
+    {
+      "workload": "sysva-1025",
+      "complex_median_us": 604.4444444444445,
+      "complex_min_us": 589.6296296296297,
+      "complex_max_us": 609.4814814814815,
+      "baseline_median_us": 2781.75533592059,
+      "baseline_min_us": 2693.741983969124,
+      "baseline_max_us": 2815.2418974374777,
+      "crypto_median_us": 2814.3528736803923,
+      "crypto_min_us": 2697.001737745104,
+      "crypto_max_us": 3442.5963286874926,
+      "median_change_percent": 1.1718333865984873,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -13750000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 4.656098504250649
+    },
+    {
+      "workload": "sysva-4096",
+      "complex_median_us": 2752.296296296296,
+      "complex_min_us": 2731.8518518518517,
+      "complex_max_us": 3291.8518518518517,
+      "baseline_median_us": 11252.966375936143,
+      "baseline_min_us": 11060.640903153308,
+      "baseline_max_us": 11607.390513760902,
+      "crypto_median_us": 11300.084635061674,
+      "crypto_min_us": 11035.15555545019,
+      "crypto_max_us": 13825.20844643691,
+      "median_change_percent": 0.41871856318963474,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -19875000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 4.105693362399951
+    },
+    {
+      "workload": "object-cold-64",
+      "complex_median_us": 120.0,
+      "complex_min_us": 118.81481481481481,
+      "complex_max_us": 141.92592592592592,
+      "baseline_median_us": 397.9863019219508,
+      "baseline_min_us": 391.46679436999034,
+      "baseline_max_us": 686.3263404700209,
+      "crypto_median_us": 414.285070801852,
+      "crypto_min_us": 400.9497144455692,
+      "crypto_max_us": 684.5482929558499,
+      "median_change_percent": 4.095309009679822,
+      "lower_pairs": 2,
+      "higher_pairs": 5,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -6875000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 3.4523755900154334
+    },
+    {
+      "workload": "object-warm-1",
+      "complex_median_us": 0.8743703703703704,
+      "complex_min_us": 0.8385185185185186,
+      "complex_max_us": 0.8939259259259259,
+      "baseline_median_us": 1.2037381670937932,
+      "baseline_min_us": 1.1569162492206224,
+      "baseline_max_us": 1.2256674197685693,
+      "crypto_median_us": 1.3053832166539043,
+      "crypto_min_us": 1.2896771302787267,
+      "crypto_max_us": 1.311310041701141,
+      "median_change_percent": 8.44411619891679,
+      "lower_pairs": 0,
+      "higher_pairs": 7,
+      "range_class": "higher disjoint ranges",
+      "exact_median_difference_us": {
+        "numerator": -42875,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 1.4929408187756446
+    },
+    {
+      "workload": "object-warm-8",
+      "complex_median_us": 4.423611111111111,
+      "complex_min_us": 4.2592592592592595,
+      "complex_max_us": 4.516203703703703,
+      "baseline_median_us": 7.318239833716996,
+      "baseline_min_us": 7.0867232303093095,
+      "baseline_max_us": 7.4015858109437636,
+      "crypto_median_us": 8.010474477905982,
+      "crypto_min_us": 7.945649828951829,
+      "crypto_max_us": 8.089190123064595,
+      "median_change_percent": 9.459031951913952,
+      "lower_pairs": 0,
+      "higher_pairs": 7,
+      "range_class": "higher disjoint ranges",
+      "exact_median_difference_us": {
+        "numerator": -359375,
+        "denominator": 519152
+      },
+      "crypto_over_complex": 1.8108450939065328
+    },
+    {
+      "workload": "object-warm-64",
+      "complex_median_us": 32.31481481481482,
+      "complex_min_us": 31.61111111111111,
+      "complex_max_us": 45.68518518518518,
+      "baseline_median_us": 79.91953149633366,
+      "baseline_min_us": 76.58569240726297,
+      "baseline_max_us": 83.58675449431144,
+      "crypto_median_us": 87.34658413365227,
+      "crypto_min_us": 83.5497118377662,
+      "crypto_max_us": 89.43949422845778,
+      "median_change_percent": 9.293163383545771,
+      "lower_pairs": 0,
+      "higher_pairs": 7,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -6265625,
+        "denominator": 843622
+      },
+      "crypto_over_complex": 2.7029888499812165
+    },
+    {
+      "workload": "modexp-1-e1-odd",
+      "complex_median_us": 46.074074074074076,
+      "complex_min_us": 45.24074074074074,
+      "complex_max_us": 56.58796296296296,
+      "baseline_median_us": 52.174581743956416,
+      "baseline_min_us": 51.81804617470858,
+      "baseline_max_us": 62.62987155384758,
+      "crypto_median_us": 54.18414586153514,
+      "crypto_min_us": 51.98473812916211,
+      "crypto_max_us": 55.943672047433566,
+      "median_change_percent": 3.851615193468229,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -3390625,
+        "denominator": 1687244
+      },
+      "crypto_over_complex": 1.176022458409525
+    },
+    {
+      "workload": "modexp-1-e65537-odd",
+      "complex_median_us": 54.370370370370374,
+      "complex_min_us": 49.648148148148145,
+      "complex_max_us": 61.73148148148148,
+      "baseline_median_us": 57.33277166787969,
+      "baseline_min_us": 55.16577625998374,
+      "baseline_max_us": 67.36207092750071,
+      "crypto_median_us": 57.193861705835076,
+      "crypto_min_us": 55.33246821443727,
+      "crypto_max_us": 60.76847806244977,
+      "median_change_percent": -0.24228719108383137,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": 234375,
+        "denominator": 1687244
+      },
+      "crypto_over_complex": 1.0519306989492827
+    },
+    {
+      "workload": "modexp-2-e3-even",
+      "complex_median_us": 47.592592592592595,
+      "complex_min_us": 45.55555555555556,
+      "complex_max_us": 55.77777777777778,
+      "baseline_median_us": 81.08637517750842,
+      "baseline_min_us": 77.04872561407835,
+      "baseline_max_us": 88.68011976928055,
+      "crypto_median_us": 61.6760231478079,
+      "crypto_min_us": 58.71261062418951,
+      "crypto_max_us": 62.93547347034573,
+      "median_change_percent": -23.937871174052077,
+      "lower_pairs": 7,
+      "higher_pairs": 0,
+      "range_class": "lower disjoint ranges",
+      "exact_median_difference_us": {
+        "numerator": 8187500,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 1.2959164396815668
+    },
+    {
+      "workload": "modexp-32-e3-odd",
+      "complex_median_us": 48.888888888888886,
+      "complex_min_us": 46.666666666666664,
+      "complex_max_us": 53.18518518518518,
+      "baseline_median_us": 1685.292702181783,
+      "baseline_min_us": 1655.658576945599,
+      "baseline_max_us": 1702.7768360711314,
+      "crypto_median_us": 62.528004248348196,
+      "crypto_min_us": 59.860932977091636,
+      "crypto_max_us": 65.93592865050935,
+      "median_change_percent": -96.28978371724986,
+      "lower_pairs": 7,
+      "higher_pairs": 0,
+      "range_class": "lower disjoint ranges",
+      "exact_median_difference_us": {
+        "numerator": 684500000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 1.2789819050798494
+    },
+    {
+      "workload": "modexp-64-e65537-odd",
+      "complex_median_us": 55.407407407407405,
+      "complex_min_us": 53.925925925925924,
+      "complex_max_us": 61.333333333333336,
+      "baseline_median_us": 7509.880017353744,
+      "baseline_min_us": 7263.027754136331,
+      "baseline_max_us": 7953.79921339178,
+      "crypto_median_us": 74.97433684754546,
+      "crypto_min_us": 72.89994808101258,
+      "crypto_max_us": 76.15970185699283,
+      "median_change_percent": -99.00165732775629,
+      "lower_pairs": 7,
+      "higher_pairs": 0,
+      "range_class": "lower disjoint ranges",
+      "exact_median_difference_us": {
+        "numerator": 3136125000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 1.3531464537992832
+    },
+    {
+      "workload": "modexp-512-e1-odd",
+      "complex_median_us": 82.66666666666667,
+      "complex_min_us": 78.22222222222223,
+      "complex_max_us": 88.0,
+      "baseline_median_us": 348046.57773268124,
+      "baseline_min_us": 342739.99492663774,
+      "baseline_max_us": 355836.5002335169,
+      "crypto_median_us": 189.06571900685378,
+      "crypto_min_us": 185.5096239785117,
+      "crypto_max_us": 200.32668659660368,
+      "median_change_percent": -99.94567804107183,
+      "lower_pairs": 7,
+      "higher_pairs": 0,
+      "range_class": "lower disjoint ranges",
+      "exact_median_difference_us": {
+        "numerator": 146730125000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 2.2870853105667797
+    },
+    {
+      "workload": "sha-0",
+      "complex_median_us": 4.52662037037037,
+      "complex_min_us": 4.203703703703703,
+      "complex_max_us": 7.079282407407407,
+      "baseline_median_us": 8.09324166362423,
+      "baseline_min_us": 7.913237504474753,
+      "baseline_max_us": 8.29234594255484,
+      "crypto_median_us": 8.167905768223209,
+      "crypto_min_us": 8.04867471746825,
+      "crypto_max_us": 8.488556263942856,
+      "median_change_percent": 0.9225488092683973,
+      "lower_pairs": 2,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -2015625,
+        "denominator": 26995904
+      },
+      "crypto_over_complex": 1.8044158997046413
+    },
+    {
+      "workload": "sha-1",
+      "complex_median_us": 4.371527777777778,
+      "complex_min_us": 4.293981481481482,
+      "complex_max_us": 6.778935185185185,
+      "baseline_median_us": 8.076456709877172,
+      "baseline_min_us": 7.948543786494425,
+      "baseline_max_us": 8.173114891799882,
+      "crypto_median_us": 8.16732697671469,
+      "crypto_min_us": 8.03478372126379,
+      "crypto_max_us": 8.858404037886636,
+      "median_change_percent": 1.1251254120682241,
+      "lower_pairs": 1,
+      "higher_pairs": 6,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -2453125,
+        "denominator": 26995904
+      },
+      "crypto_over_complex": 1.8683003727512555
+    },
+    {
+      "workload": "sha-63",
+      "complex_median_us": 5.947916666666667,
+      "complex_min_us": 5.887731481481482,
+      "complex_max_us": 6.858796296296297,
+      "baseline_median_us": 11.09890596736453,
+      "baseline_min_us": 10.751631062252999,
+      "baseline_max_us": 11.37441072541968,
+      "crypto_median_us": 11.207718770966144,
+      "crypto_min_us": 11.015559990137763,
+      "crypto_max_us": 11.8027164417239,
+      "median_change_percent": 0.9803921568627451,
+      "lower_pairs": 2,
+      "higher_pairs": 5,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -734375,
+        "denominator": 6748976
+      },
+      "crypto_over_complex": 1.884309986011821
+    },
+    {
+      "workload": "sha-65",
+      "complex_median_us": 5.783564814814815,
+      "complex_min_us": 5.736111111111111,
+      "complex_max_us": 6.924768518518518,
+      "baseline_median_us": 10.966941503422149,
+      "baseline_min_us": 10.68449124726477,
+      "baseline_max_us": 11.112796963568991,
+      "crypto_median_us": 11.073439140989684,
+      "crypto_min_us": 10.794461633883422,
+      "crypto_max_us": 11.553836093060637,
+      "median_change_percent": 0.9710787418197171,
+      "lower_pairs": 2,
+      "higher_pairs": 5,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -359375,
+        "denominator": 3374488
+      },
+      "crypto_over_complex": 1.9146390670032194
+    },
+    {
+      "workload": "sha-4096",
+      "complex_median_us": 93.51851851851852,
+      "complex_min_us": 92.37037037037037,
+      "complex_max_us": 96.51851851851852,
+      "baseline_median_us": 193.32562450955524,
+      "baseline_min_us": 191.95504621738172,
+      "baseline_max_us": 230.33123839823998,
+      "crypto_median_us": 194.0294349839146,
+      "crypto_min_us": 189.76952948121314,
+      "crypto_max_us": 199.8451320615157,
+      "median_change_percent": 0.36405441655489557,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -296875,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 2.0747701958676017
+    },
+    {
+      "workload": "sha-1MiB",
+      "complex_median_us": 23350.222222222223,
+      "complex_min_us": 22876.444444444445,
+      "complex_max_us": 24321.185185185186,
+      "baseline_median_us": 47986.538994952716,
+      "baseline_min_us": 47461.42229576754,
+      "baseline_max_us": 48940.46148630548,
+      "crypto_median_us": 48743.98723598958,
+      "crypto_min_us": 47798.65864095531,
+      "crypto_max_us": 49843.709623504365,
+      "median_change_percent": 1.5784598283208795,
+      "lower_pairs": 1,
+      "higher_pairs": 6,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -4500000,
+        "denominator": 5941
+      },
+      "crypto_over_complex": 2.087517059670649
+    },
+    {
+      "workload": "des-block",
+      "complex_median_us": 1.4861111111111112,
+      "complex_min_us": 1.349537037037037,
+      "complex_max_us": 3.513888888888889,
+      "baseline_median_us": 10.029299259621014,
+      "baseline_min_us": 9.397258932318028,
+      "baseline_max_us": 10.177469885801935,
+      "crypto_median_us": 10.006147599280247,
+      "crypto_min_us": 9.496811071783334,
+      "crypto_max_us": 10.172839553733782,
+      "median_change_percent": -0.23084025854108955,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": 78125,
+        "denominator": 3374488
+      },
+      "crypto_over_complex": 6.733108664936241
+    },
+    {
+      "workload": "des3-block",
+      "complex_median_us": 2.6296296296296298,
+      "complex_min_us": 2.439814814814815,
+      "complex_max_us": 2.824074074074074,
+      "baseline_median_us": 27.89312037855817,
+      "baseline_min_us": 26.152115520932362,
+      "baseline_max_us": 28.235764951601546,
+      "crypto_median_us": 28.03203034060278,
+      "crypto_min_us": 27.096703262835725,
+      "crypto_max_us": 28.527475871895234,
+      "median_change_percent": 0.49800796812749004,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -234375,
+        "denominator": 1687244
+      },
+      "crypto_over_complex": 10.660067876003875
+    },
+    {
+      "workload": "des-cbc-4096",
+      "complex_median_us": 423.85185185185185,
+      "complex_min_us": 412.44444444444446,
+      "complex_max_us": 444.44444444444446,
+      "baseline_median_us": 3636.403507732136,
+      "baseline_min_us": 3400.0713589735687,
+      "baseline_max_us": 3701.4504126255597,
+      "crypto_median_us": 3681.7437193434976,
+      "crypto_min_us": 3395.922581440503,
+      "crypto_max_us": 3876.736263397588,
+      "median_change_percent": 1.2468421481541847,
+      "lower_pairs": 2,
+      "higher_pairs": 5,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -19125000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 8.686392906525203
+    },
+    {
+      "workload": "des3-cbc-4096",
+      "complex_median_us": 998.8148148148148,
+      "complex_min_us": 991.7037037037037,
+      "complex_max_us": 1022.5185185185185,
+      "baseline_median_us": 10647.541197360903,
+      "baseline_min_us": 9796.152779325337,
+      "baseline_max_us": 10796.600847298909,
+      "crypto_median_us": 10755.113071968251,
+      "crypto_min_us": 9868.75638615399,
+      "crypto_max_us": 11160.80424645161,
+      "median_change_percent": 1.0102978012802672,
+      "lower_pairs": 3,
+      "higher_pairs": 4,
+      "range_class": "overlapping ranges",
+      "exact_median_difference_us": {
+        "numerator": -45375000,
+        "denominator": 421811
+      },
+      "crypto_over_complex": 10.767874997891678
+    }
+  ],
+  "chronological_execution": [
+    {
+      "run": "probe-crypto-layout-0-baseline-20261013-234948",
+      "pair": 0,
+      "side": "baseline",
+      "derived_start": "2026-10-13T23:49:49.212208+00:00",
+      "end": "2026-10-13T23:49:58.035001+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-0-crypto-20261013-234958",
+      "pair": 0,
+      "side": "crypto",
+      "derived_start": "2026-10-13T23:49:58.467108+00:00",
+      "end": "2026-10-13T23:50:06.263809+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-0-complex-20261013-235006",
+      "pair": 0,
+      "side": "complex",
+      "derived_start": "2026-10-13T23:50:06.690939+00:00",
+      "end": "2026-10-13T23:50:11.514721+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-1-complex-20261013-235011",
+      "pair": 1,
+      "side": "complex",
+      "derived_start": "2026-10-13T23:50:11.937786+00:00",
+      "end": "2026-10-13T23:50:16.817370+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-1-crypto-20261013-235016",
+      "pair": 1,
+      "side": "crypto",
+      "derived_start": "2026-10-13T23:50:17.240385+00:00",
+      "end": "2026-10-13T23:50:24.981491+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-1-baseline-20261013-235024",
+      "pair": 1,
+      "side": "baseline",
+      "derived_start": "2026-10-13T23:50:25.399608+00:00",
+      "end": "2026-10-13T23:50:34.133782+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-2-baseline-20261013-235034",
+      "pair": 2,
+      "side": "baseline",
+      "derived_start": "2026-10-13T23:50:34.560784+00:00",
+      "end": "2026-10-13T23:50:43.333872+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-2-crypto-20261013-235043",
+      "pair": 2,
+      "side": "crypto",
+      "derived_start": "2026-10-13T23:50:43.750692+00:00",
+      "end": "2026-10-13T23:50:51.417963+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-2-complex-20261013-235051",
+      "pair": 2,
+      "side": "complex",
+      "derived_start": "2026-10-13T23:50:51.835503+00:00",
+      "end": "2026-10-13T23:50:56.668241+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-3-complex-20261013-235056",
+      "pair": 3,
+      "side": "complex",
+      "derived_start": "2026-10-13T23:50:57.087358+00:00",
+      "end": "2026-10-13T23:51:01.856922+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-3-crypto-20261013-235101",
+      "pair": 3,
+      "side": "crypto",
+      "derived_start": "2026-10-13T23:51:02.289363+00:00",
+      "end": "2026-10-13T23:51:09.955408+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-3-baseline-20261013-235109",
+      "pair": 3,
+      "side": "baseline",
+      "derived_start": "2026-10-13T23:51:10.381082+00:00",
+      "end": "2026-10-13T23:51:19.091120+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-4-baseline-20261013-235119",
+      "pair": 4,
+      "side": "baseline",
+      "derived_start": "2026-10-13T23:51:19.520027+00:00",
+      "end": "2026-10-13T23:51:28.301833+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-4-crypto-20261013-235128",
+      "pair": 4,
+      "side": "crypto",
+      "derived_start": "2026-10-13T23:51:28.726669+00:00",
+      "end": "2026-10-13T23:51:36.365388+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-4-complex-20261013-235136",
+      "pair": 4,
+      "side": "complex",
+      "derived_start": "2026-10-13T23:51:36.782204+00:00",
+      "end": "2026-10-13T23:51:41.582264+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-5-complex-20261013-235141",
+      "pair": 5,
+      "side": "complex",
+      "derived_start": "2026-10-13T23:51:42.007930+00:00",
+      "end": "2026-10-13T23:51:46.793530+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-5-crypto-20261013-235146",
+      "pair": 5,
+      "side": "crypto",
+      "derived_start": "2026-10-13T23:51:47.214846+00:00",
+      "end": "2026-10-13T23:51:54.895164+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-5-baseline-20261013-235154",
+      "pair": 5,
+      "side": "baseline",
+      "derived_start": "2026-10-13T23:51:55.316932+00:00",
+      "end": "2026-10-13T23:52:03.951272+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-6-baseline-20261013-235203",
+      "pair": 6,
+      "side": "baseline",
+      "derived_start": "2026-10-13T23:52:04.370005+00:00",
+      "end": "2026-10-13T23:52:13.183740+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-6-crypto-20261013-235213",
+      "pair": 6,
+      "side": "crypto",
+      "derived_start": "2026-10-13T23:52:13.603523+00:00",
+      "end": "2026-10-13T23:52:21.365991+00:00"
+    },
+    {
+      "run": "probe-crypto-layout-6-complex-20261013-235221",
+      "pair": 6,
+      "side": "complex",
+      "derived_start": "2026-10-13T23:52:21.795631+00:00",
+      "end": "2026-10-13T23:52:26.670398+00:00"
+    }
+  ],
+  "manifest": [
+    {
+      "run": "probe-crypto-contract-complex-20261013-233013",
+      "side": "complex",
+      "bios": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "probe": "859e5e1220d2dfa70075ce40fdcbf9fbf6ff3e21200f0507030e0bfb99988f26",
+      "inputs": {
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "configSha256": "9479EB0D1B8CF6A03C2E66E19037BF53AF8950B9457ED8CA4C9E0A7BF57A3274",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91"
+      },
+      "files": {
+        "serial.log": "77a3f867128d222345a48a3845690d70b4f6c9eecd8b9cbe3e52e343c15663f9",
+        "launch.json": "42e4004b9e817469f57eee8b17649d812031394f7e383eca818fcb1d88c361ce",
+        "inputs.json": "4d815c5c51746bceb0e0f5de1463cbed25110212cdd2b0479eb5625eaafa7f4c",
+        "result.json": "69ecde5bf1bb21d2d901d6c457d41f4e7dd279ff47f2c98d567198ef803a367e",
+        "launch-xemu.toml": "9479eb0d1b8cf6a03c2e66e19037bf53af8950b9457ed8ca4c9e0a7bf57a3274",
+        "xemu.toml": "c31fd633c73b139981941f61579cbdc96af33a432928a8cfdc37b9873125d70d"
+      },
+      "result": {
+        "exitCode": 0,
+        "elapsedSeconds": 5.0740682,
+        "exited": true,
+        "utc": "2026-10-13T23:30:18.7728232Z"
+      }
+    },
+    {
+      "run": "probe-crypto-contract-baseline-20261013-233018",
+      "side": "baseline",
+      "bios": "be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827",
+      "probe": "859e5e1220d2dfa70075ce40fdcbf9fbf6ff3e21200f0507030e0bfb99988f26",
+      "inputs": {
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "configSha256": "5908A8934B1C3DF39DFD64A28A593A3F95228FB5B4F3E4F0FF28E477FA6D9DB8",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91"
+      },
+      "files": {
+        "serial.log": "fffbb29842e3060aa40926630c3b226fda3f5ddc1cecdd4a78bc88cc3335d35e",
+        "launch.json": "061a0ef4c269dcda7f7c0f83d93298b5d0f184351629df45842954124355688d",
+        "inputs.json": "6d4f3f195e165d4d3cc1e02389f78deaa4fc3cf440971802cf2335da42797392",
+        "result.json": "c02d168dcdfb5d6782a01dbd1e5b35c19e4c44effdd0e4730b886341262a8109",
+        "launch-xemu.toml": "5908a8934b1c3df39dfd64a28a593a3f95228fb5b4f3e4f0ff28e477fa6d9db8",
+        "xemu.toml": "5f220e3c83eebce493e40adaa243d6187008fd267de66eecae84698223b72ac1"
+      },
+      "result": {
+        "exitCode": 0,
+        "elapsedSeconds": 12.9900638,
+        "exited": true,
+        "utc": "2026-10-13T23:30:32.1859970Z"
+      }
+    },
+    {
+      "run": "probe-crypto-contract-crypto-20261013-233032",
+      "side": "crypto",
+      "bios": "d0e907d32d12d950dbcf97d9678079bc81e3dead5c8f5d66079cbd30621d5cc2",
+      "probe": "859e5e1220d2dfa70075ce40fdcbf9fbf6ff3e21200f0507030e0bfb99988f26",
+      "inputs": {
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "configSha256": "371227FCE2ABE26D34BC37B45409BED2AD5FAC940A5578E59EC89731F3FB5692",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91"
+      },
+      "files": {
+        "serial.log": "fffbb29842e3060aa40926630c3b226fda3f5ddc1cecdd4a78bc88cc3335d35e",
+        "launch.json": "1d07744b7c5d1db71a9c5540f210012e87ab5dbc114d89900efd442b25378b6f",
+        "inputs.json": "19776529e1722e0982b95de8971c4711cbd71936b1c9aace4d7c3655965a41cc",
+        "result.json": "cd9e2c311a721af3d4d0e9e37b35c6c1162c52948ea4466bc3a4cbfc08ff1b46",
+        "launch-xemu.toml": "371227fce2abe26d34bc37b45409bed2ad5fac940a5578e59ec89731f3fb5692",
+        "xemu.toml": "7176ba04f537377a5c985ca082d8c9a126e2194cfb9405f468e9bad1c91cd0b0"
+      },
+      "result": {
+        "exitCode": 0,
+        "elapsedSeconds": 7.851198,
+        "exited": true,
+        "utc": "2026-10-13T23:30:40.4567709Z"
+      }
+    },
+    {
+      "run": "probe-crypto-layout-0-complex-20261013-235006",
+      "side": "complex",
+      "bios": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "E7E70A48C4B714ED5D5707B8274C7EE8DB281E35E8561ACA7778EDD164DE4BA0"
+      },
+      "files": {
+        "serial.log": "941fdd33c9f192a1dd6ff41c7f18b31556e2275e46ff840d0553b9521fe6eced",
+        "launch.json": "9c2160ef8edfa5050f98d7b9db261d2621dd3d047135bf73fa42586b28b5566d",
+        "inputs.json": "f8aa9ce9522d6ab69bdff77ed51fe5e0087df7592fa08c9c3b0685b64d14660e",
+        "result.json": "db0727f0479cfdc7486dd5c92d9f979808578f56dbbef78fc4d08db251952624",
+        "launch-xemu.toml": "e7e70a48c4b714ed5d5707b8274c7ee8db281e35e8561aca7778edd164de4ba0",
+        "xemu.toml": "a1b082edddde9fb89970ace607ffc53434f808496471c899bbb310766fc40da6"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:50:11.5147219Z",
+        "exitCode": 0,
+        "elapsedSeconds": 4.8237817
+      }
+    },
+    {
+      "run": "probe-crypto-layout-0-baseline-20261013-234948",
+      "side": "baseline",
+      "bios": "be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "3CE682EBE3F0E1A1F74F126AB0D569E7888E47F188D7BAADE4B3BBB8A6A2FE39"
+      },
+      "files": {
+        "serial.log": "6f97e45663237e6e8fc0d4cae7d71224e5133dceb517e8cb4049c7de6c16577c",
+        "launch.json": "3c498ed3378591f9e85b8655c5b7add17df55d9618b1c276825bf5565a668865",
+        "inputs.json": "f67df7d395dc86be6cc96e97bc93d1a6a1c52ea76d9547b181285e995781998e",
+        "result.json": "d9d8f46cddda4b4bad0827165b2db15915ce07deb91b4b1de6db32c623079e8a",
+        "launch-xemu.toml": "3ce682ebe3f0e1a1f74f126ab0d569e7888e47f188d7baade4b3bbb8a6a2fe39",
+        "xemu.toml": "d02b920498c36f4e91428e6ca1479e7e1f20fd776285ef8fd6d612b7e5093ee3"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:49:58.0350015Z",
+        "exitCode": 0,
+        "elapsedSeconds": 8.8227934
+      }
+    },
+    {
+      "run": "probe-crypto-layout-0-crypto-20261013-234958",
+      "side": "crypto",
+      "bios": "80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "A00B274E4A3F10E9CDCFB7F09DBB3F137CAD7B4E2F7DA7F4761F7B43D6754838"
+      },
+      "files": {
+        "serial.log": "940a8b16678c066cf2ecf395a3fd5d547682cbb57487af33ed67b2e5af04839c",
+        "launch.json": "c94aa73e900157295acb0e76840e7dde1cd6a96177c5f8ecd8144fa6bfd77234",
+        "inputs.json": "c417b19c57a9c52643d044c51ce6b965505d03b92ef144889a7514a468fb7082",
+        "result.json": "3320a9a420f2e43c2975f7f5b565e19e8d0cad2fa4c0466737d17ef72657e8c5",
+        "launch-xemu.toml": "a00b274e4a3f10e9cdcfb7f09dbb3f137cad7b4e2f7da7f4761f7b43d6754838",
+        "xemu.toml": "b23cfa0fb11cebfa1c176b53d85ae8be668c5917113985e8f2bde4cc96502374"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:50:06.2638091Z",
+        "exitCode": 0,
+        "elapsedSeconds": 7.7967009
+      }
+    },
+    {
+      "run": "probe-crypto-layout-1-complex-20261013-235011",
+      "side": "complex",
+      "bios": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "71D621C744C93221994CDAC5DBE92954E0B64230E6844DF34118AFA311864AF6"
+      },
+      "files": {
+        "serial.log": "d4076a9f526466431c0ab02ead48b5b1f58fc3e760d171ae2e889bf2deb070d8",
+        "launch.json": "21a1c37ba8e2ae61d0a7f7d8c9a7734fc5d08a258546db5ffa9abcf855e2f9e4",
+        "inputs.json": "af9aa57a29507f09cfae8b19e2a77808a09f5079449db213b970d9c28ae156e4",
+        "result.json": "b9313214e072bcfa3dab99767edc7ac72c84b9745eac51b03db6c0af01bc3d3b",
+        "launch-xemu.toml": "71d621c744c93221994cdac5dbe92954e0b64230e6844df34118afa311864af6",
+        "xemu.toml": "e081a028ec87a4f59b2ed0e864c84c445c1739cfa9858714e34ff013ae56facf"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:50:16.8173700Z",
+        "exitCode": 0,
+        "elapsedSeconds": 4.8795836
+      }
+    },
+    {
+      "run": "probe-crypto-layout-1-baseline-20261013-235024",
+      "side": "baseline",
+      "bios": "be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "D685AB2973321C3B931D94167CC000670C05725DD141FD350F9642DF3B9D8470"
+      },
+      "files": {
+        "serial.log": "29686850fd74681c1ef018e86bbcdc4233fdee85db7a6f41990b543dfca820b9",
+        "launch.json": "3ec5f428eeca9e1160032d6f24165bd86776f1eb7b2d42dbd4b598b87133a694",
+        "inputs.json": "d7da2b46d5b135aea2ed57351ac14468025bf074a9accf9fbc264f3807340498",
+        "result.json": "80156f89070e380d8b322d94660a20dd7ff1084795cac2f9c605fcdcd2639046",
+        "launch-xemu.toml": "d685ab2973321c3b931d94167cc000670c05725dd141fd350f9642df3b9d8470",
+        "xemu.toml": "ac2d0b3ba5347e4274a453f6a0f176b7f9a41c235a45c7d53941dba6f6f43e1d"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:50:34.1337826Z",
+        "exitCode": 0,
+        "elapsedSeconds": 8.7341742
+      }
+    },
+    {
+      "run": "probe-crypto-layout-1-crypto-20261013-235016",
+      "side": "crypto",
+      "bios": "80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "D9D76EF863D1DD36FC7053091BE76FBB085F44AD435E8BFC82CA996A6AF131F9"
+      },
+      "files": {
+        "serial.log": "2c6da64f0d35aef65d899e294ebfcb0a13a295ac4cb6653e15e7e89a7c70bd07",
+        "launch.json": "6ea0a7af25a3722d43f9560c010aca00fac923be276740fec3f5ad5e8420e60f",
+        "inputs.json": "7a0ed09264214ddc02a60443c6a1139713231ff592e456b3c0883063ad538d22",
+        "result.json": "9a5c031f32c7e08d7af4e4db7aaabe6550852c6dd38c4c76b827499b9a2e254f",
+        "launch-xemu.toml": "d9d76ef863d1dd36fc7053091be76fbb085f44ad435e8bfc82ca996a6af131f9",
+        "xemu.toml": "9824e65c787c8bd27def081a713bbca4dc557e67c010b045174ddd899d808a16"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:50:24.9814911Z",
+        "exitCode": 0,
+        "elapsedSeconds": 7.7411065
+      }
+    },
+    {
+      "run": "probe-crypto-layout-2-complex-20261013-235051",
+      "side": "complex",
+      "bios": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "5004F9F487AB8EF8101881C3F9E701030589C2353E818D213CD4D9C52F0AAB37"
+      },
+      "files": {
+        "serial.log": "b33e1320b2103400309cca792108c6894bd7ff13bc724925b297b390c51c4e58",
+        "launch.json": "f7c122f8f2854ddce40d041aaad972966f05f78bebe2757891d3089e5c269d08",
+        "inputs.json": "a49f0c7c35b6030f1e0d34b850f4039ae1be78c01cdab053c03a510381e42b0c",
+        "result.json": "2f60667be3cf8dc1737de18c0e63526ea2c967c1438f3674f4edc87db4d2f3ca",
+        "launch-xemu.toml": "5004f9f487ab8ef8101881c3f9e701030589c2353e818d213cd4d9c52f0aab37",
+        "xemu.toml": "89f50b14a272a48676a0a9065a68eea7689349a10d230d2e94006a0adc41ddd7"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:50:56.6682417Z",
+        "exitCode": 0,
+        "elapsedSeconds": 4.8327383
+      }
+    },
+    {
+      "run": "probe-crypto-layout-2-baseline-20261013-235034",
+      "side": "baseline",
+      "bios": "be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "E69CFD8EC5E8B5269559F4416EF36EABDF05F7AEDB1DE281C268744FEA447E94"
+      },
+      "files": {
+        "serial.log": "d9894594833ad555f49f88dc7df6b6f7492b909e378e6a6aa26b4cebf3f73524",
+        "launch.json": "76f52df1e180fbd8dab8e4a9ef2040f8931bf363c4550d2fc5d81b2c964a4aeb",
+        "inputs.json": "66bbff833e91afffc19cfbe9da02caf7c682762336a331cbfe87a9f4978fac24",
+        "result.json": "d6279eb368c153618f922f3b17c8d0427bebf631f9c1d77847e5f188e54f0d2f",
+        "launch-xemu.toml": "e69cfd8ec5e8b5269559f4416ef36eabdf05f7aedb1de281c268744fea447e94",
+        "xemu.toml": "1d8ada7ebbd7d2526caaf5ff666e17d36c86380827ed016389d927847ff107f2"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:50:43.3338727Z",
+        "exitCode": 0,
+        "elapsedSeconds": 8.7730877
+      }
+    },
+    {
+      "run": "probe-crypto-layout-2-crypto-20261013-235043",
+      "side": "crypto",
+      "bios": "80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "513ECF494D2034DD8EF1F6025E3B7D6429DB0D7F49773EC0FAC2E69B1BB4AFA3"
+      },
+      "files": {
+        "serial.log": "622e918ada05eeeb849cced2b40b4d2b413de64b36f387a4c91b205b66377319",
+        "launch.json": "30242dda8ebd40f85156258b4dee90bf951e41bf2fc81f4517084839b8328b2e",
+        "inputs.json": "0b728863674c80cb80f69137782f811591d45dfd8633c506e8d3aee42564388d",
+        "result.json": "eac78fa93b98696119f7e288b4abb0235aeb0b8e62e69a2e95f69e77b3380b2c",
+        "launch-xemu.toml": "513ecf494d2034dd8ef1f6025e3b7d6429db0d7f49773ec0fac2e69b1bb4afa3",
+        "xemu.toml": "81c2de23553ca7ee98024f9bed736a4ea410774b5f1870edff82bcf1cacc2cc6"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:50:51.4179637Z",
+        "exitCode": 0,
+        "elapsedSeconds": 7.667271
+      }
+    },
+    {
+      "run": "probe-crypto-layout-3-complex-20261013-235056",
+      "side": "complex",
+      "bios": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "95BB16C7F44DC073B4B484C86D932B7AF54F756ACA1E2FD217D77B097A26E434"
+      },
+      "files": {
+        "serial.log": "c43c9cf897748ddb1667a46c9f10c0ee7c06813acb0e76d109ab8198d511552b",
+        "launch.json": "204df40f21e8d7041bd8c9432b166a4a5465695bb76628102880dfec21560264",
+        "inputs.json": "7882bd80cea765bae39953482a3d630288898e2a137b09c4cd1249416063b3b5",
+        "result.json": "950ce3b9ea6e7c75c9793ee721719ab435f3367f414ea9eca23aa50635663697",
+        "launch-xemu.toml": "95bb16c7f44dc073b4b484c86d932b7af54f756aca1e2fd217d77b097a26e434",
+        "xemu.toml": "8a0b6f96e0b16f3efc3aeb3671d862b9373b167dc126f65f4736e7a874ff7b7b"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:51:01.8569226Z",
+        "exitCode": 0,
+        "elapsedSeconds": 4.7695638
+      }
+    },
+    {
+      "run": "probe-crypto-layout-3-baseline-20261013-235109",
+      "side": "baseline",
+      "bios": "be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "E9E22727509ECD1786C0AAC14B096ADE69D98E6FC76989055E3C3313E40E6E78"
+      },
+      "files": {
+        "serial.log": "6d43543d7fc4dc9d4ef6c5621576588eb6c014c1c46710800474a136699e018c",
+        "launch.json": "2ce8a5071952ef223ff6c8c72a59eddd4219782f60662340584488aeb7c453b7",
+        "inputs.json": "d777090f6530fdaad3c7570de2cc9902e9ca272901a374614016ffe100374039",
+        "result.json": "a09146af8f59fa41ee5d3e763c006d4453d471e092f24af53c4d93633a388396",
+        "launch-xemu.toml": "e9e22727509ecd1786c0aac14b096ade69d98e6fc76989055e3c3313e40e6e78",
+        "xemu.toml": "354b76f249eb5a779a0454747e4c4385fc990689f307be2487d0fb2a95f0e45a"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:51:19.0911203Z",
+        "exitCode": 0,
+        "elapsedSeconds": 8.7100377
+      }
+    },
+    {
+      "run": "probe-crypto-layout-3-crypto-20261013-235101",
+      "side": "crypto",
+      "bios": "80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "BC42E655B76FF50360AD2FB50A2F4BFEFE8E4E25E8006AA269A4152A2384BDF5"
+      },
+      "files": {
+        "serial.log": "846526ad6c1ab5d91b2e215d9c3a723ec3a777654156474ec8e68684f7324636",
+        "launch.json": "2ffe8a6b9572ef049f813f91a29bbb6553d404cf01c0e1f8ed1d01f650fda560",
+        "inputs.json": "c4a7bf596a710ab40187e149068389344c2d6bea11d4e011d7c38ee9fcf7b31f",
+        "result.json": "ca26a93ac77667a61de464a93cbe5ec2ffcc3c0e66fd770df7600fb729b0c4f7",
+        "launch-xemu.toml": "bc42e655b76ff50360ad2fb50a2f4bfefe8e4e25e8006aa269a4152a2384bdf5",
+        "xemu.toml": "2a945899a837b614ade60c23f74c689e07c1e047bb5f9bac5579db43586e6d0a"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:51:09.9554088Z",
+        "exitCode": 0,
+        "elapsedSeconds": 7.6660453
+      }
+    },
+    {
+      "run": "probe-crypto-layout-4-complex-20261013-235136",
+      "side": "complex",
+      "bios": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "5D948F11EFA379B4616613806E72BA66B95661C9179DBF99C00DB8611D74DC80"
+      },
+      "files": {
+        "serial.log": "d8e47e3bcc0c45b476e4a262725cb09525c59c955b80bf5a0ccd19af4d95007a",
+        "launch.json": "15b0ff0ce161183f904bd65ac02b2f7c81eef2a6bb3deb6429b60e42c553c848",
+        "inputs.json": "62002385c96b5afbca018396311c284aa64b85874c9a2c2b464f81f3f59218e1",
+        "result.json": "1c1e11e429d8977e2e0db882c12de037389b7e7b66d537d082843f66de47cfbd",
+        "launch-xemu.toml": "5d948f11efa379b4616613806e72ba66b95661c9179dbf99c00db8611d74dc80",
+        "xemu.toml": "9782893e9cec7bf3483e66cc4a758ac7c8d262e0db157e53520f8bde3b31863b"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:51:41.5822647Z",
+        "exitCode": 0,
+        "elapsedSeconds": 4.8000598
+      }
+    },
+    {
+      "run": "probe-crypto-layout-4-baseline-20261013-235119",
+      "side": "baseline",
+      "bios": "be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "631F1A3F346E024C7E3FA328F5FBE299059D6D0B989722AB2DAC3EEB9E9BCD30"
+      },
+      "files": {
+        "serial.log": "35c751bbf928e484a4a186cd0ce752c3a6e0bfb0629cec1e6394e4c60aa06c5c",
+        "launch.json": "a80c10964c9d601261b4bd9fb7535c618372d122e16bb26c1ddd1764938a9d41",
+        "inputs.json": "c09d5c409015447a68d00dc7432885a592b376cb7b87dc53de94e0b51c6a70a3",
+        "result.json": "ad5c08b885104afa11e2daad8841710b63e23f97a8dc47054c83af38f9d4f9a4",
+        "launch-xemu.toml": "631f1a3f346e024c7e3fa328f5fbe299059d6d0b989722ab2dac3eeb9e9bcd30",
+        "xemu.toml": "13771ed1020b331d8287fafec6fe275e6d2524142aadcd7bfe4e91219eeefceb"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:51:28.3018337Z",
+        "exitCode": 0,
+        "elapsedSeconds": 8.7818055
+      }
+    },
+    {
+      "run": "probe-crypto-layout-4-crypto-20261013-235128",
+      "side": "crypto",
+      "bios": "80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "413E3C17A8A68A45463DFDBC03690EC7BCA76445A94E9E587CCD324895920E83"
+      },
+      "files": {
+        "serial.log": "dd4057dc70d4d218589188bf30ee6c2cb4000beb005cfc0920cbcad0d24a6b8e",
+        "launch.json": "844e6c7b0260e7c1180259c6466c0ccf9f71adcec615705825e4bc529623596a",
+        "inputs.json": "4ab2f360bc09ba9cdd68c6b7c9b89a56eb95374aa47e6609f8ebd36775fddc26",
+        "result.json": "c472ad1871db48e96ac3762f436dbaf35176db7d097d6c08e3e6d4267b074e0b",
+        "launch-xemu.toml": "413e3c17a8a68a45463dfdbc03690ec7bca76445a94e9e587ccd324895920e83",
+        "xemu.toml": "f9edab6a52cfc13ba359c14adb5e5390416f82f10ff39c6382f520956704f705"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:51:36.3653888Z",
+        "exitCode": 0,
+        "elapsedSeconds": 7.6387192
+      }
+    },
+    {
+      "run": "probe-crypto-layout-5-complex-20261013-235141",
+      "side": "complex",
+      "bios": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "6E279DA8A82F1FCFCB954A15AC95736F4E66D2A85CF8F459E576899C1E16EB43"
+      },
+      "files": {
+        "serial.log": "f3f406f6cbf6fe78d98a09a46c2efe5d294339bd9c260a0987c5917d3b5bc4b6",
+        "launch.json": "b83293d2d349e3e1c0cb506505c3c9ab388ee72bf6b7e7bfda471e3b56e81493",
+        "inputs.json": "d2691016fa2b2ffae9f9f97bc185d59ee9d827f71b77d2c7354f574205536d1a",
+        "result.json": "b52f075c566ef923a00e246d68f61a061e5bc438b8ad49e9eee9d2f07f016e35",
+        "launch-xemu.toml": "6e279da8a82f1fcfcb954a15ac95736f4e66d2a85cf8f459e576899c1e16eb43",
+        "xemu.toml": "c4b4e1b4be00080e0f5786461f164fb63ccf356e2529112466bbf0e10f420f8d"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:51:46.7935303Z",
+        "exitCode": 0,
+        "elapsedSeconds": 4.7855996
+      }
+    },
+    {
+      "run": "probe-crypto-layout-5-baseline-20261013-235154",
+      "side": "baseline",
+      "bios": "be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "627A9FA07DC44F423445DB39ECEECB18D03C4A78A22424A629656DDB8780359E"
+      },
+      "files": {
+        "serial.log": "8e3b97752fb0dbb8db53801a5462a1244be145250504f712034848f9e1061a3c",
+        "launch.json": "50ffae53cc1689eb323eb153a78220a3a533d07923733c7618b2104a50a73354",
+        "inputs.json": "6bb03391f448a4d4b4b813914e4c9c7aa6600080afe015baceb6421434ded33c",
+        "result.json": "5b32675a6fc32285618181683c6eb53a0c8609eeffd54f098252ee1e14a8cd2a",
+        "launch-xemu.toml": "627a9fa07dc44f423445db39eceecb18d03c4a78a22424a629656ddb8780359e",
+        "xemu.toml": "e2eeb1197513a3d7dce42a068c377f17861867fe01457f908cb1eaa0fb4e1138"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:52:03.9512721Z",
+        "exitCode": 0,
+        "elapsedSeconds": 8.6343398
+      }
+    },
+    {
+      "run": "probe-crypto-layout-5-crypto-20261013-235146",
+      "side": "crypto",
+      "bios": "80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "953A53FE822AFBEED119571B533B91D39366E315C8775B62060E632E743CF426"
+      },
+      "files": {
+        "serial.log": "9e0f566f4fe99d9f14050532cf35316a06d67931cacb31d510feba8ad8fc41a6",
+        "launch.json": "9159cb08506f45d1fb2a4f70fdcc55c7957159acd199467c32ed1a392526f745",
+        "inputs.json": "6bd2b00893c5e4068e685a4dfaf39e693340011fc99c3051f3c3a64f8ecaf2d7",
+        "result.json": "46f996dbbf4097b3515eb89f73de7a57b88be76e70fc76bbd46d76ecbc793cdc",
+        "launch-xemu.toml": "953a53fe822afbeed119571b533b91d39366e315c8775b62060e632e743cf426",
+        "xemu.toml": "22a6abd356b5b584eb6db6a580219df1ff419fb8bd23f6ed8d98cdd509030e48"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:51:54.8951648Z",
+        "exitCode": 0,
+        "elapsedSeconds": 7.680318
+      }
+    },
+    {
+      "run": "probe-crypto-layout-6-complex-20261013-235221",
+      "side": "complex",
+      "bios": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "1B1957DDCDD6131D7B017B97ED97EBE4100E7B0631E53E4C652830D11A2BF0BA"
+      },
+      "files": {
+        "serial.log": "1d3cd29f8b1127f8c6e0f6da323bb2c50f201c362ee3a3c9fed9c541388e3db4",
+        "launch.json": "732afde3c3f68ff2ca42a351999f260aa5fec9fd4989cacdf8f5c6910b01b700",
+        "inputs.json": "2537599439de8c77011f8438a5c3b8a3e575d680d2f6c417882febfa2da6063d",
+        "result.json": "ac545bb7c13552274c9a22b77bfb9201b43706ec704fd994d5c46940c4a2cb0b",
+        "launch-xemu.toml": "1b1957ddcdd6131d7b017b97ed97ebe4100e7b0631e53e4c652830d11a2bf0ba",
+        "xemu.toml": "67c26e602f26d4d5b5a252aa93c92c405eb2b9dd789d48c8087bea639c6ccd16"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:52:26.6703983Z",
+        "exitCode": 0,
+        "elapsedSeconds": 4.8747672
+      }
+    },
+    {
+      "run": "probe-crypto-layout-6-baseline-20261013-235203",
+      "side": "baseline",
+      "bios": "be180279642478d59bdd484abbaa3004d3efaf95a31194c838596341894c6827",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "42ACB6D574749071BF14E0F05587F0E1F90C0382016521AC2F2A1D742145C1C0"
+      },
+      "files": {
+        "serial.log": "b5c790d4c4a0bfdecb57029aa2c9f7b733cef241cb7b57db9e67603e824495c9",
+        "launch.json": "7e571d9a0051bcb7b6280a8693a22a7bd37dad682a70623e322d6d87ed240eb4",
+        "inputs.json": "c9d42a6bf4d42578609eae317329a3efc38f823411b999d92cb9f52d84a389ff",
+        "result.json": "4250508092d584547744af0d59935f44baa28872a0e7e961890d379da9243b9e",
+        "launch-xemu.toml": "42acb6d574749071bf14e0f05587f0e1f90c0382016521ac2f2a1d742145c1c0",
+        "xemu.toml": "1329980c3b2440c26ed8fb0ed4456d8734647cb3397de66f972dfa074309de03"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:52:13.1837404Z",
+        "exitCode": 0,
+        "elapsedSeconds": 8.8137346
+      }
+    },
+    {
+      "run": "probe-crypto-layout-6-crypto-20261013-235213",
+      "side": "crypto",
+      "bios": "80c5040023ce1181529e334173ff3abc22138664b4caf382acb00b75725fbb36",
+      "probe": "65da3568167cd7e25eec3da4baaffbe65c7fae931078659885297e657412a705",
+      "inputs": {
+        "eepromSha256": "67412E911568A47719EF0B3E0C6396E70996C2F7C29A4E48441BF9CC3D585642",
+        "backingSha256": "564B5CB5AD9C2EFBBFDC70C3CD7E70D62E3EC3D91029C70B9265BE95C6387A91",
+        "memoryMiB": 64,
+        "bootromSha256": "E99E3A772BF5F5D262786AEE895664EB96136196E37732FE66E14AE062F20335",
+        "backingModified": "2026-10-13T16:39:35.0592255Z",
+        "backing": "C:\\xemu-lab\\incoming\\forza-api-native-20261013\\doa-human-20261013-163331\\hdd.qcow2",
+        "backingLength": 351141888,
+        "configSha256": "C00E8B19C702644DA89AEAA703B9A10163F49417D5ED6A3CC332572B22C2E080"
+      },
+      "files": {
+        "serial.log": "32b7ce8f1f67eb2b74b71e83bce3ecc112f4ba3f3361fd5dd2fe18311a5166f9",
+        "launch.json": "493b80d1e2931243c4c6094835724386ec85b319247b89dadc6d3930329751bb",
+        "inputs.json": "61063fd1cb081eb0d0e4184b20ca961674d081c579e007a4526001e0cfb3565e",
+        "result.json": "6ff1ee8ce7ccf7c01ebab84122a1bace6e3961c3472436249a33abe255d23148",
+        "launch-xemu.toml": "c00e8b19c702644da89aeaa703b9a10163f49417d5ed6a3cc332572b22c2e080",
+        "xemu.toml": "279f101e5545159c05d4790837ac47596ee35a437f41531118ee37717170b753"
+      },
+      "result": {
+        "exited": true,
+        "utc": "2026-10-13T23:52:21.3659919Z",
+        "exitCode": 0,
+        "elapsedSeconds": 7.7624677
+      }
+    }
+  ],
+  "limitations": [
+    "Process intervals derive from recorded exit UTC and elapsed duration; overlays are identified by exported metadata/configuration, not independently reread disk image bytes.",
+    "Complex high-base vector10 differs from both unchanged SpiritBoot answers; all seven reference failures are retained.",
+    "Counter normalization uses each BIOS reported frequency; no same-frequency assumption is made.",
+    "Aggregate sums all118 declared iteration-batch samples; boot time and FPS are not measured."
+  ]
+}

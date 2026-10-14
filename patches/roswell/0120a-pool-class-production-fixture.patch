@@ -1,0 +1,118 @@
+diff --git a/tests/host/pool-classes/cases.c b/tests/host/pool-classes/cases.c
+new file mode 100644
+index 00000000..0ac270b2
+--- /dev/null
++++ b/tests/host/pool-classes/cases.c
+@@ -0,0 +1,85 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++static void reset(void) {
++ assert(!pool_lock_held);memset(used,0,sizeof(used));memset(runs,0,sizeof(runs));
++ memset(NxpFreeLists,0,sizeof(NxpFreeLists));
++ committed=peak=allocations=releases=0;allow_pages=1;page_limit=NXK_POOL_WINDOW_PAGES;
++ InitializePool(NonPagedPool,0);
++}
++static void invariant(void) {
++ unsigned seen[NXK_POOL_WINDOW_PAGES]={0};
++ for(unsigned c=0;c<NXP_BUCKET_LISTS;c++) {
++  NXP_FREE *previous=NULL;unsigned traversed=0;
++  for(NXP_FREE *f=NxpFreeLists[c];f;previous=f,f=f->Next) {
++   if(previous)assert(f->Prev==previous);
++   assert(++traversed<=NXK_POOL_WINDOW_PAGES*128u);
++   unsigned page=NXP_PAGE_INDEX(f);assert(page<NXK_POOL_WINDOW_PAGES&&used[page]);
++   NXP_HEADER *h=((NXP_HEADER*)f)-1;assert(h->Magic==NXP_MAGIC_FREE&&h->ClassIndex==c);seen[page]++;
++  }
++ }
++ for(unsigned i=0;i<NXK_POOL_WINDOW_PAGES;i++)if(NxpPageState[i]!=NXP_NOT_BUCKET) {
++  NXP_HEADER *h=(NXP_HEADER*)(arena+i*PAGE_SIZE);assert(used[i]);
++  assert(seen[i]+NxpPageState[i]==PAGE_SIZE/NxpClassSize[NXP_SIZE_CLASS(h->ClassIndex)]);
++ }
++}
++int main(void) {
++ arena=aligned_alloc(PAGE_SIZE,NXK_POOL_WINDOW_PAGES*PAGE_SIZE);assert(arena);
++ reset();
++ for(unsigned n=0;n<=NXP_SMALL_MAX+1;n++) {
++  unsigned expected=PAGE_SIZE,c=0;
++  if(n<=NXP_SMALL_MAX){while(NxpClassSize[c]<((n?n:1)+8))c++;expected=NxpClassSize[c]-8;}
++  void *p=ExAllocatePoolWithTag(NonPagedPool,n,0x314159);assert(p);
++  BOOLEAN quota=TRUE;assert(ExQueryPoolBlockSize(p,&quota)==expected&&!quota);
++  assert((uintptr_t)p%8==0);memset(p,0x73,expected);
++  if(n<=NXP_SMALL_MAX){NXP_HEADER *h=((NXP_HEADER*)p)-1;assert(h->Tag==0x314159&&h->ClassIndex==c&&h->Magic==NXP_MAGIC_ALLOC);}
++  for(unsigned j=0;j<expected;j++)assert(((unsigned char *)p)[j]==0x73);
++  ExFreePoolWithTag(p,0x314159);invariant();
++ }
++ assert(NxpReclaimEmptyBucketPages()==1&&committed==0);
++ puts("PASS every request0..2041, exact usable query, alignment, tag/header and full-capacity contents");
++ for(unsigned c=0;c<NXP_CLASSES;c++) {
++  reset();unsigned size=NxpClassSize[c],count=PAGE_SIZE/size;void *blocks[129];
++  for(unsigned i=0;i<=count;i++){blocks[i]=ExAllocatePoolWithTag(NonPagedPool,size-8,7);assert(blocks[i]);memset(blocks[i],i,size-8);}
++  assert(committed==2&&NxpPageState[NXP_PAGE_INDEX(blocks[0])]==count);
++  invariant();
++  for(unsigned i=0;i<count;i++)ExFreePoolWithTag(blocks[i],7);
++  allow_pages=0;unsigned other=NxpClassSize[(c+1)%NXP_CLASSES];
++  void *p=ExAllocatePoolWithTag(NonPagedPool,other-8,8);assert(p&&committed==2);
++  for(unsigned j=0;j<size-8;j++)assert(((unsigned char *)blocks[count])[j]==(unsigned char)count);
++  ExFreePoolWithTag(p,8);ExFreePoolWithTag(blocks[count],7);
++  invariant();assert(NxpReclaimEmptyBucketPages()==2&&committed==0);invariant();
++ }
++ puts("PASS every class page floor division, tail bytes, supplier-denied retype and complete free-link removal");
++#if XBOX_RESERVE_UPPER_RAM
++ for(unsigned c=0;c<NXP_CLASSES;c++) {
++  reset();void *a=ExAllocatePoolWithTag(NonPagedPool,NxpClassSize[c]-8,11);
++  void *b=NxTitleAllocatePoolWithTag(NxpClassSize[c]-8,12);assert(a&&b&&committed==2);
++  ExFreePoolWithTag(a,11);ExFreePoolWithTag(b,12);allow_pages=0;
++  a=ExAllocatePoolWithTag(NonPagedPool,NxpClassSize[(c+1)%NXP_CLASSES]-8,13);
++  b=NxTitleAllocatePoolWithTag(NxpClassSize[(c+2)%NXP_CLASSES]-8,14);
++  assert(a&&b&&(unsigned char *)a>=arena+(NXK_POOL_WINDOW_PAGES/2)*PAGE_SIZE);
++  assert((unsigned char *)b<arena+(NXK_POOL_WINDOW_PAGES/2)*PAGE_SIZE);
++  ExFreePoolWithTag(a,13);ExFreePoolWithTag(b,14);invariant();assert(NxpReclaimEmptyBucketPages()==2);
++ }
++ puts("PASS every class preserves independent kernel and title reuse domains");
++#endif
++ reset();page_limit=1;void *live=ExAllocatePoolWithTag(NonPagedPool,24,1);assert(live);
++ assert(ExAllocatePoolWithTag(NonPagedPool,2040,2)==NULL);assert(committed==1);invariant();
++ ExFreePoolWithTag(live,1);live=ExAllocatePoolWithTag(NonPagedPool,2040,3);assert(live&&committed==1);
++ ExFreePoolWithTag(live,3);assert(NxpReclaimEmptyBucketPages()==1);
++ puts("PASS allocation limit failure leaves lists and authoritative page state intact");
++ reset();static const unsigned distribution[][2]={{256,14},{264,1},{280,4},{288,1},{296,6},{304,12},{320,2},{352,1},{384,1},{416,4},{464,15},{472,6},{488,2}};
++ void *objects[69];unsigned total=0;
++ for(unsigned i=0;i<RTL_NUMBER_OF(distribution);i++)for(unsigned j=0;j<distribution[i][1];j++) {
++  objects[total]=ExAllocatePoolWithTag(NonPagedPool,distribution[i][0],0x2468);assert(objects[total]);
++  memset(objects[total],total,ExQueryPoolBlockSize(objects[total],NULL));total++;
++ }
++ assert(total==69);invariant();
++ if(committed>7){fprintf(stderr,"FAIL measured native boot512-class distribution needs %u pages; qualified finer classes must need at most7\n",committed);return 2;}
++ for(unsigned i=0;i<total;i++) {
++  unsigned n=ExQueryPoolBlockSize(objects[i],NULL);for(unsigned j=0;j<n;j++)assert(((unsigned char*)objects[i])[j]==i);
++  ExFreePoolWithTag(objects[i],0x2468);
++ }
++ assert(NxpReclaimEmptyBucketPages()==7&&committed==0);invariant();
++ puts("PASS measured native retained69-object distribution uses7pages instead of9");
++ free(arena);return 0;
++}
+diff --git a/tests/host/pool-classes/check.py b/tests/host/pool-classes/check.py
+new file mode 100644
+index 00000000..7895a48f
+--- /dev/null
++++ b/tests/host/pool-classes/check.py
+@@ -0,0 +1,21 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Production pool mapping, carving, retyping, capacity and measured-distribution bounds."""
++import importlib.util,re,subprocess,sys
++from pathlib import Path
++sys.dont_write_bytecode=True
++root=Path(__file__).resolve().parents[3];out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
++pool=(root/'ntoskrnl/xb/mm/pool.c').read_text()
++macros=pool[pool.index('#ifdef NXK_MM_POOLPAGES'):pool.index('/* SIZE CLASSES')]
++definitions=pool[pool.index('static const USHORT NxpClassSize'):pool.index('/* BIG-BLOCK TABLE')]
++names=['InitializePool','NxpAllocFailed','NxpDetachEmptyBucketPage','NxpReuseEmptyBucketPage','NxpAllocatePoolWithTag','ExAllocatePoolWithTag','NxTitleAllocatePoolWithTag','NxTitleAllocatePool','ExFreePoolWithTag','NxpReclaimEmptyBucketPages','ExQueryPoolBlockSize']
++bodies=''.join(m.function(pool,n) for n in names if re.search(r'\b'+n+r'\s*\([^;]*?\)\s*\{',pool))
++# Count actual production back-link stores; the fixture still executes the
++# allocation bodies and maintains their real list contents.
++bodies=re.sub(r'(\b[A-Za-z_]\w*(?:->\w+)*)->Prev = ([^;]+);',
++              r'CountPrevWrite(&\1->Prev, \2);',bodies)
++counts='\nstatic unsigned prev_writes; static void CountPrevWrite(NXP_FREE **p, NXP_FREE *v) {prev_writes++;*p=v;}\n'
++for reserve in [0,1]:
++ src=out/f'refill-{reserve}.c';src.write_text((root/'tests/host/pool-refill/shim.c').read_text()+f'\n#define XBOX_RESERVE_UPPER_RAM {reserve}\n'+macros+definitions+counts+'\nULONG NxpReclaimEmptyBucketPages(void);\n'+bodies+(root/'tests/host/pool-classes/cases.c').read_text())
++ exe=src.with_suffix('');subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',str(src),'-o',str(exe)],check=True);subprocess.run([str(exe)],check=True)

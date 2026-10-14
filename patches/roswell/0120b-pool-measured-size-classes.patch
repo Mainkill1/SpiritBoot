@@ -1,0 +1,55 @@
+diff --git a/ntoskrnl/xb/mm/pool-census.h b/ntoskrnl/xb/mm/pool-census.h
+index 4c1ba483..5483e6bd 100644
+--- a/ntoskrnl/xb/mm/pool-census.h
++++ b/ntoskrnl/xb/mm/pool-census.h
+@@ -2,7 +2,7 @@
+ #pragma once
+ 
+ #define NXP_POOL_CENSUS_MAGIC 0x4E435031UL /* NCP1 */
+-#define NXP_POOL_CENSUS_SCHEMA 3UL
++#define NXP_POOL_CENSUS_SCHEMA 4UL
+ #define NXP_POOL_CENSUS_SMALL_MAX 2040U
+ #define NXP_POOL_CENSUS_LARGE_BIN_BASE 256U
+ #define NXP_POOL_CENSUS_BIN_OVERFLOW 4225U
+@@ -16,13 +16,13 @@
+ #define NXP_POOL_CENSUS_DOMAIN_TITLE 1U
+ #define NXP_POOL_CENSUS_DOMAIN_SHARED 2U
+ #define NXP_POOL_CENSUS_DOMAIN_COUNT 3U
+-#define NXP_POOL_CENSUS_CLASS_COUNT 7U
++#define NXP_POOL_CENSUS_CLASS_COUNT 9U
+ 
+-#define NXP_POOL_CENSUS_CLASS_MASK 0x000FU
+-#define NXP_POOL_CENSUS_BIN_SHIFT 4U
+-#define NXP_POOL_CENSUS_BIN_MASK 0x0FF0U
+-#define NXP_POOL_CENSUS_DOMAIN_MASK 0x1000U
+-#define NXP_POOL_CENSUS_SAMPLED_MASK 0x2000U
++#define NXP_POOL_CENSUS_CLASS_MASK 0x001FU
++#define NXP_POOL_CENSUS_BIN_SHIFT 5U
++#define NXP_POOL_CENSUS_BIN_MASK 0x1FE0U
++#define NXP_POOL_CENSUS_DOMAIN_MASK 0x2000U
++#define NXP_POOL_CENSUS_SAMPLED_MASK 0x4000U
+ 
+ #ifdef NXK_POOL_CENSUS
+ typedef struct _NXP_POOL_CENSUS_ENTRY
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index c48d1257..80ec7281 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -69,7 +69,7 @@
+  * above 2040 user bytes go to whole pages (mm/bigpool pool_query_sizes,
+  * --official validated). */
+ static const USHORT NxpClassSize[] = {
+-    32, 64, 128, 256, 512, 1024, 2048,
++    32, 64, 128, 256, 272, 320, 512, 1024, 2048,
+ };
+ #define NXP_CLASSES       RTL_NUMBER_OF(NxpClassSize)
+ #if XBOX_RESERVE_UPPER_RAM
+@@ -82,6 +82,8 @@ static const USHORT NxpClassSize[] = {
+ #define NXP_SMALL_MAX     2040    /* user bytes; above = whole pages */
+ #ifdef NXK_POOL_CENSUS
+ C_ASSERT(NXP_SMALL_MAX == NXP_POOL_CENSUS_SMALL_MAX);
++C_ASSERT(NXP_CLASSES == NXP_POOL_CENSUS_CLASS_COUNT);
++C_ASSERT(NXP_BUCKET_LISTS - 1 <= NXP_POOL_CENSUS_CLASS_MASK);
+ C_ASSERT(((NXP_SMALL_MAX + 7) / 8) <=
+          (NXP_POOL_CENSUS_BIN_MASK >> NXP_POOL_CENSUS_BIN_SHIFT));
+ #endif

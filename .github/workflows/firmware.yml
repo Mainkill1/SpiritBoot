@@ -55,7 +55,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 694b0e2461558f6a5f7a774fd34c79bd7cdc111e
+            test "$actual_tree" = 3c23ea01cf43c2979c4c3ef247236e03d079f465
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
@@ -114,6 +114,8 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/fatx/check-update-entry-dirty.py" "$output/fatx-update-entry-dirty" >"$output/fatx-update-entry-dirty.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/metadata/check.py" "$output/metadata" >"$output/metadata.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/zero-reuse/check.py" "$output/zero-reuse" >"$output/zero-reuse.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/system-va-raw/check.py" "$output/system-va-raw" >"$output/system-va-raw.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/system-va-raw/check-validity.py" "$output/system-va-validity" >"$output/system-va-validity.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-lifetime/check.py" "$output/dma-lifetime" >"$output/dma-lifetime.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/dma-channel/check.py" "$output/dma-channel" >"$output/dma-channel.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/interrupt-admission/check.py" "$output/interrupt-admission" >"$output/interrupt-admission.log" 2>&1
@@ -139,6 +141,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/thread-stack/check.py" "$output/thread-stack" >"$output/thread-stack.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/phase1-thread/check.py" "$output/phase1-thread" >"$output/phase1-thread.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-shadow/check.py" "$output/thread-shadow" >"$output/thread-shadow.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/process-threads/check.py" "$output/process-threads" >"$output/process-threads.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-view/check-registry.py" "$output/thread-view-registry" >"$output/thread-view-registry.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-view/check-wait-adapter.py" "$output/thread-view-wait" >"$output/thread-view-wait.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/thread-view/check-irp.py" "$output/thread-view-irp" >"$output/thread-view-irp.log" 2>&1
@@ -146,8 +149,12 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/zero-alias/check.py" "$output/zero-alias" >"$output/zero-alias.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/pool-refill/check.py" "$output/pool-refill" >"$output/pool-refill.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/pool-size/check.py" "$output/pool-size" >"$output/pool-size.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/pool-census/check.py" "$output/pool-census" >"$output/pool-census.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/pool-audit/check.py" "$output/pool-audit" >"$output/pool-audit.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/pool-classes/check.py" "$output/pool-classes" >"$output/pool-classes.log" 2>&1
             "$GUEST_SOURCE/tests/host/clean-room/run.sh" "$output/clean-room" >"$output/clean-room.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/kernel-performance/check.py" "$GUEST_SOURCE" "$output/optimization" --optimized >"$output/optimization.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/kernel-performance/modexp.py" "$GUEST_SOURCE" "$output/modexp" --optimized >"$output/modexp.log" 2>&1
             mkdir -p "$output/des-baseline/ntoskrnl/xb"
             cp "$GUEST_SOURCE/ntoskrnl/xb/crypto.c" "$output/des-baseline/ntoskrnl/xb/crypto.c"
             (cd "$output/des-baseline" && git init -q && git apply --reverse --include=ntoskrnl/xb/crypto.c /work/patches/roswell/0116-des-word-rounds.patch)
@@ -171,7 +178,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '694b0e2461558f6a5f7a774fd34c79bd7cdc111e', result
+          assert result['source_tree'] == '3c23ea01cf43c2979c4c3ef247236e03d079f465', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
@@ -280,6 +287,8 @@ jobs:
             artifacts/kernel-performance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/pool-size-limit-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/zero-reuse-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/vm-zero-reuse-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/system-va-validity-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/thread-stack-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/thread-wait-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/xdvdfs-directory-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/

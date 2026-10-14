@@ -1,0 +1,195 @@
+diff --git a/ntoskrnl/xb/procobj.c b/ntoskrnl/xb/procobj.c
+index 94fa7216..57528ceb 100644
+--- a/ntoskrnl/xb/procobj.c
++++ b/ntoskrnl/xb/procobj.c
+@@ -112,7 +112,8 @@ NxkStartThreadProcess(PKTHREAD Thread)
+         return;
+     Thread->QuantumReset = XBE_THREAD_QUANTUM;
+     Thread->Quantum = XBE_THREAD_QUANTUM;
+-    if (NxkTitleProcess.BasePriority >= 1 && NxkTitleProcess.BasePriority <= 15)
++    if (NxkTitleProcess.BasePriority >= LOW_PRIORITY + 1 &&
++        NxkTitleProcess.BasePriority <= HIGH_PRIORITY)
+     {
+         Thread->Priority = NxkTitleProcess.BasePriority;
+         Thread->BasePriority = NxkTitleProcess.BasePriority;
+@@ -140,7 +141,8 @@ NxkLinkThreadProcess(PKTHREAD Thread)
+         NxkTitleProcess.StackCount++;
+         Thread->QuantumReset = XBE_THREAD_QUANTUM;
+         Thread->Quantum = XBE_THREAD_QUANTUM;
+-        if (NxkTitleProcess.BasePriority >= 1 && NxkTitleProcess.BasePriority <= 15)
++        if (NxkTitleProcess.BasePriority >= LOW_PRIORITY + 1 &&
++        NxkTitleProcess.BasePriority <= HIGH_PRIORITY)
+         {
+             Thread->BasePriority = NxkTitleProcess.BasePriority;
+             KeSetPriorityThread(Thread, NxkTitleProcess.BasePriority);
+@@ -182,7 +184,7 @@ NxkPublishThreadProcess(_Out_writes_bytes_(0x140) PUCHAR Shadow)
+ }
+ 
+ /* The published process field retains the observed raw-value behavior. Only
+- * dynamic priorities 1..15 have a qualified thread-update contract. */
++ * priorities 1..31 have a qualified thread-update contract. */
+ LONG NTAPI
+ KeSetPriorityProcess(PVOID Process, LONG BasePriority)
+ {
+@@ -201,16 +203,25 @@ KeSetPriorityProcess(PVOID Process, LONG BasePriority)
+         return Old;
+     }
+     Target->BasePriority = (CHAR)BasePriority;
+-    if (Target == &NxkTitleProcess && BasePriority >= 1 && BasePriority <= 15)
++    if (Target == &NxkTitleProcess && BasePriority >= 1 && BasePriority <= 31)
+     {
+         Head = &Target->ThreadListHead;
+         for (Entry = Head->Flink; Entry != Head; Entry = Entry->Flink)
+         {
+             PKTHREAD Thread = (PKTHREAD)((PUCHAR)Entry - XBE_KTHREAD_THREADLIST -
+                                         FIELD_OFFSET(KTHREAD, XeXboxShadow));
+-            /* Keep a thread's explicit base increment when the process moves.
+-             * The helper observes the new public process base at this point. */
+-            KeSetBasePriorityThread(Thread, Thread->BasePriority - Old);
++            /* Native process moves keep saturated threads at their class
++             * boundary without resetting scheduler state. A class transition
++             * reapplies the saturation increment using the new process base. */
++            if (Thread->Saturation == 0 ||
++                ((Old >= LOW_REALTIME_PRIORITY) !=
++                 (BasePriority >= LOW_REALTIME_PRIORITY)))
++            {
++                LONG Increment = Thread->Saturation ?
++                    (HIGH_PRIORITY + 1) / 2 * Thread->Saturation :
++                    Thread->BasePriority - Old;
++                KeSetBasePriorityThread(Thread, Increment);
++            }
+             Thread->XeXboxShadow[XBE_KTHREAD_PRIORITY] = (UCHAR)Thread->Priority;
+             Thread->XeXboxShadow[XBE_KTHREAD_BASEPRIORITY] = (UCHAR)Thread->BasePriority;
+         }
+diff --git a/tests/host/process-threads/check.py b/tests/host/process-threads/check.py
+index 603afd25..44e7dcf8 100644
+--- a/tests/host/process-threads/check.py
++++ b/tests/host/process-threads/check.py
+@@ -178,11 +178,42 @@ int main(int argc,char **argv){
+   assert(KeSetPriorityProcess(&NxkTitleProcess,8)==9);
+   assert(a.BasePriority==8&&b.BasePriority==8);
+  }
++ if(!strcmp(argv[1],"saturation")){
++  current=&b;NxkPublishThreadProcess(b.XeXboxShadow);current=&a;
++  assert(KeSetBasePriorityThread(&a,16)==0);assert(KeSetBasePriorityThread(&b,-16)==0);
++  assert(a.Saturation==1&&b.Saturation==-1);
++  const LONG bases[]={9,16,20,31,15,2,8};
++  for(unsigned i=0;i<sizeof(bases)/sizeof(bases[0]);i++){
++   LONG old=NxkTitleProcess.BasePriority;assert(KeSetPriorityProcess(&NxkTitleProcess,bases[i])==old);
++   printf("saturation process=%ld positive=%d/%ld negative=%d/%ld\n",(long)bases[i],a.BasePriority,(long)KeQueryBasePriorityThread(&a),b.BasePriority,(long)KeQueryBasePriorityThread(&b));fflush(stdout);
++   assert(a.Saturation==1&&b.Saturation==-1);
++   assert(KeQueryBasePriorityThread(&a)==16&&KeQueryBasePriorityThread(&b)==-16);
++   assert(a.BasePriority==(bases[i]>=16?31:15));assert(b.BasePriority==(bases[i]>=16?16:1));
++   assert(system.BasePriority==8&&native_process.BasePriority==8);
++  }
++ }
++ if(!strcmp(argv[1],"inherit-all-classes")){
++  const LONG bases[]={1,16,31};
++  for(unsigned i=0;i<sizeof(bases)/sizeof(bases[0]);i++){
++   assert(KeSetPriorityProcess(&NxkTitleProcess,bases[i])>=1);
++   ETHREAD new_thread={0};init(&new_thread.Tcb);current=&new_thread.Tcb;
++   NxkPublishThreadProcess(new_thread.Tcb.XeXboxShadow);
++   assert(new_thread.Tcb.BasePriority==bases[i]&&new_thread.Tcb.Priority==bases[i]);
++   assert(new_thread.Tcb.QuantumReset==60&&new_thread.Tcb.Quantum==60);
++   new_thread.Tcb.BasePriority=new_thread.Tcb.Priority=8;
++   new_thread.Tcb.QuantumReset=new_thread.Tcb.Quantum=36;
++   NxkStartThreadProcess(&new_thread.Tcb);
++   assert(new_thread.Tcb.BasePriority==bases[i]&&new_thread.Tcb.Priority==bases[i]);
++   assert(new_thread.Tcb.QuantumReset==60&&new_thread.Tcb.Quantum==60);
++   NxkUnlinkThreadProcess(&new_thread.Tcb);current=&a;
++   assert(system.BasePriority==8&&system.QuantumReset==36&&native_process.BasePriority==8);
++  }
++ }
+  assert(irql==0);printf("PASS production process adapter case=%s\n",argv[1]);return 0;
+ }
+ '''
+ fixture=out/'process-host.c';fixture.write_text(shim+classification+proc+base_setter+base_query+termination+cases)
+ binary=out/'process-host'
+ subprocess.run(['cc','-m32','-std=c11','-O1','-g','-Wall','-Wextra','-Wno-unused-function','-fsanitize=address,undefined','-fno-omit-frame-pointer',str(fixture),'-o',str(binary)],check=True)
+-for mode in ('list','inherit','process','lifecycle','offset','same','terminal'):
++for mode in ('list','inherit','process','lifecycle','offset','same','terminal','saturation','inherit-all-classes'):
+  subprocess.run([str(binary),mode],check=True)
+diff --git a/tests/xbe/process-thread-contract/Makefile b/tests/xbe/process-thread-contract/Makefile
+index 414a1f77..e7bf8d41 100644
+--- a/tests/xbe/process-thread-contract/Makefile
++++ b/tests/xbe/process-thread-contract/Makefile
+@@ -1,5 +1,5 @@
+ XBE_TITLE = PROCESS-THREAD-CONTRACT
+-GEN_XISO = process-thread-contract-v3.iso
++GEN_XISO = process-thread-contract-v6.iso
+ SRCS = $(CURDIR)/main.c $(CURDIR)/tap.c
+ NXDK_DIR ?= $(CURDIR)/../../../.reference/nxdk
+ NXDK_CFLAGS += -O2 -Wall -Wextra -Werror
+diff --git a/tests/xbe/process-thread-contract/main.c b/tests/xbe/process-thread-contract/main.c
+index 89452a1c..c44288ee 100644
+--- a/tests/xbe/process-thread-contract/main.c
++++ b/tests/xbe/process-thread-contract/main.c
+@@ -33,7 +33,7 @@ static ULONG membership(PKTHREAD target,ULONG *total) {
+ static VOID NTAPI notify(PETHREAD thread,HANDLE id,BOOLEAN create) {
+  Case *c=NULL;
+  if(create && creating>=0 && creating<CASES)c=&cases[creating];
+- else for(ULONG i=0;i<CASES;i++)if(cases[i].id==id)c=&cases[i];
++ else for(ULONG i=0;i<CASES;i++)if(cases[i].id==id){c=&cases[i];break;}
+  if(!c)return;
+  if(create) {
+   c->created=thread;c->create_base=thread->Tcb.BasePriority;c->create_priority=thread->Tcb.Priority;
+@@ -80,7 +80,48 @@ static void retire(ULONG i,HANDLE h) {
+  LONG terminal_increment=KeQueryBasePriorityThread(&t->Tcb);
+  tap_comment("terminal_priority case=%lu process_base=%d thread_base=%d query_increment=%ld",i,process->BasePriority,t->Tcb.BasePriority,terminal_increment);
+  regression_check(terminal_increment==0&&t->Tcb.BasePriority==process->BasePriority,"referenced terminated thread keeps its process-relative base query");
+- NtClose(h);ObfDereferenceObject(t);
++ NtClose(h);ObfDereferenceObject(t);c->id=NULL;
++}
++static void saturation_matrix(LONG original) {
++ const LONG priorities[]={original+2,16,20,31,15,2,original+1};
++ KeSetPriorityProcess(process,original+1);
++ regression_check(KeSetBasePriorityThread(cases[0].current,16)==0,"positive saturation setter reports previous increment");
++ regression_check(KeSetBasePriorityThread(cases[1].current,-16)==0,"negative saturation setter reports previous increment");
++ regression_check(KeQueryBasePriorityThread(cases[0].current)==16,"positive saturation query before process move");
++ regression_check(KeQueryBasePriorityThread(cases[1].current)==-16,"negative saturation query before process move");
++ for(ULONG i=0;i<sizeof(priorities)/sizeof(priorities[0]);i++) {
++  LONG before=process->BasePriority,p=priorities[i],positive=p>=16?31:15,negative=p>=16?16:1;
++  LONG returned=KeSetPriorityProcess(process,p);
++  LONG positive_query=KeQueryBasePriorityThread(cases[0].current),negative_query=KeQueryBasePriorityThread(cases[1].current);
++  tap_comment("saturation process=%ld->%ld positive_base=%d query=%ld negative_base=%d query=%ld",before,p,cases[0].current->BasePriority,positive_query,cases[1].current->BasePriority,negative_query);
++  regression_check(returned==before&&process->BasePriority==p,"saturation process setter publishes new base and returns old base");
++  regression_check(cases[0].current->BasePriority==positive,"positive saturated thread stays at class maximum");
++  regression_check(cases[1].current->BasePriority==negative,"negative saturated thread stays at class minimum");
++  regression_check(positive_query==16,"process move preserves positive saturation increment");
++  regression_check(negative_query==-16,"process move preserves negative saturation increment");
++ }
++ KeSetBasePriorityThread(cases[0].current,0);KeSetBasePriorityThread(cases[1].current,0);
++}
++static void inheritance_matrix(void) {
++ const LONG priorities[]={16,31,1};
++ for(ULONG i=0;i<sizeof(priorities)/sizeof(priorities[0]);i++) {
++  LONG old=process->BasePriority;
++  regression_check(KeSetPriorityProcess(process,priorities[i])==old&&process->BasePriority==priorities[i],"inheritance matrix process setter publishes chosen base");
++  for(ULONG suspended=0;suspended<2;suspended++) {
++   memset(&cases[0],0,sizeof(cases[0]));
++   tap_comment("inheritance process=%ld suspended=%lu",priorities[i],suspended);
++   HANDLE h=spawn(0,suspended,FALSE);
++   if(suspended) {
++    PETHREAD thread=NULL;
++    regression_require(ObReferenceObjectByHandle(h,&PsThreadObjectType,(PVOID *)&thread)==0,"reference inheritance matrix suspended thread");
++    regression_check(membership(&thread->Tcb,NULL)==1,"inheritance matrix suspended thread belongs to public process");
++    regression_check(thread->Tcb.BasePriority==priorities[i]&&thread->Tcb.Priority==priorities[i],"inheritance matrix suspended thread inherits selected process base");
++    ObfDereferenceObject(thread);
++    regression_require(NtResumeThread(h,NULL)==0,"resume inheritance matrix suspended thread");
++   }
++   entered(0);retire(0,h);
++  }
++ }
+ }
+ int main(void) {
+  regression_begin();PKTHREAD self=KeGetCurrentThread();process=self->ApcState.Process;
+@@ -116,7 +157,9 @@ int main(void) {
+  KeSetPriorityProcess(process,original);
+  regression_check(self->BasePriority==original,"caller native base restores with process");
+  KeSetPriorityProcess(process,original+1);
++ saturation_matrix(original);
+  ObfDereferenceObject(suspended);retire(0,first);retire(1,second);retire(2,third);
++ inheritance_matrix();
+  KeSetPriorityProcess(process,original);
+  ULONG final_count=0;membership(self,&final_count);
+  regression_check(final_count==initial_count,"retirement restores original public list count");

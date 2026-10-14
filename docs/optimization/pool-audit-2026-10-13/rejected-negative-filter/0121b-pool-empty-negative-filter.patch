@@ -1,0 +1,110 @@
+diff --git a/ntoskrnl/xb/mm/pool-audit.h b/ntoskrnl/xb/mm/pool-audit.h
+index 43a42eb4..1c714355 100644
+--- a/ntoskrnl/xb/mm/pool-audit.h
++++ b/ntoskrnl/xb/mm/pool-audit.h
+@@ -11,7 +11,8 @@ typedef struct _NXP_POOL_AUDIT {
+     ULONG FallbackHits;
+     ULONG NotFound;
+     ULONG Reclaims;
+-    /* Bucket 0 is a head hit; bucket k records 32*(k-1)+1..32*k pages. */
++    /* Bucket 0 is a head hit or proved negative; bucket k records
++     * 32*(k-1)+1..32*k fallback pages examined. */
+     ULONG ScanLength[129];
+ } NXP_POOL_AUDIT;
+ extern NXP_POOL_AUDIT NxpPoolAudit;
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index 80ec7281..bea4fa8f 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -126,6 +126,17 @@ NXP_POOL_AUDIT NxpPoolAudit;
+  * elastic at the exhaustion edge, steady-state stays fast. */
+ #define NXP_NOT_BUCKET 0xFF
+ static UCHAR NxpPageState[NXK_POOL_WINDOW_PAGES];
++#if XBOX_RESERVE_UPPER_RAM
++#define NXP_EMPTY_DOMAIN_COUNT 2
++#define NXP_EMPTY_DOMAIN(Class) ((Class) / NXP_CLASSES)
++#else
++#define NXP_EMPTY_DOMAIN_COUNT 1
++#define NXP_EMPTY_DOMAIN(Class) 0
++#endif
++/* A negative filter only: positive searches still validate page state and
++ * domain under NxpLock. One aggregate per allocation domain avoids a full
++ * window scan when no compatible empty bucket page exists. */
++static ULONG NxpEmptyPageCount[NXP_EMPTY_DOMAIN_COUNT];
+ #define NXP_PAGE_INDEX(P) \
+     ((ULONG)(((ULONG_PTR)(P) - NXK_POOL_WINDOW_BASE) >> PAGE_SHIFT))
+ 
+@@ -177,6 +188,7 @@ InitializePool(IN POOL_TYPE PoolType,
+ 
+     /* No page is a bucket page yet (0 would read as an empty bucket). */
+     RtlFillMemory(NxpPageState, sizeof(NxpPageState), NXP_NOT_BUCKET);
++    RtlZeroMemory(NxpEmptyPageCount, sizeof(NxpEmptyPageCount));
+ 
+     /* Map every 16-byte block-size step to the smallest fitting class. */
+     c = 0;
+@@ -267,6 +279,8 @@ NxpDetachEmptyBucketPage(ULONG Index)
+ #endif
+     Size = NxpClassSize[NXP_SIZE_CLASS(Class)];
+     Count = PAGE_SIZE / Size;
++    ASSERT(NxpEmptyPageCount[NXP_EMPTY_DOMAIN(Class)] != 0);
++    NxpEmptyPageCount[NXP_EMPTY_DOMAIN(Class)]--;
+     /* Batch frees commonly leave the whole page at the list head. Verify
+      * the complete span before splicing it; interleaved frees use the
+      * individual unlink path below. No partial splice is published. */
+@@ -321,6 +335,14 @@ NxpReuseEmptyBucketPage(ULONG Class)
+ #else
+     UNREFERENCED_PARAMETER(Class);
+ #endif
++    if (NxpEmptyPageCount[NXP_EMPTY_DOMAIN(Class)] == 0)
++    {
++#ifdef NXK_POOL_AUDIT
++        NxpPoolAudit.NotFound++;
++        NxpPoolAudit.ScanLength[0]++;
++#endif
++        return NULL;
++    }
+     /* Prefer an empty page already at a compatible list head. Its free
+      * blocks commonly form a single span, avoiding individual unlinks. */
+     for (i = FirstClass; i < FirstClass + NXP_CLASSES; ++i)
+@@ -465,6 +487,11 @@ NxpAllocatePoolWithTag(IN POOL_TYPE PoolType,
+         NxpFreeLists[Class] = Blk->Next;
+         /* The head has no predecessor; its Prev is never consulted.
+          * Leave it untouched here and use head identity when detaching. */
++        if (NxpPageState[NXP_PAGE_INDEX(Blk)] == 0)
++        {
++            ASSERT(NxpEmptyPageCount[NXP_EMPTY_DOMAIN(Class)] != 0);
++            NxpEmptyPageCount[NXP_EMPTY_DOMAIN(Class)]--;
++        }
+ #ifdef NXK_POOL_CENSUS
+         if (NxpPageState[NXP_PAGE_INDEX(Blk)] == 0)
+             NxPoolCensusPageBecameActive(Class,
+@@ -674,6 +701,8 @@ ExFreePoolWithTag(IN PVOID P,
+             ClassIndex, NXP_POOL_CENSUS_PAGE_DOMAIN(ClassIndex));
+ #endif
+     NxpPageState[NXP_PAGE_INDEX(P)]--;
++    if (NxpPageState[NXP_PAGE_INDEX(P)] == 0)
++        NxpEmptyPageCount[NXP_EMPTY_DOMAIN(Hdr->ClassIndex)]++;
+     KeReleaseSpinLock(&NxpLock, OldIrql);
+ }
+ 
+diff --git a/tests/host/pool-audit/cases.c b/tests/host/pool-audit/cases.c
+index 8f3d7717..4a545e8e 100644
+--- a/tests/host/pool-audit/cases.c
++++ b/tests/host/pool-audit/cases.c
+@@ -9,12 +9,12 @@ int main(void) {
+  arena=aligned_alloc(PAGE_SIZE,NXK_POOL_WINDOW_PAGES*PAGE_SIZE);assert(arena);
+  reset();void *a=ExAllocatePoolWithTag(NonPagedPool,64,7);assert(a);
+  assert(NxpPoolAudit.SearchCalls==1);
+- assert(NxpPoolAudit.HeadChecks==NXP_CLASSES&&NxpPoolAudit.HeadHits==0);
+- assert(NxpPoolAudit.FallbackCalls==1&&NxpPoolAudit.PagesExamined==NXK_POOL_WINDOW_PAGES);
+- assert(NxpPoolAudit.MaxPagesExamined==NXK_POOL_WINDOW_PAGES&&NxpPoolAudit.NotFound==1);
++ assert(NxpPoolAudit.HeadChecks==0&&NxpPoolAudit.HeadHits==0);
++ assert(NxpPoolAudit.FallbackCalls==0&&NxpPoolAudit.PagesExamined==0);
++ assert(NxpPoolAudit.MaxPagesExamined==0&&NxpPoolAudit.NotFound==1);
+  ExFreePoolWithTag(a,7);a=ExAllocatePoolWithTag(NonPagedPool,1024,8);assert(a);
+  assert(NxpPoolAudit.SearchCalls==2&&NxpPoolAudit.HeadHits==1);
+- assert(NxpPoolAudit.FallbackCalls==1&&NxpPoolAudit.PagesExamined==NXK_POOL_WINDOW_PAGES);
++ assert(NxpPoolAudit.FallbackCalls==0&&NxpPoolAudit.PagesExamined==0);
+  ExFreePoolWithTag(a,8);assert(NxpReclaimEmptyBucketPages()==1&&NxpPoolAudit.Reclaims==1);
+  puts("PASS accounting distinguishes full miss and list-head hit");
+  reset();void *objects[34];

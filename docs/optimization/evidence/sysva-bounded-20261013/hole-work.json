@@ -1,0 +1,63 @@
+{
+  "helper_sha256": "501e78f3fe94cdb268ecf2dd844f8bcdc62b158bdff30e5a355eff60c4f05071",
+  "sysva_file_sha256": "80aeefb6460732637f6d0930f0d1d9c5baf90e8fa442c8fa44395f222286e4aa",
+  "note": "Host work counts from the actual helper; no elapsed-time claim.",
+  "rows": [
+    {
+      "case": "cold-one",
+      "pages": 1,
+      "result_va": "0xd0000000",
+      "pde_reads": 1,
+      "pte_reads": 0
+    },
+    {
+      "case": "warm-one",
+      "pages": 1,
+      "result_va": "0xd0000000",
+      "pde_reads": 1,
+      "pte_reads": 1
+    },
+    {
+      "case": "warm-64",
+      "pages": 64,
+      "result_va": "0xd0000000",
+      "pde_reads": 64,
+      "pte_reads": 64
+    },
+    {
+      "case": "occupied-prefix-4095",
+      "pages": 1,
+      "result_va": "0xd0fff000",
+      "pde_reads": 4096,
+      "pte_reads": 4096
+    },
+    {
+      "case": "alternating-no-two-page-hole",
+      "pages": 2,
+      "result_va": "0x0",
+      "pde_reads": 16384,
+      "pte_reads": 16384
+    },
+    {
+      "case": "all-present-empty-full-aperture",
+      "pages": 16384,
+      "result_va": "0xd0000000",
+      "pde_reads": 16384,
+      "pte_reads": 16384
+    },
+    {
+      "case": "all-unbacked-full-aperture",
+      "pages": 16384,
+      "result_va": "0xd0000000",
+      "pde_reads": 16,
+      "pte_reads": 0
+    },
+    {
+      "case": "occupied-half-then-unbacked-half",
+      "pages": 8192,
+      "result_va": "0xd2000000",
+      "pde_reads": 8200,
+      "pte_reads": 8192
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+process-host: /work/artifacts/process-host-v5-red/process-host.c:548: main: Assertion `new_thread.Tcb.BasePriority==bases[i]&&new_thread.Tcb.Priority==bases[i]' failed.
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==1==ERROR: AddressSanitizer: SEGV on unknown address (pc 0xf7203367 bp 0xf7408e34 sp 0xff87b4d0 T0)
+==1==The signal is caused by a READ memory access.
+==1==Hint: this fault was caused by a dereference of a high value address (see register values below).  Disassemble the provided pc to learn which register was used.
+    #0 0xf7203367 in abort (/lib32/libc.so.6+0x23367) (BuildId: a6ac4013957ce900e167743cd60a25daff1344bb)
+    #1 0xf72031bd  (/lib32/libc.so.6+0x231bd) (BuildId: a6ac4013957ce900e167743cd60a25daff1344bb)
+    #2 0xf7213cba in __assert_fail (/lib32/libc.so.6+0x33cba) (BuildId: a6ac4013957ce900e167743cd60a25daff1344bb)
+    #3 0x56576c23 in main /work/artifacts/process-host-v5-red/process-host.c:548
+    #4 0xf7204c74  (/lib32/libc.so.6+0x24c74) (BuildId: a6ac4013957ce900e167743cd60a25daff1344bb)
+    #5 0xf7204d37 in __libc_start_main (/lib32/libc.so.6+0x24d37) (BuildId: a6ac4013957ce900e167743cd60a25daff1344bb)
+    #6 0x56571266 in _start (/work/artifacts/process-host-v5-red/process-host+0x4266) (BuildId: 09329302a66cdd1b4d6e5f41be3e2026924fe5f0)
+
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV (/lib32/libc.so.6+0x23367) (BuildId: a6ac4013957ce900e167743cd60a25daff1344bb) in abort
+==1==ABORTING

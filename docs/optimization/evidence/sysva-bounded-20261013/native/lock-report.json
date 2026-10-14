@@ -1,0 +1,73 @@
+{
+  "clock": "internal NT KeQueryPerformanceCounter (Xbox HAL PIT)",
+  "frequency": 1125000,
+  "frequency_source": "hal/halx86/include/halhw.h SARCH_XBOX PIT_FREQUENCY; hal/halx86/xbox.cmake selects generic/timer.c",
+  "title_clock_distinct": "Portable benchmark uses XeKeQueryPerformanceCounter PMT at 3374488 Hz on SpiritBoot.",
+  "captures": [
+    {
+      "side": "baseline",
+      "path": "/home/codex/xemu-shader-workbench-handoff/.scratch/remaining-mm-audit-20261013/results/probe-sysva-phase-baseline-20261013-232041",
+      "bios": "dead8f7d67c090d16fbe6ea89fe7e7023499da0a7d1f9fc608c716b2364ab8d2",
+      "serial_sha256": "7137514216d788be2e497d5d29eece1a68822f775194c50726dcc11ccb08367b",
+      "launch_sha256": "b3afdffa4f4248017cebd686c951f7a1af64c7887a261ffb2a5cd0451b63210c",
+      "inputs_sha256": "f4ed9731783dfd7d1cc60c7ed4d3d1579d7c5656af5983fc95abee40cf6ea143",
+      "result_sha256": "b0c61bbe0b6392cb150c48ccf5688ad8a7e5b2d3bc5c31f38f1a7395a901fc89"
+    },
+    {
+      "side": "raw",
+      "path": "/home/codex/xemu-shader-workbench-handoff/.scratch/remaining-mm-audit-20261013/results/probe-sysva-phase-raw-20261013-232049",
+      "bios": "61786b167f9ff2ad9196c23629941f03cad5b1072d40b409ab9ec0586dd9c3c0",
+      "serial_sha256": "f87749ff272b5a26223992eaa4cb24c9148344913ba1895a1e431dede62fc805",
+      "launch_sha256": "527ae73b4ee75416cde812094b37ddf916c0f9dbf7374f6aa0f39dcf19b1da5f",
+      "inputs_sha256": "e07868f423a81b94172a3cdf54ed0a90bf520815a059dd0f752540853a631c7c",
+      "result_sha256": "1b60b2afd9dcf7b5adee4f6c72e2e578420dba1e7a58beb3401af4d865e61efd"
+    }
+  ],
+  "all_counts_identical": true,
+  "observations": 50,
+  "first": {
+    "baseline": {
+      "side": "baseline",
+      "observation": 0,
+      "phase": "alloc",
+      "size": 4096,
+      "result": 1,
+      "locks": 2,
+      "max_ticks": 94,
+      "max_us": 83.55555555555556
+    },
+    "raw": {
+      "side": "raw",
+      "observation": 0,
+      "phase": "alloc",
+      "size": 4096,
+      "result": 1,
+      "locks": 2,
+      "max_ticks": 98,
+      "max_us": 87.11111111111111
+    }
+  },
+  "maximum": {
+    "baseline": {
+      "side": "baseline",
+      "observation": 21,
+      "phase": "alloc",
+      "size": 66281472,
+      "result": 0,
+      "locks": 16140,
+      "max_ticks": 3403,
+      "max_us": 3024.8888888888887
+    },
+    "raw": {
+      "side": "raw",
+      "observation": 21,
+      "phase": "alloc",
+      "size": 66281472,
+      "result": 0,
+      "locks": 16140,
+      "max_ticks": 2988,
+      "max_us": 2656.0
+    }
+  },
+  "limits": "One instrumented capture per BIOS; interrupts and QPC overhead may affect maxima. Not a bound or speed aggregate."
+}

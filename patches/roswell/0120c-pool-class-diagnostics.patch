@@ -1,0 +1,91 @@
+diff --git a/ntoskrnl/xb/mm/pool.c b/ntoskrnl/xb/mm/pool.c
+index bea4fa8f..281fa900 100644
+--- a/ntoskrnl/xb/mm/pool.c
++++ b/ntoskrnl/xb/mm/pool.c
+@@ -9,13 +9,13 @@
+  * ARM3 pool page layer, selected below.
+  *
+  * Shape: requests up to 2040 bytes carry an 8-byte header and come
+- * from power-of-two free lists carved out of whole nonpaged pages
+- * (retail's buckets); anything larger goes straight to whole pages (page-aligned,
++ * from size-class free lists carved out of whole nonpaged pages;
++ * anything larger goes straight to whole pages (page-aligned,
+  * tracked by VA for ExQueryPoolBlockSize, which titles reach through
+  * the pool-size ordinal).  PagedPool requests are served by the same
+  * nonpaged backend -- there is no paging, only the API distinction.
+- * Pages are never returned to the system: pool footprint is bounded
+- * by peak usage, which on this machine is what retail does too.
++ * Empty bucket pages are reused across compatible classes and returned
++ * to the page supply under allocation pressure.
+  *
+  * One spinlock covers the class lists and the big-block table, so
+  * every path is DISPATCH_LEVEL-safe and never waits.  Cache-aligned
+@@ -64,10 +64,9 @@
+ 
+ /* SIZE CLASSES *************************************************************/
+ 
+-/* Block sizes include the 8-byte header.  Retail-pinned: the pool-size
+- * ordinal shows power-of-two buckets from 32 to 2048, and requests
+- * above 2040 user bytes go to whole pages (mm/bigpool pool_query_sizes,
+- * --official validated). */
++/* Block sizes include the 8-byte header. Native boot/thread/IRP/I/O census
++ * selected the 272- and 320-byte classes; all public queries report their
++ * actual usable capacity. Requests above 2040 user bytes use whole pages. */
+ static const USHORT NxpClassSize[] = {
+     32, 64, 128, 256, 272, 320, 512, 1024, 2048,
+ };
+diff --git a/tests/host/pool-census/check.py b/tests/host/pool-census/check.py
+index 53f46e8a..a03d2a1f 100644
+--- a/tests/host/pool-census/check.py
++++ b/tests/host/pool-census/check.py
+@@ -100,6 +100,14 @@ int main(void) {
+     assert(NXP_POOL_CENSUS_GET_BIN(Packed) == 128);
+     assert(NXP_POOL_CENSUS_GET_DOMAIN(Packed));
+     assert(NXP_POOL_CENSUS_GET_SAMPLED(Packed));
++    for (unsigned Class = 0; Class < 18; Class++) {
++        Packed = NXP_POOL_CENSUS_PACK_CLASS(Class, 255,
++                                          NXP_POOL_CENSUS_DOMAIN_TITLE, TRUE);
++        assert(NXP_POOL_CENSUS_GET_CLASS(Packed) == Class);
++        assert(NXP_POOL_CENSUS_GET_BIN(Packed) == 255);
++        assert(NXP_POOL_CENSUS_GET_DOMAIN(Packed));
++        assert(NXP_POOL_CENSUS_GET_SAMPLED(Packed));
++    }
+     NxPoolCensusInitialize();
+     assert(NxpPoolCensusData.Magic == NXP_POOL_CENSUS_MAGIC);
+     assert(NxpPoolCensusData.Schema == NXP_POOL_CENSUS_SCHEMA);
+diff --git a/tests/host/pool-classes/cases.c b/tests/host/pool-classes/cases.c
+index 0ac270b2..27199108 100644
+--- a/tests/host/pool-classes/cases.c
++++ b/tests/host/pool-classes/cases.c
+@@ -67,6 +67,15 @@ int main(void) {
+  ExFreePoolWithTag(live,1);live=ExAllocatePoolWithTag(NonPagedPool,2040,3);assert(live&&committed==1);
+  ExFreePoolWithTag(live,3);assert(NxpReclaimEmptyBucketPages()==1);
+  puts("PASS allocation limit failure leaves lists and authoritative page state intact");
++ reset();void *guard=ExAllocatePoolWithTag(NonPagedPool,280,91);assert(guard);
++ expected_bug=BAD_POOL_CALLER;expected_reason=0x0A;
++ if(setjmp(bug_jump)==0){ExFreePoolWithTag(guard,92);assert(!"wrong tag accepted");}
++ assert(!expected_bug&&NxpPageState[NXP_PAGE_INDEX(guard)]==1);invariant();
++ ExFreePoolWithTag(guard,91);expected_bug=BAD_POOL_HEADER;expected_reason=7;
++ if(setjmp(bug_jump)==0){ExFreePoolWithTag(guard,91);assert(!"double free accepted");}
++ assert(!expected_bug&&NxpPageState[NXP_PAGE_INDEX(guard)]==0);invariant();
++ assert(NxpReclaimEmptyBucketPages()==1);
++ puts("PASS wrong tag and double free stop before corrupting lists or page counts");
+  reset();static const unsigned distribution[][2]={{256,14},{264,1},{280,4},{288,1},{296,6},{304,12},{320,2},{352,1},{384,1},{416,4},{464,15},{472,6},{488,2}};
+  void *objects[69];unsigned total=0;
+  for(unsigned i=0;i<RTL_NUMBER_OF(distribution);i++)for(unsigned j=0;j<distribution[i][1];j++) {
+diff --git a/tests/host/pool-classes/check.py b/tests/host/pool-classes/check.py
+index 7895a48f..e3b8ef6b 100644
+--- a/tests/host/pool-classes/check.py
++++ b/tests/host/pool-classes/check.py
+@@ -16,6 +16,10 @@ bodies=''.join(m.function(pool,n) for n in names if re.search(r'\b'+n+r'\s*\([^;
+ bodies=re.sub(r'(\b[A-Za-z_]\w*(?:->\w+)*)->Prev = ([^;]+);',
+               r'CountPrevWrite(&\1->Prev, \2);',bodies)
+ counts='\nstatic unsigned prev_writes; static void CountPrevWrite(NXP_FREE **p, NXP_FREE *v) {prev_writes++;*p=v;}\n'
++shim=(root/'tests/host/pool-refill/shim.c').read_text()
++old_bugcheck=re.search(r'static void KeBugCheckEx\([\s\S]*?\n}\n',shim).group(0)
++replacement='#include <setjmp.h>\nstatic jmp_buf bug_jump;\nstatic unsigned expected_bug,expected_reason;\nstatic void KeBugCheckEx(ULONG b,ULONG_PTR a,ULONG_PTR c,ULONG_PTR d,ULONG_PTR e) {\n (void)c;(void)d;(void)e;assert(expected_bug&&b==expected_bug&&a==expected_reason);\n expected_bug=0;longjmp(bug_jump,1);\n}\n'
++shim=shim.replace(old_bugcheck,replacement)
+ for reserve in [0,1]:
+- src=out/f'refill-{reserve}.c';src.write_text((root/'tests/host/pool-refill/shim.c').read_text()+f'\n#define XBOX_RESERVE_UPPER_RAM {reserve}\n'+macros+definitions+counts+'\nULONG NxpReclaimEmptyBucketPages(void);\n'+bodies+(root/'tests/host/pool-classes/cases.c').read_text())
++ src=out/f'refill-{reserve}.c';src.write_text(shim+f'\n#define XBOX_RESERVE_UPPER_RAM {reserve}\n'+macros+definitions+counts+'\nULONG NxpReclaimEmptyBucketPages(void);\n'+bodies+(root/'tests/host/pool-classes/cases.c').read_text())
+  exe=src.with_suffix('');subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',str(src),'-o',str(exe)],check=True);subprocess.run([str(exe)],check=True)
