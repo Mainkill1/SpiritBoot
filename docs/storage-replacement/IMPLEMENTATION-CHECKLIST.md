@@ -56,7 +56,7 @@ Maintain guest-visible names (`\Driver\Disk`, `\Driver\Cdrom`, `\Device\Harddisk
 - [ ] Inspect the current *assembled* Roswell source and produce a caller→callee/device dependency matrix. Confirm class / disk / optical dependencies, lower SRB support, PnP, partition controls and persistent memory footprint by actual compiled attribution; the 139 count is **not** a size estimate.
 - [x] **Inspect the required boot file** `ntoskrnl/io/iomgr/driver.c`: review `IopFoldedInDrivers`, entry ABI, names/order, plus `ntoskrnl/xb/devtree.c`, `ntoskrnl/xb/devnode.c` and `ntoskrnl/include/internal/nx-devtree.h`. The independently reviewed [boot audit](boot-dependency-audit/README.md) binds 25 files and 62 ranges to the actual assembled tree. This closes inspection only; P3 replacement registration and native outcomes remain open.
 - [x] Define exact build states `legacy-reference`, `partial-lab-prototype`, `complete-candidate`. Add explicit backend option CLI → `tools/firmware.py` → CMake → actual linker graph → `build.json` → tests/CI; reject missing/unknown setting and **silent fallback**. Keep separate output directories.
-- [x] The starting lock contained `0121` and ran through `0125a`; this PR now adds ordered patches through `0132`. Continue using the **next available** ordered Roswell filename(s); update `sources/firmware-lock.json` SHA256 without reordering/overwriting prior patches.
+- [x] The starting lock contained `0121` and ran through `0125a`; this PR now adds ordered patches through `0133`. Continue using the **next available** ordered Roswell filename(s); update `sources/firmware-lock.json` SHA256 without reordering/overwriting prior patches.
 - [x] Produce an approved clean-room inputs manifest identifying authorship/licensing/hashes and allowed public tests/standards. Separate implementer access from legacy-source review; **do not** hand the implementer the unfiltered assembled Roswell tree, patch history, old code, disassembly, private helpers or generated old-source tests. Record any prior exposure; an AI session boundary alone is not license proof.
 - [ ] Investigate/resolve rights for 19 `srbhelper.h` + 3 `classpnp.h` inlines **before** importing headers/functions, and enumerate other compiled copied/unknown helpers. Keep original notices and separate acceptable interface facts from protected implementations.
 - [x] Segregate the legacy `tests/host/storage-completion/check.py` test created by patch `0108`: it extracts **old** `TransferPktComplete` source. The actual CMake backend guard permits it only for `legacy-reference`; owned production tests verify locked patch hashes and apply only new production/test paths. Independent review checked rejection of partial, complete, missing and conflicting selections. Native candidate qualification remains open.
@@ -157,3 +157,14 @@ Tasks:
 - Current read-only non-certifying checker: `tools/storage_migration_gate.py` and its host regression tests.
 
 **Definition of done:** one self-contained original-Xbox BIOS with independently implemented and verified storage class functionality, preserved behavior and saved games, no identified incompatible implementation included, full source/licensing closure, and measured non-regression on the frozen Steam Deck + Windows Ryzen workloads. No follow-up implementation PR is required or requested. The **single PR remains draft until all tasks finish.**
+
+### Zero-domain descriptor admission correction
+
+Patch `0133` corrects a bounded owned request-core admission defect: a valid
+MDL may have original numeric domain zero. Explicit validated descriptor
+presence is now separate from that address. The [fix writeup](independent-implementation/zero-domain-mdl/FIX.md)
+records RED/GREEN evidence, 44 request scenarios, eight pthread scenarios and
+freestanding checks. This changes an unlinked primitive, not the published
+reference ROM. The 146-patch reference composition receipt remains a historical
+reference identity; the current lock now contains 147 patches. Native adapter
+qualification and full replacement remain open.

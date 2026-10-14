@@ -157,3 +157,13 @@ delivery. Both return CANCELLED with actual data bytes. A sync command transfers
 no data and cannot increase the parent's byte count. Ordinary NX_WRITE still
 does not promise durability. Error Information is an explicit candidate policy;
 historical write-through failure Information/parity is not claimed.
+
+## Valid descriptor with zero original domain
+
+For nonempty data, initialize `nx_request.mdl_present` to exactly 1 only after
+validating the actual non-null descriptor, its locked-page/PFN coverage and
+lifetime. The numeric original domain `mdl_virtual` may be zero; it does not
+prove descriptor absence. Preserve the original domain and actual descriptor
+through transport. Zero-initialized callers without this evidence fail closed.
+The core still validates extent, overflow and alignment; native PFN/DMA/PIO
+qualification remains required. See [fix evidence](../zero-domain-mdl/FIX.md).
