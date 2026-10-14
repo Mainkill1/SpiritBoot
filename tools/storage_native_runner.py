@@ -277,6 +277,98 @@ def derive_clock_observation(guest: dict, wall: dict) -> dict:
             'clock_qualification': 'INCONCLUSIVE'}
 
 
+def derive_causal_rate(guest_begin, guest_end, host_begin_ns, host_end_ns) -> dict:
+    """Exact conditional rate bounds; arithmetic cannot prove the causal link."""
+    from fractions import Fraction
+    brackets = [guest_begin, guest_end, host_begin_ns, host_end_ns]
+    if any(len(pair) != 2 or any(type(value) is not int or value < 0 for value in pair)
+           or pair[1] < pair[0] for pair in brackets):
+        raise ValueError('invalid or rolled-back counter/host bracket')
+    dmin, dmax = guest_end[0]-guest_begin[1], guest_end[1]-guest_begin[0]
+    tmin, tmax = host_end_ns[0]-host_begin_ns[1], host_end_ns[1]-host_begin_ns[0]
+    if dmin < 0 or dmax < dmin or tmin <= 0 or tmax < tmin:
+        raise ValueError('counter rollback or overlapping host brackets: INCONCLUSIVE')
+    lower, upper = Fraction(dmin*10**9, tmax), Fraction(dmax*10**9, tmin)
+    def rational(value):
+        return {'numerator':value.numerator, 'denominator':value.denominator}
+    return {'counter_delta_bounds':[dmin,dmax], 'host_delta_ns_bounds':[tmin,tmax],
+            'rate_lower':rational(lower), 'rate_upper':rational(upper),
+            'relative_rate_interval_width':rational((upper-lower)/lower) if lower else None,
+            'causal_proof_status':'not_established_by_arithmetic',
+            'normative_clock_qualified':False, 'performance_acceptance_eligible':False}
+
+
+def parse_causal_clock(serial: str, schedule: list) -> dict:
+    """Strict separately versioned protocol; each marker includes its newline."""
+    import re
+    records = []
+    for line in serial.splitlines(keepends=True):
+        if line.strip().startswith('not ok ') or 'STORAGE-PERF-ERROR' in line:
+            raise ValueError('causal clock fixture failure retained')
+        if 'STORAGE-CAUSAL-' not in line:
+            continue
+        if not line.endswith('\n') or not re.fullmatch(r'(?:# )?STORAGE-CAUSAL-[^\r\n]+\r?\n', line):
+            raise ValueError('partial or foreign causal protocol framing')
+        words = line.removeprefix('# ').split()
+        if any('=' not in word for word in words[1:]):
+            raise ValueError('unframed causal protocol fields')
+        records.append((words[0], _unique_fields(words[1:])))
+    at = 0
+    def take(kind, fields):
+        nonlocal at
+        if at >= len(records) or records[at][0] != 'STORAGE-CAUSAL-'+kind:
+            raise ValueError('missing, duplicate or reordered causal record: '+kind)
+        value = records[at][1]; at += 1
+        if set(value) != set(fields):
+            raise ValueError('causal record fields differ: '+kind)
+        return value
+    def number(value):
+        if not re.fullmatch(r'[0-9]+', value):
+            raise ValueError('invalid nonnegative causal counter value')
+        return int(value)
+    count = len(schedule)
+    ready = take('READY', ('fixture_generation','diagnostic_revision','samples','markers',
+                           'purpose','deadline_counter','qpc_hz'))
+    expected_ready = {'fixture_generation':'2','diagnostic_revision':'3','samples':str(count),
+                      'markers':str(count*2),'purpose':'causal_counter_brackets','deadline_counter':'qpc',
+                      'qpc_hz':ready['qpc_hz']}
+    frequency = number(ready['qpc_hz'])
+    if ready != expected_ready or frequency <= 0 or not count:
+        raise ValueError('causal diagnostic metadata differs')
+    if take('ARM', ('samples',)) != {'samples':str(count)}:
+        raise ValueError('causal guest runtime-state anchor differs')
+    samples = []; previous = {'qpc':None,'rdtsc':None}
+    for index, declared in enumerate(schedule):
+        for edge in ('begin','end'):
+            marker = take('MARKER', ('index','sample','edge'))
+            expected = {'index':str(index*2+(edge=='end')),'sample':str(index),'edge':edge}
+            if marker != expected:
+                raise ValueError('nonunique or reordered causal marker')
+        sample = {'index':index,'qpc_hz':frequency}
+        for edge in ('begin','end'):
+            sample[edge] = {}
+            for counter in ('qpc','rdtsc'):
+                bound = take('BOUND', ('marker','counter','before','after'))
+                if bound['marker'] != str(index*2+(edge=='end')) or bound['counter'] != counter:
+                    raise ValueError('causal counter/marker binding differs')
+                pair = [number(bound['before']),number(bound['after'])]
+                if pair[1] < pair[0] or (previous[counter] is not None and pair[0] < previous[counter]):
+                    raise ValueError('causal counter rollback')
+                previous[counter] = pair[1]; sample[edge][counter] = pair
+        actual = take('SAMPLE', ('index','requested_us','busy'))
+        if actual != {'index':str(index),'requested_us':str(declared['requested_us']),'busy':str(declared['busy'])}:
+            raise ValueError('causal diagnostic schedule differs')
+        sample.update(requested_us=declared['requested_us'],busy=declared['busy'])
+        if sample['busy'] and sample['end']['qpc'][0]-sample['begin']['qpc'][1] < frequency*sample['requested_us']//10**6:
+            raise ValueError('causal busy QPC deadline shorter than frozen schedule')
+        samples.append(sample)
+    ending = take('END', ('samples','markers','storage_operations'))
+    if ending != {'samples':str(count),'markers':str(count*2),'storage_operations':'0'} or at != len(records):
+        raise ValueError('causal terminal framing/count differs or records follow END')
+    return {'complete':True,'metadata':ready,'samples':samples,'storage_operations':0,
+            'normative_clock_qualified':False,'performance_acceptance_eligible':False}
+
+
 def validate_lifetime_timeout(serial: str, result: dict, cleanup: dict,
                               attempt: dict, *, windows_receipts: dict | None = None) -> None:
     """Qualify the declared failure path, never any arbitrary failed process."""

@@ -15,4 +15,11 @@ void tap_version(unsigned v){(void)v;}void tap_plan(unsigned n){(void)n;}
 void tap_ok(unsigned n,const char *text){(void)n;(void)text;}
 void tap_not_ok(unsigned n,const char *text){(void)n;(void)text;}
 void tap_puts(const char *text){fputs(text,stdout);}void tap_drain(void){}
-void tap_comment(const char *fmt,...){va_list args;va_start(args,fmt);vprintf(fmt,args);va_end(args);fputc('\n',stdout);}
+void tap_comment(const char *fmt,...){
+ char text[512];va_list args;va_start(args,fmt);vsnprintf(text,sizeof(text),fmt,args);va_end(args);puts(text);
+ unsigned index;
+ if(sscanf(text,"STORAGE-CAUSAL-MARKER index=%u",&index)==1){
+  unsigned a,d;__asm__ __volatile__("rdtsc":"=a"(a),"=d"(d)::"memory");
+  printf("MOCK-CAUSAL-EMISSION index=%u qpc=%llu rdtsc=%llu\n",index,qpc,((ULONGLONG)d<<32)|a);
+ }
+}

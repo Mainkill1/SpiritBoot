@@ -10,7 +10,7 @@ tuples match the preserved earlier header. Generated headers and binary/object
 outputs are ignored, while frozen evidence retains their exact original bytes.
 
 Build `MODE=pilot`, `MODE=replay`, `MODE=query`, `MODE=families`, `MODE=suite`,
-`MODE=dvd`, `MODE=lifetime` or `MODE=metrology`:
+`MODE=dvd`, `MODE=lifetime`, `MODE=metrology` or `MODE=causal-clock`:
 
 ```sh
 PATH=/home/codex/src/nxdk/bin:$PATH NXDK_DIR=/home/codex/src/nxdk make MODE=suite
@@ -128,10 +128,11 @@ owned JobObject before execution, bounds waits and retains the noninherited
 kill-on-close handle until observed owned-job ActiveProcesses0. Pipe server and
 client also have scoped Process-object cleanup and bounded output waits. This
 follows [the public Windows job inheritance/lifetime contract](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
-These builds/fault tests are local qualification only. Desktop-pipe normal and
-controlled-failure native qualification requires new isolated jobs. Deck capacity
-was recovered through a separate parent-owned operator procedure; Windows still
-awaits that procedure's approval. No native test changes the disk guard.
+These builds/fault tests are local checks. Separately recovered Deck and Windows
+capacity allowed corrected native byte-fill/query/lifetime qualification through
+fresh isolated jobs. Windows V27 preserves the earlier failed V23 EOF path; see
+[the Windows receipt](../../../docs/storage-replacement/WINDOWS-NATIVE-QUALIFICATION.md).
+P1 performance remains unqualified. No native test changes the disk guard.
 
 V2.3 native caller validation binds the exact frozen plan/parser/source/request,
 actual input hashes, explicit prepared-XISO or direct-copy seed lineage and the
@@ -162,3 +163,21 @@ An actual-C host mock with independently advancing QPC reproduces25 short busy
 intervals in that source and verifies the corrected50-sample schedule. Serial
 backend-delivery bounds require a separately reviewed marker/syscall experiment;
 no syscall trace or clock acceptance is implied by this source correction.
+
+`causal-clock` adds50 diagnostic samples with QPC/RDTSC brackets immediately
+around100 complete serial marker emissions and drains. Its host observer retains
+actual unbuffered EOF/read syscall timestamps, byte offsets, device/inode and
+owned process/FD identities. Complete marker visibility is required; partial
+prefixes cannot move the earlier EOF bound. Exact rational rate intervals retain
+overlap and counter rollback as INCONCLUSIVE. Poll gaps never supply a backend
+delivery bound.
+
+The runner supplies QMP through declared typed initial/final recipes around the
+external observer. The observer passively binds the actual owned listener FD;
+it opens no direct monitor connection and invokes no recursive HTTP diagnostic.
+Input/pause controls are disabled, while continuous pause/reset and foreign-writer
+exclusion remain explicitly unobserved. The narrow compiled backend/clock packet
+is conditional on the declared runtime clock assumptions. This mode performs no
+storage operations and cannot supply P1 workload measurements. The native report
+records exact V2.6.4 pins, clean build/fault checks and superseded unlaunched
+caller freezes and the retained V2.6.3 native schema failure; only parent authorization after review permits a new native run.

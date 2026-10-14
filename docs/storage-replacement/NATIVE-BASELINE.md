@@ -782,6 +782,169 @@ The corrected result receipt is included here for direct product review:
 }
 ```
 
+## Causal-clock diagnostic preparation, V2.6.4
+
+The new `causal-clock` fixture records both QPC and RDTSC immediately before
+each complete serial marker and after `tap_drain`. It preserves the same50
+idle/busy durations as V2.5, with100 uniquely ordered markers and no storage
+operations. QPC deadlines use the returned QPC frequency. The observer records
+actual unbuffered `read` entry/exit timestamps, offsets, returned bytes and
+device/inode identity. A marker's host bracket starts at the last genuine EOF
+before any marker prefix and ends at the read containing its complete newline.
+Split prefixes cannot tighten the earlier EOF bound. Partial, duplicate,
+reordered or post-END records, file replacement/truncation, counter rollback,
+changed process lifetime and observed foreign writers fail closed. Overlapping
+time brackets remain INCONCLUSIVE.
+
+The exact conservative rate interval uses guest differences
+`end_before - begin_after` through `end_after - begin_before`, divided by host
+differences `end_before - begin_after` through `end_after - begin_before` in
+the opposite order. Arithmetic retains exact rational endpoints. Poll cadence
+is recorded; it supplies no independent backend delivery bound. Sparse FD
+observations cannot establish continuous absence of other writers.
+
+The runner owns QMP. Seven declared typed recipes inspect the initial running
+state, named LPC/serial0 route and file backend, followed by the external
+observer and seven final recipes. The observer never opens a separate QMP
+connection or recursively invokes HTTP diagnostics. Actual owned TCP listening
+FD/inode, executable/argv/config, serial writable FD and input hashes bind the
+capture. Manual input and pause/resume are disabled by the job policy. Managed
+QMP connections do not retain continuous VM events, so intervening pause/reset
+exclusion stays an explicit assumption rather than an observed fact.
+
+The independently checked compiled clock packet identifies Deck RDTSC rate
+733,333,333 and raw PM timer rate3,375,000; the published BIOS reports QPC
+frequency3,374,488. The resulting paired-QPC calibration bias is approximately
+151.704ppm, rather than a cross-counter unit conversion. Under the separately
+stated monotonic-clock, running-ticks, no-icount/replay/override and unchanged
+offset assumptions, the compiled RDTSC path is affine with a difference error
+below one tick. Whole-binary source reproduction and all runtime branch facts
+are not asserted by the narrow byte/source packet. Normative qualification
+must review those conditions and propagate counter quantization and measured
+marker uncertainty; coarse long-span averages cannot establish short-span
+precision by themselves.
+
+V2.6 was never launched. Its caller failed to reject prior failed/duplicate-key
+ledgers; actual-main host faults reproduced this defect. The corrected caller
+rejects recursive duplicate JSON keys with line attribution and stops before
+dispatch on any prior failed qualification. V2.6.1 was also unlaunched and is
+preserved: its manifest included an inherited generated Python cache that
+changed during a host import. The preserved unlaunched V2.6.2 then omitted the
+required nested source manifest during cache cleanup. V2.6.3 retains that
+manifest, excludes caches and disables bytecode writes. Its positive actual
+validator checks transitive source/request/input/seed closure; missing-manifest
+and changed-source faults reject. All61 frozen pins match after these checks
+and the corrected actual-main checks. These snapshots
+do not supersede any earlier native failures or qualify old performance rows.
+
+| Frozen input | SHA-256 |
+| --- | --- |
+| V2.6.4 plan | `c880feafc2288d2aaf9896f17f621b3fba28f9659daa665c90252a3044baf946` |
+| V2.6.4 manifest | `2f1752d16ca1aee279c10202fd5852ad67dbddd8b90d235520af97c980ee01f5` |
+| HTTP caller | `0302fdec071d29eccdbf88f81281fc0bcb663d08b083a5acd83d4bc6befb5765` |
+| Parser | `1d8bae049e2058f1b788c828f9bedf9062532a6a110d6e40e4cbb13492d71184` |
+| Observer | `ff34a995aaa341d112b4024178d88c97e5fc58b41c3d53f5a251142ff3444c2d` |
+| Clean-built diagnostic ISO | `bc02de4db464e58243de4018fe6e5dc3f437e7dd589df280efa1c224ca986f7c` |
+| Static backend receipt | `48fd04a69e83c6bf48d68f6fc88a749d6e6f5fd5d591e23267bd3e8287c4643c` |
+| Static compiled clock receipt | `e3bd4f9ce066795f4bf7694e68d08b41e78af7aa6034d29dbfa8cde872fe843e` |
+| Host preparation receipt | `9bbcfc4e6fcb908b99ca71d1d6ebe9684c76d7e3d3212a74915c872009843ad2` |
+
+Local verification passed13 causal tests, including actual-C emission brackets,
+read/FD/file faults, typed recipe failures and the corrected native response
+shape. The earlier complete V2.6 host suite passed267 tests with3 pre-existing
+skips; the narrow V2.6.4 observer changes reran the affected13 tests. Four actual-main checks proved zero dispatch for prior
+failure, duplicate failure and nested escaped duplicate keys, with exactly one
+mocked dispatch for an empty ledger. The diagnostic built from a clean source
+layout with the pinned NXDK/toolchain; V2.6.4 changes no compiled fixture bytes.
+The original V2.6.3 native failure is preserved below. Independent review and
+parent authorization preceded the single new identity
+`pr248-native-deck-v264-causal-clock`; its completed receipt follows. A complete
+capture is collection evidence only: normative clock/P1 qualification remains
+INCONCLUSIVE.
+
+### Actual V2.6.3 observer failure and V2.6.4 correction
+
+The authorized V2.6.3 attempt ran as
+`20261014-171446479-6cb60c6b71274861b153be9953fc5404`. All seven initial
+managed QMP recipes completed. The actual status response was exactly
+`{"status":"running","running":true}`, without a `singlestep` field. The
+observer incorrectly required that absent field to equal false and exited
+before opening its serial capture. The runner retained `plan_failed` / execution
+`failed` / exit137; scoped cleanup reports targetStopped/evidenceFinalized and
+private HDD removal complete. Only READY preceded the failure; no marker
+intervals or causal rates qualified. This is an observer failure, not an
+observed firmware storage failure. Its failed ledger and all raw receipts stay
+unchanged, and the frozen plan stopped.
+
+V2.6.4 requires actual boolean `running=true` and `status=running`; an absent
+single-step field remains unknown. Explicit true/null or malformed state fields
+reject. Initial/final route comparisons now select the unique primary serial0
+record, retaining all other responses and hashes without requiring an unrelated
+monitor TCP peer port to remain constant. Listener comparison uses endpoint,
+FD, socket inode, local address, state and UID; volatile raw kernel rows remain
+auditable. Fail-first tests used the actual seven retained receipts. Changed
+primary label/type/file/frontend, duplicate primary, listener identity and
+failed recipe outcomes still reject. These corrections supply no continuous
+pause or writer exclusion and do not weaken the normative clock gate.
+
+The original failed-run bindings are preserved here for product review:
+
+```json
+{
+  "run_id": "20261014-171446479-6cb60c6b71274861b153be9953fc5404",
+  "plan_sha256": "b669d3ec172c03db413f644df94e5cf9bf7a99c70b0330346783c6e1a78ffde0",
+  "status": "failed_qualification",
+  "runner_status": "plan_failed",
+  "runner_execution": "failed",
+  "exit_code": 137,
+  "initial_qmp_recipes_completed": 7,
+  "observer_error": "owned VM QMP state is not ordinary running",
+  "single_step_observed": null,
+  "query_status_sha256": "e18c80157b8ae98a61ea33a841206f0dc74868f90c42220b18db13b42d41b4a7",
+  "result_sha256": "b07b349e854e53ed7fa096c67b31d44b60190551e50567d10a76db76eccaeeda",
+  "input_manifest_sha256": "bfe9859eb471051df536b501b191efa2041a6b383c1df965bc6553a1734d1cb7",
+  "serial_sha256": "a52e548d12d25454303ee33a77886f7016836dfab4c2bf52880e15e609d699e1",
+  "cleanup_sha256": "5e7d4f396e29bf5049d7951faeac63a1ba95d20c1b168e68cac8a64b70144e6c",
+  "cleanup_complete": true,
+  "normative_clock_qualified": false,
+  "performance_acceptance_eligible": false
+}
+```
+
+### Actual V2.6.4 complete causal capture
+
+The independently reviewed new attempt completed at
+`20261014-172824345-78b9645acf1a4a87a9bade4acb31f5c3`, runner/execution
+completed and exit0. Strict grading matched all50 samples,100 ordered markers,
+15 declared managed diagnostics,1,224 actual read syscall witnesses and24,675
+observed serial bytes. Both running-state snapshots, primary serial route,
+owned listening FD/inode, executable/config/PID lifetime and exact raw-prefix
+replay matched. Scoped cleanup completed. The fixture performed zero storage
+operations, and the original V2.6.3 failed row remains unchanged.
+
+| Requested span | Samples | Finite conditional intervals per counter | Overlapping INCONCLUSIVE intervals per counter |
+| --- | ---: | ---: | ---: |
+| 1ms | 10 | 0 | 10 |
+| 10ms | 10 | 0 | 10 |
+| 100ms | 10 | 9 | 1 |
+| 1s | 10 | 10 | 0 |
+| 5s | 10 | 10 | 0 |
+
+All29 finite intervals contain the compiled PM rate3,375,000 and RDTSC rate
+733,333,333. This supports the fixed-source hypothesis within those recorded
+brackets; it does not establish short-span precision. The maximum observed
+read-start gap was81,378,105ns, which is not a backend-delivery bound. Initial
+and final single-step fields remain unknown. Runtime monotonic-branch proof,
+continuous pause/writer exclusion and normative calibration remain unqualified.
+No performance row or P1 verdict is upgraded by this capture.
+
+The [portable native receipt](causal-clock-native-receipt.json), SHA-256
+`7245d04faaa966292a4d3e1e8b12b68eac8cb33c040310e5a70a74dd0a86e9ff`,
+binds the exact plan/manifest/parser/observer/fixture, review receipt, raw
+result/input/serial/read-witness/cleanup hashes, cohort counts and preserved
+V2.6.3 failure. Its explicit outcome is
+`complete_causal_diagnostic_capture_only`; normative clock and P1 flags are false.
+
 ## Windows corrected native integrity, query and lifetime checks
 
 After its separately scoped capacity recovery, the approved Ryzen host ran the
