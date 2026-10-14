@@ -8,11 +8,13 @@ Missing measurements,
 launcher failures and plan/order mismatches remain visible. **All V1 inferred
 integrity and write-persistence claims are revoked following source review.**
 The immutable V1 records are observations with known false-positive checks.
-Both runners stopped at their configured free-space minimum. After separate
-parent-owned Deck recovery, V2 completed bounded Deck byte-fill, public-query,
-lifetime and clock-observation qualification. P1/full-matrix calibration and
-Windows V2 qualification remain incomplete; real flush/durability and private
-structural evidence remain missing.
+Both runners stopped at their configured free-space minimum. Separate
+parent-owned recoveries restored capacity. Corrected fixtures completed bounded
+byte-fill, public-query and lifetime qualification on both hosts; Deck also
+completed clock-observation collection. The [Windows receipt](WINDOWS-NATIVE-QUALIFICATION.md)
+preserves its failed V23 deadline and successful fresh V27 checks. P1/full-matrix
+calibration and normative clock qualification remain incomplete; real
+flush/durability and private structural evidence remain missing.
 
 ## Approved hosts and unchanged baseline
 
@@ -336,7 +338,9 @@ result preserved, free bytes increased from971,841,536 to22,254,170,112. The
 receipt is `.scratch/pr248-operator-recovery/deck-apply.jsonl`, SHA-256
 `863ba32d563f10306e7f7e839af5778dfc21886c51a2c1ff31f477560c373a72`.
 Normal native testing performed no archive cleanup or host-policy change.
-Windows remains blocked pending the parent's separate operator authorization.
+At the V2.1 freeze, Windows was blocked pending separate operator authorization.
+Its later recovery and bounded V27 checks are recorded in
+[Windows qualification](WINDOWS-NATIVE-QUALIFICATION.md).
 
 V2.1 plan SHA-256
 `174e74d2f88a8fe3d9ae271a820c228649555458b12da712acaa84674ded61f1`
@@ -611,8 +615,8 @@ intervals. Source/compiled backend identity, the trace's monotonic timebase,
 actual tool availability and all matching/timeout rules must be frozen and
 reviewed first. Trace overhead stays in the diagnostic bounds; traced runs never
 count as performance results. The acceptance firmware binary need not change.
-Finite error bounds are still unqualified; Windows recovery/qualification,
-broad V2 A/A workload counts, both released DVD variants, physical durability
+Finite error bounds are still unqualified; broad V2 A/A workload counts,
+both released DVD variants, physical durability
 and structural counters remain open.
 
 The proposed backend experiment is separate from V2.5 and requires these gates:
@@ -777,6 +781,36 @@ The corrected result receipt is included here for direct product review:
   "performance_acceptance_eligible": false
 }
 ```
+
+## Windows corrected native integrity, query and lifetime checks
+
+After its separately scoped capacity recovery, the approved Ryzen host ran the
+published untraced64 baseline through the protected PowerShell desktop pipe in
+Codex/session1/WinSta0/Default. The original V23 owned deadline reached its
+120-second server limit and cleared its child/job, but strict qualification failed
+because client EOF handling lost the server's error output. Run
+`20261014-162325708-a52e392832b24f58ae9aaee08b090691` and the stop-on-failure
+result remain preserved. The [EOF correction](WINDOWS-PIPE-EOF-FIX.md) waits for
+the exact owned server and drains its output before interpreting completion.
+
+The new V27 launcher SHA-256 is
+`a61757b17e2da594607e82d3f8595b1faba61c3ed4d1b6276373e39b15613b79`.
+All four new identities pass the original strict integrity/query/deadline grading:
+
+| Scope | Actual run | Bounded result |
+| --- | --- | --- |
+| Normal reads | `20261014-164514066-8083861d1f224f40bcefa285c873ac81` | 1,024 ×4,096-byte poison-verified reads, exact counts and zero assertion failures |
+| Public query/private-file probe | `20261014-164525285-17dfb7728e96485d82abf5238c672c29` | Complete210 public observations; auxiliary isolated4KiB write/API-flush/reopen remains separate from durability |
+| Owned deadline | `20261014-164534904-a0eb64328b094dbeb127b56168c7fd39` | Expected runner failed/exit1, exact server deadline reason retained, owned descendants confirmed cleared |
+| Fresh normal after deadline | `20261014-164741936-bbc6a31c90d64dddaba121e161e6ffd6` | New process passes the same complete poison-verified read contract |
+
+The [portable V27 native receipt](windows-v27-native-receipt.json), SHA-256
+`aa5229881fb7610824bae4d795bb77a466cbc7b0843ede9dbcc15f41e40377f7`,
+binds plan, parser, launcher, review, raw outcomes, input hashes and scoped cleanup.
+[Windows qualification](WINDOWS-NATIVE-QUALIFICATION.md) retains recovery pins,
+the original V23 failed row and V27 provenance. These checks qualify the bounded
+native launch/integrity/query/lifetime method. They do not qualify Windows clock
+metrology, full workloads, P1 performance or a replacement class driver.
 
 ## Source-only build preparation corrections
 
