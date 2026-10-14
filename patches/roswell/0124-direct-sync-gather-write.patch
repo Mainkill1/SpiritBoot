@@ -151,7 +151,7 @@ index 4c29d19f..885a78ae 100644
      if (locked) IopUnlockFileObject(file);
      if (event) ObDereferenceObject(event);
 diff --git a/tests/host/dma-lifetime/fixture.c b/tests/host/dma-lifetime/fixture.c
-index beb220b4..6c019991 100644
+index beb220b4..36dc8b9a 100644
 --- a/tests/host/dma-lifetime/fixture.c
 +++ b/tests/host/dma-lifetime/fixture.c
 @@ -6,7 +6,7 @@
@@ -203,17 +203,20 @@ index beb220b4..6c019991 100644
  static int delayed, writing;
  static NTSTATUS completion_status;
  static PIRP pending;
-@@ -112,8 +129,10 @@ static void NxkPageSupplyPin(PFN_NUMBER p, int unpin) {
+@@ -112,11 +129,13 @@ static void NxkPageSupplyPin(PFN_NUMBER p, int unpin) {
  }
  static void *ExAllocatePoolWithTag(int kind, size_t n, int tag) {
      (void)kind;(void)tag; if(++pool_calls==fail_pool)return NULL;
 +    allocated_bytes+=n;
      size_t rounded=(n+PAGE_SIZE-1)&~(PAGE_SIZE-1); if(!rounded)rounded=PAGE_SIZE;
      void *p=NULL;assert(!posix_memalign(&p,PAGE_SIZE,rounded));memset(p,0xcc,rounded);
-+    fake_pde[(ULONG)(uintptr_t)p>>22]=force_uncached?0x8b:0x83;
      unsigned slot;for(slot=0;slot<32;slot++)if(!blocks[slot].pointer)break;
      assert(slot<32);blocks[slot].pointer=p;blocks[slot].length=rounded;++allocations;
      for(size_t off=0;off<rounded;off+=PAGE_SIZE){
++        fake_pde[(ULONG)((uintptr_t)p+off)>>22]=force_uncached?0x8b:0x83;
+         unsigned f=++next_pfn;assert(f<256);pages=f;frames[f].va=(uintptr_t)p+off;
+         frames[f].pte=(f<<12)|3;frames[f].owner=(uintptr_t)&frames[f].pte;
+         frames[f].bytes=(unsigned char*)p+off;
 @@ -149,15 +168,15 @@ static void attempt_relocation(PMDL m) {
  }
  /* PRODUCTION_MOVABLE */
@@ -295,7 +298,7 @@ index beb220b4..6c019991 100644
          assert(iosb.Status==outcome);
          if(!write)for(unsigned i=0;i<length;i++)if(caller[i]!=(NT_SUCCESS(outcome)?expected_byte(i):0x5a))++bad;
      }
-@@ -237,9 +267,51 @@ static void check_paging(int write,int delay,NTSTATUS outcome,int failure){
+@@ -237,9 +267,54 @@ static void check_paging(int write,int delay,NTSTATUS outcome,int failure){
      for(unsigned i=0;i<2;i++)assert(frames[NxMmGetPhysicalAddress(buffer+i*PAGE_SIZE)>>12].owner);
      ExFreePoolWithTag(buffer,0);++cases;
  }
@@ -307,7 +310,10 @@ index beb220b4..6c019991 100644
 +    for(unsigned i=0;i<17;i++)segments[i].Buffer=caller+i*PAGE_SIZE;
 +    IO_STATUS_BLOCK iosb={0};LARGE_INTEGER offset={0};
 +    allocated_bytes=copy_bytes=0;
-+    force_uncached=failure==6;fail_map=failure==1 || failure==5;fail_mdl_once=failure==2;skew_mdl_once=failure==3;
++    force_uncached=failure==6;
++    /* Source attributes must not depend on whether later allocations share a PDE. */
++    for(unsigned i=0;i<17;i++)fake_pde[(ULONG)(uintptr_t)(caller+i*PAGE_SIZE)>>22]=force_uncached?0x8b:0x83;
++    fail_map=failure==1 || failure==5;fail_mdl_once=failure==2;skew_mdl_once=failure==3;
 +    fail_irp=failure==4;if(failure==5)fail_pool=pool_calls+2;
 +    NTSTATUS status=XbScatterGather(1,(void*)1,NULL,NULL,NULL,&iosb,segments,length,&offset);
 +    if(failure==4 || failure==5){assert(status==STATUS_INSUFFICIENT_RESOURCES);assert(!map_calls || (failure==5 && map_calls==1));}
