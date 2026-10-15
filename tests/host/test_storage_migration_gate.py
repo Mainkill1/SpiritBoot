@@ -192,6 +192,10 @@ class StorageMigrationGateTests(unittest.TestCase):
         self.assertEqual(result["mode"], "candidate")
         self.assertEqual(result["source_tree"], self.manifest["source_tree"])
 
+    def test_required_public_disk_entry_name_is_not_treated_as_legacy_code(self):
+        result = self.run_check(symbols="84001000 T _DiskDriverEntry@8\n")
+        self.assertTrue(result["passed"])
+
     def test_baseline_expected_archive_names(self):
         result = self.run_check(mode="baseline", link=self.baseline_link,
                                 symbols="84001000 T _ClassInitialize@12\n")

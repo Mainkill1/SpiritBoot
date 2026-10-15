@@ -27,8 +27,11 @@ FORBIDDEN_CANDIDATE = frozenset({"classpnp", "disk", "nxcdrom"})
 # An intentionally non-exhaustive set, from the qualified v1 release audit.
 # Symbols are a smoke test only; stripped, folded and inline bodies need
 # independent provenance mapping against original source revisions.
+# DiskDriverEntry and CdromDriverEntry are required public boot ABI names and
+# therefore cannot identify an implementation's provenance. Archive and source
+# ownership checks distinguish the independent class drivers at those entries.
 LEGACY_IDENTITIES = frozenset({
-    "ClassInitialize", "ClassReadWrite", "DiskDriverEntry",
+    "ClassInitialize", "ClassReadWrite",
     "DiskReadWriteVerification", "SubmitTransferPacket", "TransferPktComplete",
 })
 # The focused provenance audit found these helper bodies in the qualified
