@@ -1,6 +1,14 @@
 # PR #248 implementation evidence and open gates
 
-Status: **draft; bounded independent primitives exist; full storage replacement is not implemented or qualified.** The old storage classes remain in the reference BIOS. This document is part of the one implementation PR, not a separate release or compliance claim.
+Status: **draft; the independent complete candidate boots and passes the full API regression in all four firmware profiles; broad compatibility, performance, and final license review remain open.** The old storage classes remain available only in the explicitly selected reference backend and are excluded from the complete-candidate link. This document is part of the one implementation PR, not a separate release or compliance claim.
+
+The [native cutover bring-up](NATIVE-CUTOVER-BRINGUP-2026-10-15.md) records the
+three runtime divergences found after the aggressive class replacement: missing
+`\\Device\\Harddisk0` ownership, rejected PnP start forwarding, and missing
+extended disk geometry for PartMgr. The corrected source tree
+`920af8da4535d5adbb2018d388a8cc814cd479e7` passes 639 API checks as
+637 pass, zero fail, and two declared xemu floating-point TODOs on release and
+debug builds at both 64 MiB and 128 MiB.
 
 ## Product and native reference
 
@@ -22,7 +30,7 @@ Operator-approved rigs (2026-10-14): Steam Deck `10.0.0.42` primary; Windows `10
 | --- | --- |
 | `legacy-reference` | Existing classpnp/disk/nxcdrom; baseline only |
 | `partial-lab-prototype` | Bounded owned nxstorage library and narrow geometry adapter plus the legacy driver stack; no independent read/write class adapter yet; not publishable |
-| `complete-candidate` | Requires implemented independent kernel adapter and rejects old linked classes through actual preflight; currently unavailable and rejected |
+| `complete-candidate` | Independent disk/optical class adapter and bounded request engine; rejects old linked classes through actual preflight; boot/API qualified in all four firmware profiles, with broader gates still open |
 
 The first partial64 build compiled the actual nxstorage archive, whose unused primitives were then removed by the linker; that ROM remained byte-identical to released64. The later partial geometry build installs the narrow independent geometry route and has a different ROM, as recorded below. Neither build routes ordinary native storage requests through the new request core. One kernel and one `flash.bin` remain the product format. Different backends require separate output directories; absent/unknown backend and requested/configured mismatch fail. CI explicitly builds the legacy reference; passing that matrix does not qualify replacement behavior.
 
@@ -133,7 +141,14 @@ The declaration-only target probes verified 63 cache and 250 native ABI facts wi
 
 The independently reviewed [boot dependency audit](boot-dependency-audit/README.md) binds 25 source files and 62 ranges to current assembled tree `7e891ec86f42b1313e5cd3453347836ac451ba79`. It verifies nine folded entries, Disk/Cdrom object names, NTAPI entry declarations, kernel-owned boot-node interfaces and the post-boot PnP sealing boundary. It also identifies a repeated START caller requirement through partmgr and corrects stale references to excluded Xbox power-management paths. This closes P0's missing boot-file inspection only. The exposed investigation packet is archived for review and has not been added to independent-author inputs; actual P3 entry ABI, initialization outcomes, retained callback lifetime and native memory remain open.
 
-Open P2/P3: independently implement IRP/MDL/SRB/cancel/rundown/device attachment adapter, disk controls and native cache capability, remove nxcdrom/ClassPnP dependence, integrate boot registry/order/namespaces, and preserve existing FATX leases and real durability. The installed narrow geometry route does not complete these tasks.
+P2/P3 implementation status: the complete candidate now contains the
+independent IRP/MDL/SRB adapter, fixed-slot request engine, cancellation and
+publication seal, disk and optical controls, folded boot entries, owned disk
+namespace, lower-stack attachment, PnP start forwarding, and PartMgr geometry
+contract. It links `nxstorage` without `classpnp`, `disk`, or `nxcdrom` and
+passes the four-profile API runtime matrix. Native cache-capability and
+physical durability claims remain limited by the lower stack and require the
+separate evidence gates described above.
 
 Open P4/P5: native correctness/fault/API/XISO/save/game/streaming matrix against the exact complete candidate, both approved rigs, all firmware profiles and RAM/ROM footprints, optimized-inline/helper source grants, exact corresponding source/notices, independent final review, and supported/unverified physical Xbox scope. PR #248 stays draft and issue #245 remains open until those gates pass.
 

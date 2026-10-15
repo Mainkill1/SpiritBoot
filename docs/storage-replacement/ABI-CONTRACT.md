@@ -16,9 +16,9 @@ Preserve `NxkDriveDeviceTree` boot order and existing fixed hardware topology. X
 
 ## 2. Driver/device lifecycle contract
 
-1. `NxDiskDriverEntry` and `CdromDriverEntry` register bounded, explicit `MajorFunction` tables and `AddDevice` with IoCreateDriver's existing startup path.
-2. At AddDevice, acquire/attach a lower device, allocate independently defined FDO extension, initialize geometry/media state and guard, and unwind allocations/attachments in reverse order on any failure. Preserve driver names (`\Driver\Disk` and `\Driver\Cdrom`) and device-type/stack-size/alignment/direct-I/O flags expected by callers.
-3. At StartDevice, probe only required geometry/identity/capabilities; support failed probe and unavailable media without poisoning later requests. Carry stable `\Device\Harddisk0\Partition0` and optical namespace through existing namespace/partition components.
+1. `DiskDriverEntry` and `CdromDriverEntry` are the required folded-boot ABI names. They register bounded, explicit `MajorFunction` tables and `AddDevice` with IoCreateDriver's existing startup path.
+2. At AddDevice, acquire/attach a lower device, allocate independently defined FDO extension, initialize geometry/media state and guard, and unwind allocations/attachments in reverse order on any failure. Preserve driver names (`\Driver\Disk` and `\Driver\Cdrom`) and device-type/stack-size/alignment/direct-I/O flags expected by callers. The disk owner must create and retain the `\\Device\\Harddisk0` object directory before publishing `Partition0`; otherwise `IoCreateDevice` returns `STATUS_OBJECT_PATH_NOT_FOUND`.
+3. At StartDevice, forward the PnP start request through the lower stack and answer the geometry/device-number controls required by PartMgr. `IOCTL_DISK_GET_DRIVE_GEOMETRY_EX` must publish both the 24-byte geometry prefix and the 64-bit disk size before partition enumeration can succeed. Support failed probe and unavailable media without poisoning later requests. Carry stable `\\Device\\Harddisk0\\Partition0` and optical namespace through existing namespace/partition components.
 4. Handle only the actual PnP minor requests presented by the current `devtree` plus explicit test-generated edge cases. Record responses. Do not remove a remove-lock or allow a completion to access freed FDO/device state.
 5. Driver lifetime is firmware lifetime in the ordinary Xbox case; teardown/error cleanup must nonetheless be correct for failed startup and test-induced stop/remove paths.
 

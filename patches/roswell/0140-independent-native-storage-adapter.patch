@@ -18,7 +18,7 @@ new file mode 100644
 index 0000000..17e28b0
 --- /dev/null
 +++ b/drivers/storage/class/nxstorage/driver.c
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,225 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "native_driver.h"
 +#include "nxdisk_owner.h"
@@ -31,12 +31,15 @@ index 0000000..17e28b0
 +    nxd_driver owner;
 +    nxd_device device;
 +    nxd_class_kind kind;
++    HANDLE object_directory;
 +} NX_NATIVE_CLASS_CONTEXT;
 +
 +static NX_NATIVE_CLASS_CONTEXT disk_context, cdrom_context;
++static WCHAR disk_directory_buffer[] = {'\\','D','e','v','i','c','e','\\','H','a','r','d','d','i','s','k','0',0};
 +static WCHAR disk_name_buffer[] = {'\\','D','e','v','i','c','e','\\','H','a','r','d','d','i','s','k','0','\\','P','a','r','t','i','t','i','o','n','0',0};
 +static WCHAR cdrom_name_buffer[] = {'\\','D','e','v','i','c','e','\\','C','d','R','o','m','0',0};
 +static WCHAR cdrom_link_buffer[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','C','d','R','o','m','0',0};
++static UNICODE_STRING disk_directory = {34,36,disk_directory_buffer};
 +static UNICODE_STRING disk_name = {56,58,disk_name_buffer};
 +static UNICODE_STRING cdrom_name = {28,30,cdrom_name_buffer};
 +static UNICODE_STRING cdrom_link = {38,40,cdrom_link_buffer};
@@ -53,6 +56,26 @@ index 0000000..17e28b0
 +    if(status==STATUS_MEDIA_WRITE_PROTECTED) return NXD_WRITE_PROTECTED;
 +    if(status==STATUS_NOT_SUPPORTED) return NXD_NOT_IMPLEMENTED;
 +    return NXD_IO_ERROR;
++}
++
++static NTSTATUS ensure_disk_directory(NX_NATIVE_CLASS_CONTEXT *context)
++{
++    OBJECT_ATTRIBUTES attributes;
++    NTSTATUS status;
++    if(context->object_directory) return STATUS_SUCCESS;
++    InitializeObjectAttributes(&attributes,&disk_directory,
++        OBJ_CASE_INSENSITIVE|OBJ_PERMANENT|OBJ_KERNEL_HANDLE,NULL,NULL);
++    status=ZwCreateDirectoryObject(&context->object_directory,
++                                   DIRECTORY_ALL_ACCESS,&attributes);
++    return status;
++}
++
++static void discard_disk_directory(NX_NATIVE_CLASS_CONTEXT *context)
++{
++    if(!context->object_directory) return;
++    (void)ZwMakeTemporaryObject(context->object_directory);
++    (void)ZwClose(context->object_directory);
++    context->object_directory=NULL;
 +}
 +
 +static nxd_status register_class(void *opaque,nxd_class_kind kind)
@@ -77,6 +100,8 @@ index 0000000..17e28b0
 +                                      NX_NATIVE_DEFAULT_SLOTS);
 +        if(!NT_SUCCESS(status)) return owner_status(status);
 +    } else {
++        status=ensure_disk_directory(context);
++        if(!NT_SUCCESS(status)) return owner_status(status);
 +        init.DeviceName=&disk_name;init.SymbolicLinkName=NULL;
 +        init.DeviceType=FILE_DEVICE_DISK;init.DeviceCharacteristics=0;
 +        init.Config.sector_bytes=config->geometry.bytes_per_sector;
@@ -86,8 +111,10 @@ index 0000000..17e28b0
 +        init.Config.optical=0;init.Config.cache=NX_CACHE_UNQUALIFIED;
 +        init.SlotCount=NX_NATIVE_DEFAULT_SLOTS;
 +    }
-+    return owner_status(NxNativeCreateClassDevice(context->driver,
-+        (PDEVICE_OBJECT)lower,&init,(PDEVICE_OBJECT *)created));
++    status=NxNativeCreateClassDevice(context->driver,(PDEVICE_OBJECT)lower,
++                                    &init,(PDEVICE_OBJECT *)created);
++    if(!NT_SUCCESS(status) && kind==NXD_DISK) discard_disk_directory(context);
++    return owner_status(status);
 +}
 +
 +static void seal_class(void *opaque,void *created)
@@ -201,6 +228,7 @@ index 0000000..17e28b0
 +    driver->MajorFunction[IRP_MJ_READ]=NxNativeDispatchReadWrite;
 +    driver->MajorFunction[IRP_MJ_WRITE]=NxNativeDispatchReadWrite;
 +    driver->MajorFunction[IRP_MJ_DEVICE_CONTROL]=NxNativeDispatchControl;
++    driver->MajorFunction[IRP_MJ_PNP]=NxNativeDispatchPnp;
 +    driver->MajorFunction[IRP_MJ_FLUSH_BUFFERS]=NxNativeDispatchFlush;
 +    driver->MajorFunction[IRP_MJ_SHUTDOWN]=NxNativeDispatchFlush;
 +    driver->DriverExtension->AddDevice=add_device;
@@ -221,7 +249,7 @@ new file mode 100644
 index 0000000..92624d7
 --- /dev/null
 +++ b/drivers/storage/class/nxstorage/native_adapter.c
-@@ -0,0 +1,732 @@
+@@ -0,0 +1,746 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "native_adapter.h"
 +
@@ -486,14 +514,17 @@ index 0000000..92624d7
 +        parent->IoStatus.Information=12;return STATUS_SUCCESS;
 +    }
 +    if(envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY ||
-+       envelope->control_code==IOCTL_CDROM_GET_DRIVE_GEOMETRY) {
++       envelope->control_code==IOCTL_CDROM_GET_DRIVE_GEOMETRY ||
++       envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY_EX) {
++        ULONG required=envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY_EX ? 32:24;
 +        uint64_t denominator=(uint64_t)sector*255u*63u;
 +        uint64_t cylinders=denominator ? capacity/denominator:0;
-+        if(envelope->control_output<24) return STATUS_BUFFER_TOO_SMALL;
++        if(envelope->control_output<required) return STATUS_BUFFER_TOO_SMALL;
 +        if(!cylinders) cylinders=1;
-+        zero_bytes(output,24);write_le64(output,cylinders);write_le32(output+8,12);
++        zero_bytes(output,required);write_le64(output,cylinders);write_le32(output+8,12);
 +        write_le32(output+12,255);write_le32(output+16,63);write_le32(output+20,sector);
-+        parent->IoStatus.Information=24;return STATUS_SUCCESS;
++        if(required==32) write_le64(output+24,capacity);
++        parent->IoStatus.Information=required;return STATUS_SUCCESS;
 +    }
 +    return STATUS_INVALID_DEVICE_REQUEST;
 +}
@@ -513,6 +544,7 @@ index 0000000..92624d7
 +        status=NX_OK,native=STATUS_SUCCESS;
 +    if(status==NX_OK) {
 +        if(envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY ||
++           envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY_EX ||
 +           envelope->control_code==IOCTL_CDROM_GET_DRIVE_GEOMETRY ||
 +           envelope->control_code==IOCTL_DISK_GET_LENGTH_INFO) {
 +            uint32_t last,sector;
@@ -858,6 +890,16 @@ index 0000000..92624d7
 +    return NxNativeAdapterSubmit(&extension->adapter,irp,NX_FLUSH,0,0,0);
 +}
 +
++NTSTATUS NTAPI NxNativeDispatchPnp(PDEVICE_OBJECT device,PIRP irp)
++{
++    NX_NATIVE_DEVICE_EXTENSION *extension=device ? device->DeviceExtension:NULL;
++    if(!extension || !extension->lower || !irp ||
++       !irp->Tail.Overlay.CurrentStackLocation) return STATUS_INVALID_PARAMETER;
++    ++irp->CurrentLocation;
++    ++irp->Tail.Overlay.CurrentStackLocation;
++    return IofCallDriver(extension->lower,irp);
++}
++
 +NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device,PIRP irp)
 +{
 +    NX_NATIVE_DEVICE_EXTENSION *extension=device ? device->DeviceExtension:NULL;
@@ -881,7 +923,7 @@ index 0000000..92624d7
 +    }
 +    if(code==IOCTL_STORAGE_GET_DEVICE_NUMBER ||
 +       ((code==IOCTL_DISK_GET_LENGTH_INFO||code==IOCTL_DISK_GET_DRIVE_GEOMETRY||
-+         code==IOCTL_CDROM_GET_DRIVE_GEOMETRY)&&adapter->media_present)) {
++         code==IOCTL_DISK_GET_DRIVE_GEOMETRY_EX||code==IOCTL_CDROM_GET_DRIVE_GEOMETRY)&&adapter->media_present)) {
 +        NX_NATIVE_ENVELOPE local;zero_bytes(&local,sizeof(local));local.adapter=adapter;local.parent=irp;
 +        local.control_code=code;local.control_output=stack->Parameters.DeviceIoControl.OutputBufferLength;
 +        dispatched=complete_control_output(&local);irp->IoStatus.Status=dispatched;
@@ -889,7 +931,7 @@ index 0000000..92624d7
 +        IofCompleteRequest(irp,dispatched==STATUS_SUCCESS?IO_DISK_INCREMENT:IO_NO_INCREMENT);return dispatched;
 +    }
 +    if(code!=IOCTL_DISK_GET_LENGTH_INFO&&code!=IOCTL_DISK_GET_DRIVE_GEOMETRY&&
-+       code!=IOCTL_CDROM_GET_DRIVE_GEOMETRY&&
++       code!=IOCTL_DISK_GET_DRIVE_GEOMETRY_EX&&code!=IOCTL_CDROM_GET_DRIVE_GEOMETRY&&
 +       code!=IOCTL_CDROM_READ_TOC&&code!=IOCTL_CDROM_CHECK_VERIFY) {
 +        irp->IoStatus.Status=STATUS_INVALID_DEVICE_REQUEST;irp->IoStatus.Information=0;
 +        IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_INVALID_DEVICE_REQUEST;
@@ -959,7 +1001,7 @@ new file mode 100644
 index 0000000..7573c33
 --- /dev/null
 +++ b/drivers/storage/class/nxstorage/native_adapter.h
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,40 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#ifndef NX_NATIVE_ADAPTER_H
 +#define NX_NATIVE_ADAPTER_H
@@ -998,6 +1040,7 @@ index 0000000..7573c33
 +NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT, PIRP);
 +NTSTATUS NTAPI NxNativeDispatchReadWrite(PDEVICE_OBJECT, PIRP);
 +NTSTATUS NTAPI NxNativeDispatchFlush(PDEVICE_OBJECT, PIRP);
++NTSTATUS NTAPI NxNativeDispatchPnp(PDEVICE_OBJECT, PIRP);
 +#endif
 diff --git a/drivers/storage/class/nxstorage/native_driver.h b/drivers/storage/class/nxstorage/native_driver.h
 new file mode 100644
@@ -1074,7 +1117,7 @@ new file mode 100644
 index 0000000..feb06f0
 --- /dev/null
 +++ b/tests/host/nxstorage/native_adapter_host_platform.h
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,134 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#ifndef NX_NATIVE_ADAPTER_HOST_PLATFORM_H
 +#define NX_NATIVE_ADAPTER_HOST_PLATFORM_H
@@ -1094,7 +1137,14 @@ index 0000000..feb06f0
 +typedef uint32_t ULONG, DEVICE_TYPE;
 +typedef int32_t LONG, NTSTATUS;
 +typedef uintptr_t ULONG_PTR;
++typedef void *HANDLE;
 +typedef struct _UNICODE_STRING { USHORT Length, MaximumLength; uint16_t *Buffer; } UNICODE_STRING, *PUNICODE_STRING;
++typedef struct _OBJECT_ATTRIBUTES { ULONG Length; HANDLE RootDirectory;
++    PUNICODE_STRING ObjectName; ULONG Attributes; PVOID SecurityDescriptor;
++    PVOID SecurityQualityOfService; } OBJECT_ATTRIBUTES, *POBJECT_ATTRIBUTES;
++#define InitializeObjectAttributes(p,n,a,r,s) do { (p)->Length=sizeof(*(p)); \
++    (p)->RootDirectory=(r);(p)->Attributes=(a);(p)->ObjectName=(n); \
++    (p)->SecurityDescriptor=(s);(p)->SecurityQualityOfService=NULL; } while(0)
 +typedef struct _MDL { struct _MDL *Next; int16_t Size, MdlFlags;
 +    void *Process, *MappedSystemVa, *StartVa; ULONG ByteCount, ByteOffset; } MDL, *PMDL;
 +struct _IRP; struct _DEVICE_OBJECT; struct _DRIVER_OBJECT;
@@ -1157,11 +1207,13 @@ index 0000000..feb06f0
 +    STATUS_BUFFER_OVERFLOW=(NTSTATUS)0x80000005u,
 +    IRP_MJ_CREATE=0, IRP_MJ_CLOSE=2, IRP_MJ_READ=3, IRP_MJ_WRITE=4,
 +    IRP_MJ_FLUSH_BUFFERS=9, IRP_MJ_DEVICE_CONTROL=14, IRP_MJ_SHUTDOWN=16,
++    IRP_MJ_PNP=27,
 +    IRP_MJ_MAXIMUM_FUNCTION=27,
 +    DO_DIRECT_IO=0x200000, DO_DEVICE_INITIALIZING=0x10,
 +    IO_NO_INCREMENT=0, IO_DISK_INCREMENT=1, FILE_WRITE_THROUGH=2,
 +    SL_WRITE_THROUGH=4,
 +    IOCTL_DISK_GET_DRIVE_GEOMETRY=0x00070000,
++    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX=0x000700a0,
 +    IOCTL_CDROM_GET_DRIVE_GEOMETRY=0x0002404c,
 +    IOCTL_DISK_GET_LENGTH_INFO=0x0007405c,
 +    IOCTL_STORAGE_GET_DEVICE_NUMBER=0x002d1080,
@@ -1169,7 +1221,9 @@ index 0000000..feb06f0
 +    IOCTL_CDROM_READ_TOC=0x00024000,
 +    IOCTL_CDROM_CHECK_VERIFY=0x00024800,
 +    FILE_DEVICE_DISK=7, FILE_DEVICE_CD_ROM=2,
-+    FILE_REMOVABLE_MEDIA=1, FILE_READ_ONLY_DEVICE=2
++    FILE_REMOVABLE_MEDIA=1, FILE_READ_ONLY_DEVICE=2,
++    OBJ_CASE_INSENSITIVE=0x40, OBJ_PERMANENT=0x10, OBJ_KERNEL_HANDLE=0x200,
++    DIRECTORY_ALL_ACCESS=0x000f000f
 +};
 +VOID IoReuseIrp(PIRP, NTSTATUS);
 +PIRP IoAllocateIrp(CCHAR, BOOLEAN);
@@ -1194,13 +1248,16 @@ index 0000000..feb06f0
 +VOID IoDeleteDevice(PDEVICE_OBJECT);
 +NTSTATUS IoCreateSymbolicLink(PUNICODE_STRING,PUNICODE_STRING);
 +NTSTATUS IoDeleteSymbolicLink(PUNICODE_STRING);
++NTSTATUS ZwCreateDirectoryObject(HANDLE *,ULONG,POBJECT_ATTRIBUTES);
++NTSTATUS ZwMakeTemporaryObject(HANDLE);
++NTSTATUS ZwClose(HANDLE);
 +#endif
 diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
 new file mode 100644
 index 0000000..0cacf32
 --- /dev/null
 +++ b/tests/host/nxstorage/native_adapter_test.c
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,219 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "native_adapter_host_platform.h"
 +#include "native_adapter.h"
@@ -1241,6 +1298,9 @@ index 0000000..0cacf32
 +VOID IoDeleteDevice(PDEVICE_OBJECT d){++deletes;free(d);}
 +NTSTATUS IoCreateSymbolicLink(PUNICODE_STRING a,PUNICODE_STRING b){(void)a;(void)b;return fail_symbolic_link?STATUS_IO_DEVICE_ERROR:0;}
 +NTSTATUS IoDeleteSymbolicLink(PUNICODE_STRING a){(void)a;return 0;}
++NTSTATUS ZwCreateDirectoryObject(HANDLE *h,ULONG a,POBJECT_ATTRIBUTES o){(void)a;(void)o;*h=(HANDLE)(uintptr_t)1;return STATUS_SUCCESS;}
++NTSTATUS ZwMakeTemporaryObject(HANDLE h){(void)h;return STATUS_SUCCESS;}
++NTSTATUS ZwClose(HANDLE h){(void)h;return STATUS_SUCCESS;}
 +
 +static NTSTATUS complete_child(NTSTATUS status,ULONG bytes,UCHAR srb_status)
 +{
@@ -1323,6 +1383,9 @@ index 0000000..0cacf32
 +    CHECK(lower_calls==1&&opcodes[0]==0x25);CHECK(word(output+20)==2048);CHECK(word(output+12)>0&&word(output+16)>0);
 +    IRP len;IO_STACK_LOCATION ls;uint8_t length[8];memset(&len,0,sizeof(len));memset(&ls,0,sizeof(ls));len.Tail.Overlay.CurrentStackLocation=&ls;len.AssociatedIrp.SystemBuffer=length;ls.MajorFunction=IRP_MJ_DEVICE_CONTROL;ls.Parameters.DeviceIoControl.IoControlCode=IOCTL_DISK_GET_LENGTH_INFO;ls.Parameters.DeviceIoControl.OutputBufferLength=8;
 +    CHECK(NxNativeDispatchControl(d,&len)==STATUS_SUCCESS);CHECK(len.IoStatus.Information==8&&word(length)==32768&&word(length+4)==0);CHECK(lower_calls==1);
++    IRP ex;IO_STACK_LOCATION xs;uint8_t extended[32];memset(&ex,0,sizeof(ex));memset(&xs,0,sizeof(xs));memset(extended,0xa5,sizeof(extended));
++    ex.Tail.Overlay.CurrentStackLocation=&xs;ex.AssociatedIrp.SystemBuffer=extended;xs.Parameters.DeviceIoControl.IoControlCode=IOCTL_DISK_GET_DRIVE_GEOMETRY_EX;xs.Parameters.DeviceIoControl.OutputBufferLength=32;
++    CHECK(NxNativeDispatchControl(d,&ex)==STATUS_SUCCESS);CHECK(ex.host_completed&&ex.IoStatus.Information==32);CHECK(dword(extended+24)==32768);CHECK(lower_calls==1);
 +    return 1;
 +}
 +static int optical_toc_verify_and_pending_capacity(void)
@@ -1406,6 +1469,7 @@ index 0000000..0cacf32
 +    CHECK(disk.DriverExtension->AddDevice&&cdrom.DriverExtension->AddDevice);
 +    CHECK(disk.MajorFunction[IRP_MJ_READ]==NxNativeDispatchReadWrite);
 +    CHECK(cdrom.MajorFunction[IRP_MJ_DEVICE_CONTROL]==NxNativeDispatchControl);
++    CHECK(disk.MajorFunction[IRP_MJ_PNP]==NxNativeDispatchPnp);
 +    CHECK(disk.DriverExtension->AddDevice(&disk,&disk_lower)==STATUS_SUCCESS);
 +    CHECK(created_device&&created_device->DeviceType==FILE_DEVICE_DISK);
 +    CHECK(cdrom.DriverExtension->AddDevice(&cdrom,&cdrom_lower)==STATUS_SUCCESS);

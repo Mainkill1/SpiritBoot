@@ -3,13 +3,14 @@
 **SINGLE PR DELIVERY:** [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248) owns the entire implementation through final release checks. The authoritative, detailed task list is [IMPLEMENTATION-CHECKLIST.md](IMPLEMENTATION-CHECKLIST.md). Internal P0–P5 checkpoints are commits/reviews *within #248*, not additional PRs. This file describes the boundary; where historical provisional stages conflict, the master checklist takes precedence.
 
 
-**Status:** partial laboratory implementation. Independently authored request,
-geometry and cache primitives are implemented, and the narrow geometry owner
-adapter builds against actual Xbox declarations in the 64 MiB lab image. Full
-HDD/DVD class implementation and native qualification remain open. See
-[geometry build evidence](geometry-target-build.json) and
-[issue #245](https://github.com/Mainkill1/SpiritBoot/issues/245). Do not close the
-issue based on a successful compile or a string scan.
+**Status:** the independently authored complete candidate now replaces the HDD
+and optical class layer, boots in all four 64/128 MiB release/debug profiles,
+and passes the full API regression in each profile. The exact 64 MiB release
+also passes all 149 records in a local 144-leaf broad-XISO diagnostic. See the
+[native cutover bring-up](NATIVE-CUTOVER-BRINGUP-2026-10-15.md) and
+[issue #245](https://github.com/Mainkill1/SpiritBoot/issues/245). Performance,
+physical hardware, corresponding-source, and final independent provenance/legal
+review remain release gates.
 
 ## 0. Scope, release identity, and why a narrow rewrite
 
@@ -74,7 +75,7 @@ Disk + ClassPnP           NxCdrom + ClassPnP      <-- replace THIS class layer
 | NEW `drivers/storage/class/nxstorage/request.c` | Parent/child IRP lifetime, SRB creation and dispatch, chunking, DMA-boundary rules, exactly-once completion | C |
 | NEW `drivers/storage/class/nxstorage/sense.c` | Error/sense-to-public-status mapping and bounded retry policy; never unbounded or double retries | C |
 | NEW `drivers/storage/class/nxstorage/control.c` | Shared supported disk/optical control requests, capacity/geometry and media/flush helpers | C |
-| NEW `drivers/storage/class/nxstorage/disk.c` | Export proposed `NxDiskDriverEntry`, AddDevice/start callbacks, `\Driver\Disk` device names, HDD read/write/ioctl/flush dispatch | D |
+| NEW `drivers/storage/class/nxstorage/driver.c` | Export the required public `DiskDriverEntry`/`CdromDriverEntry` boot ABI, AddDevice callbacks, device names, HDD/optical dispatch and PnP forwarding | D–E |
 | `drivers/storage/class/nxcdrom/nxcdrom.c` | Remove all dependence on ClassPnP; retain correct observable optical behavior but use owned device/IRP routines | E |
 | `drivers/storage/class/nxcdrom/CMakeLists.txt` | Use new owned interface; drop ClassPnP-specific settings only when their dependency is gone | E |
 | `drivers/storage/class/CMakeLists.txt` | Register new library; keep baseline targets conditionally during development | C–F |
@@ -173,6 +174,10 @@ Full [ABI and request-state specification](ABI-CONTRACT.md) and [test plan](TEST
 
 This is **one implementation PR (#248)** with small, reviewable commits and checkpoint reviews inside that PR. No additional implementation PRs. Do not combine deep filesystem, memory-manager or ATA rearchitecture with the class-driver rewrite. Candidate and legacy are separate firmware builds until cutover; the public BIOS stays unmodified while any parity check fails. Keep the old GPL-incompatible code in historical source/patch archives only as required by source-distribution obligations; *not* linked into the new shipped image, and do not erase its original notices.
 
-This PR currently does **not** contain the replacement, request a merge of non-working drivers, or resolve #245. Implementation, candidate qualification, and provenance will be added to **this same PR** until final completion. The task list in `IMPLEMENTATION-CHECKLIST.md` controls promotion.
+This PR now contains the complete class-layer replacement and a bootable
+candidate whose exact link excludes the legacy class archives. It does not by
+itself resolve #245: the remaining performance, physical-hardware,
+corresponding-source, and independent provenance/legal review gates in
+`IMPLEMENTATION-CHECKLIST.md` still control promotion.
 
 Related: [provenance protocol](PROVENANCE.md), [ABI contract](ABI-CONTRACT.md), [qualification plan](TEST-PLAN.md), [storage compliance issue #245](https://github.com/Mainkill1/SpiritBoot/issues/245), [documentation PR #246](https://github.com/Mainkill1/SpiritBoot/pull/246).

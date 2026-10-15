@@ -1,6 +1,6 @@
 # Single-PR implementation checklist — SpiritBoot storage replacement
 
-> **Canonical task list for [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248).** All steps are internal checkpoints of the same PR, not separate implementation PRs. The PR description and this document are intended to be kept synchronized; when implementation updates require a change, update both. Bounded independently authored primitives now exist; the full replacement and native qualification remain unfinished.
+> **Canonical task list for [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248).** All steps are internal checkpoints of the same PR, not separate implementation PRs. The PR description and this document are intended to be kept synchronized; when implementation updates require a change, update both. The complete candidate now boots and passes the four-profile API matrix; the unchecked performance, physical-hardware, corresponding-source, and final independent review gates remain unfinished.
 
 ---
 
@@ -128,11 +128,11 @@ Tasks:
 
 ## P3 — Integrate the first real read/write and optical vertical slice, then complete behavior
 
-- [ ] Register driver entry points in **`ntoskrnl/io/iomgr/driver.c:IopFoldedInDrivers`**, validate `DriverEntry` ABI/order, complete driver dispatch, PnP FDO/PDO hierarchy/`BusRelations`, `DO_DEVICE_INITIALIZING` and attachment in `ntoskrnl/xb/devtree.c` and derived nodes.
-- [ ] HDD: expose `\Device\Harddisk0\Partition0` and allow preserved `partmgr` to publish FATX Partitions1..N with correct layout/offset, alignment, geometry/capacity, IOCTL lengths and statuses, read/write/flush, write-protection and error paths.
-- [ ] DVD: remove **all** ClassPnP direct helper/private-layout dependencies from `nxcdrom`, keep `\Device\CdRom0` and XDVDFS mount order; implement READ(10), READ CAPACITY, READ TOC, TEST UNIT READY, media-change/no-disc, sizes/unsupported IOCTLs, read-only rejection and bounded sense handling.
+- [x] Register the public folded `DiskDriverEntry`/`CdromDriverEntry` entry points, owned dispatch, AddDevice attachment, `DO_DEVICE_INITIALIZING` publication, and PnP start forwarding. The [bring-up record](NATIVE-CUTOVER-BRINGUP-2026-10-15.md) captures the exact ABI and PnP failures found during cutover.
+- [x] HDD: own `\Device\Harddisk0`, expose `Partition0`, and provide the geometry/capacity/control contract that lets preserved PartMgr publish the FATX partitions. The four-profile API matrix verifies FATX-backed file, async, scatter/gather, and flush API behavior.
+- [x] DVD: replace the old `nxcdrom`/ClassPnP link with the owned optical class path, preserve `\Device\CdRom0`, and pass XDVDFS-backed API and broad-XISO reads on the exact candidate.
 - [ ] Verify lower ATA/ATAPI gets equivalent commands, queues and DMA/interrupt behavior; ensure HDD and DVD sharing the controller do not suffer new head-of-line blocking.
-- [ ] Label incomplete hybrid as `partial-lab-prototype` with old source still included, **not a compliant candidate**. Only `complete-candidate` eliminates both old archives and all retained incompatible implementation. Make one bootable, standalone GPL-compatible `flash.bin` in the final build.
+- [x] Keep the hybrid labeled `partial-lab-prototype`; build the bootable `complete-candidate` with only `libnxstorage.a` at the class layer. The exact-build preflight excludes `libclasspnp.a`, `libdisk.a`, `libnxcdrom.a`, and identified legacy/helper symbols. This is a bounded machine check, not final legal certification.
 - [ ] Run open XBE boot/sector/TOC/partition/flush native probes and focused Deck sentinel performance before completing the remaining control/error matrix.
 
 ## P4 — Existing/new compatibility, faults and real-world measurements
@@ -142,14 +142,15 @@ Tasks:
 - [x] Complete the frozen [144-leaf broad XISO ABBA comparison](BROAD-XISO-FINAL-COMPARISON.md) on the primary Linux host: all four runs complete and pass 149 applicable records, both SpiritBoot runs repeat exactly, and Complex B1 matches both. Preserve the frozen FAIL verdict because Complex B2 alone changes one eligible framebuffer hash. The two-run timing average is descriptive and does not close P1.
 - [ ] Exact candidate-facing host/native tests for single/multi-SRB, all allocation failure sites, inline/pending/cancel/teardown races, low memory, duplicate callback defense, partial transfer, queue freeze/unfreeze, timeout, failed media, HDD and DVD geometry/status/IOCTL buffer sizes, power/reset/flush ordering.
 - [ ] Preserve existing `storage-contract` 48 checks, `fatx-async-lifetime` 7,833 checks (documented QMP throttle **correctness only**), `save-path-separators` 34 checks, DMA/SG, cache/async/metadata/writeback, interrupt/APC and XDVDFS tests; ensure test source includes **new** candidate code rather than extracted old `TransferPktComplete`.
-- [ ] Run full API and both XISO variants at milestone checkpoints, not after every small edit. Verify data byte-for-byte, status/event/APC order and stable memory/MDL pool after repeated reads/writes/resets.
+- [ ] Run the remaining storage-contract/lifetime XISO variants and repeated reset/pool-stability campaigns against the exact candidate. Verify data byte-for-byte, status/event/APC order and stable memory/MDL pool after repeated reads/writes/resets.
+- [x] Run the exact complete-candidate API suite in 64/128 MiB release/debug profiles: each ran 639 checks with 637 passing, zero failures, and two existing xemu floating-point TODOs. Run the local broad-XISO diagnostic: all 144 leaves and five groups passed their 149 built-in records. See the [cutover record](NATIVE-CUTOVER-BRINGUP-2026-10-15.md); this does not replace the remaining paired native/performance runs.
 - [ ] Game probes: DOA Xtreme create/save/reset/reload; PGR2 boot/race/streaming; Forza Motorsport scenery-streaming and asset-ready; Halo/Halo 2 boot/load; Conker scene transitions. Captures need test/run image hashes and, for streaming, p95/p99 frame milliseconds not just mean FPS. No game content committed.
 - [ ] A/B on Steam Deck and Windows Ryzen independently, both with untraced release builds, identical binary/settings except class implementation, frozen run count, paired distributions, matched caches and sector bytes. Report **every** primary workload, confidence bound, errors and regression root cause.
 - [ ] Run 64/128 MiB release + checked/debug and supported upper-RAM-reserved profile. Measure compressed kernel bytes vs fixed `flash.bin` envelope, linker section/page hotness, INIT discard, resident RAM and per-device high-water. Physical console IDE/DMA/optical/cache tests when available; xemu pass is not hardware proof.
 
 ## P5 — Static-license closure, final validation and merge gate
 
-- [ ] Candidate linker inputs (including expanded response/archive transitive closure) contain **no `libclasspnp.a`/`libdisk.a`**. Validate actual retained PE native functions, optimized inline/code/data ranges, inlined SDK/DDK helper bodies, and build input grants—not just old symbol-name grep.
+- [ ] Candidate linker inputs (including expanded response/archive transitive closure) contain **no `libclasspnp.a`/`libdisk.a`**. The exact-build preflight now passes the archive, PE-symbol, and owned-source sentinels; optimized inline/code/data attribution and independent grant review remain open, so this combined gate stays unchecked.
 - [ ] Resolve or eliminate 22 SDK/DDK helper identities, five additional SCSI utilities and any other discovered uncertain source; verify GCC runtime exception, original notices and full corresponding source. Preserve old archive historical notices where required but do not ship incorporated incompatible code in final BIOS.
 - [ ] Validate `build.json` backend identity/source tree, patch SHA256, PE/flash hashes, no unauthorized backend fallback, deterministic clean builds and correct 64/128 firmware memory/size.
 - [ ] Run final host/native/XISO/save/game/performance matrix against the **exact** final candidate; external legal/provenance reviewer and technical code reviewer verify compiled firmware. Record any supported/unverified physical hardware scope.
@@ -175,5 +176,6 @@ records RED/GREEN evidence, 44 request scenarios, eight pthread scenarios and
 freestanding checks. This changes an unlinked primitive, not the published
 reference ROM. The 146-patch reference composition receipt remains a historical
 reference identity; the current lock now contains 151 patches through public-kernel
-contract correction patch `0137`. Native adapter
-qualification and full replacement remain open.
+contract correction patch `0137`. The replacement is now integrated by locked
+patches `0138`–`0140`; its current qualification and remaining gates are
+recorded in [the native cutover bring-up](NATIVE-CUTOVER-BRINGUP-2026-10-15.md).
