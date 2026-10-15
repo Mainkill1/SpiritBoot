@@ -20,10 +20,10 @@ else:
 
 REQUIRED_BASELINE = frozenset({"classpnp", "disk", "nxcdrom"})
 REQUIRED_CANDIDATE = frozenset({
-    "nxstorage", "nxcdrom", "atapi", "pciide", "pciidex",
+    "nxstorage", "atapi", "pciide", "pciidex",
     "partmgr", "mountmgr", "xdvdfs", "vfatfs",
 })
-FORBIDDEN_CANDIDATE = frozenset({"classpnp", "disk"})
+FORBIDDEN_CANDIDATE = frozenset({"classpnp", "disk", "nxcdrom"})
 # An intentionally non-exhaustive set, from the qualified v1 release audit.
 # Symbols are a smoke test only; stripped, folded and inline bodies need
 # independent provenance mapping against original source revisions.
@@ -31,15 +31,49 @@ LEGACY_IDENTITIES = frozenset({
     "ClassInitialize", "ClassReadWrite", "DiskDriverEntry",
     "DiskReadWriteVerification", "SubmitTransferPacket", "TransferPktComplete",
 })
-OWNED_SOURCE = (
-    "drivers/storage/class/nxstorage",
-    "drivers/storage/class/nxcdrom/nxcdrom.c",
-)
+# The focused provenance audit found these helper bodies in the qualified
+# legacy image, but did not establish a compatible grant for their source.
+# Candidate-owned code must use its own public-contract field access and sense
+# parsing instead of retaining, renaming, or wrapping these implementations.
+UNCERTAIN_HELPER_IDENTITIES = frozenset({
+    "FREE_PORT_ALLOCATED_SENSE_BUFFER",
+    "GET_FDO_EXTENSON_SENSE_DATA_LENGTH",
+    "PORT_ALLOCATED_SENSE",
+    "SrbAssignSrbFlags",
+    "SrbClearSrbFlags",
+    "SrbGetDataTransferLength",
+    "SrbGetScsiStatus",
+    "SrbGetSenseInfoBuffer",
+    "SrbGetSenseInfoBufferLength",
+    "SrbSetCdbLength",
+    "SrbSetDataBuffer",
+    "SrbSetDataTransferLength",
+    "SrbSetNextSrb",
+    "SrbSetOriginalRequest",
+    "SrbSetQueueSortKey",
+    "SrbSetQueueTag",
+    "SrbSetRequestAttribute",
+    "SrbSetScsiStatus",
+    "SrbSetSenseInfoBuffer",
+    "SrbSetSenseInfoBufferLength",
+    "SrbSetSrbFlags",
+    "SrbSetTimeOutValue",
+    "ScsiConvertToFixedSenseFormat",
+    "ScsiGetDescriptorSenseKeyAndCodes",
+    "ScsiGetFixedSenseKeyAndCodes",
+    "ScsiGetSenseKeyAndCodes",
+    "ScsiGetTotalSenseByteCountIndicated",
+})
+PROHIBITED_IDENTITIES = LEGACY_IDENTITIES | UNCERTAIN_HELPER_IDENTITIES
+OWNED_SOURCE = "drivers/storage/class/nxstorage"
 NO_PRIVATE_HEADER = re.compile(
     r'^\s*#\s*include\s*[<"](?:[^>"]*/)?(?:classpnp|classp|disk|srbhelper)\.h[>"]',
     re.MULTILINE | re.IGNORECASE,
 )
 NO_CLASS_CALL = re.compile(r"\bClass[A-Z]\w*\s*\(")
+NO_UNCERTAIN_HELPER = re.compile(
+    r"\b(?:" + "|".join(map(re.escape, sorted(UNCERTAIN_HELPER_IDENTITIES))) + r")\b"
+)
 HASH40 = re.compile(r"[0-9a-f]{40}\Z")
 HASH64 = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -109,16 +143,11 @@ def strip_comments(source):
 def candidate_source_findings(source):
     """Inspect only new/owned code, not unused archived MS-PL source."""
     root = Path(source)
-    newdir = root / OWNED_SOURCE[0]
-    cdrom = root / OWNED_SOURCE[1]
+    newdir = root / OWNED_SOURCE
     problems = []
     if not newdir.is_dir() or not any(newdir.rglob("*.c")):
         problems.append("missing independently implemented nxstorage C sources")
-    if not cdrom.is_file():
-        problems.append("missing nxcdrom implementation")
     files = list(newdir.rglob("*.c")) + list(newdir.rglob("*.h"))
-    if cdrom.is_file():
-        files.append(cdrom)
     for file in files:
         try:
             source_text = strip_comments(file.read_text(encoding="utf-8"))
@@ -129,6 +158,9 @@ def candidate_source_findings(source):
             problems.append(f"{file.relative_to(root)}: includes legacy private storage header")
         if NO_CLASS_CALL.search(source_text):
             problems.append(f"{file.relative_to(root)}: contains a Class* direct call/declaration")
+        for identity in sorted(set(NO_UNCERTAIN_HELPER.findall(source_text))):
+            problems.append(
+                f"{file.relative_to(root)}: contains unresolved storage helper {identity}")
     return problems
 
 
@@ -162,7 +194,7 @@ def check(source, manifest, link_command, nm_table, mode):
     findings.append({"check": "expected_libraries", "pass": not missing, "detail": missing})
     if mode == "candidate":
         forbidden = sorted(FORBIDDEN_CANDIDATE & (libraries | command_libraries))
-        present = sorted(LEGACY_IDENTITIES & names)
+        present = sorted(PROHIBITED_IDENTITIES & names)
         source_errors = candidate_source_findings(source)
         findings.extend((
             {"check": "forbidden_libraries", "pass": not forbidden, "detail": forbidden},

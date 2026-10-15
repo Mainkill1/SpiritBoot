@@ -20,14 +20,13 @@ class StorageMigrationGateTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.source = self.root / "assembled"
         self.new = self.source / "drivers/storage/class/nxstorage"
-        self.optical = self.source / "drivers/storage/class/nxcdrom"
         self.new.mkdir(parents=True)
-        self.optical.mkdir(parents=True)
         (self.new / "request.c").write_text(
             '#include <ntddk.h>\nvoid NxStorageSubmit(void) {}\n', encoding="utf-8")
         (self.new / "nxstorage.h").write_text(
             '#pragma once\n', encoding="utf-8")
-        (self.optical / "nxcdrom.c").write_text(
+        self.optical = self.new / "optical.c"
+        self.optical.write_text(
             '#include <ntddk.h>\nvoid CdromDispatch(void) {}\n',
             encoding="utf-8")
         self.manifest = {
@@ -37,7 +36,7 @@ class StorageMigrationGateTests(unittest.TestCase):
         self.candidate_link = (
             "i686-w64-mingw32-gcc -o xboxkrnl.exe "
             "libatapi.a libpciide.a libpciidex.a "
-            "libnxstorage.a libnxcdrom.a libpartmgr.a "
+            "libnxstorage.a libpartmgr.a "
             "libmountmgr.a libxdvdfs.a libvfatfs.a"
         )
         self.baseline_link = (
@@ -207,9 +206,11 @@ class StorageMigrationGateTests(unittest.TestCase):
         self.assertIn("atapi", result["checks"][0]["detail"])
 
     def test_linked_legacy_archives_fail_even_if_candidate_present(self):
-        result = self.run_check(link=self.candidate_link + " libclasspnp.a libdisk.a")
+        result = self.run_check(
+            link=self.candidate_link + " libclasspnp.a libdisk.a libnxcdrom.a")
         self.assertFalse(result["passed"])
-        self.assertEqual(result["checks"][1]["detail"], ["classpnp", "disk"])
+        self.assertEqual(result["checks"][1]["detail"],
+                         ["classpnp", "disk", "nxcdrom"])
 
     def test_hidden_compiler_and_linker_library_forms_fail(self):
         for flag in ("-Wl,-lclasspnp", "-l:libdisk.a",
@@ -244,8 +245,29 @@ class StorageMigrationGateTests(unittest.TestCase):
         self.assertIn("SubmitTransferPacket", result["checks"][2]["detail"])
         self.assertIn("ClassReadWrite", result["checks"][2]["detail"])
 
+    def test_unresolved_sdk_and_scsi_helper_symbols_fail(self):
+        result = self.run_check(symbols=(
+            "84001000 T _SrbSetDataBuffer@8\n"
+            "84001040 t _ScsiGetSenseKeyAndCodes.constprop.0\n"))
+        self.assertFalse(result["passed"])
+        self.assertIn("SrbSetDataBuffer", result["checks"][2]["detail"])
+        self.assertIn("ScsiGetSenseKeyAndCodes", result["checks"][2]["detail"])
+
+    def test_unresolved_helper_references_fail_in_owned_sources(self):
+        (self.new / "request.c").write_text(
+            "void f(void) { SrbSetDataBuffer(); ScsiGetSenseKeyAndCodes(); }\n",
+            encoding="utf-8")
+        result = self.run_check()
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("unresolved storage helper" in item
+                            and "SrbSetDataBuffer" in item
+                            for item in result["checks"][3]["detail"]))
+        self.assertTrue(any("unresolved storage helper" in item
+                            and "ScsiGetSenseKeyAndCodes" in item
+                            for item in result["checks"][3]["detail"]))
+
     def test_direct_class_calls_and_headers_fail_in_owned_sources(self):
-        (self.optical / "nxcdrom.c").write_text(
+        self.optical.write_text(
             '#include "classpnp.h"\nvoid f(void) { ClassInitialize(); }\n',
             encoding="utf-8")
         result = self.run_check()
@@ -268,9 +290,11 @@ class StorageMigrationGateTests(unittest.TestCase):
         self.assertFalse(self.run_check()["passed"])
 
     def test_comments_do_not_trigger_a_false_failure(self):
-        (self.optical / "nxcdrom.c").write_text(
+        self.optical.write_text(
             '/* #include "classpnp.h" */\n'
             '// ClassInitialize();\n'
+            '// SrbSetDataBuffer();\n'
+            '/* ScsiGetSenseKeyAndCodes(); */\n'
             'int valid(void) { return 0; }\n', encoding="utf-8")
         self.assertTrue(self.run_check()["passed"])
 
@@ -283,6 +307,7 @@ class StorageMigrationGateTests(unittest.TestCase):
 
     def test_missing_candidate_source_fails(self):
         (self.new / "request.c").unlink()
+        self.optical.unlink()
         self.assertFalse(self.run_check()["passed"])
 
     def test_linker_response_files_are_rejected_not_silently_ignored(self):
