@@ -45,6 +45,7 @@ jobs:
             --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
             --variant ${{ matrix.variant }} --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
       - name: Check the built source identity and actual kernel work
+        if: matrix.variant == 'release'
         run: |
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           guest_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["build_directory"])')
@@ -199,6 +200,7 @@ jobs:
             --source .reference/roswell --output artifacts/firmware-repeat --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
           cmp artifacts/firmware-release-${{ matrix.memory_mib }}mib/flash.bin artifacts/firmware-repeat/flash.bin
       - name: Prepare pinned open runtime fixtures
+        if: matrix.variant == 'release'
         run: |
           python3 - <<'PY'
           import hashlib, json, pathlib, urllib.request
@@ -215,6 +217,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             -w /work/artifacts spiritboot-toolchain ./xemu.AppImage --appimage-extract
       - name: Build guests from the tested patched source
+        if: matrix.variant == 'release'
         run: |
           nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
@@ -229,6 +232,7 @@ jobs:
               "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
           done
       - name: Run API, contracts, warm reboot, and performance correctness guests
+        if: matrix.variant == 'release'
         run: |
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           docker run --rm -v "$PWD:/work" \

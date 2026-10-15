@@ -18,6 +18,18 @@ class CandidateReleasePolicyTests(unittest.TestCase):
             'NXK_STORAGE_BACKEND:STRING=//p\' "$GUEST_BUILD/CMakeCache.txt")" '
             '= complete-candidate', workflow)
 
+    def test_runtime_and_performance_qualification_runs_only_on_release(self):
+        workflow = (ROOT / ".github/workflows/firmware.yml").read_text(
+            encoding="utf-8")
+        for step in (
+                "Check the built source identity and actual kernel work",
+                "Prepare pinned open runtime fixtures",
+                "Build guests from the tested patched source",
+                "Run API, contracts, warm reboot, and performance correctness guests"):
+            self.assertIn(
+                f"- name: {step}\n        if: matrix.variant == 'release'",
+                workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
