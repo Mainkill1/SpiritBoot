@@ -26,9 +26,10 @@ not a legal certification.
    therefore describe the same lower facts. Admission adds no property IRP,
    allocation, wait, worker handoff, or global lock per I/O.
 2. Adapter initialization clears the envelope array immediately after its
-   allocation and tracks the exact number of constructed entries. Partial pool,
-   child-IRP, and control-MDL failure paths free only constructed objects, even
-   when successful allocations contain nonzero poison bytes.
+   allocation. Each child IRP and control MDL is stored only after successful
+   construction, so partial pool, child-IRP, and control-MDL failure paths can
+   safely scan the zeroed array and free only constructed objects, even when
+   successful allocations contain nonzero poison bytes.
 3. Direct READ CAPACITY, READ TOC, and CHECK VERIFY requests react to a frozen
    lower queue with one preallocated `SRB_FUNCTION_RELEASE_QUEUE` phase. The
    original control result is retained for the parent. Release preparation or

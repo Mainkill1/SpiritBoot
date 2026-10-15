@@ -6,14 +6,14 @@ The [native cutover bring-up](NATIVE-CUTOVER-BRINGUP-2026-10-15.md) records the
 three runtime divergences found after the aggressive class replacement: missing
 `\\Device\\Harddisk0` ownership, rejected PnP start forwarding, and missing
 extended disk geometry for PartMgr. The corrected source tree
-`5e427e695c7790966191ed8a0a56b10a441c6ab8` passes 639 API checks as
+`abebfef7a717e0379057b5087b8ff71e75279018` passes 639 API checks as
 637 pass, zero fail, and two declared xemu floating-point TODOs on release and
 debug builds at both 64 MiB and 128 MiB.
 The exact second-pass images are release64
-`3a273ba1f213bb2523dddfcf4755071403784f1e25affacef4a4a7b48d47f895`,
-release128 `d35a5bca5cd0d60fdc0764012a9525724bd0481d8589ac837c8ef089c2ca23e0`,
-debug64 `90d46ef658aa9a355cd53948d4216b6c63c59aa920ce963ae20e4539fbb27798`,
-and debug128 `3d9be11f1b2a2e8290b76a5d9c6368ebcf7a23f3e89954dbfc0bd15623623b4c`.
+`cff12e2cd1b1af1faf0060b676d8ffc37f8256400b12edfe5ad3b2a191943db9`,
+release128 `b2de51291b6231e25fd6f1fda7db607595c94673f8312a78f02833825863931a`,
+debug64 `5cf32acc210781f7a8337b94f5deff45b73b381d1b9777329a85d171f67d13bb`,
+and debug128 `ef99a89e607c52d339196aa491927971fa5c6f98c10c73c9666ecae1815a3185`.
 The [second-pass review-fix record](PR248-SECOND-PASS-REVIEW-FIXES-2026-10-15.md)
 and its machine-readable receipt bind those images to the focused production
 tests, storage preflight, and per-profile API runs.
