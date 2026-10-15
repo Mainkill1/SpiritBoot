@@ -199,11 +199,14 @@ qualification gates.
 ## Final bounded acceptance
 
 Locked patch `0137-xbox-public-kernel-contracts.patch` has SHA-256
-`83d61c19f4081369ede8b5179da679945979ab9ec01f0ae6754184a9d355c4ef`.
+`f3e34548351cef6f6016dca58695e42945fc0bf62510fdf8dbde2563bd7590a1`.
 The final assembled tree is
-`31963f970704ab04d8538714c94c78445b5391b2`; its release64 BIOS is
+`8d0d83ef8ca0fcfb716c58bbec1f3aed2333d4f6`; its release64 BIOS is
 `0f6e4f48269e0ef65bb27758e221b4bcdb707ef0cbf57c211d7e969866334d5e`.
 An independent clean release64 build produced the same BIOS byte for byte.
+The final patch also exposes `CLOCK_LEVEL` to the pre-existing extracted-body
+interrupt fixture; this is host-test support only and leaves the qualified
+firmware byte-identical.
 
 The corrected 119-check XISO has SHA-256
 `48e950a387cefc750bcdde184a4e0decbf11e0ec6f896ddd458a9ee0dd3b437b`;
