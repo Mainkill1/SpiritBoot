@@ -181,3 +181,5 @@ corresponding-source, and independent provenance/legal review gates in
 `IMPLEMENTATION-CHECKLIST.md` still control promotion.
 
 Related: [provenance protocol](PROVENANCE.md), [ABI contract](ABI-CONTRACT.md), [qualification plan](TEST-PLAN.md), [storage compliance issue #245](https://github.com/Mainkill1/SpiritBoot/issues/245), [documentation PR #246](https://github.com/Mainkill1/SpiritBoot/pull/246).
+
+Final replacement source inventory: [compiled-unit and function-group license map](COMPLETE-CANDIDATE-LICENSE-MAP.md).

@@ -18,6 +18,9 @@ The replacement source is carried by locked patches `0138`, `0139`, and
 `0140`. The source is GPL-2.0-or-later and uses public kernel/DDK declarations
 and independently recorded behavior. The complete-candidate link and source
 gates reject the old class archives and identified legacy helper bodies.
+The [complete-candidate license map](COMPLETE-CANDIDATE-LICENSE-MAP.md) records
+each linked replacement unit, function group, source hash, and directly used
+interface-header terms.
 
 ## Failure 1: disk namespace parent was missing
 

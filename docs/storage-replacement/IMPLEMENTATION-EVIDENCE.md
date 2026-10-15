@@ -9,6 +9,9 @@ extended disk geometry for PartMgr. The corrected source tree
 `920af8da4535d5adbb2018d388a8cc814cd479e7` passes 639 API checks as
 637 pass, zero fail, and two declared xemu floating-point TODOs on release and
 debug builds at both 64 MiB and 128 MiB.
+The [complete-candidate license map](COMPLETE-CANDIDATE-LICENSE-MAP.md)
+enumerates the linked replacement units and function groups, their exact source
+hashes, directly used interface-header terms, and source-only exclusions.
 
 ## Product and native reference
 
