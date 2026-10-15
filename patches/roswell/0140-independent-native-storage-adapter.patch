@@ -2,7 +2,7 @@ diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/cl
 index 62d4fd4..60999b1 100644
 --- a/drivers/storage/class/nxstorage/CMakeLists.txt
 +++ b/drivers/storage/class/nxstorage/CMakeLists.txt
-@@ -1,5 +1,6 @@
+@@ -1,5 +1,7 @@
 -# Independently authored laboratory primitives; no FDO/IRP adapter yet.
 -# This target is linked only by the explicitly labeled partial prototype.
 -add_library(nxstorage STATIC request.c geometry_composer.c cache_query.c cache_property.c nxdisk_owner.c)
@@ -11,6 +11,7 @@ index 62d4fd4..60999b1 100644
 +    geometry_composer.c cache_query.c cache_property.c nxdisk_owner.c)
  target_include_directories(nxstorage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 +target_compile_definitions(nxstorage PRIVATE NX_NATIVE_TARGET=1)
++add_dependencies(nxstorage psdk xdk bugcodes)
  target_sources(nxstorage PRIVATE nxcdrom_profile.c)
 diff --git a/drivers/storage/class/nxstorage/driver.c b/drivers/storage/class/nxstorage/driver.c
 new file mode 100644
