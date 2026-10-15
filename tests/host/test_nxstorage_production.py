@@ -24,7 +24,9 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0133-independent-zero-domain-mdl.patch",
                      "0134-independent-native-packet-primitive.patch",
                      "0135-independent-sense-header-primitive.patch",
-                     "0138-independent-nxdisk-owner.patch"):
+                     "0138-independent-nxdisk-owner.patch",
+                     "0139-independent-nxcdrom-profile.patch",
+                     "0140-independent-native-storage-adapter.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -68,3 +70,10 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertEqual(owner.returncode, 0, owner.stdout + owner.stderr)
             self.assertIn('nxdisk-owner-plain: 9 groups, 0 failures', owner.stdout)
             self.assertIn('nxdisk-owner-sanitized: 9 groups, 0 failures', owner.stdout)
+            adapter = subprocess.run([sys.executable, str(source / 'tests/host/nxstorage/check_adapter.py'),
+                                      str(Path(temporary) / 'adapter-output')], text=True,
+                                     capture_output=True, timeout=120,
+                                     env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
+            self.assertEqual(adapter.returncode, 0, adapter.stdout + adapter.stderr)
+            self.assertIn('adapter-plain: 8 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-sanitized: 8 adapter groups, 0 failures', adapter.stdout)
