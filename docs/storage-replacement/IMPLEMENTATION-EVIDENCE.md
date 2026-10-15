@@ -153,6 +153,14 @@ passes the four-profile API runtime matrix. Native cache-capability and
 physical durability claims remain limited by the lower stack and require the
 separate evidence gates described above.
 
+The [native adapter review hardening](NATIVE-ADAPTER-REVIEW-HARDENING-2026-10-15.md)
+records fail-first production-function coverage for poisoned partial allocation,
+every child-IRP/control-MDL slot failure, an already-cancelled data IRP, and
+cancellation on both sides of the request core's transport commit. The locked
+adapter harness now passes 10 groups under plain and ASan/UBSan builds. This is
+deterministic host fault/race coverage; the existing native qualification limits
+remain unchanged.
+
 Open P4/P5: native correctness/fault/API/XISO/save/game/streaming matrix against the exact complete candidate, both approved rigs, all firmware profiles and RAM/ROM footprints, optimized-inline/helper source grants, exact corresponding source/notices, independent final review, and supported/unverified physical Xbox scope. PR #248 stays draft and issue #245 remains open until those gates pass.
 
 Cache qualification gap: the retained Xbox lower stack excludes ATA caching MODE SENSE, ATA passthrough and the standard write-cache property. Its SYNCHRONIZE CACHE implementation can return success without any ATA command for cache-unrecognized/disabled state or absent selected flush opcode. The approved read-only cache-query proposal exposes these facts without altering ATA execution; enabled/unknown cache without a verified flush path cannot be treated as durable. Native callback-time child reuse must preserve older dispatch/channel frames and device references as documented in the approved completion packet.

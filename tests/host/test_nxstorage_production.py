@@ -75,8 +75,8 @@ class NxStorageProductionTests(unittest.TestCase):
                                      capture_output=True, timeout=120,
                                      env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
             self.assertEqual(adapter.returncode, 0, adapter.stdout + adapter.stderr)
-            self.assertIn('adapter-plain: 8 adapter groups, 0 failures', adapter.stdout)
-            self.assertIn('adapter-sanitized: 8 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-plain: 10 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-sanitized: 10 adapter groups, 0 failures', adapter.stdout)
 
             driver = (source / 'drivers/storage/class/nxstorage/driver.c').read_text()
             self.assertIn('ZwCreateDirectoryObject(&context->object_directory', driver)

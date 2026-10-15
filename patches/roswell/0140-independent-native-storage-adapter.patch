@@ -1,5 +1,5 @@
 diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
-index 62d4fd4..60999b1 100644
+index 62d4fd4..ff8fc72 100644
 --- a/drivers/storage/class/nxstorage/CMakeLists.txt
 +++ b/drivers/storage/class/nxstorage/CMakeLists.txt
 @@ -1,5 +1,7 @@
@@ -15,7 +15,7 @@ index 62d4fd4..60999b1 100644
  target_sources(nxstorage PRIVATE nxcdrom_profile.c)
 diff --git a/drivers/storage/class/nxstorage/driver.c b/drivers/storage/class/nxstorage/driver.c
 new file mode 100644
-index 0000000..17e28b0
+index 0000000..25303b4
 --- /dev/null
 +++ b/drivers/storage/class/nxstorage/driver.c
 @@ -0,0 +1,225 @@
@@ -246,10 +246,10 @@ index 0000000..17e28b0
 +}
 diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
 new file mode 100644
-index 0000000..92624d7
+index 0000000..1a7a651
 --- /dev/null
 +++ b/drivers/storage/class/nxstorage/native_adapter.c
-@@ -0,0 +1,746 @@
+@@ -0,0 +1,754 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "native_adapter.h"
 +
@@ -378,9 +378,15 @@ index 0000000..92624d7
 +    NX_NATIVE_ENVELOPE *envelope=find_parent(adapter,(PIRP)command->parent);
 +    nx_packet_resources resources;
 +    nx_packet_command packet;
++    nx_handle handle;
 +    PMDL mdl;
 +    uint32_t pfn_capacity=0;
++    unsigned cancel_after;
 +    if(!envelope || envelope->packet_live) return NX_PROTOCOL_ERROR;
++    handle.slot=command->token.slot;handle.generation=command->token.generation;
++    port_enter(adapter);envelope->handle=handle;envelope->handle_valid=1;
++    cancel_after=envelope->cancel_latched;port_leave(adapter);
++    if(cancel_after) nx_cancel(&adapter->core,handle);
 +    mdl=envelope->parent->MdlAddress;
 +    if(mdl && mdl->Size>=(int)sizeof(*mdl))
 +        pfn_capacity=((uint32_t)mdl->Size-(uint32_t)sizeof(*mdl))/(uint32_t)sizeof(ULONG);
@@ -706,8 +712,9 @@ index 0000000..92624d7
 +    zero_bytes(adapter,sizeof(*adapter));
 +    adapter->slots=ExAllocatePool(NonPagedPool,(size_t)slot_count*sizeof(*adapter->slots));
 +    adapter->envelopes=ExAllocatePool(NonPagedPool,(size_t)slot_count*sizeof(*adapter->envelopes));
++    if(adapter->envelopes)
++        zero_bytes(adapter->envelopes,(size_t)slot_count*sizeof(*adapter->envelopes));
 +    if(!adapter->slots || !adapter->envelopes) goto no_memory;
-+    zero_bytes(adapter->envelopes,(size_t)slot_count*sizeof(*adapter->envelopes));
 +    adapter->lower=lower;adapter->count=slot_count;KeInitializeSpinLock(&adapter->lock);
 +    adapter->media_capacity=config->capacity_bytes;adapter->media_sector=config->sector_bytes;
 +    adapter->media_present=config->capacity_bytes!=0;
@@ -813,6 +820,7 @@ index 0000000..92624d7
 +            request.mdl_bytes=mdl->ByteCount;request.mdl_present=1;
 +        }
 +    }
++    port_enter(adapter);request.cancelled=envelope->cancel_latched;port_leave(adapter);
 +    result=nx_start(&adapter->core,&request,&handle);
 +    port_enter(adapter);
 +    if(envelope->active && !envelope->completed) {
@@ -998,7 +1006,7 @@ index 0000000..92624d7
 +}
 diff --git a/drivers/storage/class/nxstorage/native_adapter.h b/drivers/storage/class/nxstorage/native_adapter.h
 new file mode 100644
-index 0000000..7573c33
+index 0000000..ec216f9
 --- /dev/null
 +++ b/drivers/storage/class/nxstorage/native_adapter.h
 @@ -0,0 +1,40 @@
@@ -1114,7 +1122,7 @@ index 0000000..3285680
 +    print(name+': '+result.stdout.splitlines()[-1])
 diff --git a/tests/host/nxstorage/native_adapter_host_platform.h b/tests/host/nxstorage/native_adapter_host_platform.h
 new file mode 100644
-index 0000000..feb06f0
+index 0000000..ea159b0
 --- /dev/null
 +++ b/tests/host/nxstorage/native_adapter_host_platform.h
 @@ -0,0 +1,134 @@
@@ -1254,10 +1262,10 @@ index 0000000..feb06f0
 +#endif
 diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
 new file mode 100644
-index 0000000..0cacf32
+index 0000000..cabde89
 --- /dev/null
 +++ b/tests/host/nxstorage/native_adapter_test.c
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,301 @@
 +/* SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "native_adapter_host_platform.h"
 +#include "native_adapter.h"
@@ -1273,13 +1281,30 @@ index 0000000..0cacf32
 +static unsigned lower_calls, cancel_calls;
 +static unsigned property_calls,free_irps,free_mdls,detaches,deletes;
 +static int fail_pool,fail_symbolic_link;
++static int pool_fail_call=-1,irp_fail_call=-1,mdl_fail_call=-1;
++static unsigned pool_calls,irp_calls,mdl_calls,pool_live;
++static unsigned invalid_irp_frees,invalid_mdl_frees;
++static int poison_pool,cancel_during_prepare,cancel_during_submit;
++static PIRP cancel_parent;
++static void *live_irps[128],*live_mdls[128];
 +static uint8_t opcodes[8];
 +static int lower_pending;
 +static uint32_t read_capacity_last=15,read_capacity_sector=2048;
 +
-+VOID IoReuseIrp(PIRP i,NTSTATUS s){int8_t n=i->StackCount;PIO_STACK_LOCATION base=i->Tail.Overlay.CurrentStackLocation-n;memset(i,0,sizeof(*i));i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=base+n;i->IoStatus.Status=s;}
-+PIRP IoAllocateIrp(CCHAR n,BOOLEAN q){(void)q;size_t z=sizeof(IRP)+(size_t)n*sizeof(IO_STACK_LOCATION);PIRP i=calloc(1,z);if(i){i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=(PIO_STACK_LOCATION)(i+1)+n;}return i;}
-+VOID IoFreeIrp(PIRP i){++free_irps;free(i);}
++static void remember(void **live,void *pointer){for(unsigned i=0;i<128;++i)if(!live[i]){live[i]=pointer;return;}abort();}
++static int forget(void **live,void *pointer){for(unsigned i=0;i<128;++i)if(live[i]==pointer){live[i]=NULL;return 1;}return 0;}
++static unsigned live_count(void **live){unsigned count=0;for(unsigned i=0;i<128;++i)count+=live[i]!=NULL;return count;}
++static void cancel_now(void)
++{
++    PDRIVER_CANCEL routine;
++    MUST(cancel_parent&&cancel_parent->CancelRoutine);
++    routine=cancel_parent->CancelRoutine;cancel_parent->CancelRoutine=NULL;
++    cancel_parent->Cancel=TRUE;cancel_parent->CancelIrql=0;
++    routine(created_device,cancel_parent);
++}
++VOID IoReuseIrp(PIRP i,NTSTATUS s){if(cancel_during_prepare){cancel_during_prepare=0;cancel_now();}int8_t n=i->StackCount;PIO_STACK_LOCATION base=i->Tail.Overlay.CurrentStackLocation-n;memset(i,0,sizeof(*i));i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=base+n;i->IoStatus.Status=s;}
++PIRP IoAllocateIrp(CCHAR n,BOOLEAN q){(void)q;unsigned call=irp_calls++;if((int)call==irp_fail_call)return NULL;size_t z=sizeof(IRP)+(size_t)n*sizeof(IO_STACK_LOCATION);PIRP i=calloc(1,z);if(i){remember(live_irps,i);i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=(PIO_STACK_LOCATION)(i+1)+n;}return i;}
++VOID IoFreeIrp(PIRP i){if(!forget(live_irps,i)){++invalid_irp_frees;return;}++free_irps;free(i);}
 +VOID FASTCALL IofCompleteRequest(PIRP i,CCHAR b){(void)b;MUST(!i->host_completed);i->host_completed=1;}
 +VOID IoMarkIrpPending(PIRP i){i->host_pending=1;}
 +VOID IoAcquireCancelSpinLock(KIRQL *q){*q=0;}
@@ -1287,11 +1312,11 @@ index 0000000..0cacf32
 +VOID KeInitializeSpinLock(PKSPIN_LOCK l){*l=0;}
 +KIRQL FASTCALL KfAcquireSpinLock(PKSPIN_LOCK l){MUST(!*l);*l=1;return 0;}
 +VOID FASTCALL KfReleaseSpinLock(PKSPIN_LOCK l,KIRQL q){(void)q;MUST(*l);*l=0;}
-+PVOID ExAllocatePool(int t,size_t n){(void)t;if(fail_pool){--fail_pool;return NULL;}return calloc(1,n);}
-+VOID ExFreePool(PVOID p){free(p);}
-+PMDL IoAllocateMdl(PVOID p,ULONG n,BOOLEAN s,BOOLEAN q,PIRP i){(void)s;(void)q;(void)i;PMDL m=calloc(1,sizeof(*m)+2*sizeof(ULONG));if(m){uintptr_t a=(uintptr_t)p;m->StartVa=(PVOID)(a&~(uintptr_t)4095);m->ByteOffset=(ULONG)(a&4095);m->ByteCount=n;m->Size=sizeof(*m)+2*sizeof(ULONG);}return m;}
++PVOID ExAllocatePool(int t,size_t n){(void)t;unsigned call=pool_calls++;if(fail_pool){--fail_pool;return NULL;}if((int)call==pool_fail_call)return NULL;PVOID p=malloc(n);if(p){memset(p,poison_pool?0xa5:0,n);++pool_live;}return p;}
++VOID ExFreePool(PVOID p){if(p){MUST(pool_live);--pool_live;}free(p);}
++PMDL IoAllocateMdl(PVOID p,ULONG n,BOOLEAN s,BOOLEAN q,PIRP i){(void)s;(void)q;(void)i;unsigned call=mdl_calls++;if((int)call==mdl_fail_call)return NULL;PMDL m=calloc(1,sizeof(*m)+2*sizeof(ULONG));if(m){remember(live_mdls,m);uintptr_t a=(uintptr_t)p;m->StartVa=(PVOID)(a&~(uintptr_t)4095);m->ByteOffset=(ULONG)(a&4095);m->ByteCount=n;m->Size=sizeof(*m)+2*sizeof(ULONG);}return m;}
 +VOID MmBuildMdlForNonPagedPool(PMDL m){(void)m;}
-+VOID IoFreeMdl(PMDL m){++free_mdls;free(m);}
++VOID IoFreeMdl(PMDL m){if(!forget(live_mdls,m)){++invalid_mdl_frees;return;}++free_mdls;free(m);}
 +NTSTATUS IoCreateDevice(PDRIVER_OBJECT d,ULONG n,PUNICODE_STRING u,DEVICE_TYPE t,ULONG c,BOOLEAN x,PDEVICE_OBJECT *o){(void)u;(void)x;PDEVICE_OBJECT v=calloc(1,sizeof(*v)+n);if(!v)return STATUS_INSUFFICIENT_RESOURCES;v->DriverObject=d;v->DeviceExtension=(uint8_t *)v+sizeof(*v);v->DeviceType=(UCHAR)t;v->Characteristics=c;*o=created_device=v;return 0;}
 +PDEVICE_OBJECT IoAttachDeviceToDeviceStack(PDEVICE_OBJECT a,PDEVICE_OBJECT b){a->AttachedDevice=b;a->StackSize=b->StackSize+1;return b;}
 +VOID IoDetachDevice(PDEVICE_OBJECT d){(void)d;++detaches;}
@@ -1314,6 +1339,7 @@ index 0000000..0cacf32
 +        IofCompleteRequest(child,IO_NO_INCREMENT);return STATUS_SUCCESS;}
 +    (void)lower;PIO_STACK_LOCATION s=child->Tail.Overlay.CurrentStackLocation-1;
 +    MUST(lower_calls<8 && s->Parameters.Scsi.Srb);opcodes[lower_calls++]=s->Parameters.Scsi.Srb->Cdb[0];active_child=child;
++    if(cancel_during_submit){cancel_during_submit=0;cancel_now();}
 +    if(s->Parameters.Scsi.Srb->Cdb[0]==0x25){uint8_t *b=s->Parameters.Scsi.Srb->DataBuffer;memset(b,0,8);
 +        b[0]=(uint8_t)(read_capacity_last>>24);b[1]=(uint8_t)(read_capacity_last>>16);
 +        b[2]=(uint8_t)(read_capacity_last>>8);b[3]=(uint8_t)read_capacity_last;
@@ -1353,6 +1379,50 @@ index 0000000..0cacf32
 +    nx_config c={512,4096,0x20000,33,0,256,0,0,NX_CACHE_UNQUALIFIED};NX_NATIVE_DEVICE_INIT init={0};init.DeviceType=7;init.Config=c;init.SlotCount=2;
 +    PDEVICE_OBJECT out=NULL;MUST(NxNativeCreateClassDevice(&driver,&lower,&init,&out)==0);return out;
 +}
++static void reset_allocation_faults(void)
++{
++    MUST(!pool_live&&!live_count(live_irps)&&!live_count(live_mdls));
++    fail_pool=0;pool_fail_call=irp_fail_call=mdl_fail_call=-1;
++    pool_calls=irp_calls=mdl_calls=0;free_irps=free_mdls=0;
++    invalid_irp_frees=invalid_mdl_frees=0;poison_pool=1;
++}
++static NTSTATUS initialize_for_failure(ULONG slots)
++{
++    static DEVICE_OBJECT lower;
++    _Alignas(max_align_t) unsigned char storage[4096];
++    nx_config config={512,4096,4096,2,0,256,1u<<20,0,NX_CACHE_ENABLED};
++    memset(&lower,0,sizeof(lower));lower.StackSize=2;memset(storage,0xa5,sizeof(storage));
++    return NxNativeAdapterInitialize((NX_NATIVE_ADAPTER *)(void *)storage,&lower,slots,&config);
++}
++/* Break: partial initialization frees poisoned pointers from envelope slots it never initialized. */
++static int initialization_cleans_only_constructed_envelopes(void)
++{
++    enum { SLOTS=4 };
++    for(int failure=0;failure<2;++failure) {
++        NTSTATUS status;unsigned invalid_irps,invalid_mdls;
++        reset_allocation_faults();pool_fail_call=failure;
++        status=initialize_for_failure(SLOTS);invalid_irps=invalid_irp_frees;invalid_mdls=invalid_mdl_frees;
++        pool_fail_call=-1;poison_pool=0;
++        CHECK(status==STATUS_INSUFFICIENT_RESOURCES);
++        CHECK(!pool_live&&!live_count(live_irps)&&!live_count(live_mdls));
++        CHECK(!invalid_irps&&!invalid_mdls);
++    }
++    for(int failure=0;failure<SLOTS;++failure) {
++        reset_allocation_faults();irp_fail_call=failure;
++        CHECK(initialize_for_failure(SLOTS)==STATUS_INSUFFICIENT_RESOURCES);
++        CHECK(free_irps==(unsigned)failure&&free_mdls==(unsigned)failure+1u);
++        CHECK(!pool_live&&!live_count(live_irps)&&!live_count(live_mdls));
++        CHECK(!invalid_irp_frees&&!invalid_mdl_frees);
++    }
++    for(int failure=0;failure<SLOTS;++failure) {
++        reset_allocation_faults();mdl_fail_call=failure;
++        CHECK(initialize_for_failure(SLOTS)==STATUS_INSUFFICIENT_RESOURCES);
++        CHECK(free_irps==(unsigned)failure+1u&&free_mdls==(unsigned)failure);
++        CHECK(!pool_live&&!live_count(live_irps)&&!live_count(live_mdls));
++        CHECK(!invalid_irp_frees&&!invalid_mdl_frees);
++    }
++    poison_pool=0;return 1;
++}
 +static int sync_read_and_write_through(void)
 +{
 +    PDEVICE_OBJECT d=make_device(2);parent_fixture p;lower_calls=0;lower_pending=0;init_parent(&p,IRP_MJ_READ,4096);
@@ -1371,6 +1441,26 @@ index 0000000..0cacf32
 +    CHECK(cancel_calls==0);a.irp.Cancel=1;a.irp.CancelIrql=0;a.irp.CancelRoutine(d,&a.irp);
 +    CHECK(cancel_calls==1&&a.irp.host_completed==1&&a.irp.IoStatus.Status==STATUS_CANCELLED);
 +    return 1;
++}
++/* Break: a cancelled parent reaches lower transport before commit, or committed transport is not drained once. */
++static int cancellation_respects_transport_commit(void)
++{
++    PDEVICE_OBJECT d=make_device(1);parent_fixture already,before,after;
++    lower_pending=1;lower_calls=cancel_calls=0;init_parent(&already,IRP_MJ_READ,4096);already.irp.Cancel=TRUE;
++    CHECK(NxNativeDispatchReadWrite(d,&already.irp)==STATUS_CANCELLED);
++    CHECK(already.irp.host_completed&&already.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(!lower_calls&&!cancel_calls);
++
++    init_parent(&before,IRP_MJ_READ,4096);cancel_parent=&before.irp;cancel_during_prepare=1;
++    CHECK(NxNativeDispatchReadWrite(d,&before.irp)==STATUS_CANCELLED);
++    CHECK(before.irp.host_completed&&before.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(!lower_calls&&!cancel_calls&&!cancel_during_prepare);
++
++    init_parent(&after,IRP_MJ_READ,4096);cancel_parent=&after.irp;cancel_during_submit=1;
++    CHECK(NxNativeDispatchReadWrite(d,&after.irp)==STATUS_PENDING);
++    CHECK(after.irp.host_completed&&after.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(lower_calls==1&&cancel_calls==1&&!cancel_during_submit);
++    cancel_parent=NULL;lower_pending=0;return 1;
 +}
 +static uint32_t word(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 +static uint64_t dword(const uint8_t *p){return word(p)|((uint64_t)word(p+4)<<32);}
@@ -1476,6 +1566,6 @@ index 0000000..0cacf32
 +    CHECK(created_device&&created_device->DeviceType==FILE_DEVICE_CD_ROM);
 +    return 1;
 +}
-+int main(void){unsigned f=0;f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!registers_both_boot_drivers_and_adds_atomically();printf("8 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!cancellation_respects_transport_commit();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!registers_both_boot_drivers_and_adds_atomically();printf("10 adapter groups, %u failures\n",f);return f?1:0;}
 
 # end of patch
