@@ -1,0 +1,176 @@
+{
+  "status": "observed-both-arms",
+  "classification": "none-observation-only",
+  "harnessLimitations": [
+    "nxdk exposes no IoSetCompletionRoutine; used its reviewed public 36-byte stack ABI equivalent",
+    "one run per arm; no retries"
+  ],
+  "productOracle": {
+    "checks": 119,
+    "changed": false
+  },
+  "diagnosticObservedChecks": 7,
+  "manifestSha256": "29c072994733c773d9c3b4c36807b406abdfe824900fe25a6c0db6d3d1c73d5f",
+  "sourcePatchSha256": "e2a6d9c61873934abc77f72fce0b62a9e6df1f815eaf7dc719b39f8bd489521b",
+  "artifact": {
+    "xbe": {
+      "path": "source/bin/default.xbe",
+      "sha256": "0fba6b55c4a9a1311670e4020ca64bb002f91c187a0057ef43e4fee85ed8e48e",
+      "bytes": 81920
+    },
+    "iso": {
+      "path": "source/kernel-export-contracts.iso",
+      "sha256": "c52c4afb4dc8629b17dca5a679781ca410c1a32eafff71f74ee7f03872247983",
+      "bytes": 655360
+    }
+  },
+  "runnerVersion": "0.2.0+baf56ca5164ab477cf7bc3c424705577df0100f5",
+  "userPipeRequiredAndVerified": true,
+  "privateStateCleanupVerified": true,
+  "arms": [
+    {
+      "arm": "candidate",
+      "jobId": "pr248-ioinvalid-completion-v4-candidate64-20261015-v1",
+      "runId": "20261015-045229616-bec1d9538310454bafe61e0c11748d40",
+      "executionStatus": "completed",
+      "exitCode": 0,
+      "biosSha256": "42ad0c392b97d195f6aacaa47b1c168f1f74038ddf3258257b21cfde99bcb647",
+      "isoSha256": "c52c4afb4dc8629b17dca5a679781ca410c1a32eafff71f74ee7f03872247983",
+      "xemuSha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d",
+      "tap": {
+        "passed": true,
+        "plan": 7,
+        "ran": 7,
+        "errors": [],
+        "ok": 7,
+        "failed": 0,
+        "todo": 0,
+        "skipped": 0
+      },
+      "diagnostics": {
+        "reference": {
+          "statusHex": "00000000",
+          "thread": "0xc1008dd4"
+        },
+        "create": {
+          "statusHex": "00000000",
+          "device": "0xc102f178",
+          "dispatch": "0x8401a50c"
+        },
+        "allocation": {
+          "irp": "0xc100a308"
+        },
+        "result": {
+          "callStatusHex": "c0000010",
+          "waitStatusHex": "00000102",
+          "completionCalls": 0,
+          "callbackDevice": "0",
+          "callbackIrp": "0",
+          "expectedDevice": "0xc102f178",
+          "expectedIrp": "0xc100a308",
+          "irpStatusHex": "a5a5a5a5",
+          "irpInformationHex": "a5a5a5",
+          "serialLineTruncatedBeforeInformation": false
+        },
+        "cleanup": {
+          "irpUnlinked": true,
+          "irpFreed": true,
+          "deviceDeleted": true,
+          "threadDereferenced": true
+        }
+      },
+      "serialSha256": "ad69ecd21adb270292d79fc13af3cabca3d1dd4a08bd909b92fe4da267a98564",
+      "resultSha256": "7a372005369cac01cd4ea9eb20536439fb2f814f50acb47dc1367a5e74125840",
+      "inputManifestSha256": "6bb77b1943005e8b8b790861c79a72e1aa4b050156e1d589837b3b407e8cbc36",
+      "cleanupSha256": "3c3bc9c29b56835a99d22319e5e73eef9d98cea2f85c03b058d59d5a6043f4e0",
+      "cleanupComplete": true,
+      "userDesktopPipe": true
+    },
+    {
+      "arm": "complex",
+      "jobId": "pr248-ioinvalid-completion-v4-complex64-20261015-v1",
+      "runId": "20261015-045252409-607f50ecad244a76b8926eee519e0d8c",
+      "executionStatus": "completed",
+      "exitCode": 0,
+      "biosSha256": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "isoSha256": "c52c4afb4dc8629b17dca5a679781ca410c1a32eafff71f74ee7f03872247983",
+      "xemuSha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d",
+      "tap": {
+        "passed": false,
+        "plan": 7,
+        "ran": 7,
+        "errors": [],
+        "ok": 6,
+        "failed": 1,
+        "todo": 0,
+        "skipped": 0
+      },
+      "diagnostics": {
+        "reference": {
+          "statusHex": "00000000",
+          "thread": "0xd002f018"
+        },
+        "create": {
+          "statusHex": "00000000",
+          "device": "0xd002f608",
+          "dispatch": "0x80016667"
+        },
+        "allocation": {
+          "irp": "0xd004cac8"
+        },
+        "result": {
+          "callStatusHex": "c0000010",
+          "waitStatusHex": "00000000",
+          "completionCalls": 1,
+          "callbackDevice": "0",
+          "callbackIrp": "0xd004cac8",
+          "expectedDevice": "0xd002f608",
+          "expectedIrp": "0xd004cac8",
+          "irpStatusHex": "c0000010",
+          "irpInformationHex": null,
+          "serialLineTruncatedBeforeInformation": true
+        },
+        "cleanup": {
+          "irpUnlinked": true,
+          "irpFreed": true,
+          "deviceDeleted": true,
+          "threadDereferenced": true
+        }
+      },
+      "serialSha256": "5ddff821bc2af05c35095892cf2f6e502e32d341f8e6564dddec31a820b54d19",
+      "resultSha256": "662208e30a5dc9096c7955561a691ce13872d4b05fa1a24116710375221514e0",
+      "inputManifestSha256": "7c09abbc42986584ffb699eb3734edda747d86ebedb27a2764289aec52568093",
+      "cleanupSha256": "b66733b8130f4abf9a4d302b5299ffb6569ec2ae8b802af832184793df62d0cc",
+      "cleanupComplete": true,
+      "userDesktopPipe": true
+    }
+  ],
+  "rigAfter": {
+    "currentJob": null,
+    "queue": {
+      "Pending": 0,
+      "Testing": 0,
+      "Tested": 893
+    },
+    "workstation": {
+      "Supported": true,
+      "Platform": "windows",
+      "SessionLocked": false,
+      "InputDesktop": "Default",
+      "DisplayState": "on",
+      "PowerState": "awake",
+      "PowerSource": "ac",
+      "BatteryPercent": 55,
+      "BatterySaver": false,
+      "UserIdleSeconds": 4475,
+      "TimestampUtc": "2026-10-15T04:53:11.2946014+00:00",
+      "LastSessionChangeUtc": null,
+      "LastDisplayChangeUtc": "2026-10-14T23:38:03.0462238+00:00",
+      "LastSuspendUtc": null,
+      "LastResumeUtc": null,
+      "LastEvent": "display_on",
+      "EventSequence": 2,
+      "RenderingRisk": false
+    }
+  }
+}

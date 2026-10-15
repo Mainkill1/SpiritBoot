@@ -50,7 +50,64 @@ CI exposed a checker failure under GCC's default PIE settings after the publicat
 
 ## Native measurements and remaining work
 
+The [public-kernel contract differential](KERNEL-PUBLIC-CONTRACT-FIXES.md)
+separates three real firmware divergences from three invalid test assumptions.
+Complex establishes clock level 28 for public ordinal 130, direct PCI
+configuration access and completion of a valid invalid-request IRP. Boundary
+diagnostics also establish eight-bit bus/register wrapping, ignored slot
+reserved bits and blacklist ordering. Locked patch `0137` corrects those paths.
+The final identical 119-check fixture passes 119/119 on SpiritBoot and Complex
+with byte-identical serial output; 31 registered native fixtures pass 5,481
+assertions on the final release64 image. These pre-extraction kernel corrections
+remain separate from storage-replacement completion and candidate qualification.
+
+The exact final pre-extraction release64 image then completed the expanded
+Windows matrix through the protected USER desktop pipe: all 36 registered
+fixtures passed, with 6,197 successful assertions and the two declared TODOs
+out of 6,199 checks. The same inputs on Complex passed 19 fixtures; six more
+completed with reference-oracle discrepancies and eleven did not complete on
+that reference. The portable [combined comparison](../provenance/evidence/pr248-final-windows-matrix/COMBINED-36-COMPARISON-RECEIPT.portable-v2.json),
+[Complex receipt](../provenance/evidence/pr248-final-windows-matrix/COMPLEX36-FINAL-RECEIPT.portable-v3.json)
+and its [normalization manifest](../provenance/evidence/pr248-final-windows-matrix/COMPLEX36-FINAL-RECEIPT.portable-v3.manifest.json)
+retain the classifications, identities and cleanup evidence. Two additional
+performance-fixture executions per BIOS reproduced SpiritBoot's 72/72
+scatter/gather and 42/42 kernel-performance results; Complex reproduced 72/72
+and 35/42. Their [two-run summary](../provenance/evidence/pr248-final-windows-matrix/PERFORMANCE-TWO-RUN-SUMMARY.portable.json)
+retains 102 metric series. Cross-BIOS timing is not comparable because the
+Complex support-discovery rows used a shorter completion ceiling. These are
+bounded pre-extraction results; they do not qualify the unimplemented storage
+replacement or establish the unfinished P1 experiment.
+
+The [final broad XISO comparison](BROAD-XISO-FINAL-COMPARISON.md) then ran all
+144 executable leaves twice per BIOS in frozen ABBA order on the primary Linux
+host. Every run completed 144/144 leaves and all 149 records passed their
+applicable built-in oracle. Both SpiritBoot runs repeat exactly; Complex B1
+matches both SpiritBoot runs, while Complex B2 alone changes one eligible
+framebuffer hash. The frozen repeatability verdict is therefore FAIL without
+proving a SpiritBoot regression. Two-run aggregate timing is descriptive only:
+SpiritBoot's sum of leaf means is about 0.299% lower, with 64 lower leaf means
+versus 80 for Complex, but cache controls and the functional gate are
+insufficient for acceptance.
+
 Latest bounded update: [0133 zero-domain descriptor correction](independent-implementation/zero-domain-mdl/FIX.md) passes 44 request and eight ownership scenarios plus sanitizer/freestanding checks. The reviewed [native seam facts](native-seam-facts/WORKER-HANDOFF-FACTS.md) and [next-task plan](independent-implementation/native-adapter-plan/NEXT-NATIVE-TASKS.md) resolve the requested worker/MDL planning questions. Neither installs the full adapter.
+
+The [2026-10-15 storage diagnostics](IO-PERFORMANCE-DIAGNOSTICS-20261015.md)
+now establish six functional V3 leaves and narrow the pre-extraction slowdown.
+QD1 reproduces the gap without queue underfill or induced pressure. The
+order-aware V5 control rejects forcing the existing worker route, which was
+1.6475 times slower than the current direct route. The V6 raw-device ABBA
+control passed 4,096 byte-exact reads and measured SpiritBoot at 1.5164 times
+the Complex batch mean, with a 3.2040 issue-through-return ratio. It also found
+that whole-disk `NtFlushBuffersFile` returns `STATUS_INVALID_DEVICE_REQUEST` on
+SpiritBoot and success on Complex. This is pre-extraction diagnostic evidence;
+it neither qualifies performance nor installs the replacement.
+
+The [isolated raw-flush follow-up](independent-implementation/raw-flush-adapter/README.md)
+passes three sanitizer-backed scenarios and a freestanding i386 check against
+the independently authored request core. It localizes the missing behavior to
+the unimplemented public-to-core adapter and records the exact declarations,
+lifetime rules, lower bridge, status mapping and persistence evidence still
+needed. No production patch or durability claim is made.
 
 The unchanged-fixture [post-END collector](STORAGE-POST-END-CONTEXT.md) now qualifies Deck collection without a heavy initial guard overlapping measurement. First scheduled V351 capture passed its workload, but [actual importer replay failed](AA-FIRST-IMPORT-FAILURE.json) on a flat-receipt/case-map interface mismatch. Its timing result remains ineligible and the remaining schedule is stopped pending correction and a fresh predeclared method. Windows cache and full P1 gates remain open.
 

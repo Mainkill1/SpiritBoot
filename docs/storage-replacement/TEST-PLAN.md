@@ -2,8 +2,17 @@
 
 **Single-PR rule:** all code, measurement infrastructure, test results and fixes live in [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248); see [the executable checklist](IMPLEMENTATION-CHECKLIST.md). These are internal milestones, not separate PRs.
 
+Current inventory and its limitations are recorded in [KERNEL-COVERAGE-AUDIT.md](KERNEL-COVERAGE-AUDIT.md). Broad suites exist, but exhaustive kernel coverage and a qualified post-extraction performance comparison have not been established.
 
-**All expected values are evidence-dependent.** No new BIOS or runtime measurements were produced for this preparation PR. This document is a checklist and experiment specification, not a pass report.
+The current pre-extraction firmware also includes the independently reviewed
+[Xbox semaphore overflow fix](KERNEL-SEMAPHORE-OVERFLOW-FIX.md). Its fixed
+composition must be used on both sides of later extraction performance work so
+that the kernel correction is not a comparison variable.
+
+Before scheduling any new experiment, validate its best-case sample-count feasibility. [The planning fix](PLANNING-FEASIBILITY-FIX.md) records the impossible five-pair/2,000-confirmation combination and the separate limits of V37's three-pair readiness screen. Original results are retained; a new pilot must be prospective and affordable without changing product margins.
+
+
+**All expected values are evidence-dependent.** Bounded pre-extraction BIOS diagnostics are now recorded in [the 2026-10-15 update](IO-PERFORMANCE-DIAGNOSTICS-20261015.md). They refine root-cause priorities but do not qualify the replacement or turn this checklist into a P1 pass report.
 
 ## 1. Identity, candidate isolation and comparison order
 

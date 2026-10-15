@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "pr248_storage_io_diagnostic_receipt",
+  "date": "2026-10-15",
+  "identities": {
+    "spiritboot_release64_sha256": "42ad0c392b97d195f6aacaa47b1c168f1f74038ddf3258257b21cfde99bcb647",
+    "complex_sha256": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+    "xemu_sha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d",
+    "memory_mib": 64
+  },
+  "campaigns": [
+    {
+      "generation": 3,
+      "scope": "queue_depth_and_pressure_descriptive",
+      "runs": 10,
+      "operations": 10240,
+      "bytes": 108712960,
+      "failures": 0,
+      "artifacts": {
+        "root_cause_report_sha256": "e864330458655be951bc49bdcbde60e8ac1a0f65c67a819d91b9bf6f7525e52a",
+        "root_cause_metrics_sha256": "f4cc88221db65dc148ae77d078a82c0c2a908328717d82f33d10e07411ec50fd",
+        "qd_pressure_report_sha256": "379dd31d0cf700efbb01ad40e4450f151bdb6d05b3a603b5e477e43d2c90b960",
+        "qd_pressure_analysis_sha256": "8d4f8d444f12e7543c4476d0cde8197cf18c3d98ea774cce69371d826e8393a4",
+        "strict_verification_sha256": "a5b1d3dd761af0237b459aff583391e54a7d4dedc47c7e91fc4a8dad19048644"
+      },
+      "conclusion": "QD1 reproduces the gap; queue starvation and 900-page pressure are lowered as primary causes."
+    },
+    {
+      "generation": 4,
+      "scope": "submit_return_split_and_oracle_failure",
+      "artifacts": {
+        "initial_manifest_sha256": "9629d0fb0a592aac46afc79c44988428fbd02e7fe146c1b87e0c892e4c69a44f",
+        "initial_verification_sha256": "25b6afbcaeddc458a1b0934075389629b6959af0c90f2561e29fd36c8857e7a7",
+        "oracle_failure_manifest_sha256": "1714e00f91e52d7c637b2ee85e0c73cf650e9f92b1130b5d5e5058e762c22302"
+      },
+      "conclusion": "APC entry may precede the post-NtReadFile timestamp; V4 is not a general correctness oracle."
+    },
+    {
+      "generation": 5,
+      "scope": "order_aware_current_worker_current",
+      "runs": 3,
+      "operations": 3072,
+      "bytes": 32613888,
+      "failures": 0,
+      "artifacts": {
+        "manifest_sha256": "2b75efb2cadcbf69569efdf05bfa760ed3328679670c12373cccd002f7e17205",
+        "report_sha256": "e18179b91ae51908503311ce6550641792d52e45abbc6f50dba1021aab05b786",
+        "verification_sha256": "344926c74e873cf2e43fda9a99bc2d864aa52d085734efabe34e5799304e18d5"
+      },
+      "worker_to_current_mean_batch_ratio": 1.6474916977052376,
+      "source_review_eligible": false,
+      "source_review_limit": "Scratch source-provenance inherited V3 hashes for five modified V5 files; result is binary-bound diagnostic evidence only.",
+      "conclusion": "Forcing the established worker route is slower and is rejected as a performance fix."
+    },
+    {
+      "generation": 6,
+      "scope": "raw_device_abba_discriminator",
+      "runs": 4,
+      "operations": 4096,
+      "bytes": 43485184,
+      "failures": 0,
+      "artifacts": {
+        "initial_status_manifest_sha256": "669ee86696be07ead8404f2a6feae4c54dd11804a13db3826c13ce33efff73cb",
+        "final_manifest_sha256": "ad244c506f5c80b1cd27ab89c2a59d57f96dd2bd56b5ac2ceecb0a97d388fcd1",
+        "report_sha256": "29d073060c71e1ac7376c5cff1a5fc18cae51805e751d4c39f49306987a6611c",
+        "strict_verification_sha256": "faaf936555fe78358c3e41c45d2bad8ad8c77fa6f6271d387d467738fcf0a53e"
+      },
+      "spiritboot_to_complex_mean_batch_ratio": 1.5164232154418307,
+      "spiritboot_to_complex_mean_submit_sum_ratio": 3.20401412209672,
+      "spiritboot_raw_flush_status": "STATUS_INVALID_DEVICE_REQUEST",
+      "complex_raw_flush_status": "STATUS_SUCCESS",
+      "subsequent_reads_byte_exact": true,
+      "conclusion": "The gap exists below FATX as well as in unequal added file-path cost; raw flush compatibility remains open."
+    }
+  ],
+  "performance_acceptance_eligible": false,
+  "limitations": [
+    "Diagnostic sample counts do not establish confidence intervals or release acceptance.",
+    "V3 through V6 results are pre-extraction baselines, not replacement-driver qualification.",
+    "The destructive raw control ran only against separate disposable private overlays.",
+    "No physical Xbox result is claimed."
+  ]
+}

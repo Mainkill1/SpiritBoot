@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "id": "pr248-final119-broad144-primary-linux-host-portable-evidence-v1",
+  "verdict": "FAIL",
+  "purpose": "Portable binding for the frozen-policy final 144-leaf candidate/Complex ABBA comparison.",
+  "normalization": {
+    "scope": "JSON string values and the CSV line ending convention only; verdict-bearing values, run IDs, input/evidence hashes, measurements, and mismatch observations are unchanged.",
+    "workspacePaths": "campaign://",
+    "runnerWorkspacePaths": "runner-workspace://",
+    "runnerEndpoint": "runner://primary-linux-host",
+    "hostLabel": "primary-linux-host",
+    "originalHashesPreserved": true
+  },
+  "pins": {
+    "candidateBiosSha256": "0f6e4f48269e0ef65bb27758e221b4bcdb707ef0cbf57c211d7e969866334d5e",
+    "complexBiosSha256": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+    "suiteIsoSha256": "10ca07f227ae4e1d03510fcc1d3237304ff4291741d4c552ab33991e71de1738",
+    "catalogId": "sha256:c5059152ee5e253a7ab66156f50ae7218e821b021f76203185cda30e2e8a94f7",
+    "planId": "sha256:6fc441fcaa1c8af7b29369811124364aab2ae068726b6195c287474b23892c2c",
+    "policySourceSha256": "6116503461786a9a4630a698ebdafe957c8510f6ba04cf9b29985adcb7056ca1"
+  },
+  "artifacts": [
+    {
+      "logicalName": "final-comparison.json",
+      "sourceRelativePath": ".scratch/pr248-final-broad-xiso-20261015/deck/FINAL-SAME-HOST-COMPARISON.json",
+      "sourceSha256": "3443e46e5b23c8c7a1db6217dff00e1f29977ed94aefc06ece6cf51d166fc3e9",
+      "portableSha256": "bb5ee1fe898cb3fe660c26991896aa8c7e8365edecc2a22841452fc41e326096",
+      "normalization": true
+    },
+    {
+      "logicalName": "leaf-averages.csv",
+      "sourceRelativePath": ".scratch/pr248-final-broad-xiso-20261015/deck/FINAL-SAME-HOST-LEAF-AVERAGES.csv",
+      "sourceSha256": "54837ec57ef4dd61e0993c037c36a8d38c13adb2a9d0569ebb74e62a29fde6b0",
+      "portableSha256": "94a6d0ca72d3b7e3a3df010dc02d490b345963b01c804aeba6526436ec6e4346",
+      "normalization": "CRLF line endings converted to LF for the repository; all 144 CSV rows and field values are unchanged"
+    },
+    {
+      "logicalName": "policy.json",
+      "sourceRelativePath": ".scratch/pr248-final-broad-xiso-20261015/deck/SAME-HOST-DIFFERENTIAL-POLICY.json",
+      "sourceSha256": "6116503461786a9a4630a698ebdafe957c8510f6ba04cf9b29985adcb7056ca1",
+      "portableSha256": "b371713f23996f3844b964c7907999d85cefb652a9de1eb1ce6377b8e6f74a85",
+      "normalization": true
+    },
+    {
+      "logicalName": "execution-receipt.json",
+      "sourceRelativePath": ".scratch/pr248-final-broad-xiso-20261015/deck/SAME-HOST-EXECUTION-RECEIPT.json",
+      "sourceSha256": "04095d373ec2c309c8a4e52c632aaa946b52f53e8fdd16d015df9d5b2475ec2c",
+      "portableSha256": "2dfac4bdac09e1edb84f757ece5720c2821fb0a1aebdd161d17c9e2721c59893",
+      "normalization": true
+    }
+  ],
+  "verification": {
+    "leafRows": 144,
+    "runCount": 4,
+    "candidateRepeatMismatchCount": 0,
+    "complexRepeatMismatchCount": 1,
+    "candidateComplexCrossProductMismatchCounts": {
+      "A1_vs_B1": 0,
+      "A1_vs_B2": 1,
+      "A2_vs_B1": 0,
+      "A2_vs_B2": 1
+    },
+    "portableCopiesEqualDeterministicNormalizationOfOriginals": true
+  }
+}

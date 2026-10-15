@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "id": "pr248-final119-broad144-deck-same-host-v2",
+  "frozenBeforeFirstComplexResult": true,
+  "host": "primary-linux-host",
+  "suiteIsoSha256": "10ca07f227ae4e1d03510fcc1d3237304ff4291741d4c552ab33991e71de1738",
+  "catalogId": "sha256:c5059152ee5e253a7ab66156f50ae7218e821b021f76203185cda30e2e8a94f7",
+  "planId": "sha256:6fc441fcaa1c8af7b29369811124364aab2ae068726b6195c287474b23892c2c",
+  "originalWindowsReferenceSha256": "9f4ede2f21861953272531bded2d5cf91dd4f009689a5983d759b018e3ec342e",
+  "originalA1ReferenceGate": {
+    "runId": "20261015-055424329-52fa382e3bfe417ca5587688d128c331",
+    "execution": "completed",
+    "correctness": "failed",
+    "evidence": "complete",
+    "actualPassRecords": 149,
+    "applicableReferenceMismatches": 55,
+    "mismatchFields": [
+      "framebuffer_fnv1a64"
+    ],
+    "disposition": "Retain and report; the pinned reference framebuffer values came from a different host/backend context and are informational for this Deck OpenGL campaign."
+  },
+  "runLevelRequirements": {
+    "execution": "completed, exit 0, no crash or runner termination",
+    "state": "complete, target stopped, comparison ready, private Mesa driver namespace verified, no issues, cleanup complete",
+    "coverage": "exact 144 selected and emitted leaves, COMPLETE receipt, 149 unique exact catalog records, all 149 outcome PASS",
+    "fixedFields": [
+      "schema_version",
+      "id",
+      "revision",
+      "kind",
+      "iterations",
+      "sample_count",
+      "measurement_iterations_multiplier",
+      "warmup_iterations",
+      "gpu_completion_mode"
+    ],
+    "fixedFieldReference": "Pinned reference-results.json except raw timing values and cross-GPU framebuffer values",
+    "builtInOracles": "For every record whose metadata does not explicitly set oracle_applicable=false, any present oracle_status must be PASS and any present oracle_failure_count must be zero. Records explicitly setting oracle_applicable=false are retained descriptively.",
+    "evidence": "exact input hashes, plan preparation identity, coverage, receipt, guest results, run state, and cleanup all retained"
+  },
+  "sameHostDifferential": {
+    "hashExtractor": "xemu-perf-tests utils/oracle_validation.py eligible_record_hashes",
+    "hashExtractorSha256": "14203872ec1c4fe81faa4152dcd2c7c2cbb028c196b3ed91d6a432ad12ad1f33",
+    "eligibleFields": "framebuffer_fnv1a64 plus metadata work_checksum, result_checksum, KAT/final-state observations",
+    "exclusions": "Only observations removed by result metadata where oracle_applicable=false or framebuffer_comparison_eligible=false; excluded raw values remain in evidence and the final descriptive report",
+    "repeatability": "candidate A1 must exactly equal candidate A2, and Complex B1 must exactly equal Complex B2, for every eligible functional observation",
+    "firmwareEquality": "After repeatability passes, candidate and Complex eligible functional observations must match exactly; any mismatch fails qualification"
+  },
+  "performance": {
+    "order": "ABBA",
+    "runsPerArm": 2,
+    "leafStatistic": "arithmetic mean of each run raw_results mean in microseconds",
+    "acceptanceOrder": "functional same-host differential first; performance comparison second"
+  },
+  "supersedesPolicySha256": "1c72634cfce183e78e5b8abf1d5f7da85c3b80eca0ee0861ab939d2006eae61f",
+  "controlledRuntime": {
+    "renderer": "OPENGL",
+    "xemuSha256": "ee9baadc62679bab44ea937e465b95059304ce5a19db33835932b2350a12b0ba",
+    "xemuConfigSha256": "3ae73c51c9979526c619cbbcd083d11cc558c7d716005f00e773f181bc603ee8",
+    "memoryMiB": 64,
+    "cacheMode": "cold",
+    "privateMesaDiskCache": true
+  }
+}

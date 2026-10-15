@@ -214,6 +214,18 @@ def validate_spec(spec):
                                                   if case["kind"] == "boundary-sg"}), "missing boundary/fragmented SG cases")
     if "artifact_policy" in spec:
         validate_artifact_policy(spec)
+    # Reject an experiment that cannot finish under its own frozen rules before
+    # creating thousands of native jobs. This is only a best-case feasibility
+    # check; actual A/A observations still determine the confirmatory count.
+    tests = len(cases) * len(METRICS)
+    try:
+        planned_pairs(spec["pilot_pairs"], spec["pilot_pairs"], spec["planning_confidence"],
+                      1 - (1 - spec["planning_power"]) / tests, .05 / (2 * tests),
+                      spec["minimum_confirmatory_pairs"], spec["maximum_confirmatory_pairs"])
+    except ValueError as error:
+        raise ValueError("infeasible experiment: even a perfect A/A pilot cannot meet the "
+                         "frozen confidence/power and confirmatory cap; increase the pilot "
+                         "count or cap before collecting data: " + str(error)) from error
 
 
 def digest(value):

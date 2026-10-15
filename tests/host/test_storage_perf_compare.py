@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 """Independently chosen host fixtures; no measured firmware timings."""
 import copy
 import datetime
@@ -247,6 +248,31 @@ class StoragePerformanceVariableRequests(unittest.TestCase):
 
 
 class StoragePerformanceCLI(unittest.TestCase):
+    def test_impossible_perfect_pilot_rejected_before_scheduling(self):
+        # A real .95-confidence five-pair pilot cannot meet the 2,000-pair cap,
+        # even if all five pairs satisfy every product margin.
+        value = specification()
+        value["planning_confidence"] = 0.95
+        with self.assertRaisesRegex(ValueError, "even a perfect A/A pilot"):
+            load_tool().make_schedule(value)
+        with tempfile.TemporaryDirectory() as directory:
+            spec = pathlib.Path(directory) / "spec.json"
+            output = pathlib.Path(directory) / "schedule.json"
+            spec.write_text(json.dumps(value))
+            result = subprocess.run([sys.executable, str(TOOL), "pilot", "--spec", str(spec),
+                                     "--output", str(output)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("even a perfect A/A pilot", result.stderr)
+            self.assertFalse(output.exists())
+
+    def test_larger_pilot_can_keep_confidence_and_acceptance_margins(self):
+        value = specification()
+        value.update(pilot_pairs=15, planning_confidence=0.95)
+        schedule = load_tool().make_schedule(value)
+        self.assertEqual(len(schedule["jobs"]), 1080)
+        self.assertEqual(schedule["spec"]["limits"],
+                         {"latency": 1.02, "throughput": 0.98, "p95": 1.05, "p99": 1.05})
+
     def test_pilot_cli_produces_all_paired_jobs_without_candidate_measurements(self):
         # Catch silently omitting a workload/arm from the executable schedule.
         with tempfile.TemporaryDirectory() as directory:

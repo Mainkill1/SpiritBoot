@@ -55,7 +55,11 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 3c91ce69a469086dfdc76f5d0c3eeb6895a8baaf
+            test "$actual_tree" = 31963f970704ab04d8538714c94c78445b5391b2
+            python3 /work/tools/kernel_coverage.py --source-root "$GUEST_SOURCE" --check >"$output/kernel-coverage.log" 2>&1
+            python3 /work/tools/check_kernel_semaphore_overflow.py --source-root "$GUEST_SOURCE" --platform xbox --output "$output/semaphore-xbox" >"$output/semaphore-xbox.log" 2>&1
+            python3 /work/tools/check_kernel_semaphore_overflow.py --source-root "$GUEST_SOURCE" --platform nt --output "$output/semaphore-nt" >"$output/semaphore-nt.log" 2>&1
+            python3 /work/tools/check_kernel_public_contracts.py --source-root "$GUEST_SOURCE" --output "$output/kernel-public-contracts" >"$output/kernel-public-contracts.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/nxstorage/check.py" "$output/nxstorage" >"$output/nxstorage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
@@ -181,7 +185,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '3c91ce69a469086dfdc76f5d0c3eeb6895a8baaf', result
+          assert result['source_tree'] == '31963f970704ab04d8538714c94c78445b5391b2', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
@@ -212,10 +216,12 @@ jobs:
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           kernel_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["build_directory"])')
           for guest in api-regression clean-room-contracts clean-room-warm-reboot rom-shadow-persistence kernel-performance $(python3 -c 'import json; print(" ".join(json.load(open("sources/native-regressions.json"))))'); do
+            guest_directory="$guest_source/tests/xbe/$guest"
+            if [ "$guest" = kernel-export-contracts ]; then guest_directory="/work/tests/xbe/$guest"; fi
             docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
               -e KERNEL_ASM="$kernel_build/sdk/include/asm/ks386.inc" \
               -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-              -w "$guest_source/tests/xbe/$guest" \
+              -w "$guest_directory" \
               "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
           done
       - name: Run API, contracts, warm reboot, and performance correctness guests
@@ -234,11 +240,13 @@ jobs:
                 clean-room-contracts|clean-room-warm-reboot|rom-shadow-persistence|kernel-performance) iso=$guest.iso; capture=$guest ;;
                 *) iso=$(python3 -c "import json,sys; print(json.load(open(\"sources/native-regressions.json\"))[sys.argv[1]][\"iso\"])" "$guest"); capture=$guest ;;
               esac
+              guest_directory="$GUEST_SOURCE/tests/xbe/$guest"
+              if [ "$guest" = kernel-export-contracts ]; then guest_directory="/work/tests/xbe/$guest"; fi
               DISPLAY=:99 python3 scripts/run-firmware.py \
                 --xemu artifacts/squashfs-root/usr/bin/xemu \
                 --flash "artifacts/firmware-$VARIANT/flash.bin" \
                 --hdd artifacts/xbox_hdd.qcow2 \
-                --dvd "$GUEST_SOURCE/tests/xbe/$guest/$iso" \
+                --dvd "$guest_directory/$iso" \
                 --memory-mib "$MEMORY_MIB" --output "artifacts/$capture-$VARIANT" --timeout 240 --expect-tap
             done'
           python3 - <<'PY'
@@ -287,6 +295,7 @@ jobs:
             artifacts/saved-image-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/interrupt-public-abi-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/object-handle-fastpath-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/kernel-export-contracts-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/kernel-performance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/pool-size-limit-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/zero-reuse-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/

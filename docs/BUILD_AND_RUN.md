@@ -55,7 +55,7 @@ epoch. `source` identifies the supplied pristine checkout; `source_directory`
 is the actual source used by CMake and guest builds; `build_directory` and
 `output_directory` identify their outputs. `base_source_tree` is the pristine
 tree and `source_tree` is the patched Git index tree, including new guest tests.
-The current reviewed patched tree is `eee7de60ad3d2047efab3161491edb17768b5482`.
+The current reviewed patched tree is `31963f970704ab04d8538714c94c78445b5391b2`.
 The base epoch is exported as `SOURCE_DATE_EPOCH` to avoid wall-clock PE linker
 timestamps. Each build uses a fresh configure tree so previous CMake cache flags,
 compiler selections, or timestamps cannot leak into a newly attributed image.
@@ -95,7 +95,7 @@ supplies its runtime dependencies, including host `libusb`. A native launch
 needs an X display, those runtime libraries, and the appropriate audio backend.
 For a desktop run, the AppImage can also run normally through FUSE.
 
-Build the API regression, 23-check targeted contract guest, and 5-check warm
+Build the API regression, 23-check targeted contract guest, and 7-check warm
 reboot guest using the recorded nxdk container. Obtain their source path from
 the manifest of the flash being tested, so the payloads use its patched tests:
 
@@ -142,7 +142,7 @@ Run `clean-room-contracts/clean-room-contracts.iso` and
 `clean-room-warm-reboot/clean-room-warm-reboot.iso` under the same
 `$GUEST_SOURCE/tests/xbe/` path with new capture directories. The warm guest
 performs its own two-stage reset within one emulator run. CI builds and runs all
-three guests for each variant and checks targeted plans of 23 and 5 respectively.
+three guests for each variant and checks targeted plans of 23 and 7 respectively.
 `--expect-tap` requires one complete TAP v13/v14 stream, a matching numbered
 plan, no unexpected failures, and a clean emulator exit. TODO and SKIP cases are
 reported separately. A timeout or reset is a failure even if part of the suite

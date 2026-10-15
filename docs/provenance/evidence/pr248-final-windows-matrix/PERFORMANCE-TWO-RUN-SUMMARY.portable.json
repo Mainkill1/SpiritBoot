@@ -1,0 +1,1681 @@
+{
+  "portablePerformanceSummarySchema": 1,
+  "status": "complete",
+  "method": "Arithmetic mean of each run sample mean; all raw sample values retained. Metrics with any incorrect sample are labeled correctnessQualified=false.",
+  "sourceReceipts": [
+    {
+      "file": "PERFORMANCE-TWO-RUN-AVERAGES-RECEIPT.json",
+      "sha256": "20d5d6cd40772cb36eb46fb713e916925bd0089ce197cd8c7337b0b935c3cc22",
+      "bytes": 292192
+    },
+    {
+      "file": "CORRECTED-CANDIDATE36-RECEIPT.json",
+      "sha256": "bc47383b79b56a1a639abca5d39fb2c19e2a29953fda45d0941c044b2f42610f",
+      "bytes": 57320
+    },
+    {
+      "file": "COMPLEX36-FINAL-RECEIPT.json",
+      "sha256": "d7ff20f4bade1a6284759ddac7fa15d9c77e38bdf52ece853456f10448ed8234",
+      "bytes": 90434
+    },
+    {
+      "file": "PERFORMANCE-REPEAT2-CANDIDATE-RECEIPT.json",
+      "sha256": "3521511f5c1385e6a2bb9df2e0a5c5df72e98abb235f744a57d3ad5572255f3c",
+      "bytes": 4791
+    },
+    {
+      "file": "PERFORMANCE-REPEAT2-COMPLEX-RECEIPT.json",
+      "sha256": "90632951d686e84b173cd59d683577f2b0ca686d71f3ee7f55d1a5f88e6a7e86",
+      "bytes": 4805
+    }
+  ],
+  "biosSha256": {
+    "candidate": "0f6e4f48269e0ef65bb27758e221b4bcdb707ef0cbf57c211d7e969866334d5e",
+    "complex": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f"
+  },
+  "xemuSha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d",
+  "timingLimitations": {
+    "candidate": "Both runs use the same 240s correctness schedule and are descriptive only.",
+    "complex": "Both completed under the 60s support-discovery ceiling; values are descriptive and not timing-comparable to candidate."
+  },
+  "comparability": {
+    "crossArmTimingComparable": false,
+    "reason": "Complex runs used the 60-second support-discovery schedule; timings are descriptive and must not be compared to candidate timings."
+  },
+  "summary": {
+    "candidate": {
+      "fixtureCount": 2,
+      "executionCount": 4,
+      "executionPassCount": 4,
+      "executionFailCount": 0,
+      "declaredChecks": 228,
+      "ok": 228,
+      "failed": 0,
+      "todo": 0
+    },
+    "complex": {
+      "fixtureCount": 2,
+      "executionCount": 4,
+      "executionPassCount": 2,
+      "executionFailCount": 2,
+      "declaredChecks": 228,
+      "ok": 214,
+      "failed": 14,
+      "todo": 0
+    }
+  },
+  "fixtures": [
+    {
+      "arm": "candidate",
+      "fixture": "sg-performance",
+      "isoSha256": "37283cce9505a0c78231477e768b285cd95f39de51368f77d468ca036a348e8a",
+      "frequencyHz": 3374488,
+      "runCount": 2,
+      "runs": [
+        {
+          "run": 1,
+          "runId": "20261015-053540290-3017bed8a28841e5ba53c84b7461283f",
+          "declaredChecks": 72,
+          "ok": 72,
+          "failed": 0,
+          "todo": 0,
+          "passed": true,
+          "serialSha256": "be4574c45992446e902e5ea5f2660357ec6de3164038e759e918f99a27501844",
+          "resultSha256": "89180a60535f9f620388691ead65a8214bc5ceb20273f62408f79da5d88e698d",
+          "metricsSha256": "430bc61aa22d46d95008c24743bdf13aac133e22f9f8f921fc4996e0f65e91dc",
+          "cleanupSha256": "5401a32fa2293b446b69cfc33640732426ccd8027f5be70aedb3c7635c39bb01",
+          "cleanupComplete": true,
+          "userDesktopPipe": true
+        },
+        {
+          "run": 2,
+          "runId": "20261015-061057090-0cc40addba904da89f9afda5882c5d8f",
+          "declaredChecks": 72,
+          "ok": 72,
+          "failed": 0,
+          "todo": 0,
+          "passed": true,
+          "serialSha256": "b0305c2760284bfb37b36eca70929775d48c1c2ba10de8c18c7c67b7e4e5e5ae",
+          "resultSha256": "286df8aca4db78bb5ff3db34d6834d23666f843208349cce9c1c659d52130369",
+          "metricsSha256": "b957636d9ea7539d8436759090885d2591a9f62d1cad24953df10f661b5dd526",
+          "cleanupSha256": "86fc6382daace9f69436c814dd801662ed452f2a66b0994fdf9f25d9f2ce82bd",
+          "cleanupComplete": true,
+          "userDesktopPipe": true
+        }
+      ],
+      "runPassCount": 2,
+      "runFailCount": 0,
+      "metricCount": 10,
+      "correctnessQualifiedMetricCount": 10,
+      "nonqualifiedMetricCount": 0,
+      "metrics": [
+        {
+          "metric": "gather-pages-1",
+          "runMeanTicks": [
+            1846.5714285714287,
+            1946.142857142857
+          ],
+          "twoRunAverageTicks": 1896.357142857143,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            7.138415306359276,
+            6.773189183733392
+          ],
+          "twoRunAverageMiBPerSecond": 6.955802245046334
+        },
+        {
+          "metric": "gather-pages-2",
+          "runMeanTicks": [
+            1398.142857142857,
+            1921.5714285714287
+          ],
+          "twoRunAverageTicks": 1659.857142857143,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            18.855861091243487,
+            13.719597985279904
+          ],
+          "twoRunAverageMiBPerSecond": 16.287729538261694
+        },
+        {
+          "metric": "gather-pages-16",
+          "runMeanTicks": [
+            1864.7142857142858,
+            1651.2857142857142
+          ],
+          "twoRunAverageTicks": 1758.0,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            113.1033861947445,
+            127.72199152175794
+          ],
+          "twoRunAverageMiBPerSecond": 120.41268885825122
+        },
+        {
+          "metric": "gather-pages-128",
+          "runMeanTicks": [
+            5040.0,
+            5013.714285714285
+          ],
+          "twoRunAverageTicks": 5026.857142857143,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            334.7706349206349,
+            336.52575792113066
+          ],
+          "twoRunAverageMiBPerSecond": 335.64819642088275
+        },
+        {
+          "metric": "gather-pages-512",
+          "runMeanTicks": [
+            14937.714285714286,
+            15527.857142857143
+          ],
+          "twoRunAverageTicks": 15232.785714285714,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            451.80781148387587,
+            434.6366622199733
+          ],
+          "twoRunAverageMiBPerSecond": 443.22223685192455
+        },
+        {
+          "metric": "flat-pages-1",
+          "runMeanTicks": [
+            1522.2857142857142,
+            1344.857142857143
+          ],
+          "twoRunAverageTicks": 1433.5714285714284,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            8.659079978415916,
+            9.801482499468875
+          ],
+          "twoRunAverageMiBPerSecond": 9.230281238942396
+        },
+        {
+          "metric": "flat-pages-2",
+          "runMeanTicks": [
+            1490.5714285714287,
+            1226.4285714285713
+          ],
+          "twoRunAverageTicks": 1358.5,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            17.68663144527506,
+            21.495901281304604
+          ],
+          "twoRunAverageMiBPerSecond": 19.591266363289833
+        },
+        {
+          "metric": "flat-pages-16",
+          "runMeanTicks": [
+            1172.0,
+            1260.4285714285713
+          ],
+          "twoRunAverageTicks": 1216.2142857142858,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            179.95349829351537,
+            167.32840303751559
+          ],
+          "twoRunAverageMiBPerSecond": 173.64095066551548
+        },
+        {
+          "metric": "flat-pages-128",
+          "runMeanTicks": [
+            2773.285714285714,
+            2864.714285714286
+          ],
+          "twoRunAverageTicks": 2819.0,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            608.3916962859939,
+            588.9746172642497
+          ],
+          "twoRunAverageMiBPerSecond": 598.6831567751218
+        },
+        {
+          "metric": "flat-pages-512",
+          "runMeanTicks": [
+            7914.571428571428,
+            7475.857142857143
+          ],
+          "twoRunAverageTicks": 7695.214285714286,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            852.7279159597126,
+            902.7695247558808
+          ],
+          "twoRunAverageMiBPerSecond": 877.7487203577966
+        }
+      ]
+    },
+    {
+      "arm": "candidate",
+      "fixture": "kernel-performance",
+      "isoSha256": "ece625228e169faf806f3fc7c2b4f0cce503948f33eb78abbfaaba1d186f11c1",
+      "frequencyHz": 3374488,
+      "runCount": 2,
+      "runs": [
+        {
+          "run": 1,
+          "runId": "20261015-053658233-c0968011e2c04e639bdb7599bf91835d",
+          "declaredChecks": 42,
+          "ok": 42,
+          "failed": 0,
+          "todo": 0,
+          "passed": true,
+          "serialSha256": "84451b3d07cdb8e13558e21d3ffb7a8e568ddd16c2039929d2554d8b52c0167a",
+          "resultSha256": "021fb08883d8345e8e57122dbee48e8bae54229945dcc6261ae057a30c723727",
+          "metricsSha256": "73fa857878b87825be7f1dd2b21e545be5f8e25dcc2b5f1f23d23c70987dc131",
+          "cleanupSha256": "66e00cbdc705b241867cc897f2edf917ea5eb922a2339434712b764d6a9b9823",
+          "cleanupComplete": true,
+          "userDesktopPipe": true
+        },
+        {
+          "run": 2,
+          "runId": "20261015-061114263-b6e43f7ff68247338fa2acfa59491bd6",
+          "declaredChecks": 42,
+          "ok": 42,
+          "failed": 0,
+          "todo": 0,
+          "passed": true,
+          "serialSha256": "0ba0d02f5df75e6f624acb6da9d148b6f6ba29b703228a3dd934c6d03110e3b6",
+          "resultSha256": "4b860559ee3563321dcd1130203ff658fc7d0a6cc28b177a7aacadac55bbf99a",
+          "metricsSha256": "703a7c6695185ba132d5b1117a828f4c73da52a57a8e37d001103b7099ba3a5d",
+          "cleanupSha256": "9591f998dbfd2afeac6d428a1469a4fc45739059e04cd4721119ec27bf020d8f",
+          "cleanupComplete": true,
+          "userDesktopPipe": true
+        }
+      ],
+      "runPassCount": 2,
+      "runFailCount": 0,
+      "metricCount": 41,
+      "correctnessQualifiedMetricCount": 41,
+      "nonqualifiedMetricCount": 0,
+      "metrics": [
+        {
+          "metric": "empty",
+          "runMeanTicks": [
+            918.6666666666666,
+            906.0
+          ],
+          "twoRunAverageTicks": 912.3333333333333,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            0.9186666666666667,
+            0.906
+          ],
+          "twoRunAverageTicksPerIteration": 0.9123333333333334
+        },
+        {
+          "metric": "pin-1",
+          "runMeanTicks": [
+            4090.6666666666665,
+            4132.666666666667
+          ],
+          "twoRunAverageTicks": 4111.666666666667,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            4.0906666666666665,
+            4.132666666666666
+          ],
+          "twoRunAverageTicksPerIteration": 4.111666666666666
+        },
+        {
+          "metric": "pin-16",
+          "runMeanTicks": [
+            11949.666666666666,
+            11327.666666666666
+          ],
+          "twoRunAverageTicks": 11638.666666666666,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            23.89933333333333,
+            22.655333333333335
+          ],
+          "twoRunAverageTicksPerIteration": 23.27733333333333
+        },
+        {
+          "metric": "pin-64",
+          "runMeanTicks": [
+            8576.0,
+            8275.666666666666
+          ],
+          "twoRunAverageTicks": 8425.833333333332,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            85.75999999999999,
+            82.75666666666667
+          ],
+          "twoRunAverageTicksPerIteration": 84.25833333333333
+        },
+        {
+          "metric": "pin-65",
+          "runMeanTicks": [
+            10489.333333333334,
+            10073.0
+          ],
+          "twoRunAverageTicks": 10281.166666666668,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            104.89333333333333,
+            100.73
+          ],
+          "twoRunAverageTicksPerIteration": 102.81166666666667
+        },
+        {
+          "metric": "pin-256",
+          "runMeanTicks": [
+            12863.0,
+            12345.0
+          ],
+          "twoRunAverageTicks": 12604.0,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            401.96875,
+            385.78125
+          ],
+          "twoRunAverageTicksPerIteration": 393.875
+        },
+        {
+          "metric": "pin-4096",
+          "runMeanTicks": [
+            26041.333333333332,
+            24805.0
+          ],
+          "twoRunAverageTicks": 25423.166666666664,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            6510.333333333333,
+            6201.25
+          ],
+          "twoRunAverageTicksPerIteration": 6355.791666666666
+        },
+        {
+          "metric": "pin-reject-0",
+          "runMeanTicks": [
+            1023.3333333333334,
+            990.3333333333334
+          ],
+          "twoRunAverageTicks": 1006.8333333333334,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2.046666666666667,
+            1.9806666666666668
+          ],
+          "twoRunAverageTicksPerIteration": 2.013666666666667
+        },
+        {
+          "metric": "pin-reject-32",
+          "runMeanTicks": [
+            2157.6666666666665,
+            2067.0
+          ],
+          "twoRunAverageTicks": 2112.333333333333,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            21.576666666666668,
+            20.67
+          ],
+          "twoRunAverageTicksPerIteration": 21.123333333333335
+        },
+        {
+          "metric": "pin-reject-64",
+          "runMeanTicks": [
+            4180.0,
+            4257.333333333333
+          ],
+          "twoRunAverageTicks": 4218.666666666666,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            41.800000000000004,
+            42.57333333333333
+          ],
+          "twoRunAverageTicksPerIteration": 42.18666666666667
+        },
+        {
+          "metric": "pin-reject-65",
+          "runMeanTicks": [
+            4189.666666666667,
+            4000.0
+          ],
+          "twoRunAverageTicks": 4094.8333333333335,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            41.89666666666667,
+            40.0
+          ],
+          "twoRunAverageTicksPerIteration": 40.94833333333334
+        },
+        {
+          "metric": "pool-1",
+          "runMeanTicks": [
+            1043.0,
+            994.0
+          ],
+          "twoRunAverageTicks": 1018.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            16.296875,
+            15.53125
+          ],
+          "twoRunAverageTicksPerIteration": 15.9140625
+        },
+        {
+          "metric": "pool-16",
+          "runMeanTicks": [
+            854.0,
+            803.0
+          ],
+          "twoRunAverageTicks": 828.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            53.375,
+            50.1875
+          ],
+          "twoRunAverageTicksPerIteration": 51.78125
+        },
+        {
+          "metric": "pool-256",
+          "runMeanTicks": [
+            2298.6666666666665,
+            2525.3333333333335
+          ],
+          "twoRunAverageTicks": 2412.0,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            574.6666666666666,
+            631.3333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 603.0
+        },
+        {
+          "metric": "pool-1024",
+          "runMeanTicks": [
+            2203.0,
+            2139.3333333333335
+          ],
+          "twoRunAverageTicks": 2171.166666666667,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2203.0,
+            2139.3333333333335
+          ],
+          "twoRunAverageTicksPerIteration": 2171.166666666667
+        },
+        {
+          "metric": "pool-fragmented-fail-4",
+          "runMeanTicks": [
+            6988.666666666667,
+            6824.0
+          ],
+          "twoRunAverageTicks": 6906.333333333334,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            436.7916666666667,
+            426.5
+          ],
+          "twoRunAverageTicksPerIteration": 431.64583333333337
+        },
+        {
+          "metric": "sysva-1",
+          "runMeanTicks": [
+            1588.6666666666667,
+            1591.0
+          ],
+          "twoRunAverageTicks": 1589.8333333333335,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            49.645833333333336,
+            49.71875
+          ],
+          "twoRunAverageTicksPerIteration": 49.68229166666667
+        },
+        {
+          "metric": "sysva-16",
+          "runMeanTicks": [
+            597.0,
+            598.0
+          ],
+          "twoRunAverageTicks": 597.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            74.625,
+            74.75
+          ],
+          "twoRunAverageTicksPerIteration": 74.6875
+        },
+        {
+          "metric": "sysva-1024",
+          "runMeanTicks": [
+            2541.6666666666665,
+            2620.3333333333335
+          ],
+          "twoRunAverageTicks": 2581.0,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2541.6666666666665,
+            2620.3333333333335
+          ],
+          "twoRunAverageTicksPerIteration": 2581.0
+        },
+        {
+          "metric": "sysva-1025",
+          "runMeanTicks": [
+            2419.6666666666665,
+            2422.6666666666665
+          ],
+          "twoRunAverageTicks": 2421.1666666666665,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2419.6666666666665,
+            2422.6666666666665
+          ],
+          "twoRunAverageTicksPerIteration": 2421.1666666666665
+        },
+        {
+          "metric": "sysva-4096",
+          "runMeanTicks": [
+            10389.666666666666,
+            10631.666666666666
+          ],
+          "twoRunAverageTicks": 10510.666666666666,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            10389.666666666666,
+            10631.666666666666
+          ],
+          "twoRunAverageTicksPerIteration": 10510.666666666666
+        },
+        {
+          "metric": "object-cold-64",
+          "runMeanTicks": [
+            958.0,
+            1479.0
+          ],
+          "twoRunAverageTicks": 1218.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            958.0,
+            1479.0
+          ],
+          "twoRunAverageTicksPerIteration": 1218.5
+        },
+        {
+          "metric": "object-warm-1",
+          "runMeanTicks": [
+            4550.0,
+            4660.666666666667
+          ],
+          "twoRunAverageTicks": 4605.333333333334,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            4.55,
+            4.660666666666667
+          ],
+          "twoRunAverageTicksPerIteration": 4.605333333333333
+        },
+        {
+          "metric": "object-warm-8",
+          "runMeanTicks": [
+            3614.3333333333335,
+            3608.6666666666665
+          ],
+          "twoRunAverageTicks": 3611.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            28.236979166666668,
+            28.192708333333332
+          ],
+          "twoRunAverageTicksPerIteration": 28.21484375
+        },
+        {
+          "metric": "object-warm-64",
+          "runMeanTicks": [
+            4741.333333333333,
+            4837.0
+          ],
+          "twoRunAverageTicks": 4789.166666666666,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            296.3333333333333,
+            302.3125
+          ],
+          "twoRunAverageTicksPerIteration": 299.32291666666663
+        },
+        {
+          "metric": "modexp-1-e1-odd",
+          "runMeanTicks": [
+            7233.0,
+            7147.666666666667
+          ],
+          "twoRunAverageTicks": 7190.333333333334,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            113.015625,
+            111.68229166666667
+          ],
+          "twoRunAverageTicksPerIteration": 112.34895833333334
+        },
+        {
+          "metric": "modexp-1-e65537-odd",
+          "runMeanTicks": [
+            3542.6666666666665,
+            3504.6666666666665
+          ],
+          "twoRunAverageTicks": 3523.6666666666665,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            110.70833333333333,
+            109.52083333333333
+          ],
+          "twoRunAverageTicksPerIteration": 110.11458333333333
+        },
+        {
+          "metric": "modexp-2-e3-even",
+          "runMeanTicks": [
+            1160.3333333333333,
+            1273.0
+          ],
+          "twoRunAverageTicks": 1216.6666666666665,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            145.04166666666666,
+            159.125
+          ],
+          "twoRunAverageTicksPerIteration": 152.08333333333331
+        },
+        {
+          "metric": "modexp-32-e3-odd",
+          "runMeanTicks": [
+            274.0,
+            277.6666666666667
+          ],
+          "twoRunAverageTicks": 275.83333333333337,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            137.0,
+            138.83333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 137.91666666666669
+        },
+        {
+          "metric": "modexp-64-e65537-odd",
+          "runMeanTicks": [
+            255.33333333333334,
+            169.0
+          ],
+          "twoRunAverageTicks": 212.16666666666669,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            255.33333333333334,
+            169.0
+          ],
+          "twoRunAverageTicksPerIteration": 212.16666666666669
+        },
+        {
+          "metric": "modexp-512-e1-odd",
+          "runMeanTicks": [
+            549.3333333333334,
+            519.6666666666666
+          ],
+          "twoRunAverageTicks": 534.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            549.3333333333334,
+            519.6666666666666
+          ],
+          "twoRunAverageTicksPerIteration": 534.5
+        },
+        {
+          "metric": "sha-0",
+          "runMeanTicks": [
+            17990.333333333332,
+            18220.0
+          ],
+          "twoRunAverageTicks": 18105.166666666664,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            35.137369791666664,
+            35.5859375
+          ],
+          "twoRunAverageTicksPerIteration": 35.36165364583333
+        },
+        {
+          "metric": "sha-1",
+          "runMeanTicks": [
+            17726.666666666668,
+            17683.666666666668
+          ],
+          "twoRunAverageTicks": 17705.166666666668,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            34.622395833333336,
+            34.538411458333336
+          ],
+          "twoRunAverageTicksPerIteration": 34.580403645833336
+        },
+        {
+          "metric": "sha-63",
+          "runMeanTicks": [
+            11749.0,
+            11427.333333333334
+          ],
+          "twoRunAverageTicks": 11588.166666666668,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            45.89453125,
+            44.638020833333336
+          ],
+          "twoRunAverageTicksPerIteration": 45.26627604166667
+        },
+        {
+          "metric": "sha-65",
+          "runMeanTicks": [
+            11432.333333333334,
+            11230.333333333334
+          ],
+          "twoRunAverageTicks": 11331.333333333334,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            44.657552083333336,
+            43.868489583333336
+          ],
+          "twoRunAverageTicksPerIteration": 44.263020833333336
+        },
+        {
+          "metric": "sha-4096",
+          "runMeanTicks": [
+            5075.333333333333,
+            4996.333333333333
+          ],
+          "twoRunAverageTicks": 5035.833333333333,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            634.4166666666666,
+            624.5416666666666
+          ],
+          "twoRunAverageTicksPerIteration": 629.4791666666666
+        },
+        {
+          "metric": "sha-1MiB",
+          "runMeanTicks": [
+            155560.66666666666,
+            150684.33333333334
+          ],
+          "twoRunAverageTicks": 153122.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            155560.66666666666,
+            150684.33333333334
+          ],
+          "twoRunAverageTicksPerIteration": 153122.5
+        },
+        {
+          "metric": "des-block",
+          "runMeanTicks": [
+            4250.333333333333,
+            4383.0
+          ],
+          "twoRunAverageTicks": 4316.666666666666,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            33.205729166666664,
+            34.2421875
+          ],
+          "twoRunAverageTicksPerIteration": 33.72395833333333
+        },
+        {
+          "metric": "des3-block",
+          "runMeanTicks": [
+            5724.666666666667,
+            6174.666666666667
+          ],
+          "twoRunAverageTicks": 5949.666666666667,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            89.44791666666667,
+            96.47916666666667
+          ],
+          "twoRunAverageTicksPerIteration": 92.96354166666667
+        },
+        {
+          "metric": "des-cbc-4096",
+          "runMeanTicks": [
+            22650.333333333332,
+            24606.666666666668
+          ],
+          "twoRunAverageTicks": 23628.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            11325.166666666666,
+            12303.333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 11814.25
+        },
+        {
+          "metric": "des3-cbc-4096",
+          "runMeanTicks": [
+            33030.666666666664,
+            35003.0
+          ],
+          "twoRunAverageTicks": 34016.83333333333,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            33030.666666666664,
+            35003.0
+          ],
+          "twoRunAverageTicksPerIteration": 34016.83333333333
+        }
+      ]
+    },
+    {
+      "arm": "complex",
+      "fixture": "sg-performance",
+      "isoSha256": "37283cce9505a0c78231477e768b285cd95f39de51368f77d468ca036a348e8a",
+      "frequencyHz": 3375000,
+      "runCount": 2,
+      "runs": [
+        {
+          "run": 1,
+          "runId": "20261015-060502188-3df0a1c050dc45a58578210df4fa83e6",
+          "declaredChecks": 72,
+          "ok": 72,
+          "failed": 0,
+          "todo": 0,
+          "passed": true,
+          "serialSha256": "eadd7b555aae039ac22f0d6e97ffcbeba5dfe9af36670b1cfa495972077a1c51",
+          "resultSha256": "001386d470e85414562e5d32887abb329abe8988ce8f41bc039f5e6efc47422f",
+          "metricsSha256": "af788609e788c911b7eb30f351c6ab2b30cd196f71e7f3db01c6ca6056cd0f41",
+          "cleanupSha256": "1abaa09328a81b99e8b3291ec5c16f41efd69a7578900dbf4b915feffbe43cac",
+          "cleanupComplete": true,
+          "userDesktopPipe": true
+        },
+        {
+          "run": 2,
+          "runId": "20261015-061126762-41fb5fff7a814013b5a60511e4764536",
+          "declaredChecks": 72,
+          "ok": 72,
+          "failed": 0,
+          "todo": 0,
+          "passed": true,
+          "serialSha256": "2fef3d09b5c2fb3ad92a1830813ac2014c551f5c3b3695bf302d91b18e37435b",
+          "resultSha256": "c8b1a5a46af60c5a10253de54e341cf2d8087e135b3ed3953ea553b55f2a9e7b",
+          "metricsSha256": "7f8b66da0d800e27761dce4279dedd1e1ef8404c8a9a9f61138069595a6e74b8",
+          "cleanupSha256": "d6a769ca03f5db256792f51bb8ff10749790a76f0f76172449ef16eda3315726",
+          "cleanupComplete": true,
+          "userDesktopPipe": true
+        }
+      ],
+      "runPassCount": 2,
+      "runFailCount": 0,
+      "metricCount": 10,
+      "correctnessQualifiedMetricCount": 10,
+      "nonqualifiedMetricCount": 0,
+      "metrics": [
+        {
+          "metric": "gather-pages-1",
+          "runMeanTicks": [
+            1081.142857142857,
+            1079.5714285714287
+          ],
+          "twoRunAverageTicks": 1080.357142857143,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            12.194127411469346,
+            12.211877233028979
+          ],
+          "twoRunAverageMiBPerSecond": 12.203002322249162
+        },
+        {
+          "metric": "gather-pages-2",
+          "runMeanTicks": [
+            733.5714285714286,
+            688.1428571428571
+          ],
+          "twoRunAverageTicks": 710.8571428571429,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            35.94358568646543,
+            38.31644436371185
+          ],
+          "twoRunAverageMiBPerSecond": 37.13001502508864
+        },
+        {
+          "metric": "gather-pages-16",
+          "runMeanTicks": [
+            763.2857142857143,
+            849.1428571428571
+          ],
+          "twoRunAverageTicks": 806.2142857142858,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            276.35457608085346,
+            248.4122644683715
+          ],
+          "twoRunAverageMiBPerSecond": 262.3834202746125
+        },
+        {
+          "metric": "gather-pages-128",
+          "runMeanTicks": [
+            3081.5714285714284,
+            2845.4285714285716
+          ],
+          "twoRunAverageTicks": 2963.5,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            547.6102174215382,
+            593.0565317802992
+          ],
+          "twoRunAverageMiBPerSecond": 570.3333746009187
+        },
+        {
+          "metric": "gather-pages-512",
+          "runMeanTicks": [
+            9378.42857142857,
+            9344.0
+          ],
+          "twoRunAverageTicks": 9361.214285714286,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            719.7367819768771,
+            722.388698630137
+          ],
+          "twoRunAverageMiBPerSecond": 721.0627403035071
+        },
+        {
+          "metric": "flat-pages-1",
+          "runMeanTicks": [
+            615.7142857142857,
+            563.5714285714286
+          ],
+          "twoRunAverageTicks": 589.6428571428571,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            21.411869199535964,
+            23.392942015209126
+          ],
+          "twoRunAverageMiBPerSecond": 22.402405607372543
+        },
+        {
+          "metric": "flat-pages-2",
+          "runMeanTicks": [
+            599.7142857142857,
+            544.7142857142857
+          ],
+          "twoRunAverageTicks": 572.2142857142857,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            43.96624880895665,
+            48.40553697875689
+          ],
+          "twoRunAverageMiBPerSecond": 46.185892893856774
+        },
+        {
+          "metric": "flat-pages-16",
+          "runMeanTicks": [
+            510.7142857142857,
+            599.2857142857143
+          ],
+          "twoRunAverageTicks": 555.0,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            413.0244755244755,
+            351.9815256257449
+          ],
+          "twoRunAverageMiBPerSecond": 382.5030005751102
+        },
+        {
+          "metric": "flat-pages-128",
+          "runMeanTicks": [
+            1404.857142857143,
+            1424.857142857143
+          ],
+          "twoRunAverageTicks": 1414.857142857143,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            1201.189749847468,
+            1184.329256065771
+          ],
+          "twoRunAverageMiBPerSecond": 1192.7595029566196
+        },
+        {
+          "metric": "flat-pages-512",
+          "runMeanTicks": [
+            5105.285714285715,
+            4725.571428571428
+          ],
+          "twoRunAverageTicks": 4915.428571428572,
+          "correctnessQualified": true,
+          "runMeanMiBPerSecond": [
+            1322.15910680807,
+            1428.3986819432268
+          ],
+          "twoRunAverageMiBPerSecond": 1375.2788943756484
+        }
+      ]
+    },
+    {
+      "arm": "complex",
+      "fixture": "kernel-performance",
+      "isoSha256": "ece625228e169faf806f3fc7c2b4f0cce503948f33eb78abbfaaba1d186f11c1",
+      "frequencyHz": 3375000,
+      "runCount": 2,
+      "runs": [
+        {
+          "run": 1,
+          "runId": "20261015-061005507-7d2ab63e2af24de19f201e22ca1870dd",
+          "declaredChecks": 42,
+          "ok": 35,
+          "failed": 7,
+          "todo": 0,
+          "passed": false,
+          "serialSha256": "cfaae7e50613bad2e82ac6bab42a632e4fe61a5d670cdaaf1de68e2b8495a5e9",
+          "resultSha256": "0b41cb672a06c89e767c0bec8c3d99f98e59e2b91ee158c9c1ae9cb90dc01add",
+          "metricsSha256": "06a010b94eba8ecbed279a92b0709a357836edbdea3c3a4fb0f167dfa94f6546",
+          "cleanupSha256": "e85f466caca52bf2aa748203412b5446c224f9f5754bdf11490c11e527972a49",
+          "cleanupComplete": true,
+          "userDesktopPipe": true
+        },
+        {
+          "run": 2,
+          "runId": "20261015-061140591-b5308b985d6a4a03a2e3f47ff7d1f2c5",
+          "declaredChecks": 42,
+          "ok": 35,
+          "failed": 7,
+          "todo": 0,
+          "passed": false,
+          "serialSha256": "231ebbafd438c41037d41ac1eda4b08b5cd2bc17281aaab7815e00e2112c9a1b",
+          "resultSha256": "381b99a41bf03929d8729600ee05c5b8489c39de0717bc0a184f4d80aa7d22d8",
+          "metricsSha256": "879710aa94d905402630f8bbabc5e9e0fb46502ece8afbf8f11443ac71f98d29",
+          "cleanupSha256": "2cea457dc0b80fefef2f3506756f8c2b3579e8c84c11a373aa6228f72ca795a7",
+          "cleanupComplete": true,
+          "userDesktopPipe": true
+        }
+      ],
+      "runPassCount": 0,
+      "runFailCount": 2,
+      "metricCount": 41,
+      "correctnessQualifiedMetricCount": 34,
+      "nonqualifiedMetricCount": 7,
+      "metrics": [
+        {
+          "metric": "empty",
+          "runMeanTicks": [
+            927.0,
+            933.3333333333334
+          ],
+          "twoRunAverageTicks": 930.1666666666667,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            0.927,
+            0.9333333333333332
+          ],
+          "twoRunAverageTicksPerIteration": 0.9301666666666666
+        },
+        {
+          "metric": "pin-1",
+          "runMeanTicks": [
+            2375.6666666666665,
+            2415.6666666666665
+          ],
+          "twoRunAverageTicks": 2395.6666666666665,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2.3756666666666666,
+            2.4156666666666666
+          ],
+          "twoRunAverageTicksPerIteration": 2.3956666666666666
+        },
+        {
+          "metric": "pin-16",
+          "runMeanTicks": [
+            1485.6666666666667,
+            1509.6666666666667
+          ],
+          "twoRunAverageTicks": 1497.6666666666667,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2.9713333333333334,
+            3.0193333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 2.9953333333333334
+        },
+        {
+          "metric": "pin-64",
+          "runMeanTicks": [
+            483.3333333333333,
+            502.6666666666667
+          ],
+          "twoRunAverageTicks": 493.0,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            4.833333333333333,
+            5.026666666666666
+          ],
+          "twoRunAverageTicksPerIteration": 4.93
+        },
+        {
+          "metric": "pin-65",
+          "runMeanTicks": [
+            490.6666666666667,
+            486.0
+          ],
+          "twoRunAverageTicks": 488.33333333333337,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            4.906666666666666,
+            4.86
+          ],
+          "twoRunAverageTicksPerIteration": 4.883333333333333
+        },
+        {
+          "metric": "pin-256",
+          "runMeanTicks": [
+            394.0,
+            395.6666666666667
+          ],
+          "twoRunAverageTicks": 394.83333333333337,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            12.3125,
+            12.364583333333334
+          ],
+          "twoRunAverageTicksPerIteration": 12.338541666666668
+        },
+        {
+          "metric": "pin-4096",
+          "runMeanTicks": [
+            621.3333333333334,
+            625.3333333333334
+          ],
+          "twoRunAverageTicks": 623.3333333333334,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            155.33333333333334,
+            156.33333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 155.83333333333334
+        },
+        {
+          "metric": "pin-reject-0",
+          "runMeanTicks": [
+            881.0,
+            882.6666666666666
+          ],
+          "twoRunAverageTicks": 881.8333333333333,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            1.7619999999999998,
+            1.7653333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 1.7636666666666665
+        },
+        {
+          "metric": "pin-reject-32",
+          "runMeanTicks": [
+            215.33333333333334,
+            225.66666666666666
+          ],
+          "twoRunAverageTicks": 220.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2.1533333333333333,
+            2.2566666666666664
+          ],
+          "twoRunAverageTicksPerIteration": 2.205
+        },
+        {
+          "metric": "pin-reject-64",
+          "runMeanTicks": [
+            307.3333333333333,
+            296.6666666666667
+          ],
+          "twoRunAverageTicks": 302.0,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            3.0733333333333337,
+            2.966666666666667
+          ],
+          "twoRunAverageTicksPerIteration": 3.0200000000000005
+        },
+        {
+          "metric": "pin-reject-65",
+          "runMeanTicks": [
+            272.0,
+            409.3333333333333
+          ],
+          "twoRunAverageTicks": 340.66666666666663,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2.72,
+            4.093333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 3.406666666666667
+        },
+        {
+          "metric": "pool-1",
+          "runMeanTicks": [
+            658.0,
+            768.3333333333334
+          ],
+          "twoRunAverageTicks": 713.1666666666667,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            10.28125,
+            12.005208333333334
+          ],
+          "twoRunAverageTicksPerIteration": 11.143229166666668
+        },
+        {
+          "metric": "pool-16",
+          "runMeanTicks": [
+            686.3333333333334,
+            525.3333333333334
+          ],
+          "twoRunAverageTicks": 605.8333333333334,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            42.895833333333336,
+            32.833333333333336
+          ],
+          "twoRunAverageTicksPerIteration": 37.864583333333336
+        },
+        {
+          "metric": "pool-256",
+          "runMeanTicks": [
+            1334.0,
+            1953.3333333333333
+          ],
+          "twoRunAverageTicks": 1643.6666666666665,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            333.5,
+            488.3333333333333
+          ],
+          "twoRunAverageTicksPerIteration": 410.91666666666663
+        },
+        {
+          "metric": "pool-1024",
+          "runMeanTicks": [
+            1356.3333333333333,
+            2147.0
+          ],
+          "twoRunAverageTicks": 1751.6666666666665,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            1356.3333333333333,
+            2147.0
+          ],
+          "twoRunAverageTicksPerIteration": 1751.6666666666665
+        },
+        {
+          "metric": "pool-fragmented-fail-4",
+          "runMeanTicks": [
+            0.6666666666666666,
+            0.6666666666666666
+          ],
+          "twoRunAverageTicks": 0.6666666666666666,
+          "correctnessQualified": false,
+          "runMeanTicksPerIteration": [
+            0.041666666666666664,
+            0.041666666666666664
+          ],
+          "twoRunAverageTicksPerIteration": 0.041666666666666664
+        },
+        {
+          "metric": "sysva-1",
+          "runMeanTicks": [
+            362.6666666666667,
+            366.6666666666667
+          ],
+          "twoRunAverageTicks": 364.6666666666667,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            11.333333333333334,
+            11.458333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 11.395833333333334
+        },
+        {
+          "metric": "sysva-16",
+          "runMeanTicks": [
+            284.0,
+            271.6666666666667
+          ],
+          "twoRunAverageTicks": 277.83333333333337,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            35.5,
+            33.958333333333336
+          ],
+          "twoRunAverageTicksPerIteration": 34.72916666666667
+        },
+        {
+          "metric": "sysva-1024",
+          "runMeanTicks": [
+            2168.6666666666665,
+            2439.3333333333335
+          ],
+          "twoRunAverageTicks": 2304.0,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2168.6666666666665,
+            2439.3333333333335
+          ],
+          "twoRunAverageTicksPerIteration": 2304.0
+        },
+        {
+          "metric": "sysva-1025",
+          "runMeanTicks": [
+            2015.6666666666667,
+            2121.6666666666665
+          ],
+          "twoRunAverageTicks": 2068.6666666666665,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2015.6666666666667,
+            2121.6666666666665
+          ],
+          "twoRunAverageTicksPerIteration": 2068.6666666666665
+        },
+        {
+          "metric": "sysva-4096",
+          "runMeanTicks": [
+            9761.0,
+            9870.666666666666
+          ],
+          "twoRunAverageTicks": 9815.833333333332,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            9761.0,
+            9870.666666666666
+          ],
+          "twoRunAverageTicksPerIteration": 9815.833333333332
+        },
+        {
+          "metric": "object-cold-64",
+          "runMeanTicks": [
+            647.0,
+            403.0
+          ],
+          "twoRunAverageTicks": 525.0,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            647.0,
+            403.0
+          ],
+          "twoRunAverageTicksPerIteration": 525.0
+        },
+        {
+          "metric": "object-warm-1",
+          "runMeanTicks": [
+            2897.0,
+            2960.0
+          ],
+          "twoRunAverageTicks": 2928.5,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            2.897,
+            2.9600000000000004
+          ],
+          "twoRunAverageTicksPerIteration": 2.9285
+        },
+        {
+          "metric": "object-warm-8",
+          "runMeanTicks": [
+            1829.0,
+            1911.3333333333333
+          ],
+          "twoRunAverageTicks": 1870.1666666666665,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            14.2890625,
+            14.932291666666666
+          ],
+          "twoRunAverageTicksPerIteration": 14.610677083333332
+        },
+        {
+          "metric": "object-warm-64",
+          "runMeanTicks": [
+            1698.0,
+            1736.0
+          ],
+          "twoRunAverageTicks": 1717.0,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            106.125,
+            108.5
+          ],
+          "twoRunAverageTicksPerIteration": 107.3125
+        },
+        {
+          "metric": "modexp-1-e1-odd",
+          "runMeanTicks": [
+            6510.0,
+            6632.666666666667
+          ],
+          "twoRunAverageTicks": 6571.333333333334,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            101.71875,
+            103.63541666666667
+          ],
+          "twoRunAverageTicksPerIteration": 102.67708333333334
+        },
+        {
+          "metric": "modexp-1-e65537-odd",
+          "runMeanTicks": [
+            3774.6666666666665,
+            3815.6666666666665
+          ],
+          "twoRunAverageTicks": 3795.1666666666665,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            117.95833333333333,
+            119.23958333333333
+          ],
+          "twoRunAverageTicksPerIteration": 118.59895833333333
+        },
+        {
+          "metric": "modexp-2-e3-even",
+          "runMeanTicks": [
+            746.6666666666666,
+            768.0
+          ],
+          "twoRunAverageTicks": 757.3333333333333,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            93.33333333333333,
+            96.0
+          ],
+          "twoRunAverageTicksPerIteration": 94.66666666666666
+        },
+        {
+          "metric": "modexp-32-e3-odd",
+          "runMeanTicks": [
+            234.66666666666666,
+            200.0
+          ],
+          "twoRunAverageTicks": 217.33333333333331,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            117.33333333333333,
+            100.0
+          ],
+          "twoRunAverageTicksPerIteration": 108.66666666666666
+        },
+        {
+          "metric": "modexp-64-e65537-odd",
+          "runMeanTicks": [
+            114.0,
+            108.33333333333333
+          ],
+          "twoRunAverageTicks": 111.16666666666666,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            114.0,
+            108.33333333333333
+          ],
+          "twoRunAverageTicksPerIteration": 111.16666666666666
+        },
+        {
+          "metric": "modexp-512-e1-odd",
+          "runMeanTicks": [
+            175.0,
+            184.33333333333334
+          ],
+          "twoRunAverageTicks": 179.66666666666669,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            175.0,
+            184.33333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 179.66666666666669
+        },
+        {
+          "metric": "sha-0",
+          "runMeanTicks": [
+            3899.3333333333335,
+            4297.666666666667
+          ],
+          "twoRunAverageTicks": 4098.5,
+          "correctnessQualified": false,
+          "runMeanTicksPerIteration": [
+            7.615885416666667,
+            8.393880208333334
+          ],
+          "twoRunAverageTicksPerIteration": 8.0048828125
+        },
+        {
+          "metric": "sha-1",
+          "runMeanTicks": [
+            3814.6666666666665,
+            3926.3333333333335
+          ],
+          "twoRunAverageTicks": 3870.5,
+          "correctnessQualified": false,
+          "runMeanTicksPerIteration": [
+            7.450520833333333,
+            7.668619791666667
+          ],
+          "twoRunAverageTicksPerIteration": 7.5595703125
+        },
+        {
+          "metric": "sha-63",
+          "runMeanTicks": [
+            2436.3333333333335,
+            2477.3333333333335
+          ],
+          "twoRunAverageTicks": 2456.8333333333335,
+          "correctnessQualified": false,
+          "runMeanTicksPerIteration": [
+            9.516927083333334,
+            9.677083333333334
+          ],
+          "twoRunAverageTicksPerIteration": 9.597005208333334
+        },
+        {
+          "metric": "sha-65",
+          "runMeanTicks": [
+            2354.6666666666665,
+            2416.6666666666665
+          ],
+          "twoRunAverageTicks": 2385.6666666666665,
+          "correctnessQualified": false,
+          "runMeanTicksPerIteration": [
+            9.197916666666666,
+            9.440104166666666
+          ],
+          "twoRunAverageTicksPerIteration": 9.319010416666666
+        },
+        {
+          "metric": "sha-4096",
+          "runMeanTicks": [
+            1132.3333333333333,
+            1058.6666666666667
+          ],
+          "twoRunAverageTicks": 1095.5,
+          "correctnessQualified": false,
+          "runMeanTicksPerIteration": [
+            141.54166666666666,
+            132.33333333333334
+          ],
+          "twoRunAverageTicksPerIteration": 136.9375
+        },
+        {
+          "metric": "sha-1MiB",
+          "runMeanTicks": [
+            26300.333333333332,
+            26730.333333333332
+          ],
+          "twoRunAverageTicks": 26515.333333333332,
+          "correctnessQualified": false,
+          "runMeanTicksPerIteration": [
+            26300.333333333332,
+            26730.333333333332
+          ],
+          "twoRunAverageTicksPerIteration": 26515.333333333332
+        },
+        {
+          "metric": "des-block",
+          "runMeanTicks": [
+            1427.0,
+            1267.6666666666667
+          ],
+          "twoRunAverageTicks": 1347.3333333333335,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            11.1484375,
+            9.903645833333334
+          ],
+          "twoRunAverageTicksPerIteration": 10.526041666666668
+        },
+        {
+          "metric": "des3-block",
+          "runMeanTicks": [
+            609.0,
+            694.3333333333334
+          ],
+          "twoRunAverageTicks": 651.6666666666667,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            9.515625,
+            10.848958333333334
+          ],
+          "twoRunAverageTicksPerIteration": 10.182291666666668
+        },
+        {
+          "metric": "des-cbc-4096",
+          "runMeanTicks": [
+            2904.3333333333335,
+            3263.3333333333335
+          ],
+          "twoRunAverageTicks": 3083.8333333333335,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            1452.1666666666667,
+            1631.6666666666667
+          ],
+          "twoRunAverageTicksPerIteration": 1541.9166666666667
+        },
+        {
+          "metric": "des3-cbc-4096",
+          "runMeanTicks": [
+            3311.0,
+            3318.3333333333335
+          ],
+          "twoRunAverageTicks": 3314.666666666667,
+          "correctnessQualified": true,
+          "runMeanTicksPerIteration": [
+            3311.0,
+            3318.3333333333335
+          ],
+          "twoRunAverageTicksPerIteration": 3314.666666666667
+        }
+      ]
+    }
+  ]
+}
