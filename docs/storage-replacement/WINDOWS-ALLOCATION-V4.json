@@ -1,0 +1,110 @@
+{
+  "run_id": "20261014-235225915-6088a015c61149689b1d37c66f5b2c4c",
+  "result": "completed",
+  "exit_code": 0,
+  "scope": "Owned reference64 Windows allocation diagnostic; not performance or physical-pool acceptance",
+  "report": {
+    "schema_version": 1,
+    "integrity": "complete",
+    "issues": [],
+    "events_consumed": 4100,
+    "baseline_complete": false,
+    "observed": {
+      "successful_allocations": 1025,
+      "failed_allocations": 0,
+      "completed_frees": 1024,
+      "unknown_owner_successful_allocations": 1025,
+      "declared_storage_successful_allocations": 0,
+      "current_requested_bytes": 128,
+      "peak_requested_bytes": 1000,
+      "declared_storage_current_requested_bytes": 0,
+      "declared_storage_peak_requested_bytes": 0
+    },
+    "live_allocations": [
+      {
+        "address": 3238337800,
+        "requested_bytes": 128,
+        "owner": "unknown",
+        "owner_evidence": {
+          "kind": "unknown",
+          "evidence_sha256": null
+        },
+        "caller_pc": 2214887951,
+        "thread": 3238038560,
+        "tag": 1182032198,
+        "allocation_call_id": 1
+      }
+    ],
+    "service_count": {
+      "readings": [],
+      "observed_modulo_delta": null,
+      "qualified_isr_entries": null
+    },
+    "physical_storage_peak_bytes": null,
+    "qualified_storage_successful_allocations": null,
+    "native_qualified": false,
+    "limitations": [
+      "requested bytes are not physical charges",
+      "return boundaries are not allocator commit/release points",
+      "declared owner evidence is not independently authenticated",
+      "capture completeness is not debugger/native coverage proof"
+    ],
+    "debugger_control": {
+      "step_stops": 6149,
+      "same_identity_step_stops": 3,
+      "raw_step_log": "debugger-control.jsonl",
+      "per_consumed_stop_attempt_limit": 8,
+      "register_order": [
+        "eax",
+        "ecx",
+        "edx",
+        "ebx",
+        "esp",
+        "ebp",
+        "esi",
+        "edi",
+        "eip"
+      ],
+      "instruction_retirement_proven": false,
+      "performance_acceptance_eligible": false
+    },
+    "owned_boundaries": {
+      "complete": true,
+      "operations": 1024,
+      "error": null,
+      "exact_observed_guest_pcs": true,
+      "performance_acceptance_eligible": false,
+      "consumer_semantics": "normal API return plus status/IOSB/length and full-byte comparison observed before next timestamp"
+    }
+  },
+  "private_disk_cleanup": {
+    "schemaVersion": 1,
+    "runId": "20261014-235225915-6088a015c61149689b1d37c66f5b2c4c",
+    "state": "complete",
+    "targetStopped": true,
+    "evidenceFinalized": true,
+    "runtimeDirectory": "C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Runtime\\20261014-235225915-6088a015c61149689b1d37c66f5b2c4c",
+    "files": [
+      {
+        "assetId": "pr256-clean-fatx-compat010-v1",
+        "path": "hdd.qcow2",
+        "retention": "deleteAfterEvidence",
+        "deleted": true,
+        "error": null
+      }
+    ],
+    "updatedUtc": "2026-10-14T23:53:08.7349725+00:00"
+  },
+  "evidence_sha256": {
+    "result.json": "c03676295665295c41135565b2d1f1aed4c4a6b8d38f439c488497c1459d6e3f",
+    "runtime-cleanup.json": "f3f84b28d29bdec0192e9a940125ebbdcdd0d1efa9d33fcd8f432e9a7475f19a",
+    "allocation-trace/report.json": "975f4bcf5d5e4ab88d3a3739154ea27c30abccde75b5710e0250402969d9e694",
+    "allocation-trace/events.jsonl": "35fde01b83cef9dddc81cb1e51c540486055b427deee5f2cc6f1cf6e1e4d0d77",
+    "allocation-trace/boundaries.jsonl": "bf3a3841ca2c2ae1b87b5fdeb3d7674b843745ca8fc6592e3f1468a6e7d669af",
+    "allocation-trace/debugger-control.jsonl": "dd386d332bf2931d6bda7e709dc5ca72d31bce3c79d88d7d933ea3135360020f",
+    "native-serial.log": "b224668c9600264c07ca026d9973fe6fae2a019a60f194d01c6f8d93aaa7fb2e"
+  },
+  "collector_sha256": "85005418cd75f81b39081386a05680f83eb30742c94b47970c0ae689347f8f3a",
+  "request_sha256": "b1da20d36fe5ad00c519fb6776e1caa77a53a3875b35174d0c98177a2c32bd87",
+  "old_v3_preserved": true
+}

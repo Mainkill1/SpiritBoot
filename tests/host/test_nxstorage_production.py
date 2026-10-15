@@ -22,7 +22,8 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0131-independent-cache-publication-primitive.patch",
                      "0132-nxstorage-freestanding-gcc-checks.patch",
                      "0133-independent-zero-domain-mdl.patch",
-                     "0134-independent-native-packet-primitive.patch"):
+                     "0134-independent-native-packet-primitive.patch",
+                     "0135-independent-sense-header-primitive.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -35,7 +36,8 @@ class NxStorageProductionTests(unittest.TestCase):
             for data in patches:
                 subprocess.run(['git', '-C', str(source), 'apply', '--index',
                                 '--include=drivers/storage/class/nxstorage/*',
-                                '--include=tests/host/nxstorage/*', '-'], input=data, check=True)
+                                '--include=tests/host/nxstorage/*',
+                                '--include=tests/host/nxstorage-sense/*', '-'], input=data, check=True)
             result = subprocess.run([sys.executable, str(source / 'tests/host/nxstorage/check.py'),
                                      str(Path(temporary) / 'output')], text=True,
                                     capture_output=True, timeout=120)
@@ -53,3 +55,8 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertEqual(packet.returncode, 0, packet.stdout + packet.stderr)
             self.assertIn('packet-plain: ', packet.stdout)
             self.assertIn('packet-sanitized: ', packet.stdout)
+            sense = subprocess.run([sys.executable, str(source / 'tests/host/nxstorage-sense/check.py')],
+                                   text=True, capture_output=True, timeout=120,
+                                   env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
+            self.assertEqual(sense.returncode, 0, sense.stdout + sense.stderr)
+            self.assertEqual(sense.stdout.count('sense_header: all tests passed'), 2)

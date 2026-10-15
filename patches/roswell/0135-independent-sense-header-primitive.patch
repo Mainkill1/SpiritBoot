@@ -1,0 +1,311 @@
+diff --git a/drivers/storage/class/nxstorage/sense_header.h b/drivers/storage/class/nxstorage/sense_header.h
+new file mode 100644
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/sense_header.h
+@@ -0,0 +1,53 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef SPIRITBOOT_SENSE_HEADER_H
++#define SPIRITBOOT_SENSE_HEADER_H
++
++#include <stddef.h>
++
++typedef enum _SB_SENSE_REASON {
++    SbSenseTupleAvailable,
++    SbSenseNoAutosense,
++    SbSenseInvalidCount,
++    SbSenseNoStorage,
++    SbSenseShortHeader,
++    SbSenseUnknownFormat,
++    SbSenseShortDeclaredTuple,
++    SbSenseShortCopiedTuple
++} SB_SENSE_REASON;
++
++typedef enum _SB_SENSE_FORMAT {
++    SbSenseFormatUnknown,
++    SbSenseFormatFixed,
++    SbSenseFormatDescriptor
++} SB_SENSE_FORMAT;
++
++typedef enum _SB_SENSE_TIMING {
++    SbSenseTimingUnknown,
++    SbSenseCurrent,
++    SbSenseDeferred
++} SB_SENSE_TIMING;
++
++typedef struct _SB_SENSE_HEADER {
++    SB_SENSE_REASON Reason;
++    SB_SENSE_FORMAT Format;
++    SB_SENSE_TIMING Timing;
++    unsigned int DeclaredBytes;
++    int TailTruncated;
++    unsigned char Key;
++    unsigned char Asc;
++    unsigned char Ascq;
++} SB_SENSE_HEADER;
++
++/* Bytes is borrowed readable storage of Capacity bytes for this call only.
++ * CopiedBytes must not exceed Capacity or the owned copy limit of 96.
++ * Reason == SbSenseTupleAvailable certifies only Key/Asc/Ascq availability.
++ * TailTruncated is meaningful only for a recognized, complete header.
++ * This routine does not validate descriptors or certify the whole record.
++ */
++SB_SENSE_HEADER
++SbNormalizeSenseHeader(const unsigned char *Bytes,
++                       size_t CopiedBytes,
++                       size_t Capacity,
++                       int AutosenseValid);
++
++#endif
+diff --git a/drivers/storage/class/nxstorage/sense_header.c b/drivers/storage/class/nxstorage/sense_header.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/sense_header.c
+@@ -0,0 +1,77 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#include "sense_header.h"
++
++SB_SENSE_HEADER
++SbNormalizeSenseHeader(const unsigned char *Bytes,
++                       size_t CopiedBytes,
++                       size_t Capacity,
++                       int AutosenseValid)
++{
++    SB_SENSE_HEADER Result = {0};
++    unsigned int Code;
++
++    if (!AutosenseValid)
++    {
++        Result.Reason = SbSenseNoAutosense;
++        return Result;
++    }
++    if (CopiedBytes > Capacity || CopiedBytes > 96)
++    {
++        Result.Reason = SbSenseInvalidCount;
++        return Result;
++    }
++    if (Bytes == NULL)
++    {
++        Result.Reason = SbSenseNoStorage;
++        return Result;
++    }
++    if (CopiedBytes < 8)
++    {
++        Result.Reason = SbSenseShortHeader;
++        return Result;
++    }
++
++    Code = Bytes[0] & 0x7f;
++    switch (Code)
++    {
++        case 0x70:
++        case 0x71:
++            Result.Format = SbSenseFormatFixed;
++            break;
++        case 0x72:
++        case 0x73:
++            Result.Format = SbSenseFormatDescriptor;
++            break;
++        default:
++            Result.Reason = SbSenseUnknownFormat;
++            return Result;
++    }
++    Result.Timing = (Code == 0x71 || Code == 0x73) ? SbSenseDeferred : SbSenseCurrent;
++    Result.DeclaredBytes = 8u + Bytes[7];
++    Result.TailTruncated = CopiedBytes < Result.DeclaredBytes;
++
++    if (Result.Format == SbSenseFormatFixed)
++    {
++        if (Result.DeclaredBytes < 14)
++        {
++            Result.Reason = SbSenseShortDeclaredTuple;
++            return Result;
++        }
++        if (CopiedBytes < 14)
++        {
++            Result.Reason = SbSenseShortCopiedTuple;
++            return Result;
++        }
++        Result.Key = Bytes[2] & 0x0f;
++        Result.Asc = Bytes[12];
++        Result.Ascq = Bytes[13];
++    }
++    else
++    {
++        Result.Key = Bytes[1] & 0x0f;
++        Result.Asc = Bytes[2];
++        Result.Ascq = Bytes[3];
++    }
++    Result.Reason = SbSenseTupleAvailable;
++    return Result;
++}
+diff --git a/tests/host/nxstorage-sense/sense_header_test.c b/tests/host/nxstorage-sense/sense_header_test.c
+new file mode 100644
+--- /dev/null
++++ b/tests/host/nxstorage-sense/sense_header_test.c
+@@ -0,0 +1,126 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#include "sense_header.h"
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++static const unsigned char FixedCurrent[] = {
++    0x70, 0, 0x05, 0, 0, 0, 0, 0x0a, 0, 0, 0, 0, 0x24, 0x01, 0, 0, 0, 0
++};
++static const unsigned char FixedDeferred[] = {
++    0x71, 0, 0x06, 0, 0, 0, 0, 0x06, 0, 0, 0, 0, 0x28, 0x02
++};
++static const unsigned char DescriptorCurrent[] = {
++    0x72, 0x02, 0x3a, 0x03, 0, 0, 0, 0
++};
++static const unsigned char DescriptorDeferred[] = {
++    0x73, 0x07, 0x27, 0x04, 0, 0, 0, 0x04, 0xff, 0xff, 0, 0
++};
++
++static void Unavailable(SB_SENSE_HEADER Result, SB_SENSE_REASON Reason)
++{
++    assert(Result.Reason == Reason);
++    assert(Result.Key == 0 && Result.Asc == 0 && Result.Ascq == 0);
++}
++
++static void Prefixes(const unsigned char *Vector, size_t Length,
++                     SB_SENSE_FORMAT Format, SB_SENSE_TIMING Timing,
++                     unsigned char Key, unsigned char Asc, unsigned char Ascq)
++{
++    size_t Count;
++    size_t Needed = Format == SbSenseFormatFixed ? 14 : 8;
++    for (Count = 0; Count <= Length; ++Count)
++    {
++        /* Exact heap bounds let ASan detect reads past every short prefix. */
++        unsigned char *Copy = malloc(Count ? Count : 1);
++        SB_SENSE_HEADER Result;
++        assert(Copy != NULL);
++        memcpy(Copy, Vector, Count);
++        Result = SbNormalizeSenseHeader(Copy, Count, Count, 1);
++        assert(memcmp(Copy, Vector, Count) == 0);
++        memset(Copy, 0xa5, Count);
++        free(Copy);
++        if (Count < 8)
++        {
++            Unavailable(Result, SbSenseShortHeader);
++            assert(Result.Format == SbSenseFormatUnknown);
++            assert(Result.Timing == SbSenseTimingUnknown);
++            assert(Result.DeclaredBytes == 0 && !Result.TailTruncated);
++        }
++        else
++        {
++            assert(Result.Format == Format && Result.Timing == Timing);
++            assert(Result.DeclaredBytes == Length);
++            assert(Result.TailTruncated == (Count < Length));
++            if (Count < Needed)
++                Unavailable(Result, SbSenseShortCopiedTuple);
++            else
++            {
++                assert(Result.Reason == SbSenseTupleAvailable);
++                assert(Result.Key == Key && Result.Asc == Asc && Result.Ascq == Ascq);
++            }
++        }
++    }
++}
++
++int main(void)
++{
++    unsigned char Guarded[98];
++    unsigned char Snapshot[98];
++    unsigned char *Bytes = Guarded + 1;
++    SB_SENSE_HEADER Result;
++    unsigned int Extra;
++    Prefixes(FixedCurrent, sizeof(FixedCurrent), SbSenseFormatFixed, SbSenseCurrent, 5, 0x24, 1);
++    Prefixes(FixedDeferred, sizeof(FixedDeferred), SbSenseFormatFixed, SbSenseDeferred, 6, 0x28, 2);
++    Prefixes(DescriptorCurrent, sizeof(DescriptorCurrent), SbSenseFormatDescriptor, SbSenseCurrent, 2, 0x3a, 3);
++    Prefixes(DescriptorDeferred, sizeof(DescriptorDeferred), SbSenseFormatDescriptor, SbSenseDeferred, 7, 0x27, 4);
++    memset(Guarded, 0xa5, sizeof(Guarded));
++    memcpy(Bytes, FixedCurrent, sizeof(FixedCurrent));
++    for (Extra = 0; Extra <= 255; ++Extra)
++    {
++        Bytes[7] = (unsigned char)Extra;
++        Result = SbNormalizeSenseHeader(Bytes, 96, 96, 1);
++        assert(Result.DeclaredBytes == 8 + Extra);
++        assert(Result.TailTruncated == (Extra > 88));
++        if (Extra < 6)
++            Unavailable(Result, SbSenseShortDeclaredTuple);
++        else
++            assert(Result.Reason == SbSenseTupleAvailable && Result.Asc == 0x24);
++    }
++    Bytes[7] = 5;
++    Unavailable(SbNormalizeSenseHeader(Bytes, 8, 96, 1), SbSenseShortDeclaredTuple);
++    Bytes[7] = 255;
++    Bytes[0] = 0xf0;
++    Bytes[2] = 0xf5;
++    memcpy(Snapshot, Guarded, sizeof(Guarded));
++    Result = SbNormalizeSenseHeader(Bytes, 14, 96, 1);
++    assert(Result.Reason == SbSenseTupleAvailable && Result.Key == 5);
++    assert(Result.Timing == SbSenseCurrent && Result.TailTruncated);
++    assert(memcmp(Snapshot, Guarded, sizeof(Guarded)) == 0);
++    memcpy(Bytes, DescriptorDeferred, sizeof(DescriptorDeferred));
++    Bytes[0] = 0xf3;
++    Bytes[1] = 0xf7;
++    Result = SbNormalizeSenseHeader(Bytes, 8, 96, 1);
++    assert(Result.Reason == SbSenseTupleAvailable && Result.Key == 7);
++    assert(Result.Timing == SbSenseDeferred && Result.TailTruncated);
++    Unavailable(SbNormalizeSenseHeader(NULL, 96, 96, 0), SbSenseNoAutosense);
++    Unavailable(SbNormalizeSenseHeader(NULL, 1, 0, 1), SbSenseInvalidCount);
++    Unavailable(SbNormalizeSenseHeader(NULL, 97, 97, 1), SbSenseInvalidCount);
++    Unavailable(SbNormalizeSenseHeader(NULL, (size_t)-1, (size_t)-1, 1), SbSenseInvalidCount);
++    Unavailable(SbNormalizeSenseHeader(NULL, 0, 0, 1), SbSenseNoStorage);
++    Unavailable(SbNormalizeSenseHeader(Bytes, 8, 7, 1), SbSenseInvalidCount);
++    for (Extra = 0; Extra <= 255; ++Extra)
++    {
++        if ((Extra & 0x7f) >= 0x70 && (Extra & 0x7f) <= 0x73)
++            continue;
++        Bytes[0] = (unsigned char)Extra;
++        Result = SbNormalizeSenseHeader(Bytes, 96, 96, 1);
++        Unavailable(Result, SbSenseUnknownFormat);
++        assert(Result.Format == SbSenseFormatUnknown && Result.Timing == SbSenseTimingUnknown);
++        assert(Result.DeclaredBytes == 0 && !Result.TailTruncated);
++    }
++    assert(Guarded[0] == 0xa5 && Guarded[97] == 0xa5);
++    puts("sense_header: all tests passed");
++    return 0;
++}
+diff --git a/tests/host/nxstorage-sense/check.py b/tests/host/nxstorage-sense/check.py
+new file mode 100644
+--- /dev/null
++++ b/tests/host/nxstorage-sense/check.py
+@@ -0,0 +1,35 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only
++"""Compile and exercise the actual standalone production sense normalizer."""
++
++import os
++from pathlib import Path
++import shlex
++import subprocess
++import tempfile
++
++
++def main():
++    test_dir = Path(__file__).resolve().parent
++    repo = test_dir.parents[2]
++    production = repo / "drivers/storage/class/nxstorage"
++    compiler = shlex.split(os.environ.get("CC", "cc"))
++    common = compiler + [
++        "-std=c99", "-Wall", "-Wextra", "-Werror", "-pedantic",
++        "-I", str(production),
++        str(production / "sense_header.c"),
++        str(test_dir / "sense_header_test.c"),
++    ]
++    with tempfile.TemporaryDirectory(prefix="nxstorage-sense-") as directory:
++        for name, flags in (
++            ("plain", []),
++            ("sanitized", ["-g", "-fsanitize=address,undefined",
++                           "-fno-omit-frame-pointer"]),
++        ):
++            executable = Path(directory) / name
++            subprocess.run(common + flags + ["-o", str(executable)], check=True)
++            subprocess.run([str(executable)], check=True)
++
++
++if __name__ == "__main__":
++    main()
