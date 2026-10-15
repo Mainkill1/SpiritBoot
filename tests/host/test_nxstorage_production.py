@@ -23,7 +23,8 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0132-nxstorage-freestanding-gcc-checks.patch",
                      "0133-independent-zero-domain-mdl.patch",
                      "0134-independent-native-packet-primitive.patch",
-                     "0135-independent-sense-header-primitive.patch"):
+                     "0135-independent-sense-header-primitive.patch",
+                     "0138-independent-nxdisk-owner.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -60,3 +61,10 @@ class NxStorageProductionTests(unittest.TestCase):
                                    env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
             self.assertEqual(sense.returncode, 0, sense.stdout + sense.stderr)
             self.assertEqual(sense.stdout.count('sense_header: all tests passed'), 2)
+            owner = subprocess.run([sys.executable, str(source / 'tests/host/nxstorage/check_owner.py'),
+                                    str(Path(temporary) / 'owner-output')], text=True,
+                                   capture_output=True, timeout=120,
+                                   env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
+            self.assertEqual(owner.returncode, 0, owner.stdout + owner.stderr)
+            self.assertIn('nxdisk-owner-plain: 9 groups, 0 failures', owner.stdout)
+            self.assertIn('nxdisk-owner-sanitized: 9 groups, 0 failures', owner.stdout)
