@@ -35,6 +35,7 @@ TEXT(label_pal60, "PAL60 preference");
 TEXT(label_audio, "Audio mode");
 TEXT(label_ac3, "Dolby Digital (AC3)");
 TEXT(label_dts, "DTS");
+TEXT(label_contig_cache, "Advanced: contig cache");
 TEXT(label_save, "Save and reboot");
 TEXT(label_continue, "Discard and continue");
 TEXT(text_unknown_preserved, "Unknown (preserved)");
@@ -64,7 +65,8 @@ TEXT(text_no_writes, "No EEPROM writes");
 
 static const char *const labels[SB_ROW_COUNT] SB_INIT_DATA = {
     label_language, label_shape, label_480p, label_720p, label_1080i,
-    label_pal60, label_audio, label_ac3, label_dts, label_save, label_continue
+    label_pal60, label_audio, label_ac3, label_dts, label_contig_cache,
+    label_save, label_continue
 };
 static const char *const languages[] SB_INIT_DATA = {
     text_unknown_preserved, text_english, text_japanese, text_german,
@@ -107,6 +109,10 @@ SB_INIT_CODE static void edit(SbSetup *s, int direction)
     static const uint32_t audio[] SB_INIT_DATA = {0,1,2};
     uint32_t *word, value, mask;
     if ((unsigned)s->row >= SB_FIELD_COUNT || !(s->supported & (1u << s->row))) return;
+    if (s->row == SB_CONTIG_CACHE_ALIAS) {
+        s->edited.experimental ^= SB_EXPERIMENT_CONTIG_CACHE_ALIAS;
+        return;
+    }
     if (s->row == SB_LANGUAGE) {
         s->edited.language = next_value(s->edited.language,lang,9,direction);
         return;
@@ -222,6 +228,8 @@ void sb_setup_field_value(const SbSetup *s, SbSetupRow row, char *out, size_t si
         if (!(s->supported & (1u << row))) text=text_unavailable;
         else if (row == SB_LANGUAGE)
             text=languages[s->edited.language <= 9u ? s->edited.language : 0u];
+        else if (row == SB_CONTIG_CACHE_ALIAS)
+            text=(s->edited.experimental & SB_EXPERIMENT_CONTIG_CACHE_ALIAS) ? text_on : text_off;
         else {
             value = (row < SB_AUDIO_MODE ? s->edited.video : s->edited.audio) & masks[row];
             if (row == SB_ASPECT)

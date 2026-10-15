@@ -136,7 +136,7 @@ static SbCommitResult commit(void *ctx, const SbSettings *old,
     if (f->result==SB_COMMIT_UNCERTAIN) f->hardware.video=value->video ^ 1u;
     return f->result;
 }
-static SbSettings initial(void) { return (SbSettings){1,0x80000010u,0x40000000u}; }
+static SbSettings initial(void) { return (SbSettings){1,0x80000010u,0x40000000u,0}; }
 static void sample(SbSetup *s, uint32_t keys, uint32_t source, bool valid,
                    const SbSettingsStore *store) {
     sb_setup_input(s,input(0,source,keys,valid),store);
@@ -149,7 +149,7 @@ static void row(SbSetup *s, SbSetupRow target) {
     assert(s->row==target);
 }
 static void menu_starts_without_mutation(void) {
-    SbSetup s; SbSettings v={0,0xdeadbeef,0xbaadf00d};
+    SbSetup s; SbSettings v={0,0xdeadbeef,0xbaadf00d,0};
     sb_setup_open(&s,v,SB_ALL_FIELDS);
     assert(sb_setup_changed(&s)==0 && s.state==SB_MENU_EDIT);
     assert(memcmp(&s.edited,&v,sizeof(v))==0);
@@ -186,7 +186,7 @@ static void language_wrap_and_unknown_value(void) {
     SbSetup s; sb_setup_open(&s,initial(),SB_ALL_FIELDS);
     press(&s,SB_LEFT,NULL); assert(s.edited.language==9);
     press(&s,SB_RIGHT,NULL); assert(s.edited.language==1);
-    sb_setup_open(&s,(SbSettings){999,0,0},SB_ALL_FIELDS);
+    sb_setup_open(&s,(SbSettings){999,0,0,0},SB_ALL_FIELDS);
     press(&s,SB_RIGHT,NULL); assert(s.edited.language==1);
 }
 static void video_edit_preserves_unknown_bits(void) {
@@ -210,6 +210,18 @@ static void audio_edit_preserves_unknown_bits(void) {
     row(&s,SB_DTS); press(&s,SB_A,NULL);
     assert(s.edited.audio==(initial().audio|2u|0x30000u));
     assert(sb_setup_changed(&s)==SB_AUDIO_WORD);
+}
+static void advanced_cache_alias_is_session_only(void) {
+    Store f={0}; SbSettingsStore io={&f,commit}; SbSetup s; char text[32];
+    sb_setup_open(&s,initial(),SB_ALL_FIELDS); row(&s,SB_CONTIG_CACHE_ALIAS);
+    press(&s,SB_A,&io);
+    assert(s.edited.experimental==SB_EXPERIMENT_CONTIG_CACHE_ALIAS);
+    assert(sb_setup_changed(&s)==0);
+    sb_setup_field_value(&s,SB_CONTIG_CACHE_ALIAS,text,sizeof(text));
+    assert(strcmp(text,"On")==0);
+    press(&s,SB_B,&io);
+    assert(s.state==SB_MENU_CONTINUE && f.calls==0);
+    assert(s.edited.experimental==SB_EXPERIMENT_CONTIG_CACHE_ALIAS);
 }
 static void unavailable_fields_cannot_be_changed(void) {
     SbSetup s; char text[32]; sb_setup_open(&s,initial(),0);
@@ -352,7 +364,7 @@ static void credits_cannot_leave_uncertain_eeprom_recovery(void) {
 
 static void display_is_bounded_and_unknown_values_are_visible(void) {
     SbSetup s; char b[32], tiny[2]={'!','!'};
-    sb_setup_open(&s,(SbSettings){999,0x110000,3},SB_ALL_FIELDS);
+    sb_setup_open(&s,(SbSettings){999,0x110000,3,0},SB_ALL_FIELDS);
     sb_setup_field_value(&s,SB_LANGUAGE,b,sizeof(b)); assert(strstr(b,"Unknown"));
     sb_setup_field_value(&s,SB_ASPECT,b,sizeof(b)); assert(strstr(b,"Unknown"));
     sb_setup_field_value(&s,SB_AUDIO_MODE,b,sizeof(b)); assert(strstr(b,"Unknown"));
@@ -427,6 +439,7 @@ int main(void) {
     RUN(reconnect_requires_neutral_report); RUN(changing_device_without_disconnect_requires_release);
     RUN(language_wrap_and_unknown_value); RUN(video_edit_preserves_unknown_bits);
     RUN(aspect_modes_are_mutually_exclusive); RUN(audio_edit_preserves_unknown_bits);
+    RUN(advanced_cache_alias_is_session_only);
     RUN(unavailable_fields_cannot_be_changed); RUN(conflicting_buttons_are_ignored);
     RUN(clean_continue_never_calls_writer); RUN(dirty_discard_needs_confirmation_and_never_writes);
     RUN(save_requires_second_press_and_verified_result); RUN(no_change_save_performs_no_write);

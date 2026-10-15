@@ -30,11 +30,14 @@ SB_INIT_CODE void sb_boot_gate_init(SbBootGate *gate, uint32_t now);
 SB_INIT_CODE SbGateResult sb_boot_gate_poll(SbBootGate *gate, SbInput input);
 
 /* Only standardized setting indices 7/8/9; no factory or key material. */
-typedef struct { uint32_t language, video, audio; } SbSettings;
+/* experimental is session-only. It is never written to the console EEPROM. */
+typedef struct { uint32_t language, video, audio, experimental; } SbSettings;
+enum { SB_EXPERIMENT_CONTIG_CACHE_ALIAS=1u, SB_EXPERIMENT_XDVDFS_ASYNC=2u };
 enum { SB_LANGUAGE_WORD=1u, SB_VIDEO_WORD=2u, SB_AUDIO_WORD=4u };
 typedef enum {
     SB_LANGUAGE, SB_ASPECT, SB_480P, SB_720P, SB_1080I, SB_PAL60,
-    SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_FIELD_COUNT,
+    SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_STANDARD_FIELD_COUNT,
+    SB_CONTIG_CACHE_ALIAS=SB_STANDARD_FIELD_COUNT, SB_FIELD_COUNT,
     SB_SAVE=SB_FIELD_COUNT, SB_CONTINUE, SB_ROW_COUNT
 } SbSetupRow;
 #define SB_ALL_FIELDS ((1u << SB_FIELD_COUNT) - 1u)

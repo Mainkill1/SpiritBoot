@@ -1,0 +1,248 @@
+diff --git a/ntoskrnl/xb/boot_setup.c b/ntoskrnl/xb/boot_setup.c
+index 1656eaa0..7961f6ae 100644
+--- a/ntoskrnl/xb/boot_setup.c
++++ b/ntoskrnl/xb/boot_setup.c
+@@ -35,6 +35,7 @@ TEXT(label_pal60, "PAL60 preference");
+ TEXT(label_audio, "Audio mode");
+ TEXT(label_ac3, "Dolby Digital (AC3)");
+ TEXT(label_dts, "DTS");
++TEXT(label_contig_cache, "Advanced: contig cache");
+ TEXT(label_save, "Save and reboot");
+ TEXT(label_continue, "Discard and continue");
+ TEXT(text_unknown_preserved, "Unknown (preserved)");
+@@ -64,7 +65,8 @@ TEXT(text_no_writes, "No EEPROM writes");
+ 
+ static const char *const labels[SB_ROW_COUNT] SB_INIT_DATA = {
+     label_language, label_shape, label_480p, label_720p, label_1080i,
+-    label_pal60, label_audio, label_ac3, label_dts, label_save, label_continue
++    label_pal60, label_audio, label_ac3, label_dts, label_contig_cache,
++    label_save, label_continue
+ };
+ static const char *const languages[] SB_INIT_DATA = {
+     text_unknown_preserved, text_english, text_japanese, text_german,
+@@ -107,6 +109,10 @@ SB_INIT_CODE static void edit(SbSetup *s, int direction)
+     static const uint32_t audio[] SB_INIT_DATA = {0,1,2};
+     uint32_t *word, value, mask;
+     if ((unsigned)s->row >= SB_FIELD_COUNT || !(s->supported & (1u << s->row))) return;
++    if (s->row == SB_CONTIG_CACHE_ALIAS) {
++        s->edited.experimental ^= SB_EXPERIMENT_CONTIG_CACHE_ALIAS;
++        return;
++    }
+     if (s->row == SB_LANGUAGE) {
+         s->edited.language = next_value(s->edited.language,lang,9,direction);
+         return;
+@@ -222,6 +228,8 @@ void sb_setup_field_value(const SbSetup *s, SbSetupRow row, char *out, size_t si
+         if (!(s->supported & (1u << row))) text=text_unavailable;
+         else if (row == SB_LANGUAGE)
+             text=languages[s->edited.language <= 9u ? s->edited.language : 0u];
++        else if (row == SB_CONTIG_CACHE_ALIAS)
++            text=(s->edited.experimental & SB_EXPERIMENT_CONTIG_CACHE_ALIAS) ? text_on : text_off;
+         else {
+             value = (row < SB_AUDIO_MODE ? s->edited.video : s->edited.audio) & masks[row];
+             if (row == SB_ASPECT)
+diff --git a/ntoskrnl/xb/boot_setup.h b/ntoskrnl/xb/boot_setup.h
+index a2ee73fa..7fcfc9b8 100644
+--- a/ntoskrnl/xb/boot_setup.h
++++ b/ntoskrnl/xb/boot_setup.h
+@@ -30,11 +30,14 @@ SB_INIT_CODE void sb_boot_gate_init(SbBootGate *gate, uint32_t now);
+ SB_INIT_CODE SbGateResult sb_boot_gate_poll(SbBootGate *gate, SbInput input);
+ 
+ /* Only standardized setting indices 7/8/9; no factory or key material. */
+-typedef struct { uint32_t language, video, audio; } SbSettings;
++/* experimental is session-only. It is never written to the console EEPROM. */
++typedef struct { uint32_t language, video, audio, experimental; } SbSettings;
++enum { SB_EXPERIMENT_CONTIG_CACHE_ALIAS=1u, SB_EXPERIMENT_XDVDFS_ASYNC=2u };
+ enum { SB_LANGUAGE_WORD=1u, SB_VIDEO_WORD=2u, SB_AUDIO_WORD=4u };
+ typedef enum {
+     SB_LANGUAGE, SB_ASPECT, SB_480P, SB_720P, SB_1080I, SB_PAL60,
+-    SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_FIELD_COUNT,
++    SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_STANDARD_FIELD_COUNT,
++    SB_CONTIG_CACHE_ALIAS=SB_STANDARD_FIELD_COUNT, SB_FIELD_COUNT,
+     SB_SAVE=SB_FIELD_COUNT, SB_CONTINUE, SB_ROW_COUNT
+ } SbSetupRow;
+ #define SB_ALL_FIELDS ((1u << SB_FIELD_COUNT) - 1u)
+diff --git a/ntoskrnl/xb/bootsetup_native.c b/ntoskrnl/xb/bootsetup_native.c
+index 70ff188d..2afd9da0 100644
+--- a/ntoskrnl/xb/bootsetup_native.c
++++ b/ntoskrnl/xb/bootsetup_native.c
+@@ -758,6 +758,7 @@ static BOOLEAN
+ BsLoadSettings(SbSettings *Settings)
+ {
+     ULONG Type, Length;
++    Settings->experimental = 0;
+     return NT_SUCCESS(ExQueryNonVolatileSetting(7, &Type, &Settings->language,
+                                                 sizeof(ULONG), &Length)) &&
+            Type == NVS_DWORD && Length == sizeof(ULONG) &&
+@@ -1009,6 +1010,12 @@ NxkBootSetupRun(VOID)
+         }
+         BsDelayMs(10);
+     }
++    NxkExperimentalFlags = Setup.edited.experimental &
++                           (NXK_EXPERIMENT_CONTIG_CACHE_ALIAS |
++                            NXK_EXPERIMENT_XDVDFS_ASYNC);
++    if (NxkExperimentalFlags)
++        DbgPrint("SpiritBoot experimental flags: %08lx\n",
++                 NxkExperimentalFlags);
+     if (!BsPadClose(&Pad))
+         KeBugCheckEx(PHASE1_INITIALIZATION_FAILED,
+                      STATUS_DEVICE_NOT_READY, 9, 0, 0);
+diff --git a/ntoskrnl/xb/mm/contig.c b/ntoskrnl/xb/mm/contig.c
+index 0a19352b..2270fc25 100644
+--- a/ntoskrnl/xb/mm/contig.c
++++ b/ntoskrnl/xb/mm/contig.c
+@@ -519,8 +519,6 @@ NxMmAllocateContiguousMemoryEx(
+     KIRQL OldIrql;
+     ULONG Slot;
+ 
+-    UNREFERENCED_PARAMETER(Protect);    /* TODO: WC/UC PSE alias selection */
+-
+     NxkMmEnsureXboxWindows();
+ 
+     AllocBytes = (NumberOfBytes + PAGE_SIZE - 1) & ~((SIZE_T)PAGE_SIZE - 1);
+@@ -593,7 +591,9 @@ NxMmAllocateContiguousMemoryEx(
+     }
+ Got:
+     Pa = (ULONG_PTR)Base << PAGE_SHIFT;
+-    Alias = (PVOID)(NXK_KSEG0_BASE | Pa);
++    Alias = (PVOID)(((NxkExperimentalFlags & NXK_EXPERIMENT_CONTIG_CACHE_ALIAS) &&
++                     (Protect & (PAGE_WRITECOMBINE | PAGE_NOCACHE))) ?
++                    (NXK_WC_BASE | Pa) : (NXK_KSEG0_BASE | Pa));
+     NxpRecordHeapContigLocked(Slot, Alias, Pa, AllocBytes);
+     KeReleaseSpinLock(&NxContigLock, OldIrql);
+ 
+@@ -618,8 +618,6 @@ NxMmAllocateContiguousMemoryEx(
+     KIRQL OldIrql;
+     ULONG Slot = 0;
+ 
+-    UNREFERENCED_PARAMETER(Protect);    /* TODO: WC/UC PSE alias selection */
+-
+     NxkMmEnsureXboxWindows();
+ 
+     /* Page-align the request and add headroom for stricter alignment.  We
+@@ -635,7 +633,9 @@ NxMmAllocateContiguousMemoryEx(
+                             HighestAcceptableAddress, Slot);
+     if (Pa != 0)
+     {
+-        Alias = (PVOID)(NXK_KSEG0_BASE | Pa);
++        Alias = (PVOID)(((NxkExperimentalFlags & NXK_EXPERIMENT_CONTIG_CACHE_ALIAS) &&
++                         (Protect & (PAGE_WRITECOMBINE | PAGE_NOCACHE))) ?
++                        (NXK_WC_BASE | Pa) : (NXK_KSEG0_BASE | Pa));
+         NxpRecordHeapContigLocked(Slot, Alias, Pa, AllocBytes);
+         KeReleaseSpinLock(&NxContigLock, OldIrql);
+         DPRINT("MmAllocContig req=%lu got=%lu KB at PA=%08lx (alias %p)\n",
+diff --git a/ntoskrnl/xb/mm/init.c b/ntoskrnl/xb/mm/init.c
+index ce99372e..46a885a8 100644
+--- a/ntoskrnl/xb/mm/init.c
++++ b/ntoskrnl/xb/mm/init.c
+@@ -23,6 +23,8 @@
+ #include <xb-debug.h>
+ 
+ #include "mm.h"
++
++ULONG NxkExperimentalFlags;
+ #include "../../../boot/nxldr/boot-layout.h"
+ #include "../../../boot/nxldr/rom-kernel.h"
+ 
+diff --git a/ntoskrnl/xb/mm/iospace.c b/ntoskrnl/xb/mm/iospace.c
+index 550043b3..5fed3a22 100644
+--- a/ntoskrnl/xb/mm/iospace.c
++++ b/ntoskrnl/xb/mm/iospace.c
+@@ -50,6 +50,9 @@ NxMmGetPhysicalAddress(IN PVOID Va)
+ {
+     ULONG_PTR V = (ULONG_PTR)Va;
+ 
++    if ((NxkExperimentalFlags & NXK_EXPERIMENT_CONTIG_CACHE_ALIAS) &&
++        V >= NXK_WC_BASE && V < NXK_WC_BASE + NXK_KSEG0_RAM_SIZE)
++        return V - NXK_WC_BASE;
+     if (V >= NXK_WC_BASE && V < NXK_MMIO_LIMIT)
+         return V;       /* preserve the device/WC API address contract */
+ 
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index 8e5a7fb8..ef787cb8 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -51,6 +51,12 @@
+ 
+ #define NXK_4MB             0x00400000UL
+ 
++/* Session-only experiments selected from the boot setup menu.  Defaults are
++ * zero so ordinary boots retain the reference-compatible behavior. */
++#define NXK_EXPERIMENT_CONTIG_CACHE_ALIAS 0x00000001UL
++#define NXK_EXPERIMENT_XDVDFS_ASYNC       0x00000002UL
++extern ULONG NxkExperimentalFlags;
++
+ /* i386 page-directory / page-table entry bits.
+  *
+  * NXK_PDE_WC selects IA32_PAT entry 1 (PWT=1, PCD=0, PAT=0), which
+diff --git a/tests/host/contig-retry/fixture.c b/tests/host/contig-retry/fixture.c
+index 1078799e..fb37fcc5 100644
+--- a/tests/host/contig-retry/fixture.c
++++ b/tests/host/contig-retry/fixture.c
+@@ -21,6 +21,10 @@ typedef KIRQL *PKIRQL;
+ #define PAGE_SHIFT 12
+ #define NXK_KSEG0_BASE 0x80000000u
+ #define NXK_KSEG0_RAM_SIZE 0x04000000u
++#define NXK_WC_BASE 0xf0000000u
++#define NXK_EXPERIMENT_CONTIG_CACHE_ALIAS 1u
++#define PAGE_NOCACHE 0x200u
++#define PAGE_WRITECOMBINE 0x400u
+ #define NXK_NV2A_INSTANCE_BASE 0x03fe0000u
+ #define NXK_CONTIG_INITIAL_SLOTS 64
+ #define NXK_CONTIG_TAG 1
+@@ -44,6 +48,7 @@ static KSPIN_LOCK NxContigLock;
+ static int contigHeld, pfnHeld, lockErrors, actor, attempts, runTakes;
+ static int ordinary, reclaimZero, freeOther, growthFail, retryFail, retryRelocate;
+ static PVOID competitor;
++ULONG NxkExperimentalFlags;
+ static void KeAcquireSpinLock(KSPIN_LOCK *lock, PKIRQL old) {
+     (void)lock; *old = 0;
+     if (contigHeld || pfnHeld) ++lockErrors;
+@@ -107,8 +112,11 @@ static int check(const char *name, int success, int grow, int expectedTakes) {
+     NxContigTable[1] = (NXK_CONTIG_ENTRY){(void *)(uintptr_t)0x80100000,0x100000,0x102000,8192};
+     contigHeld = pfnHeld = lockErrors = attempts = runTakes = 0;
+     actor = 1; competitor = NULL;
+-    PVOID result = NxMmAllocateContiguousMemoryEx(5000,0x100000,0xffffffff,8192,0);
+-    int ok = result == (success ? (void *)(uintptr_t)0x80300000 : NULL);
++    ULONG protect = NxkExperimentalFlags ? PAGE_WRITECOMBINE : 0;
++    PVOID result = NxMmAllocateContiguousMemoryEx(5000,0x100000,0xffffffff,8192,protect);
++    PVOID expected = NxkExperimentalFlags ? (void *)(uintptr_t)0xf0300000 :
++                                             (void *)(uintptr_t)0x80300000;
++    int ok = result == (success ? expected : NULL);
+     if (!ordinary) {
+         ok &= competitor == (void *)(uintptr_t)0x80200000;
+         ok &= NxMmQueryAllocationSize(competitor) == 8192;
+@@ -135,7 +143,9 @@ int main(void) {
+     failures += check("zero-page reclaim returns without replacing concurrent ownership",0,0,1);
+     reclaimZero = 0; ordinary = 1;
+     failures += check("ordinary success records the rounded allocation extent",1,0,1);
+-    ordinary = 0; retryRelocate = 1;
++    NxkExperimentalFlags = NXK_EXPERIMENT_CONTIG_CACHE_ALIAS;
++    failures += check("advanced WC toggle returns the write-combined alias",1,0,1);
++    NxkExperimentalFlags = 0; ordinary = 0; retryRelocate = 1;
+     failures += check("relocation retry also records in a fresh tracking slot",1,0,2);
+     if (NxContigTable != NxContigInitial) free(NxContigTable);
+     return failures ? 1 : 0;
+diff --git a/tests/host/physical-address/check.py b/tests/host/physical-address/check.py
+index bf1f310d..62bb574a 100644
+--- a/tests/host/physical-address/check.py
++++ b/tests/host/physical-address/check.py
+@@ -45,7 +45,9 @@ static MMPTE ptes[1024][1024];
+ #define NXK_PHYS_MASK 0x03ffffffu
+ #define NXK_WC_BASE 0xf0000000u
+ #define NXK_MMIO_LIMIT 0xffc00000u
++#define NXK_EXPERIMENT_CONTIG_CACHE_ALIAS 1u
+ #define PAGE_SIZE 4096
++static ULONG NxkExperimentalFlags;
+ '''
+ c += "\nPHYSICAL_ADDRESS NTAPI MmGetPhysicalAddress(IN PVOID Address)\n" + body("ntoskrnl/xb/mm/fault.c", "MmGetPhysicalAddress")
+ c += "\nULONG_PTR NTAPI NxMmGetPhysicalAddress(IN PVOID Va)\n" + body("ntoskrnl/xb/mm/iospace.c", "NxMmGetPhysicalAddress")
+@@ -80,6 +82,9 @@ int main(void) {
+     small(0xd0001000, 0x00401000);
+     check("system-memory aperture", 0xd0001234, 0x00401234);
+     check("WC aperture contract unchanged", 0xf0001234, 0xf0001234);
++    NxkExperimentalFlags = NXK_EXPERIMENT_CONTIG_CACHE_ALIAS;
++    check("advanced WC RAM alias reports underlying physical address", 0xf0001234, 0x00001234);
++    check("advanced mode preserves device MMIO identity", 0xf8001234, 0xf8001234);
+     return failures ? 1 : 0;
+ }
+ '''
