@@ -26,7 +26,8 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0135-independent-sense-header-primitive.patch",
                      "0138-independent-nxdisk-owner.patch",
                      "0139-independent-nxcdrom-profile.patch",
-                     "0140-independent-native-storage-adapter.patch"):
+                     "0140-independent-native-storage-adapter.patch",
+                     "0141-lower-cache-integration.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -49,7 +50,7 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertIn('13 scenarios, 6001 checks', result.stdout)
             self.assertIn('20 passed; 0 failed', result.stdout)
             self.assertIn('16 adapter scenarios, 61973 checks', result.stdout)
-            self.assertIn('32 passed; 0 failed', result.stdout)
+            self.assertIn('34 passed; 0 failed', result.stdout)
             self.assertIn('production checks passed', result.stdout)
             packet = subprocess.run([sys.executable, str(source / 'tests/host/nxstorage/check_packet.py'),
                                      str(Path(temporary) / 'packet-output')], text=True,
@@ -75,8 +76,8 @@ class NxStorageProductionTests(unittest.TestCase):
                                      capture_output=True, timeout=120,
                                      env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
             self.assertEqual(adapter.returncode, 0, adapter.stdout + adapter.stderr)
-            self.assertIn('adapter-plain: 25 adapter groups, 0 failures', adapter.stdout)
-            self.assertIn('adapter-sanitized: 25 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-plain: 26 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-sanitized: 26 adapter groups, 0 failures', adapter.stdout)
 
             driver = (source / 'drivers/storage/class/nxstorage/driver.c').read_text()
             self.assertIn('ZwCreateDirectoryObject(&context->object_directory', driver)
@@ -84,3 +85,34 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertLess(driver.index('ZwCreateDirectoryObject(&context->object_directory'),
                             driver.index('NxNativeCreateClassDevice(context->driver'))
             self.assertIn('driver->MajorFunction[IRP_MJ_PNP]=NxNativeDispatchPnp', driver)
+
+    def test_locked_lower_cache_route_uses_real_transaction_facts(self):
+        lock = json.loads((ROOT / 'sources/firmware-lock.json').read_text())
+        entry = next(item for item in lock['repositories']['roswell']['patches']
+                     if item['path'] == 'patches/roswell/0141-lower-cache-integration.patch')
+        data = (ROOT / entry['path']).read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(), entry['sha256'])
+        patch = data.decode()
+        added = '\n'.join(line[1:] for line in patch.splitlines()
+                          if line.startswith('+') and not line.startswith('+++'))
+        self.assertIn('#include "native_hook.inc"', patch)
+        self.assertIn('case StorageDeviceWriteCacheProperty:', patch)
+        self.assertIn('NxAtapiWriteCachePropertyEndpoint(DevExt, Irp, IoStack)', patch)
+        self.assertIn('*ForwardToFdo = FALSE; /* This PDO owns local endpoint completion. */', patch)
+        self.assertIn('Irp->IoStatus.Information = 0;', patch)
+        self.assertIn('PDO dispatch remains the sole completion owner', patch)
+        self.assertIn('IoCompleteRequest(Irp, IO_NO_INCREMENT);', patch)
+        self.assertIn('IoReleaseRemoveLock(&DevExt->Common.RemoveLock, Irp); /* Common epilogue. */', patch)
+        self.assertIn('NxAtapiCacheTrack(DevExt, Request)', patch)
+        self.assertIn('NxAtapiCacheStart(', patch)
+        self.assertIn('NxAtapiCacheStoreResult(Request, NxAtapiCacheRawResult(Request))', patch)
+        self.assertIn('NxAtapiCachePublish(DevExt, IdentityResult)', patch)
+        self.assertIn('NxAtapiCachePublish(DevExt, NxAtapiCacheLoadResult(Request))', patch)
+        self.assertIn('AtaPortRevokeCachePublication(PortData, MAXULONG)', patch)
+        self.assertIn('C_ASSERT(sizeof(((PATA_DEVICE_REQUEST)0)->NxCacheWriter) == 12)', patch)
+        self.assertIn('actual_pdo_write_cache_endpoint', patch)
+        self.assertNotIn('NxAtapiCachePublishIdentity', added)
+        self.assertNotIn('nx_lcq_result_copy(&w,SRB_STATUS_SUCCESS', added)
+        self.assertNotIn('refresh_cache_qualification', added)
+        self.assertNotIn('cache_epoch', added)
+        self.assertNotIn('core.config.cache=', added)
