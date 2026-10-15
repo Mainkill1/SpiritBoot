@@ -67,5 +67,15 @@ Ran 504 tests in 449.474s
 OK (skipped=26)
 ```
 
+## Integrated coverage follow-up
+
+At integrated head `058442d8e1ede5511941f9042f330919a85d655f`, the exact
+production harness expanded the already-cancelled data request case into an
+explicit read/write and inline/delayed matrix. Each of the four cases requires
+zero lower submissions, one cancelled parent completion, and zero completed
+bytes. Both plain and sanitized adapter modes passed all 24 groups. The
+production body already met these assertions, so this follow-up changed only
+the owned test and its locked patch identity.
+
 These host checks cover deterministic fault and cancellation boundaries. They
 do not add native hardware, performance, durability, or legal qualification.

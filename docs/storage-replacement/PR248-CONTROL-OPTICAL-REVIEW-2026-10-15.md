@@ -57,5 +57,6 @@ The complete assembled owned nxstorage checker also passed its request,
 threaded, cache, lower-query, profile, and publication suites before export.
 The repository host suite passed 504 tests with 26 declared skips, and the
 focused storage migration gate passed all 35 tests.
-Patch 0140 now hashes to
-`7059e982c881d0d2d120ae40f9c56d23e4826522d5d910f9e74c53a186a42709`.
+The patch 0140 hash captured during this isolated review was a pre-integration
+identity. The authoritative current hash is the value recorded in
+`sources/firmware-lock.json`.
