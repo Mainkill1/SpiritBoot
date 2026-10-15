@@ -1,8 +1,8 @@
 # Complete-candidate storage source and license map
 
 This map binds the storage-class replacement in assembled Roswell tree
-`920af8da4535d5adbb2018d388a8cc814cd479e7` to the exact release64 image
-`037950f7a00fc2a7a5faeb12fd46d61b0697819ca6852b94b2f808cdffef8ef6`.
+`5e427e695c7790966191ed8a0a56b10a441c6ab8` to the exact release64 image
+`3a273ba1f213bb2523dddfcf4755071403784f1e25affacef4a4a7b48d47f895`.
 It inventories the storage replacement by compiled unit and function group. It
 is source-review evidence, not legal advice or a substitute for the final
 whole-image provenance review.
@@ -20,7 +20,7 @@ into the retained GPL PartMgr archive.
 | --- | --- | --- |
 | `request.c` | Request validation and initialization; `nx_start`; command construction; bounded pump; result capture; `nx_lower_done`; `nx_cancel` | `0a151418c7f42fe50be83bf216a0da1862ed8dd931e5d3826e2707078b368b30` |
 | `native_packet.c` | MDL/data-range validation; `nx_packet_prepare`; `nx_packet_capture`; owned SRB/IRP field population | `8f278db3fcd78075d56c5154d508c12e57642f05c56be5590399e68f09f4ab35` |
-| `native_adapter.c` | Port callbacks; envelope/slot lifetime; child completion and cancellation; adapter initialization/seal/submit; class-device creation; read/write, flush, PnP, and control dispatch | `f38fe5e77bd0918e9a884fb319cdf42e6c1476da3a532fe8c1f8cb0104cfe717` |
+| `native_adapter.c` | Port callbacks; envelope/slot lifetime; child completion and cancellation; adapter initialization/seal/submit; class-device creation; read/write, flush, PnP, and control dispatch | `f33e1b37c9cb2d1c04bb9c69edce5651cb75e9ae122259a30c47ba49e4bff46c` |
 | `driver.c` | Status translation; disk object-directory ownership; class creation/seal; owner forwarding; default dispatch; AddDevice; driver installation; public `DiskDriverEntry` and `CdromDriverEntry` | `6c971abfcc8394d1652aa0daead9313c40a2cb2b9f9284e21d269a32fb59da21` |
 | `geometry_composer.c` | Public geometry response validation and bounded initialized-prefix composition | `9aa37527ca497180337a58216e11d3b458fe2cec06c484618c62ce756876cfc9` |
 | `geometry_owner_adapter.c` | PartMgr basic-geometry query and extended-geometry owner snapshot/composition | `173e60a70d5ca0bb6b4651c70e162a118647c34bb84d3846c89062d1c6a29fc1` |
