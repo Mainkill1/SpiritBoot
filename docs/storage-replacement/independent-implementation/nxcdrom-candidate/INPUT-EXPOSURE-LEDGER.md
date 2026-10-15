@@ -1,6 +1,6 @@
 # Optical candidate input exposure ledger
 
-Author: `/root/pr248_optical_driver_impl`  
+Author: `/root/pr248_optical_driver_impl`
 Product base: `7215382c7ca5545b7baa38c26cc868b0d57687bb`
 
 This author did not open a legacy `nxcdrom`, ClassPnP, or disk-class
