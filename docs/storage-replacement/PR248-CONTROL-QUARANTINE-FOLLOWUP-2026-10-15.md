@@ -40,6 +40,6 @@ adapter-plain: 25 adapter groups, 0 failures
 adapter-sanitized: 25 adapter groups, 0 failures
 ```
 
-The owned `nxstorage` suite also passes all 44 request tests, eight pthread
+The owned `nxstorage` suite also passes all 45 request tests, eight pthread
 scenarios, geometry checks, cache checks, and owner checks. Patch `0140` has
-SHA-256 `b053febe20a7cafba474f5ae21271dc5f881ad7ca40cf1e31c7e0031ee0056c8`.
+SHA-256 `4d531813949f9f123c0281061063b93967458c6f6ed99d30465409c5e22592da`.

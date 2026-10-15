@@ -1,28 +1,54 @@
 {
   "api_xiso": {
     "bytes": 1114112,
-    "sha256": "07596d9a17ec86dc0e60728523a4ddfbdb60af0df45cc71bc796e598ea87ffbc"
+    "sha256": "b7ff416765d1a8aa895d0885b805a5a05a51c19761a116df0bf46b33c5e472a7"
   },
-  "firmware_lock_sha256": "da9bf4295cfcc4e757b6fecf74d914ebcbedd4d312c3eed9cf312c2249676607",
+  "firmware_lock_sha256": "0a6d7065cbcc5e07bb7e0c7689f4dbced175b1925d536556754668ca693697c1",
   "fixtures": {
     "hdd_sha256": "00d7df7a2bc235f8801764f00b7f40e194d1e392f7a9619d6b2396c89770f6dd",
     "xemu_appimage_sha256": "e10b192a0402c7624525651ac7631dd7764e6a1b26d67fbb85ef8a4fdd563301",
     "xemu_binary_sha256": "3790019a2ccab47df1f67982e05856b2a345ec8ce5393967d1ed2187528aada2",
     "xemu_revision": "458730bf5373f1f0d027450fef7443e3af7a3ae1"
   },
+  "focused_host": {
+    "adapter_groups_plain": 26,
+    "adapter_groups_sanitized": 26,
+    "cache_query_groups": 20,
+    "failures": 0,
+    "geometry_groups": 13,
+    "lower_publication_groups": 34,
+    "owner_groups": 16,
+    "production_wrapper_tests": 2,
+    "pthread_scenarios": 8,
+    "request_engine_groups": 45
+  },
+  "full_host_suite": {
+    "elapsed_seconds": 455.671,
+    "failures": 0,
+    "ran": 505,
+    "skipped": 26
+  },
+  "implementation_code_head": "6bc7bd3c2b07b77b7067b33019503f2741ad975a",
   "limits": [
-    "Build preflight is bounded evidence, not a legal certification.",
-    "Physical Xbox, media-swap, reset/pool-stability, and paired performance coverage remain open."
+    "Build preflight is bounded engineering evidence, not a legal certification.",
+    "Physical Xbox, paired exact-candidate performance, and independent whole-image provenance/legal review remain outside this resolution and keep the PR in draft."
   ],
-  "patch_0140_sha256": "3fbb56932fb36685e9b00b07c0ebc14d152589fe958babd59c6ed3173abeb9df",
+  "migration_gate_unit_tests": {
+    "failures": 0,
+    "ran": 35
+  },
+  "patches": {
+    "0140-independent-native-storage-adapter.patch": "4d531813949f9f123c0281061063b93967458c6f6ed99d30465409c5e22592da",
+    "0141-lower-cache-integration.patch": "cadc6fc0491712900f4fa1ca8e519458fe75f8062a8fac5f317181b9a57677ae"
+  },
   "profiles": {
     "debug128": {
       "api_runtime": {
-        "dvd_sha256": "07596d9a17ec86dc0e60728523a4ddfbdb60af0df45cc71bc796e598ea87ffbc",
-        "elapsed_seconds": 16.694,
-        "flash_sha256": "3d9be11f1b2a2e8290b76a5d9c6368ebcf7a23f3e89954dbfc0bd15623623b4c",
+        "dvd_sha256": "b7ff416765d1a8aa895d0885b805a5a05a51c19761a116df0bf46b33c5e472a7",
+        "elapsed_seconds": 16.641,
+        "flash_sha256": "ef99a89e607c52d339196aa491927971fa5c6f98c10c73c9666ecae1815a3185",
         "hdd_sha256": "00d7df7a2bc235f8801764f00b7f40e194d1e392f7a9619d6b2396c89770f6dd",
-        "started_utc": "2026-10-15T18:57:32Z",
+        "started_utc": "2026-10-15T19:50:25Z",
         "status": "passed",
         "tap": {
           "errors": [],
@@ -38,13 +64,13 @@
       },
       "flash": {
         "bytes": 524288,
-        "sha256": "3d9be11f1b2a2e8290b76a5d9c6368ebcf7a23f3e89954dbfc0bd15623623b4c"
+        "sha256": "ef99a89e607c52d339196aa491927971fa5c6f98c10c73c9666ecae1815a3185"
       },
-      "kernel_final_sha256": "e00b63691a5a3d61a8ae3bc37180e4ff3bb8019e1741412634865e9a2312b3d6",
-      "kernel_unstripped_sha256": "37619bd81e0021c921957ef74bc7f672695765aeab6a40e26761f3b91e404a2f",
-      "linker_map_sha256": "e4804737f57d6134a18ada28c782d0ae65bf773d91a725fc78345fd52a3a933c",
+      "kernel_final_sha256": "cfad6346e54c20b3493f24bfed32ca8c53eed3e987c5305e36fd6c3012a762b8",
+      "kernel_unstripped_sha256": "c10e54c30cf81e2aa659217b17175b298fac0b1c244ecfb34cb013054cf0a943",
+      "linker_map_sha256": "2bcc615627bee662b0b25ddb19d3381ca3de701305b85ac4563bd61dab4014c4",
       "memory_mib": 128,
-      "source_tree": "5e427e695c7790966191ed8a0a56b10a441c6ab8",
+      "source_tree": "abebfef7a717e0379057b5087b8ff71e75279018",
       "storage_preflight": {
         "checks": [
           {
@@ -81,6 +107,7 @@
           "memcmp",
           "mountmgr",
           "ntoskrnl_vista",
+          "nxcache",
           "nxstorage",
           "partmgr",
           "pci",
@@ -98,16 +125,16 @@
         "passed": true,
         "scope": "PRECHECK_ONLY_NOT_LICENSE_CERTIFICATION"
       },
-      "storage_symbols_sha256": "931f1a933093073eac4a1e0c4ae2dae46d7a2a40585c9b18198152f43277ee48",
+      "storage_symbols_sha256": "15acb9358bbcef3e94897aafcc09491e4c0208b0304e1ee6dfc70521882eae9e",
       "variant": "debug"
     },
     "debug64": {
       "api_runtime": {
-        "dvd_sha256": "07596d9a17ec86dc0e60728523a4ddfbdb60af0df45cc71bc796e598ea87ffbc",
-        "elapsed_seconds": 16.644,
-        "flash_sha256": "90d46ef658aa9a355cd53948d4216b6c63c59aa920ce963ae20e4539fbb27798",
+        "dvd_sha256": "b7ff416765d1a8aa895d0885b805a5a05a51c19761a116df0bf46b33c5e472a7",
+        "elapsed_seconds": 16.792,
+        "flash_sha256": "5cf32acc210781f7a8337b94f5deff45b73b381d1b9777329a85d171f67d13bb",
         "hdd_sha256": "00d7df7a2bc235f8801764f00b7f40e194d1e392f7a9619d6b2396c89770f6dd",
-        "started_utc": "2026-10-15T18:57:15Z",
+        "started_utc": "2026-10-15T19:50:08Z",
         "status": "passed",
         "tap": {
           "errors": [],
@@ -123,13 +150,13 @@
       },
       "flash": {
         "bytes": 524288,
-        "sha256": "90d46ef658aa9a355cd53948d4216b6c63c59aa920ce963ae20e4539fbb27798"
+        "sha256": "5cf32acc210781f7a8337b94f5deff45b73b381d1b9777329a85d171f67d13bb"
       },
-      "kernel_final_sha256": "8cf5c4010e6b63197ba1da90a80f15a17af13ef6312ac378e4f3bf4e4955a243",
-      "kernel_unstripped_sha256": "1cd24e52c278f4594e451054051526dfeddff00dcab86ef5a131801b84533eaf",
-      "linker_map_sha256": "932dbaab363cb856309d174bf8659d49c84c64aa834320e5b23f52bb66ae67eb",
+      "kernel_final_sha256": "4431667fba3b079701a46bf577cb020dba0fdd88c74b9fb1210cd0962fb11579",
+      "kernel_unstripped_sha256": "bac45f21f6b880e9461863b9b180d8e3d7c73a34686c462fe16131919eafa266",
+      "linker_map_sha256": "40f865f0f22d54187fe93a3083a5a4513855b690cdde1bc36715de61ca99b425",
       "memory_mib": 64,
-      "source_tree": "5e427e695c7790966191ed8a0a56b10a441c6ab8",
+      "source_tree": "abebfef7a717e0379057b5087b8ff71e75279018",
       "storage_preflight": {
         "checks": [
           {
@@ -166,6 +193,7 @@
           "memcmp",
           "mountmgr",
           "ntoskrnl_vista",
+          "nxcache",
           "nxstorage",
           "partmgr",
           "pci",
@@ -183,16 +211,16 @@
         "passed": true,
         "scope": "PRECHECK_ONLY_NOT_LICENSE_CERTIFICATION"
       },
-      "storage_symbols_sha256": "d6ddb707d1a00d66058556791cd1e4b6270d2fe44f52ea6110991f78ac1b251d",
+      "storage_symbols_sha256": "ee2563a143974e0842f61dbcb24998ad773261ddb38adcd945475ffc0ad7b206",
       "variant": "debug"
     },
     "release128": {
       "api_runtime": {
-        "dvd_sha256": "07596d9a17ec86dc0e60728523a4ddfbdb60af0df45cc71bc796e598ea87ffbc",
-        "elapsed_seconds": 16.546,
-        "flash_sha256": "d35a5bca5cd0d60fdc0764012a9525724bd0481d8589ac837c8ef089c2ca23e0",
+        "dvd_sha256": "b7ff416765d1a8aa895d0885b805a5a05a51c19761a116df0bf46b33c5e472a7",
+        "elapsed_seconds": 16.589,
+        "flash_sha256": "b2de51291b6231e25fd6f1fda7db607595c94673f8312a78f02833825863931a",
         "hdd_sha256": "00d7df7a2bc235f8801764f00b7f40e194d1e392f7a9619d6b2396c89770f6dd",
-        "started_utc": "2026-10-15T18:56:59Z",
+        "started_utc": "2026-10-15T19:49:51Z",
         "status": "passed",
         "tap": {
           "errors": [],
@@ -208,13 +236,13 @@
       },
       "flash": {
         "bytes": 262144,
-        "sha256": "d35a5bca5cd0d60fdc0764012a9525724bd0481d8589ac837c8ef089c2ca23e0"
+        "sha256": "b2de51291b6231e25fd6f1fda7db607595c94673f8312a78f02833825863931a"
       },
-      "kernel_final_sha256": "ac8b09d92aea5e4ac98df8c866cbf5448f2aaccf470c61877ce83e76d2b31a15",
-      "kernel_unstripped_sha256": "68b9cae3a694e26c20e9b18df14e0d644ce636e36c65a822afe2f07d216a4abe",
-      "linker_map_sha256": "719de9ee844c65a5f17e1d0a935c575ab88b925e66313231ba2c40550edb7822",
+      "kernel_final_sha256": "965209af51490d4aa0b5f303885a72f70776685f2639bfe2127e6c70183d58d4",
+      "kernel_unstripped_sha256": "129549def4b26a3ee4e37a02b75d74fe1ae75065df28333cd8a4e08cc1755c73",
+      "linker_map_sha256": "e90b35734fa3589aa4bb0114e6eff3631ddce1d4c15233dfaae1827270326364",
       "memory_mib": 128,
-      "source_tree": "5e427e695c7790966191ed8a0a56b10a441c6ab8",
+      "source_tree": "abebfef7a717e0379057b5087b8ff71e75279018",
       "storage_preflight": {
         "checks": [
           {
@@ -251,6 +279,7 @@
           "memcmp",
           "mountmgr",
           "ntoskrnl_vista",
+          "nxcache",
           "nxstorage",
           "partmgr",
           "pci",
@@ -268,16 +297,16 @@
         "passed": true,
         "scope": "PRECHECK_ONLY_NOT_LICENSE_CERTIFICATION"
       },
-      "storage_symbols_sha256": "5d4c9d8b2147e48a3d81314e85bbc15854d35509e3a53d77121ef98a389c1b0c",
+      "storage_symbols_sha256": "0c32a6cfc07cbc2f259a83a6bd358f67fa5d7e7bfbd5543f8992cf62a9ee106e",
       "variant": "release"
     },
     "release64": {
       "api_runtime": {
-        "dvd_sha256": "07596d9a17ec86dc0e60728523a4ddfbdb60af0df45cc71bc796e598ea87ffbc",
-        "elapsed_seconds": 16.392,
-        "flash_sha256": "3a273ba1f213bb2523dddfcf4755071403784f1e25affacef4a4a7b48d47f895",
+        "dvd_sha256": "b7ff416765d1a8aa895d0885b805a5a05a51c19761a116df0bf46b33c5e472a7",
+        "elapsed_seconds": 16.592,
+        "flash_sha256": "cff12e2cd1b1af1faf0060b676d8ffc37f8256400b12edfe5ad3b2a191943db9",
         "hdd_sha256": "00d7df7a2bc235f8801764f00b7f40e194d1e392f7a9619d6b2396c89770f6dd",
-        "started_utc": "2026-10-15T18:56:42Z",
+        "started_utc": "2026-10-15T19:49:35Z",
         "status": "passed",
         "tap": {
           "errors": [],
@@ -293,13 +322,13 @@
       },
       "flash": {
         "bytes": 524288,
-        "sha256": "3a273ba1f213bb2523dddfcf4755071403784f1e25affacef4a4a7b48d47f895"
+        "sha256": "cff12e2cd1b1af1faf0060b676d8ffc37f8256400b12edfe5ad3b2a191943db9"
       },
-      "kernel_final_sha256": "05dd6b893911fd823a4d3e7ba2c657b44495ece075440adb6d6ba3db591090c5",
-      "kernel_unstripped_sha256": "8b8b5887327cc82f56a7e1838d9f5890c2abe8ba932eea4bdb06cc3ea7dabfd4",
-      "linker_map_sha256": "ef58cc94de1572697bf1b5a567a031bda0ff02f187fdba13b179ae247d045f3c",
+      "kernel_final_sha256": "f1b8616ba8e80efcb13e434d6d43830b4b9dcf099c3edcc90a499f1a8efbfffe",
+      "kernel_unstripped_sha256": "2b629a3368f647d395efe4415a88f2de5a825d677f3e5f3ba48cf7f5564b3974",
+      "linker_map_sha256": "e0d69f2619a56185010ee629841658c9b77be998f1c32b838c8cb5843e44d959",
       "memory_mib": 64,
-      "source_tree": "5e427e695c7790966191ed8a0a56b10a441c6ab8",
+      "source_tree": "abebfef7a717e0379057b5087b8ff71e75279018",
       "storage_preflight": {
         "checks": [
           {
@@ -336,6 +365,7 @@
           "memcmp",
           "mountmgr",
           "ntoskrnl_vista",
+          "nxcache",
           "nxstorage",
           "partmgr",
           "pci",
@@ -353,12 +383,13 @@
         "passed": true,
         "scope": "PRECHECK_ONLY_NOT_LICENSE_CERTIFICATION"
       },
-      "storage_symbols_sha256": "a0f52d840143d49df1efd698df3d5287f158cdb7e56b1c51d7f9c2a2328e1657",
+      "storage_symbols_sha256": "97ae6cea6a0b02b7719d05147c4f264b6a254d11eed0bee41a092f42057b2715",
       "variant": "release"
     }
   },
   "review_comment": "https://github.com/Mainkill1/SpiritBoot/pull/248#issuecomment-6198942417",
-  "schema": 1,
+  "reviewed_head": "143b38ac41bafb937b269b9aea5c8bd39bd51768",
+  "schema": 2,
   "scope": "PR248_SECOND_PASS_ENGINEERING_QUALIFICATION_NOT_LEGAL_CERTIFICATION",
-  "source_tree": "5e427e695c7790966191ed8a0a56b10a441c6ab8"
+  "source_tree": "abebfef7a717e0379057b5087b8ff71e75279018"
 }
