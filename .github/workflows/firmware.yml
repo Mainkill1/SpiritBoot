@@ -63,7 +63,13 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/nxstorage/check.py" "$output/nxstorage" >"$output/nxstorage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
+            if ninja -C "$GUEST_BUILD" -t commands classpnp >/dev/null 2>&1; then
+              python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
+            else
+              storage_backend=$(sed -n "s/^NXK_STORAGE_BACKEND:STRING=//p" "$GUEST_BUILD/CMakeCache.txt")
+              test "$storage_backend" = complete-candidate
+              echo "SKIP: complete-candidate has no legacy classpnp target" >"$output/class-errorlog-layout.log"
+            fi
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check.py" "$output/upper-ram-reservation" >"$output/upper-ram-reservation.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" --storage-backend complete-candidate --source-tree "$actual_tree" --link-recorder /work/tools/storage_link_record.py --artifact-recorder /work/tools/storage_artifact_record.py >"$output/upper-ram-config.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/warm-stage/check.py" >"$output/warm-stage.log" 2>&1
