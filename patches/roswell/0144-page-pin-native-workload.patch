@@ -1,0 +1,187 @@
+diff --git a/tests/xbe/page-pin-performance/Makefile b/tests/xbe/page-pin-performance/Makefile
+new file mode 100644
+index 00000000..ada7f7f9
+--- /dev/null
++++ b/tests/xbe/page-pin-performance/Makefile
+@@ -0,0 +1,5 @@
++XBE_TITLE = page-pin-performance
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /home/codex/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/../sg-performance/tap.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/page-pin-performance/README.md b/tests/xbe/page-pin-performance/README.md
+new file mode 100644
+index 00000000..e7d771a0
+--- /dev/null
++++ b/tests/xbe/page-pin-performance/README.md
+@@ -0,0 +1,14 @@
++# Physical page-pin and scatter performance
++
++This release-only native workload separates the scalar physical-page lock path
++from scatter/gather validation and cleanup. Seven samples cover accepted and
++rejected physical pins, sustained accepted 64-page gathers, and gathers
++rejected after 32 or 64 accepted pages. The accepted interval transfers 512 MiB
++per sample so short host-I/O jitter cannot dominate the page-pin comparison.
++Every rejected gather is followed by another accepted control. Final
++exact-range reallocation proves that physical and scatter pins were released
++before the guest reports success.
++
++`PIN-PERF` records use `KeQueryPerformanceCounter`; callers must compare
++alternating runs of the same XISO, release firmware, xemu, HDD, and memory
++profile. Do not subtract the physical-reject control from other workloads.
+diff --git a/tests/xbe/page-pin-performance/main.c b/tests/xbe/page-pin-performance/main.c
+new file mode 100644
+index 00000000..1a393faf
+--- /dev/null
++++ b/tests/xbe/page-pin-performance/main.c
+@@ -0,0 +1,150 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include <xboxkrnl/xboxkrnl.h>
++#include "../sg-performance/tap.h"
++#include <stdbool.h>
++#include <stdint.h>
++#include <string.h>
++
++#define MAX_PAGES 65
++#define SAMPLES 7
++#define PHYSICAL_ITERATIONS 1048576
++#define SCATTER_ACCEPT_ITERATIONS 2048
++#define SCATTER_REJECT_ITERATIONS 2048
++
++typedef NTSTATUS (NTAPI *GATHER)(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,
++    PIO_STATUS_BLOCK,PFILE_SEGMENT_ELEMENT,ULONG,PLARGE_INTEGER);
++
++static PUCHAR source;
++static PVOID invalid_page;
++static FILE_SEGMENT_ELEMENT segments[MAX_PAGES + 1];
++static ULONG checks, failures, checksum;
++static const char path[] = "\\Device\\Harddisk0\\Partition1\\page-pin-performance.tmp";
++
++static void mix(ULONG value) { checksum = (checksum ^ value) * 16777619U; }
++static void check(bool value, const char *name) {
++    ++checks;
++    if (value) tap_ok(checks, name);
++    else { tap_not_ok(checks, name); ++failures; }
++}
++static bool open_file(HANDLE *handle) {
++    ANSI_STRING name = {(USHORT)(sizeof(path)-1),(USHORT)sizeof(path),(PCHAR)path};
++    OBJECT_ATTRIBUTES attributes = {0}; IO_STATUS_BLOCK io;
++    attributes.ObjectName = &name; attributes.Attributes = OBJ_CASE_INSENSITIVE;
++    return NtCreateFile(handle, GENERIC_READ|GENERIC_WRITE|SYNCHRONIZE,
++        &attributes, &io, NULL, FILE_ATTRIBUTE_NORMAL, 0, FILE_SUPERSEDE,
++        FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE|
++        FILE_NO_INTERMEDIATE_BUFFERING) == STATUS_SUCCESS;
++}
++static void prepare_segments(ULONG valid, bool reject) {
++    for (ULONG i=0; i<valid; ++i) {
++        segments[i].Alignment=0; segments[i].Buffer=source+i*PAGE_SIZE;
++    }
++    if (reject) {
++        segments[valid].Alignment=0; segments[valid].Buffer=invalid_page;
++        ++valid;
++    }
++    segments[valid].Alignment=0; segments[valid].Buffer=NULL;
++}
++static NTSTATUS gather(HANDLE file, ULONG pages, PIO_STATUS_BLOCK io) {
++    LARGE_INTEGER offset={0};
++    memset(io,0,sizeof(*io));
++    return ((GATHER)NtWriteFileGather)(file,NULL,NULL,NULL,io,segments,
++        pages*PAGE_SIZE,&offset);
++}
++static bool accepted_control(HANDLE file, ULONG pages) {
++    IO_STATUS_BLOCK io; prepare_segments(pages,false);
++    NTSTATUS status=gather(file,pages,&io);
++    return status==STATUS_SUCCESS && io.Status==STATUS_SUCCESS &&
++        io.Information==pages*PAGE_SIZE;
++}
++static void record(const char *name, ULONG sample, ULONG iterations,
++                   ULONGLONG ticks, bool correct) {
++    tap_comment("PIN-PERF workload=%s sample=%lu iterations=%lu ticks=%llu correct=%u checksum=%08lx",
++        name,sample,iterations,(unsigned long long)ticks,correct?1:0,checksum);
++}
++
++int main(void) {
++    tap_puts("== page-pin-performance begin ==\n"); tap_version(14); tap_plan(7);
++    HANDLE file=NULL; SIZE_T invalid_size=PAGE_SIZE; PVOID invalid_base=NULL;
++    source=MmAllocateContiguousMemory(MAX_PAGES*PAGE_SIZE);
++    NTSTATUS status=NtAllocateVirtualMemory(&invalid_base,0,&invalid_size,
++        MEM_RESERVE,PAGE_READWRITE); invalid_page=invalid_base;
++    bool ready=source && status==STATUS_SUCCESS && invalid_page &&
++        !MmIsAddressValid(invalid_page) && open_file(&file);
++    if (source) memset(source,0x5a,MAX_PAGES*PAGE_SIZE);
++    ULONG first_pa=source ? MmGetPhysicalAddress(source)&~(PAGE_SIZE-1) : 0;
++    check(ready,"setup-release-page-pin-workload");
++    ULONGLONG frequency=KeQueryPerformanceFrequency();
++    tap_comment("PIN-PERF-META version=1 frequency=%llu samples=%u",
++        (unsigned long long)frequency,SAMPLES);
++
++    bool physical_valid=ready;
++    for (ULONG sample=0; sample<SAMPLES; ++sample) {
++        checksum=2166136261U; ULONGLONG start=KeQueryPerformanceCounter();
++        if (ready) for (ULONG i=0;i<PHYSICAL_ITERATIONS;++i) {
++            MmLockUnlockPhysicalPage(first_pa+37,FALSE);
++            MmLockUnlockPhysicalPage(first_pa+37,TRUE);
++        }
++        ULONGLONG end=KeQueryPerformanceCounter();
++        physical_valid &= source && source[0]==0x5a; mix(source?source[0]:0);
++        record("physical-valid",sample,PHYSICAL_ITERATIONS,end-start,physical_valid);
++    }
++    check(physical_valid,"physical-valid");
++
++    bool physical_reject=ready;
++    for (ULONG sample=0; sample<SAMPLES; ++sample) {
++        checksum=2166136261U; ULONGLONG start=KeQueryPerformanceCounter();
++        if (ready) for (ULONG i=0;i<PHYSICAL_ITERATIONS;++i)
++            MmLockUnlockPhysicalPage(0xFD000000,FALSE);
++        ULONGLONG end=KeQueryPerformanceCounter();
++        physical_reject &= source && source[0]==0x5a; mix(source?source[0]:0);
++        record("physical-reject-device",sample,PHYSICAL_ITERATIONS,end-start,physical_reject);
++    }
++    check(physical_reject,"physical-reject-device");
++
++    bool scatter_accepted=ready;
++    for (ULONG sample=0; sample<SAMPLES; ++sample) {
++        checksum=2166136261U; prepare_segments(64,false);
++        ULONGLONG start=KeQueryPerformanceCounter();
++        for (ULONG i=0;ready&&i<SCATTER_ACCEPT_ITERATIONS;++i) {
++            IO_STATUS_BLOCK io; status=gather(file,64,&io);
++            scatter_accepted &= status==STATUS_SUCCESS && io.Status==STATUS_SUCCESS &&
++                io.Information==64*PAGE_SIZE; mix((ULONG)status); mix(io.Information);
++        }
++        ULONGLONG end=KeQueryPerformanceCounter();
++        record("scatter-accepted-sustained",sample,SCATTER_ACCEPT_ITERATIONS,
++            end-start,scatter_accepted);
++    }
++    check(scatter_accepted,"scatter-accepted");
++
++    ULONG prefixes[2]={32,64}; bool rejected[2]={ready,ready};
++    for (ULONG p=0;p<2;++p) {
++        const char *name=p?"scatter-rejected-64":"scatter-rejected-32";
++        for (ULONG sample=0; sample<SAMPLES; ++sample) {
++            checksum=2166136261U; prepare_segments(prefixes[p],true);
++            ULONGLONG start=KeQueryPerformanceCounter();
++            for (ULONG i=0;ready&&i<SCATTER_REJECT_ITERATIONS;++i) {
++                IO_STATUS_BLOCK io; status=gather(file,prefixes[p]+1,&io);
++                rejected[p] &= status==STATUS_ACCESS_VIOLATION; mix((ULONG)status);
++            }
++            ULONGLONG end=KeQueryPerformanceCounter();
++            rejected[p] &= accepted_control(file,prefixes[p]);
++            record(name,sample,SCATTER_REJECT_ITERATIONS,end-start,rejected[p]);
++        }
++        check(rejected[p],name);
++    }
++
++    if (file) NtClose(file);
++    if (invalid_page) {SIZE_T bytes=0;NtFreeVirtualMemory(&invalid_page,&bytes,MEM_RELEASE);}
++    if (source) MmFreeContiguousMemory(source);
++    PVOID exact=ready?MmAllocateContiguousMemoryEx(MAX_PAGES*PAGE_SIZE,first_pa,
++        first_pa+MAX_PAGES*PAGE_SIZE-1,PAGE_SIZE,PAGE_READWRITE):NULL;
++    bool cleanup=ready && exact!=NULL;
++    if (exact) MmFreeContiguousMemory(exact);
++    check(cleanup,"cleanup-after-reject");
++    tap_comment("PIN-PERF-SUMMARY workloads=5 failures=%lu",failures);
++    tap_puts(failures?"== page-pin-performance end FAIL ==\n":
++        "== page-pin-performance end PASS ==\n");
++    tap_drain();HalWriteSMBusValue(0x20,0x02,FALSE,0x80);
++    for(;;)__asm__ __volatile__("hlt");
++}
