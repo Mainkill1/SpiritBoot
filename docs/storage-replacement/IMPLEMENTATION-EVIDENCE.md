@@ -178,14 +178,15 @@ remain unchanged.
 ## Current final performance batch
 
 The exact corrected release stack adds the bounded Forza queue and hot-path
-patches 0146 through 0151 plus safe-default Advanced controls in 0152. It
-assembles tree `2f6790bae801075928f1ff556aed1ef2d2938858`. Release64 reproduces
+patches 0146 through 0151, safe-default Advanced controls in 0152, opt-in
+XDVDFS direct forwarding in 0153, and small-SYSVA local invalidation in 0154.
+It assembles tree `2b1a5b77493d16fe05a226684e4db5d745300b3a`. Release64 reproduces
 SHA-256
-`b266d2a130c4c3c02cf396aea4af3d294107ccffbf04593e1d156d9a638b51cd`;
+`6f4070f788355d88cf44f37b792a6aceb1e9ead91bc441fe04df800c0a0fc077`;
 release128 is
-`fdfcb2382d3b24a0d4aaa7f8037792b00bd82daf2640bf40d1b9b1f8c036f340`.
+`267ad8f3139a7bbc7b2aea3f1d5cdc648c55ab0a3f40ff54881ec5b331929735`.
 
-The complete product host suite passes 535 tests with 26 expected
+The complete product host suite passes 544 tests with 26 expected
 host-platform skips. Two independent Windows release64 boots completed 32
 Forza-shaped passes and 32,768 asynchronous FATX reads at queue depth 12 and
 900-page pressure, with zero request, oracle, warmup or cleanup failures. The
@@ -209,6 +210,14 @@ initial >20% leaf was rerun with 4,096x work in ABBA order; its 15.4--16.1
 second samples narrowed to +1.95%, so no broad-suite leaf remains over the
 review threshold. These results are under `final-broad-xiso/` in the evidence
 directory above.
+
+The 0154 focused release64 A/B/B/A campaign performs 8,388,608 warm one-page
+allocate/write/verify/free operations per arm. Local invalidation reduces the
+two-run mean from 10.689900 to 1.584932 seconds (85.1736%) with identical
+checksums and all guest correctness markers passing. This closes a measured
+firmware-owned bottleneck; it is not a whole-game claim. Reproduction inputs
+and raw logs are in
+`docs/performance/evidence/sysva-local-invalidation-20261016/`.
 
 Remaining P5 operator gates are current-image Forza scenery streaming, DOA save
 reload, PGR2/Conker scene transitions and a physical-Xbox smoke test. These do

@@ -351,3 +351,15 @@ receipt remain under `rejected/`; that patch is absent from the selected lock.
 The source-stage artifact is not its pristine Roswell HEAD: assembled changes
 are staged. Reproduce using the maintained ordered patches and pinned lock,
 or the actual assembled filesystem; do not read pristine HEAD as the product.
+
+## Accepted warm-small follow-up, 2026-10-16
+
+Patch 0154 addresses the warm one-page gap identified above without reviving
+the rejected zeroing batch. Ranges of one through four pages invalidate each
+changed virtual address locally; larger mappings keep the global CR3 reload.
+The release64 A/B/B/A workload reduces 8,388,608 verified operations per arm
+from a 10.689900-second two-run mean to 1.584932 seconds, an 85.1736% reduction,
+with identical checksums. The production-body fixture covers both memory
+profiles, rollback, PDE crossings, frame-return ordering and the unchanged
+large-range policy. Exact sources, requests and raw serial logs are retained in
+[`../performance/evidence/sysva-local-invalidation-20261016/`](../performance/evidence/sysva-local-invalidation-20261016/).

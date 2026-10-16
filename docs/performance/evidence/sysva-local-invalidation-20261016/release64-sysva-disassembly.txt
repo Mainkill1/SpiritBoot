@@ -1,0 +1,846 @@
+84021e20 t .text$MmAllocateSystemMemory
+84021e20 T _MmAllocateSystemMemory@8
+840223bc t .text$MmFreeSystemMemory
+840223bc T _MmFreeSystemMemory@8
+
+/work/.scratch/sysva-local-release64-r2/work-ufmb25bm/build/ntoskrnl/xboxkrnl.unstripped.exe:     file format pei-i386
+
+
+Disassembly of section .text:
+
+84021e20 <_MmAllocateSystemMemory@8>:
+84021e20:	55                   	push   %ebp
+84021e21:	89 e5                	mov    %esp,%ebp
+84021e23:	57                   	push   %edi
+84021e24:	56                   	push   %esi
+84021e25:	53                   	push   %ebx
+84021e26:	83 ec 2c             	sub    $0x2c,%esp
+84021e29:	83 7d 08 00          	cmpl   $0x0,0x8(%ebp)
+84021e2d:	0f 84 19 02 00 00    	je     8402204c <_MmAllocateSystemMemory@8+0x22c>
+84021e33:	8b 45 08             	mov    0x8(%ebp),%eax
+84021e36:	8d b8 ff 0f 00 00    	lea    0xfff(%eax),%edi
+84021e3c:	89 f8                	mov    %edi,%eax
+84021e3e:	c1 e8 0c             	shr    $0xc,%eax
+84021e41:	89 45 e8             	mov    %eax,-0x18(%ebp)
+84021e44:	a0 24 f0 df ff       	mov    0xffdff024,%al
+84021e49:	88 45 e4             	mov    %al,-0x1c(%ebp)
+84021e4c:	c6 05 24 f0 df ff 02 	movb   $0x2,0xffdff024
+84021e53:	31 db                	xor    %ebx,%ebx
+84021e55:	31 d2                	xor    %edx,%edx
+84021e57:	b8 00 00 00 d0       	mov    $0xd0000000,%eax
+84021e5c:	89 5d ec             	mov    %ebx,-0x14(%ebp)
+84021e5f:	89 c1                	mov    %eax,%ecx
+84021e61:	89 c3                	mov    %eax,%ebx
+84021e63:	c1 e9 16             	shr    $0x16,%ecx
+84021e66:	c1 eb 0c             	shr    $0xc,%ebx
+84021e69:	8b 0c 8d 00 00 30 c0 	mov    -0x3fd00000(,%ecx,4),%ecx
+84021e70:	80 e1 01             	and    $0x1,%cl
+84021e73:	75 3c                	jne    84021eb1 <_MmAllocateSystemMemory@8+0x91>
+84021e75:	be 00 00 00 d4       	mov    $0xd4000000,%esi
+84021e7a:	81 e3 ff 03 00 00    	and    $0x3ff,%ebx
+84021e80:	b9 00 04 00 00       	mov    $0x400,%ecx
+84021e85:	29 c6                	sub    %eax,%esi
+84021e87:	29 d9                	sub    %ebx,%ecx
+84021e89:	c1 ee 0c             	shr    $0xc,%esi
+84021e8c:	39 ce                	cmp    %ecx,%esi
+84021e8e:	73 02                	jae    84021e92 <_MmAllocateSystemMemory@8+0x72>
+84021e90:	89 f1                	mov    %esi,%ecx
+84021e92:	85 d2                	test   %edx,%edx
+84021e94:	75 03                	jne    84021e99 <_MmAllocateSystemMemory@8+0x79>
+84021e96:	89 45 ec             	mov    %eax,-0x14(%ebp)
+84021e99:	8b 75 e8             	mov    -0x18(%ebp),%esi
+84021e9c:	39 f2                	cmp    %esi,%edx
+84021e9e:	73 08                	jae    84021ea8 <_MmAllocateSystemMemory@8+0x88>
+84021ea0:	89 f3                	mov    %esi,%ebx
+84021ea2:	29 d3                	sub    %edx,%ebx
+84021ea4:	39 d9                	cmp    %ebx,%ecx
+84021ea6:	73 36                	jae    84021ede <_MmAllocateSystemMemory@8+0xbe>
+84021ea8:	01 ca                	add    %ecx,%edx
+84021eaa:	c1 e1 0c             	shl    $0xc,%ecx
+84021ead:	01 c8                	add    %ecx,%eax
+84021eaf:	eb 21                	jmp    84021ed2 <_MmAllocateSystemMemory@8+0xb2>
+84021eb1:	8b 0c 9d 00 00 00 c0 	mov    -0x40000000(,%ebx,4),%ecx
+84021eb8:	85 c9                	test   %ecx,%ecx
+84021eba:	75 0f                	jne    84021ecb <_MmAllocateSystemMemory@8+0xab>
+84021ebc:	85 d2                	test   %edx,%edx
+84021ebe:	75 03                	jne    84021ec3 <_MmAllocateSystemMemory@8+0xa3>
+84021ec0:	89 45 ec             	mov    %eax,-0x14(%ebp)
+84021ec3:	42                   	inc    %edx
+84021ec4:	39 55 e8             	cmp    %edx,-0x18(%ebp)
+84021ec7:	75 04                	jne    84021ecd <_MmAllocateSystemMemory@8+0xad>
+84021ec9:	eb 13                	jmp    84021ede <_MmAllocateSystemMemory@8+0xbe>
+84021ecb:	31 d2                	xor    %edx,%edx
+84021ecd:	05 00 10 00 00       	add    $0x1000,%eax
+84021ed2:	3d ff ff ff d3       	cmp    $0xd3ffffff,%eax
+84021ed7:	76 86                	jbe    84021e5f <_MmAllocateSystemMemory@8+0x3f>
+84021ed9:	31 c9                	xor    %ecx,%ecx
+84021edb:	89 4d ec             	mov    %ecx,-0x14(%ebp)
+84021ede:	0f b6 45 e4          	movzbl -0x1c(%ebp),%eax
+84021ee2:	83 7d ec 00          	cmpl   $0x0,-0x14(%ebp)
+84021ee6:	89 45 e0             	mov    %eax,-0x20(%ebp)
+84021ee9:	0f 84 f3 00 00 00    	je     84021fe2 <_MmAllocateSystemMemory@8+0x1c2>
+84021eef:	8b 45 ec             	mov    -0x14(%ebp),%eax
+84021ef2:	81 e7 00 f0 ff ff    	and    $0xfffff000,%edi
+84021ef8:	8b 5d ec             	mov    -0x14(%ebp),%ebx
+84021efb:	8d 44 38 ff          	lea    -0x1(%eax,%edi,1),%eax
+84021eff:	c1 eb 16             	shr    $0x16,%ebx
+84021f02:	c1 e8 16             	shr    $0x16,%eax
+84021f05:	89 c6                	mov    %eax,%esi
+84021f07:	39 de                	cmp    %ebx,%esi
+84021f09:	72 55                	jb     84021f60 <_MmAllocateSystemMemory@8+0x140>
+84021f0b:	8b 04 9d 00 00 30 c0 	mov    -0x3fd00000(,%ebx,4),%eax
+84021f12:	8d 3c 9d 00 00 00 00 	lea    0x0(,%ebx,4),%edi
+84021f19:	a8 01                	test   $0x1,%al
+84021f1b:	75 40                	jne    84021f5d <_MmAllocateSystemMemory@8+0x13d>
+84021f1d:	b9 02 00 00 00       	mov    $0x2,%ecx
+84021f22:	e8 e9 6f ff ff       	call   84018f10 <@KeAcquireQueuedSpinLock@4>
+84021f27:	31 c9                	xor    %ecx,%ecx
+84021f29:	88 45 e4             	mov    %al,-0x1c(%ebp)
+84021f2c:	89 0c 24             	mov    %ecx,(%esp)
+84021f2f:	e8 e4 a9 00 00       	call   8402c918 <_NxkPageSupplyTakeZero@4.constprop.0>
+84021f34:	b9 02 00 00 00       	mov    $0x2,%ecx
+84021f39:	52                   	push   %edx
+84021f3a:	0f b6 55 e4          	movzbl -0x1c(%ebp),%edx
+84021f3e:	89 45 dc             	mov    %eax,-0x24(%ebp)
+84021f41:	e8 02 8c ff ff       	call   8401ab48 <@KeReleaseQueuedSpinLock@8>
+84021f46:	8b 45 dc             	mov    -0x24(%ebp),%eax
+84021f49:	85 c0                	test   %eax,%eax
+84021f4b:	0f 84 91 00 00 00    	je     84021fe2 <_MmAllocateSystemMemory@8+0x1c2>
+84021f51:	c1 e0 0c             	shl    $0xc,%eax
+84021f54:	83 c8 03             	or     $0x3,%eax
+84021f57:	89 87 00 00 30 c0    	mov    %eax,-0x3fd00000(%edi)
+84021f5d:	43                   	inc    %ebx
+84021f5e:	eb a7                	jmp    84021f07 <_MmAllocateSystemMemory@8+0xe7>
+84021f60:	8b 45 ec             	mov    -0x14(%ebp),%eax
+84021f63:	31 ff                	xor    %edi,%edi
+84021f65:	c1 e8 0c             	shr    $0xc,%eax
+84021f68:	8d 04 85 00 00 00 c0 	lea    -0x40000000(,%eax,4),%eax
+84021f6f:	89 45 e4             	mov    %eax,-0x1c(%ebp)
+84021f72:	89 c3                	mov    %eax,%ebx
+84021f74:	eb 0d                	jmp    84021f83 <_MmAllocateSystemMemory@8+0x163>
+84021f76:	c1 e6 0c             	shl    $0xc,%esi
+84021f79:	47                   	inc    %edi
+84021f7a:	83 c3 04             	add    $0x4,%ebx
+84021f7d:	83 ce 03             	or     $0x3,%esi
+84021f80:	89 73 fc             	mov    %esi,-0x4(%ebx)
+84021f83:	39 7d e8             	cmp    %edi,-0x18(%ebp)
+84021f86:	0f 84 91 00 00 00    	je     8402201d <_MmAllocateSystemMemory@8+0x1fd>
+84021f8c:	b9 02 00 00 00       	mov    $0x2,%ecx
+84021f91:	31 f6                	xor    %esi,%esi
+84021f93:	e8 78 6f ff ff       	call   84018f10 <@KeAcquireQueuedSpinLock@4>
+84021f98:	88 45 dc             	mov    %al,-0x24(%ebp)
+84021f9b:	89 34 24             	mov    %esi,(%esp)
+84021f9e:	e8 19 a5 00 00       	call   8402c4bc <_NxkPageSupplyTakeAny@4>
+84021fa3:	b9 02 00 00 00       	mov    $0x2,%ecx
+84021fa8:	52                   	push   %edx
+84021fa9:	0f b6 55 dc          	movzbl -0x24(%ebp),%edx
+84021fad:	89 c6                	mov    %eax,%esi
+84021faf:	e8 94 8b ff ff       	call   8401ab48 <@KeReleaseQueuedSpinLock@8>
+84021fb4:	85 f6                	test   %esi,%esi
+84021fb6:	75 be                	jne    84021f76 <_MmAllocateSystemMemory@8+0x156>
+84021fb8:	b9 02 00 00 00       	mov    $0x2,%ecx
+84021fbd:	e8 4e 6f ff ff       	call   84018f10 <@KeAcquireQueuedSpinLock@4>
+84021fc2:	88 45 e8             	mov    %al,-0x18(%ebp)
+84021fc5:	39 fe                	cmp    %edi,%esi
+84021fc7:	75 23                	jne    84021fec <_MmAllocateSystemMemory@8+0x1cc>
+84021fc9:	0f b6 55 e8          	movzbl -0x18(%ebp),%edx
+84021fcd:	b9 02 00 00 00       	mov    $0x2,%ecx
+84021fd2:	e8 71 8b ff ff       	call   8401ab48 <@KeReleaseQueuedSpinLock@8>
+84021fd7:	83 fe 04             	cmp    $0x4,%esi
+84021fda:	76 06                	jbe    84021fe2 <_MmAllocateSystemMemory@8+0x1c2>
+84021fdc:	0f 20 d8             	mov    %cr3,%eax
+84021fdf:	0f 22 d8             	mov    %eax,%cr3
+84021fe2:	8b 4d e0             	mov    -0x20(%ebp),%ecx
+84021fe5:	e8 52 b1 ff ff       	call   8401d13c <@KfLowerIrql@4>
+84021fea:	eb 60                	jmp    8402204c <_MmAllocateSystemMemory@8+0x22c>
+84021fec:	8b 45 e4             	mov    -0x1c(%ebp),%eax
+84021fef:	8b 55 e4             	mov    -0x1c(%ebp),%edx
+84021ff2:	31 c9                	xor    %ecx,%ecx
+84021ff4:	8b 00                	mov    (%eax),%eax
+84021ff6:	89 0a                	mov    %ecx,(%edx)
+84021ff8:	c1 e8 0c             	shr    $0xc,%eax
+84021ffb:	83 ff 04             	cmp    $0x4,%edi
+84021ffe:	77 0d                	ja     8402200d <_MmAllocateSystemMemory@8+0x1ed>
+84022000:	8b 55 ec             	mov    -0x14(%ebp),%edx
+84022003:	89 f3                	mov    %esi,%ebx
+84022005:	c1 e3 0c             	shl    $0xc,%ebx
+84022008:	01 d3                	add    %edx,%ebx
+8402200a:	0f 01 3b             	invlpg (%ebx)
+8402200d:	89 04 24             	mov    %eax,(%esp)
+84022010:	46                   	inc    %esi
+84022011:	e8 26 a4 00 00       	call   8402c43c <_NxkPageSupplyReturn@4>
+84022016:	52                   	push   %edx
+84022017:	83 45 e4 04          	addl   $0x4,-0x1c(%ebp)
+8402201b:	eb a8                	jmp    84021fc5 <_MmAllocateSystemMemory@8+0x1a5>
+8402201d:	83 7d e8 04          	cmpl   $0x4,-0x18(%ebp)
+84022021:	77 16                	ja     84022039 <_MmAllocateSystemMemory@8+0x219>
+84022023:	31 c0                	xor    %eax,%eax
+84022025:	39 c7                	cmp    %eax,%edi
+84022027:	74 16                	je     8402203f <_MmAllocateSystemMemory@8+0x21f>
+84022029:	8b 55 ec             	mov    -0x14(%ebp),%edx
+8402202c:	89 c3                	mov    %eax,%ebx
+8402202e:	c1 e3 0c             	shl    $0xc,%ebx
+84022031:	01 d3                	add    %edx,%ebx
+84022033:	0f 01 3b             	invlpg (%ebx)
+84022036:	40                   	inc    %eax
+84022037:	eb ec                	jmp    84022025 <_MmAllocateSystemMemory@8+0x205>
+84022039:	0f 20 d8             	mov    %cr3,%eax
+8402203c:	0f 22 d8             	mov    %eax,%cr3
+8402203f:	8b 4d e0             	mov    -0x20(%ebp),%ecx
+84022042:	e8 f5 b0 ff ff       	call   8401d13c <@KfLowerIrql@4>
+84022047:	8b 45 ec             	mov    -0x14(%ebp),%eax
+8402204a:	eb 1c                	jmp    84022068 <_MmAllocateSystemMemory@8+0x248>
+8402204c:	c7 44 24 08 4e 78 4d 	movl   $0x6d4d784e,0x8(%esp)
+84022053:	6d 
+84022054:	8b 45 08             	mov    0x8(%ebp),%eax
+84022057:	89 44 24 04          	mov    %eax,0x4(%esp)
+8402205b:	31 c0                	xor    %eax,%eax
+8402205d:	89 04 24             	mov    %eax,(%esp)
+84022060:	e8 a3 a8 fe ff       	call   8400c908 <_ExAllocatePoolWithTag@12>
+84022065:	83 ec 0c             	sub    $0xc,%esp
+84022068:	8d 65 f4             	lea    -0xc(%ebp),%esp
+8402206b:	5b                   	pop    %ebx
+8402206c:	5e                   	pop    %esi
+8402206d:	5f                   	pop    %edi
+8402206e:	5d                   	pop    %ebp
+8402206f:	c2 08 00             	ret    $0x8
+84022072:	90                   	nop
+84022073:	90                   	nop
+
+84022074 <_MmBuildMdlForNonPagedPool@4>:
+84022074:	55                   	push   %ebp
+84022075:	31 c9                	xor    %ecx,%ecx
+84022077:	89 e5                	mov    %esp,%ebp
+84022079:	57                   	push   %edi
+8402207a:	56                   	push   %esi
+8402207b:	53                   	push   %ebx
+8402207c:	83 ec 0c             	sub    $0xc,%esp
+8402207f:	8b 5d 08             	mov    0x8(%ebp),%ebx
+84022082:	8b 53 10             	mov    0x10(%ebx),%edx
+84022085:	8b 73 14             	mov    0x14(%ebx),%esi
+84022088:	89 4b 08             	mov    %ecx,0x8(%ebx)
+8402208b:	8d 43 1c             	lea    0x1c(%ebx),%eax
+8402208e:	8b 4b 18             	mov    0x18(%ebx),%ecx
+84022091:	01 d1                	add    %edx,%ecx
+84022093:	c1 ea 0c             	shr    $0xc,%edx
+84022096:	89 4b 0c             	mov    %ecx,0xc(%ebx)
+84022099:	81 e1 ff 0f 00 00    	and    $0xfff,%ecx
+8402209f:	8d 14 95 00 00 00 c0 	lea    -0x40000000(,%edx,4),%edx
+840220a6:	8d 8c 0e ff 0f 00 00 	lea    0xfff(%esi,%ecx,1),%ecx
+840220ad:	c1 e9 0c             	shr    $0xc,%ecx
+840220b0:	8d 0c 88             	lea    (%eax,%ecx,4),%ecx
+840220b3:	89 d6                	mov    %edx,%esi
+840220b5:	83 c0 04             	add    $0x4,%eax
+840220b8:	83 c2 04             	add    $0x4,%edx
+840220bb:	8b 36                	mov    (%esi),%esi
+840220bd:	c1 ee 0c             	shr    $0xc,%esi
+840220c0:	89 70 fc             	mov    %esi,-0x4(%eax)
+840220c3:	39 c8                	cmp    %ecx,%eax
+840220c5:	72 ec                	jb     840220b3 <_MmBuildMdlForNonPagedPool@4+0x3f>
+840220c7:	66 8b 7b 06          	mov    0x6(%ebx),%di
+840220cb:	89 f8                	mov    %edi,%eax
+840220cd:	83 c8 04             	or     $0x4,%eax
+840220d0:	66 89 43 06          	mov    %ax,0x6(%ebx)
+840220d4:	39 35 44 12 06 84    	cmp    %esi,0x84061244
+840220da:	72 2a                	jb     84022106 <_MmBuildMdlForNonPagedPool@4+0x92>
+840220dc:	83 3d 7c 1d 06 84 00 	cmpl   $0x0,0x84061d7c
+840220e3:	74 16                	je     840220fb <_MmBuildMdlForNonPagedPool@4+0x87>
+840220e5:	89 74 24 04          	mov    %esi,0x4(%esp)
+840220e9:	c7 04 24 78 1d 06 84 	movl   $0x84061d78,(%esp)
+840220f0:	e8 ff a0 01 00       	call   8403c1f4 <_RtlTestBit@8.constprop.0>
+840220f5:	52                   	push   %edx
+840220f6:	52                   	push   %edx
+840220f7:	84 c0                	test   %al,%al
+840220f9:	74 0b                	je     84022106 <_MmBuildMdlForNonPagedPool@4+0x92>
+840220fb:	6b f6 24             	imul   $0x24,%esi,%esi
+840220fe:	03 35 a8 12 06 84    	add    0x840612a8,%esi
+84022104:	75 09                	jne    8402210f <_MmBuildMdlForNonPagedPool@4+0x9b>
+84022106:	66 81 cf 04 08       	or     $0x804,%di
+8402210b:	66 89 7b 06          	mov    %di,0x6(%ebx)
+8402210f:	8d 65 f4             	lea    -0xc(%ebp),%esp
+84022112:	5b                   	pop    %ebx
+84022113:	5e                   	pop    %esi
+84022114:	5f                   	pop    %edi
+84022115:	5d                   	pop    %ebp
+84022116:	c2 04 00             	ret    $0x4
+84022119:	90                   	nop
+8402211a:	90                   	nop
+8402211b:	90                   	nop
+
+8402211c <_MmCanFileBeTruncated@8>:
+8402211c:	b0 01                	mov    $0x1,%al
+8402211e:	c2 08 00             	ret    $0x8
+84022121:	90                   	nop
+84022122:	90                   	nop
+84022123:	90                   	nop
+
+84022124 <_MmCreateKernelStackEx@12>:
+84022124:	55                   	push   %ebp
+84022125:	89 e5                	mov    %esp,%ebp
+84022127:	57                   	push   %edi
+84022128:	56                   	push   %esi
+84022129:	53                   	push   %ebx
+8402212a:	83 ec 24             	sub    $0x24,%esp
+8402212d:	8b 7d 08             	mov    0x8(%ebp),%edi
+84022130:	8b 45 10             	mov    0x10(%ebp),%eax
+84022133:	89 f9                	mov    %edi,%ecx
+84022135:	84 c9                	test   %cl,%cl
+84022137:	74 1f                	je     84022158 <_MmCreateKernelStackEx@12+0x34>
+84022139:	8b 15 b4 53 05 84    	mov    0x840553b4,%edx
+8402213f:	31 c0                	xor    %eax,%eax
+84022141:	c7 45 e4 03 00 00 00 	movl   $0x3,-0x1c(%ebp)
+84022148:	f7 c2 ff 0f 00 00    	test   $0xfff,%edx
+8402214e:	0f 95 c0             	setne  %al
+84022151:	c1 ea 0c             	shr    $0xc,%edx
+84022154:	01 d0                	add    %edx,%eax
+84022156:	eb 39                	jmp    84022191 <_MmCreateKernelStackEx@12+0x6d>
+84022158:	3d 00 30 00 00       	cmp    $0x3000,%eax
+8402215d:	74 04                	je     84022163 <_MmCreateKernelStackEx@12+0x3f>
+8402215f:	85 c0                	test   %eax,%eax
+84022161:	75 28                	jne    8402218b <_MmCreateKernelStackEx@12+0x67>
+84022163:	66 83 3d cc 45 06 84 	cmpw   $0x0,0x840645cc
+8402216a:	00 
+8402216b:	75 07                	jne    84022174 <_MmCreateKernelStackEx@12+0x50>
+8402216d:	b8 00 30 00 00       	mov    $0x3000,%eax
+84022172:	eb 17                	jmp    8402218b <_MmCreateKernelStackEx@12+0x67>
+84022174:	b9 c8 45 06 84       	mov    $0x840645c8,%ecx
+84022179:	e8 89 ee fd ff       	call   84001007 <@ExInterlockedPopEntrySList@8>
+8402217e:	8d 58 04             	lea    0x4(%eax),%ebx
+84022181:	85 c0                	test   %eax,%eax
+84022183:	0f 85 26 01 00 00    	jne    840222af <_MmCreateKernelStackEx@12+0x18b>
+84022189:	eb e2                	jmp    8402216d <_MmCreateKernelStackEx@12+0x49>
+8402218b:	c1 e8 0c             	shr    $0xc,%eax
+8402218e:	89 45 e4             	mov    %eax,-0x1c(%ebp)
+84022191:	40                   	inc    %eax
+84022192:	31 db                	xor    %ebx,%ebx
+84022194:	89 45 e8             	mov    %eax,-0x18(%ebp)
+84022197:	89 5c 24 08          	mov    %ebx,0x8(%esp)
+8402219b:	89 5c 24 04          	mov    %ebx,0x4(%esp)
+8402219f:	89 04 24             	mov    %eax,(%esp)
+840221a2:	e8 81 fa ff ff       	call   84021c28 <_MiReserveAlignedSystemPtes@12.constprop.0>
+840221a7:	83 ec 0c             	sub    $0xc,%esp
+840221aa:	89 c6                	mov    %eax,%esi
+840221ac:	85 c0                	test   %eax,%eax
+840221ae:	74 65                	je     84022215 <_MmCreateKernelStackEx@12+0xf1>
+840221b0:	89 c3                	mov    %eax,%ebx
+840221b2:	89 f8                	mov    %edi,%eax
+840221b4:	84 c0                	test   %al,%al
+840221b6:	74 1e                	je     840221d6 <_MmCreateKernelStackEx@12+0xb2>
+840221b8:	8b 15 b4 53 05 84    	mov    0x840553b4,%edx
+840221be:	8d 82 00 d0 ff ff    	lea    -0x3000(%edx),%eax
+840221c4:	81 e2 ff 0f 00 00    	and    $0xfff,%edx
+840221ca:	c1 e8 0c             	shr    $0xc,%eax
+840221cd:	83 fa 01             	cmp    $0x1,%edx
+840221d0:	83 d8 ff             	sbb    $0xffffffff,%eax
+840221d3:	8d 1c 86             	lea    (%esi,%eax,4),%ebx
+840221d6:	b9 02 00 00 00       	mov    $0x2,%ecx
+840221db:	bf 03 00 00 00       	mov    $0x3,%edi
+840221e0:	e8 2b 6d ff ff       	call   84018f10 <@KeAcquireQueuedSpinLock@4>
+840221e5:	31 c9                	xor    %ecx,%ecx
+840221e7:	88 45 e3             	mov    %al,-0x1d(%ebp)
+840221ea:	89 4d ec             	mov    %ecx,-0x14(%ebp)
+840221ed:	eb 6b                	jmp    8402225a <_MmCreateKernelStackEx@12+0x136>
+840221ef:	0f b6 55 e3          	movzbl -0x1d(%ebp),%edx
+840221f3:	b9 02 00 00 00       	mov    $0x2,%ecx
+840221f8:	e8 4b 89 ff ff       	call   8401ab48 <@KeReleaseQueuedSpinLock@8>
+840221fd:	31 c0                	xor    %eax,%eax
+840221ff:	89 44 24 08          	mov    %eax,0x8(%esp)
+84022203:	8b 45 e8             	mov    -0x18(%ebp),%eax
+84022206:	89 34 24             	mov    %esi,(%esp)
+84022209:	89 44 24 04          	mov    %eax,0x4(%esp)
+8402220d:	e8 ea f8 ff ff       	call   84021afc <_MiReleaseSystemPtes@12.constprop.0>
+84022212:	83 ec 0c             	sub    $0xc,%esp
+84022215:	31 db                	xor    %ebx,%ebx
+84022217:	e9 93 00 00 00       	jmp    840222af <_MmCreateKernelStackEx@12+0x18b>
+8402221c:	a1 10 45 06 84       	mov    0x84064510,%eax
+84022221:	83 c3 04             	add    $0x4,%ebx
+84022224:	40                   	inc    %eax
+84022225:	a3 10 45 06 84       	mov    %eax,0x84064510
+8402222a:	23 05 e8 2e 06 84    	and    0x84062ee8,%eax
+84022230:	89 04 24             	mov    %eax,(%esp)
+84022233:	e8 84 a2 00 00       	call   8402c4bc <_NxkPageSupplyTakeAny@4>
+84022238:	52                   	push   %edx
+84022239:	85 c0                	test   %eax,%eax
+8402223b:	74 27                	je     84022264 <_MmCreateKernelStackEx@12+0x140>
+8402223d:	89 c2                	mov    %eax,%edx
+8402223f:	89 f9                	mov    %edi,%ecx
+84022241:	c1 e2 0c             	shl    $0xc,%edx
+84022244:	81 e1 ff 0f 00 00    	and    $0xfff,%ecx
+8402224a:	09 d1                	or     %edx,%ecx
+8402224c:	89 da                	mov    %ebx,%edx
+8402224e:	89 0b                	mov    %ecx,(%ebx)
+84022250:	89 cf                	mov    %ecx,%edi
+84022252:	e8 35 a2 00 00       	call   8402c48c <_NxkPageSupplySetOwner>
+84022257:	ff 45 ec             	incl   -0x14(%ebp)
+8402225a:	8b 4d ec             	mov    -0x14(%ebp),%ecx
+8402225d:	39 4d e4             	cmp    %ecx,-0x1c(%ebp)
+84022260:	75 ba                	jne    8402221c <_MmCreateKernelStackEx@12+0xf8>
+84022262:	eb 2a                	jmp    8402228e <_MmCreateKernelStackEx@12+0x16a>
+84022264:	ff 4d ec             	decl   -0x14(%ebp)
+84022267:	83 7d ec ff          	cmpl   $0xffffffff,-0x14(%ebp)
+8402226b:	74 82                	je     840221ef <_MmCreateKernelStackEx@12+0xcb>
+8402226d:	8b 7b fc             	mov    -0x4(%ebx),%edi
+84022270:	31 d2                	xor    %edx,%edx
+84022272:	83 eb 04             	sub    $0x4,%ebx
+84022275:	89 13                	mov    %edx,(%ebx)
+84022277:	31 d2                	xor    %edx,%edx
+84022279:	c1 ef 0c             	shr    $0xc,%edi
+8402227c:	89 f8                	mov    %edi,%eax
+8402227e:	e8 09 a2 00 00       	call   8402c48c <_NxkPageSupplySetOwner>
+84022283:	89 3c 24             	mov    %edi,(%esp)
+84022286:	e8 b1 a1 00 00       	call   8402c43c <_NxkPageSupplyReturn@4>
+8402228b:	51                   	push   %ecx
+8402228c:	eb d6                	jmp    84022264 <_MmCreateKernelStackEx@12+0x140>
+8402228e:	8b 45 e8             	mov    -0x18(%ebp),%eax
+84022291:	0f b6 55 e3          	movzbl -0x1d(%ebp),%edx
+84022295:	b9 02 00 00 00       	mov    $0x2,%ecx
+8402229a:	8d 1c 86             	lea    (%esi,%eax,4),%ebx
+8402229d:	e8 a6 88 ff ff       	call   8401ab48 <@KeReleaseQueuedSpinLock@8>
+840222a2:	8b 45 e4             	mov    -0x1c(%ebp),%eax
+840222a5:	c1 e3 0a             	shl    $0xa,%ebx
+840222a8:	f0 01 05 e0 2e 06 84 	lock add %eax,0x84062ee0
+840222af:	8d 65 f4             	lea    -0xc(%ebp),%esp
+840222b2:	89 d8                	mov    %ebx,%eax
+840222b4:	5b                   	pop    %ebx
+840222b5:	5e                   	pop    %esi
+840222b6:	5f                   	pop    %edi
+840222b7:	5d                   	pop    %ebp
+840222b8:	c2 0c 00             	ret    $0xc
+840222bb:	90                   	nop
+
+840222bc <_MmDeleteKernelStackEx@12>:
+840222bc:	55                   	push   %ebp
+840222bd:	89 e5                	mov    %esp,%ebp
+840222bf:	57                   	push   %edi
+840222c0:	56                   	push   %esi
+840222c1:	53                   	push   %ebx
+840222c2:	83 ec 2c             	sub    $0x2c,%esp
+840222c5:	8b 55 08             	mov    0x8(%ebp),%edx
+840222c8:	8b 45 10             	mov    0x10(%ebp),%eax
+840222cb:	c1 ea 0c             	shr    $0xc,%edx
+840222ce:	80 7d 0c 00          	cmpb   $0x0,0xc(%ebp)
+840222d2:	8d 3c 95 fc ff ff bf 	lea    -0x40000004(,%edx,4),%edi
+840222d9:	89 7d ec             	mov    %edi,-0x14(%ebp)
+840222dc:	75 0b                	jne    840222e9 <_MmDeleteKernelStackEx@12+0x2d>
+840222de:	ba 03 00 00 00       	mov    $0x3,%edx
+840222e3:	85 c0                	test   %eax,%eax
+840222e5:	75 07                	jne    840222ee <_MmDeleteKernelStackEx@12+0x32>
+840222e7:	eb 15                	jmp    840222fe <_MmDeleteKernelStackEx@12+0x42>
+840222e9:	a1 b4 53 05 84       	mov    0x840553b4,%eax
+840222ee:	89 c2                	mov    %eax,%edx
+840222f0:	c1 ea 0c             	shr    $0xc,%edx
+840222f3:	a9 ff 0f 00 00       	test   $0xfff,%eax
+840222f8:	0f 95 c0             	setne  %al
+840222fb:	0f b6 c0             	movzbl %al,%eax
+840222fe:	01 d0                	add    %edx,%eax
+84022300:	b9 02 00 00 00       	mov    $0x2,%ecx
+84022305:	31 ff                	xor    %edi,%edi
+84022307:	31 f6                	xor    %esi,%esi
+84022309:	89 45 e4             	mov    %eax,-0x1c(%ebp)
+8402230c:	e8 ff 6b ff ff       	call   84018f10 <@KeAcquireQueuedSpinLock@4>
+84022311:	8b 4d ec             	mov    -0x14(%ebp),%ecx
+84022314:	88 45 e3             	mov    %al,-0x1d(%ebp)
+84022317:	8b 45 e4             	mov    -0x1c(%ebp),%eax
+8402231a:	39 c6                	cmp    %eax,%esi
+8402231c:	74 3c                	je     8402235a <_MmDeleteKernelStackEx@12+0x9e>
+8402231e:	f6 01 01             	testb  $0x1,(%ecx)
+84022321:	74 31                	je     84022354 <_MmDeleteKernelStackEx@12+0x98>
+84022323:	8b 01                	mov    (%ecx),%eax
+84022325:	31 d2                	xor    %edx,%edx
+84022327:	89 cb                	mov    %ecx,%ebx
+84022329:	89 4d dc             	mov    %ecx,-0x24(%ebp)
+8402232c:	89 11                	mov    %edx,(%ecx)
+8402232e:	c1 e3 0a             	shl    $0xa,%ebx
+84022331:	c1 e8 0c             	shr    $0xc,%eax
+84022334:	89 45 e8             	mov    %eax,-0x18(%ebp)
+84022337:	0f 01 3b             	invlpg (%ebx)
+8402233a:	8b 45 e8             	mov    -0x18(%ebp),%eax
+8402233d:	31 d2                	xor    %edx,%edx
+8402233f:	47                   	inc    %edi
+84022340:	e8 47 a1 00 00       	call   8402c48c <_NxkPageSupplySetOwner>
+84022345:	8b 45 e8             	mov    -0x18(%ebp),%eax
+84022348:	89 04 24             	mov    %eax,(%esp)
+8402234b:	e8 ec a0 00 00       	call   8402c43c <_NxkPageSupplyReturn@4>
+84022350:	51                   	push   %ecx
+84022351:	8b 4d dc             	mov    -0x24(%ebp),%ecx
+84022354:	83 e9 04             	sub    $0x4,%ecx
+84022357:	46                   	inc    %esi
+84022358:	eb bd                	jmp    84022317 <_MmDeleteKernelStackEx@12+0x5b>
+8402235a:	6b de fc             	imul   $0xfffffffc,%esi,%ebx
+8402235d:	8b 45 ec             	mov    -0x14(%ebp),%eax
+84022360:	0f b6 55 e3          	movzbl -0x1d(%ebp),%edx
+84022364:	b9 02 00 00 00       	mov    $0x2,%ecx
+84022369:	f7 df                	neg    %edi
+8402236b:	01 d8                	add    %ebx,%eax
+8402236d:	89 c3                	mov    %eax,%ebx
+8402236f:	e8 d4 87 ff ff       	call   8401ab48 <@KeReleaseQueuedSpinLock@8>
+84022374:	f0 01 3d e0 2e 06 84 	lock add %edi,0x84062ee0
+8402237b:	31 c0                	xor    %eax,%eax
+8402237d:	46                   	inc    %esi
+8402237e:	89 1c 24             	mov    %ebx,(%esp)
+84022381:	89 74 24 04          	mov    %esi,0x4(%esp)
+84022385:	89 44 24 08          	mov    %eax,0x8(%esp)
+84022389:	e8 6e f7 ff ff       	call   84021afc <_MiReleaseSystemPtes@12.constprop.0>
+8402238e:	83 ec 0c             	sub    $0xc,%esp
+84022391:	8d 65 f4             	lea    -0xc(%ebp),%esp
+84022394:	5b                   	pop    %ebx
+84022395:	5e                   	pop    %esi
+84022396:	5f                   	pop    %edi
+84022397:	5d                   	pop    %ebp
+84022398:	c2 0c 00             	ret    $0xc
+8402239b:	90                   	nop
+
+8402239c <_MmFlushImageSection@8.constprop.0>:
+8402239c:	b0 01                	mov    $0x1,%al
+8402239e:	c2 08 00             	ret    $0x8
+840223a1:	90                   	nop
+840223a2:	90                   	nop
+840223a3:	90                   	nop
+
+840223a4 <_MmFreeContiguousMemorySpecifyCache@12>:
+840223a4:	55                   	push   %ebp
+840223a5:	89 e5                	mov    %esp,%ebp
+840223a7:	83 ec 08             	sub    $0x8,%esp
+840223aa:	8b 45 08             	mov    0x8(%ebp),%eax
+840223ad:	89 04 24             	mov    %eax,(%esp)
+840223b0:	e8 37 57 00 00       	call   84027aec <_NxMmFreeContiguousMemory@4>
+840223b5:	52                   	push   %edx
+840223b6:	c9                   	leave
+840223b7:	c2 0c 00             	ret    $0xc
+840223ba:	90                   	nop
+840223bb:	90                   	nop
+
+840223bc <_MmFreeSystemMemory@8>:
+840223bc:	55                   	push   %ebp
+840223bd:	89 e5                	mov    %esp,%ebp
+840223bf:	57                   	push   %edi
+840223c0:	56                   	push   %esi
+840223c1:	31 f6                	xor    %esi,%esi
+840223c3:	53                   	push   %ebx
+840223c4:	83 ec 1c             	sub    $0x1c,%esp
+840223c7:	83 7d 08 00          	cmpl   $0x0,0x8(%ebp)
+840223cb:	0f 84 c9 00 00 00    	je     8402249a <_MmFreeSystemMemory@8+0xde>
+840223d1:	8b 45 0c             	mov    0xc(%ebp),%eax
+840223d4:	05 ff 0f 00 00       	add    $0xfff,%eax
+840223d9:	c1 e8 0c             	shr    $0xc,%eax
+840223dc:	89 45 e8             	mov    %eax,-0x18(%ebp)
+840223df:	8b 45 08             	mov    0x8(%ebp),%eax
+840223e2:	05 00 00 00 30       	add    $0x30000000,%eax
+840223e7:	3d ff ff ff 03       	cmp    $0x3ffffff,%eax
+840223ec:	0f 87 90 00 00 00    	ja     84022482 <_MmFreeSystemMemory@8+0xc6>
+840223f2:	a0 24 f0 df ff       	mov    0xffdff024,%al
+840223f7:	88 45 e3             	mov    %al,-0x1d(%ebp)
+840223fa:	c6 05 24 f0 df ff 02 	movb   $0x2,0xffdff024
+84022401:	31 db                	xor    %ebx,%ebx
+84022403:	8b 45 08             	mov    0x8(%ebp),%eax
+84022406:	89 5d ec             	mov    %ebx,-0x14(%ebp)
+84022409:	c1 e8 0c             	shr    $0xc,%eax
+8402240c:	8d 3c 85 00 00 00 c0 	lea    -0x40000000(,%eax,4),%edi
+84022413:	8b 55 e8             	mov    -0x18(%ebp),%edx
+84022416:	39 55 ec             	cmp    %edx,-0x14(%ebp)
+84022419:	74 50                	je     8402246b <_MmFreeSystemMemory@8+0xaf>
+8402241b:	8b 07                	mov    (%edi),%eax
+8402241d:	89 45 e4             	mov    %eax,-0x1c(%ebp)
+84022420:	a8 01                	test   $0x1,%al
+84022422:	74 3f                	je     84022463 <_MmFreeSystemMemory@8+0xa7>
+84022424:	31 c9                	xor    %ecx,%ecx
+84022426:	83 7d e8 04          	cmpl   $0x4,-0x18(%ebp)
+8402242a:	89 0f                	mov    %ecx,(%edi)
+8402242c:	77 0c                	ja     8402243a <_MmFreeSystemMemory@8+0x7e>
+8402242e:	8b 5d ec             	mov    -0x14(%ebp),%ebx
+84022431:	c1 e3 0c             	shl    $0xc,%ebx
+84022434:	03 5d 08             	add    0x8(%ebp),%ebx
+84022437:	0f 01 3b             	invlpg (%ebx)
+8402243a:	b9 02 00 00 00       	mov    $0x2,%ecx
+8402243f:	46                   	inc    %esi
+84022440:	e8 cb 6a ff ff       	call   84018f10 <@KeAcquireQueuedSpinLock@4>
+84022445:	89 c3                	mov    %eax,%ebx
+84022447:	8b 45 e4             	mov    -0x1c(%ebp),%eax
+8402244a:	c1 e8 0c             	shr    $0xc,%eax
+8402244d:	89 04 24             	mov    %eax,(%esp)
+84022450:	e8 e7 9f 00 00       	call   8402c43c <_NxkPageSupplyReturn@4>
+84022455:	b9 02 00 00 00       	mov    $0x2,%ecx
+8402245a:	52                   	push   %edx
+8402245b:	0f b6 d3             	movzbl %bl,%edx
+8402245e:	e8 e5 86 ff ff       	call   8401ab48 <@KeReleaseQueuedSpinLock@8>
+84022463:	ff 45 ec             	incl   -0x14(%ebp)
+84022466:	83 c7 04             	add    $0x4,%edi
+84022469:	eb a8                	jmp    84022413 <_MmFreeSystemMemory@8+0x57>
+8402246b:	83 7d ec 04          	cmpl   $0x4,-0x14(%ebp)
+8402246f:	76 06                	jbe    84022477 <_MmFreeSystemMemory@8+0xbb>
+84022471:	0f 20 d8             	mov    %cr3,%eax
+84022474:	0f 22 d8             	mov    %eax,%cr3
+84022477:	0f b6 4d e3          	movzbl -0x1d(%ebp),%ecx
+8402247b:	e8 bc ac ff ff       	call   8401d13c <@KfLowerIrql@4>
+84022480:	eb 18                	jmp    8402249a <_MmFreeSystemMemory@8+0xde>
+84022482:	c7 44 24 04 4e 78 4d 	movl   $0x6d4d784e,0x4(%esp)
+84022489:	6d 
+8402248a:	8b 45 08             	mov    0x8(%ebp),%eax
+8402248d:	89 04 24             	mov    %eax,(%esp)
+84022490:	e8 37 ac fe ff       	call   8400d0cc <_ExFreePoolWithTag@8>
+84022495:	50                   	push   %eax
+84022496:	50                   	push   %eax
+84022497:	8b 75 e8             	mov    -0x18(%ebp),%esi
+8402249a:	8d 65 f4             	lea    -0xc(%ebp),%esp
+8402249d:	89 f0                	mov    %esi,%eax
+8402249f:	5b                   	pop    %ebx
+840224a0:	5e                   	pop    %esi
+840224a1:	5f                   	pop    %edi
+840224a2:	5d                   	pop    %ebp
+840224a3:	c2 08 00             	ret    $0x8
+840224a6:	90                   	nop
+840224a7:	90                   	nop
+
+840224a8 <_MmGetPhysicalAddress@4>:
+840224a8:	57                   	push   %edi
+840224a9:	31 c0                	xor    %eax,%eax
+840224ab:	31 d2                	xor    %edx,%edx
+840224ad:	56                   	push   %esi
+840224ae:	53                   	push   %ebx
+840224af:	8b 7c 24 10          	mov    0x10(%esp),%edi
+840224b3:	89 fb                	mov    %edi,%ebx
+840224b5:	c1 eb 16             	shr    $0x16,%ebx
+840224b8:	81 c3 00 00 0c 30    	add    $0x300c0000,%ebx
+840224be:	8a 0c 9d 00 00 00 00 	mov    0x0(,%ebx,4),%cl
+840224c5:	f6 c1 01             	test   $0x1,%cl
+840224c8:	74 47                	je     84022511 <_MmGetPhysicalAddress@4+0x69>
+840224ca:	84 c9                	test   %cl,%cl
+840224cc:	79 16                	jns    840224e4 <_MmGetPhysicalAddress@4+0x3c>
+840224ce:	8b 04 9d 00 00 00 00 	mov    0x0(,%ebx,4),%eax
+840224d5:	89 fa                	mov    %edi,%edx
+840224d7:	81 e2 ff ff 3f 00    	and    $0x3fffff,%edx
+840224dd:	25 00 00 c0 ff       	and    $0xffc00000,%eax
+840224e2:	eb 29                	jmp    8402250d <_MmGetPhysicalAddress@4+0x65>
+840224e4:	89 fb                	mov    %edi,%ebx
+840224e6:	c1 eb 0c             	shr    $0xc,%ebx
+840224e9:	8d b3 00 00 00 30    	lea    0x30000000(%ebx),%esi
+840224ef:	f6 04 9d 00 00 00 c0 	testb  $0x1,-0x40000000(,%ebx,4)
+840224f6:	01 
+840224f7:	74 18                	je     84022511 <_MmGetPhysicalAddress@4+0x69>
+840224f9:	8b 04 b5 00 00 00 00 	mov    0x0(,%esi,4),%eax
+84022500:	81 e7 ff 0f 00 00    	and    $0xfff,%edi
+84022506:	89 fa                	mov    %edi,%edx
+84022508:	25 00 f0 ff ff       	and    $0xfffff000,%eax
+8402250d:	09 d0                	or     %edx,%eax
+8402250f:	31 d2                	xor    %edx,%edx
+84022511:	5b                   	pop    %ebx
+84022512:	5e                   	pop    %esi
+84022513:	5f                   	pop    %edi
+84022514:	c2 04 00             	ret    $0x4
+84022517:	90                   	nop
+
+84022518 <_MmLockUnlockBufferPages@12>:
+84022518:	55                   	push   %ebp
+84022519:	89 e5                	mov    %esp,%ebp
+8402251b:	57                   	push   %edi
+8402251c:	56                   	push   %esi
+8402251d:	53                   	push   %ebx
+8402251e:	81 ec 24 01 00 00    	sub    $0x124,%esp
+84022524:	8b 7d 10             	mov    0x10(%ebp),%edi
+84022527:	8b 45 0c             	mov    0xc(%ebp),%eax
+8402252a:	8b 55 08             	mov    0x8(%ebp),%edx
+8402252d:	89 bd e4 fe ff ff    	mov    %edi,-0x11c(%ebp)
+84022533:	8a 8d e4 fe ff ff    	mov    -0x11c(%ebp),%cl
+84022539:	88 8d e9 fe ff ff    	mov    %cl,-0x117(%ebp)
+8402253f:	85 c0                	test   %eax,%eax
+84022541:	0f 84 4e 02 00 00    	je     84022795 <_MmLockUnlockBufferPages@12+0x27d>
+84022547:	48                   	dec    %eax
+84022548:	89 d7                	mov    %edx,%edi
+8402254a:	01 c7                	add    %eax,%edi
+8402254c:	0f 92 c3             	setb   %bl
+8402254f:	89 f8                	mov    %edi,%eax
+84022551:	0f b6 db             	movzbl %bl,%ebx
+84022554:	89 9d ec fe ff ff    	mov    %ebx,-0x114(%ebp)
+8402255a:	0f 82 35 02 00 00    	jb     84022795 <_MmLockUnlockBufferPages@12+0x27d>
+84022560:	81 e2 00 f0 ff ff    	and    $0xfffff000,%edx
+84022566:	25 00 f0 ff ff       	and    $0xfffff000,%eax
+8402256b:	b9 02 00 00 00       	mov    $0x2,%ecx
+84022570:	31 db                	xor    %ebx,%ebx
+84022572:	89 95 e0 fe ff ff    	mov    %edx,-0x120(%ebp)
+84022578:	89 85 d8 fe ff ff    	mov    %eax,-0x128(%ebp)
+8402257e:	e8 8d 69 ff ff       	call   84018f10 <@KeAcquireQueuedSpinLock@4>
+84022583:	31 c9                	xor    %ecx,%ecx
+84022585:	c6 85 eb fe ff ff 00 	movb   $0x0,-0x115(%ebp)
+8402258c:	8b b5 e0 fe ff ff    	mov    -0x120(%ebp),%esi
+84022592:	88 85 e8 fe ff ff    	mov    %al,-0x118(%ebp)
+84022598:	89 8d dc fe ff ff    	mov    %ecx,-0x124(%ebp)
+8402259e:	c6 85 ea fe ff ff 01 	movb   $0x1,-0x116(%ebp)
+840225a5:	89 34 24             	mov    %esi,(%esp)
+840225a8:	e8 27 57 00 00       	call   84027cd4 <_NxMmIsAddressValid@4>
+840225ad:	52                   	push   %edx
+840225ae:	89 c2                	mov    %eax,%edx
+840225b0:	84 c0                	test   %al,%al
+840225b2:	0f 84 95 00 00 00    	je     8402264d <_MmLockUnlockBufferPages@12+0x135>
+840225b8:	89 34 24             	mov    %esi,(%esp)
+840225bb:	e8 dc 56 00 00       	call   84027c9c <_NxMmGetPhysicalAddress@4>
+840225c0:	c1 e8 0c             	shr    $0xc,%eax
+840225c3:	57                   	push   %edi
+840225c4:	80 bd e9 fe ff ff 00 	cmpb   $0x0,-0x117(%ebp)
+840225cb:	89 c7                	mov    %eax,%edi
+840225cd:	74 38                	je     84022607 <_MmLockUnlockBufferPages@12+0xef>
+840225cf:	ba 01 00 00 00       	mov    $0x1,%edx
+840225d4:	e8 43 9d 00 00       	call   8402c31c <_NxkPageSupplyCanPin>
+840225d9:	89 c2                	mov    %eax,%edx
+840225db:	84 c0                	test   %al,%al
+840225dd:	0f 84 a0 00 00 00    	je     84022683 <_MmLockUnlockBufferPages@12+0x16b>
+840225e3:	8d 14 3f             	lea    (%edi,%edi,1),%edx
+840225e6:	03 15 f8 2e 06 84    	add    0x84062ef8,%edx
+840225ec:	66 8b 02             	mov    (%edx),%ax
+840225ef:	f6 c4 40             	test   $0x40,%ah
+840225f2:	75 22                	jne    84022616 <_MmLockUnlockBufferPages@12+0xfe>
+840225f4:	48                   	dec    %eax
+840225f5:	66 89 02             	mov    %ax,(%edx)
+840225f8:	66 3d 00 80          	cmp    $0x8000,%ax
+840225fc:	75 18                	jne    84022616 <_MmLockUnlockBufferPages@12+0xfe>
+840225fe:	c6 85 eb fe ff ff 01 	movb   $0x1,-0x115(%ebp)
+84022605:	eb 0f                	jmp    84022616 <_MmLockUnlockBufferPages@12+0xfe>
+84022607:	31 d2                	xor    %edx,%edx
+84022609:	e8 0e 9d 00 00       	call   8402c31c <_NxkPageSupplyCanPin>
+8402260e:	84 c0                	test   %al,%al
+84022610:	0f 84 0f 01 00 00    	je     84022725 <_MmLockUnlockBufferPages@12+0x20d>
+84022616:	83 fb 3f             	cmp    $0x3f,%ebx
+84022619:	77 07                	ja     84022622 <_MmLockUnlockBufferPages@12+0x10a>
+8402261b:	89 bc 9d f0 fe ff ff 	mov    %edi,-0x110(%ebp,%ebx,4)
+84022622:	39 bd dc fe ff ff    	cmp    %edi,-0x124(%ebp)
+84022628:	72 07                	jb     84022631 <_MmLockUnlockBufferPages@12+0x119>
+8402262a:	c6 85 ea fe ff ff 00 	movb   $0x0,-0x116(%ebp)
+84022631:	8b 85 d8 fe ff ff    	mov    -0x128(%ebp),%eax
+84022637:	43                   	inc    %ebx
+84022638:	39 c6                	cmp    %eax,%esi
+8402263a:	74 20                	je     8402265c <_MmLockUnlockBufferPages@12+0x144>
+8402263c:	89 bd dc fe ff ff    	mov    %edi,-0x124(%ebp)
+84022642:	81 c6 00 10 00 00    	add    $0x1000,%esi
+84022648:	e9 58 ff ff ff       	jmp    840225a5 <_MmLockUnlockBufferPages@12+0x8d>
+8402264d:	80 bd e4 fe ff ff 00 	cmpb   $0x0,-0x11c(%ebp)
+84022654:	0f 84 cb 00 00 00    	je     84022725 <_MmLockUnlockBufferPages@12+0x20d>
+8402265a:	eb 27                	jmp    84022683 <_MmLockUnlockBufferPages@12+0x16b>
+8402265c:	80 bd e4 fe ff ff 00 	cmpb   $0x0,-0x11c(%ebp)
+84022663:	0f 84 cf 00 00 00    	je     84022738 <_MmLockUnlockBufferPages@12+0x220>
+84022669:	8a 85 ea fe ff ff    	mov    -0x116(%ebp),%al
+8402266f:	83 f0 01             	xor    $0x1,%eax
+84022672:	84 85 eb fe ff ff    	test   %al,-0x115(%ebp)
+84022678:	74 17                	je     84022691 <_MmLockUnlockBufferPages@12+0x179>
+8402267a:	c6 85 eb fe ff ff 01 	movb   $0x1,-0x115(%ebp)
+84022681:	b2 01                	mov    $0x1,%dl
+84022683:	31 f6                	xor    %esi,%esi
+84022685:	39 de                	cmp    %ebx,%esi
+84022687:	75 24                	jne    840226ad <_MmLockUnlockBufferPages@12+0x195>
+84022689:	84 d2                	test   %dl,%dl
+8402268b:	0f 84 94 00 00 00    	je     84022725 <_MmLockUnlockBufferPages@12+0x20d>
+84022691:	80 bd e4 fe ff ff 00 	cmpb   $0x0,-0x11c(%ebp)
+84022698:	0f 84 9a 00 00 00    	je     84022738 <_MmLockUnlockBufferPages@12+0x220>
+8402269e:	80 bd eb fe ff ff 00 	cmpb   $0x0,-0x115(%ebp)
+840226a5:	0f 85 8d 00 00 00    	jne    84022738 <_MmLockUnlockBufferPages@12+0x220>
+840226ab:	eb 78                	jmp    84022725 <_MmLockUnlockBufferPages@12+0x20d>
+840226ad:	83 fb 40             	cmp    $0x40,%ebx
+840226b0:	77 09                	ja     840226bb <_MmLockUnlockBufferPages@12+0x1a3>
+840226b2:	8b 84 b5 f0 fe ff ff 	mov    -0x110(%ebp,%esi,4),%eax
+840226b9:	eb 25                	jmp    840226e0 <_MmLockUnlockBufferPages@12+0x1c8>
+840226bb:	8b bd e0 fe ff ff    	mov    -0x120(%ebp),%edi
+840226c1:	89 f0                	mov    %esi,%eax
+840226c3:	88 95 dc fe ff ff    	mov    %dl,-0x124(%ebp)
+840226c9:	c1 e0 0c             	shl    $0xc,%eax
+840226cc:	01 f8                	add    %edi,%eax
+840226ce:	89 04 24             	mov    %eax,(%esp)
+840226d1:	e8 c6 55 00 00       	call   84027c9c <_NxMmGetPhysicalAddress@4>
+840226d6:	51                   	push   %ecx
+840226d7:	8a 95 dc fe ff ff    	mov    -0x124(%ebp),%dl
+840226dd:	c1 e8 0c             	shr    $0xc,%eax
+840226e0:	01 c0                	add    %eax,%eax
+840226e2:	03 05 f8 2e 06 84    	add    0x84062ef8,%eax
+840226e8:	66 8b 08             	mov    (%eax),%cx
+840226eb:	f6 c5 40             	test   $0x40,%ch
+840226ee:	75 04                	jne    840226f4 <_MmLockUnlockBufferPages@12+0x1dc>
+840226f0:	41                   	inc    %ecx
+840226f1:	66 89 08             	mov    %cx,(%eax)
+840226f4:	46                   	inc    %esi
+840226f5:	eb 8e                	jmp    84022685 <_MmLockUnlockBufferPages@12+0x16d>
+840226f7:	8b 85 ec fe ff ff    	mov    -0x114(%ebp),%eax
+840226fd:	83 fb 40             	cmp    $0x40,%ebx
+84022700:	77 3f                	ja     84022741 <_MmLockUnlockBufferPages@12+0x229>
+84022702:	8b 84 85 f0 fe ff ff 	mov    -0x110(%ebp,%eax,4),%eax
+84022709:	80 bd e9 fe ff ff 00 	cmpb   $0x0,-0x117(%ebp)
+84022710:	75 48                	jne    8402275a <_MmLockUnlockBufferPages@12+0x242>
+84022712:	e8 49 9c 00 00       	call   8402c360 <_NxkPageSupplyCommitPin>
+84022717:	ff 85 ec fe ff ff    	incl   -0x114(%ebp)
+8402271d:	39 9d ec fe ff ff    	cmp    %ebx,-0x114(%ebp)
+84022723:	75 d2                	jne    840226f7 <_MmLockUnlockBufferPages@12+0x1df>
+84022725:	0f b6 95 e8 fe ff ff 	movzbl -0x118(%ebp),%edx
+8402272c:	b9 02 00 00 00       	mov    $0x2,%ecx
+84022731:	e8 12 84 ff ff       	call   8401ab48 <@KeReleaseQueuedSpinLock@8>
+84022736:	eb 5d                	jmp    84022795 <_MmLockUnlockBufferPages@12+0x27d>
+84022738:	0f b6 b5 e9 fe ff ff 	movzbl -0x117(%ebp),%esi
+8402273f:	eb dc                	jmp    8402271d <_MmLockUnlockBufferPages@12+0x205>
+84022741:	8b bd e0 fe ff ff    	mov    -0x120(%ebp),%edi
+84022747:	c1 e0 0c             	shl    $0xc,%eax
+8402274a:	01 f8                	add    %edi,%eax
+8402274c:	89 04 24             	mov    %eax,(%esp)
+8402274f:	e8 48 55 00 00       	call   84027c9c <_NxMmGetPhysicalAddress@4>
+84022754:	c1 e8 0c             	shr    $0xc,%eax
+84022757:	52                   	push   %edx
+84022758:	eb af                	jmp    84022709 <_MmLockUnlockBufferPages@12+0x1f1>
+8402275a:	80 bd ea fe ff ff 00 	cmpb   $0x0,-0x116(%ebp)
+84022761:	74 29                	je     8402278c <_MmLockUnlockBufferPages@12+0x274>
+84022763:	8d 14 00             	lea    (%eax,%eax,1),%edx
+84022766:	03 15 f8 2e 06 84    	add    0x84062ef8,%edx
+8402276c:	66 81 3a 00 80       	cmpw   $0x8000,(%edx)
+84022771:	75 a4                	jne    84022717 <_MmLockUnlockBufferPages@12+0x1ff>
+84022773:	66 c7 02 00 00       	movw   $0x0,(%edx)
+84022778:	e8 5f b1 00 00       	call   8402d8dc <_NxpPushHead>
+8402277d:	3b 05 ec 2e 06 84    	cmp    0x84062eec,%eax
+84022783:	73 92                	jae    84022717 <_MmLockUnlockBufferPages@12+0x1ff>
+84022785:	a3 ec 2e 06 84       	mov    %eax,0x84062eec
+8402278a:	eb 8b                	jmp    84022717 <_MmLockUnlockBufferPages@12+0x1ff>
+8402278c:	89 f2                	mov    %esi,%edx
+8402278e:	e8 21 9c 00 00       	call   8402c3b4 <_NxkPageSupplyPin>
+84022793:	eb 82                	jmp    84022717 <_MmLockUnlockBufferPages@12+0x1ff>
+84022795:	8d 65 f4             	lea    -0xc(%ebp),%esp
+84022798:	5b                   	pop    %ebx
+84022799:	5e                   	pop    %esi
+8402279a:	5f                   	pop    %edi
+8402279b:	5d                   	pop    %ebp
+8402279c:	c2 0c 00             	ret    $0xc
+8402279f:	90                   	nop
+
+840227a0 <_MmLockUnlockPhysicalPage@8>:
+840227a0:	55                   	push   %ebp
+840227a1:	b9 02 00 00 00       	mov    $0x2,%ecx
+840227a6:	89 e5                	mov    %esp,%ebp
+840227a8:	56                   	push   %esi
+840227a9:	53                   	push   %ebx
+840227aa:	8b 75 0c             	mov    0xc(%ebp),%esi
+840227ad:	e8 5e 67 ff ff       	call   84018f10 <@KeAcquireQueuedSpinLock@4>
+840227b2:	89 c3                	mov    %eax,%ebx
+840227b4:	89 f0                	mov    %esi,%eax
+840227b6:	0f b6 d0             	movzbl %al,%edx
+840227b9:	8b 45 08             	mov    0x8(%ebp),%eax
+840227bc:	c1 e8 0c             	shr    $0xc,%eax
+840227bf:	e8 f0 9b 00 00       	call   8402c3b4 <_NxkPageSupplyPin>
+840227c4:	0f b6 d3             	movzbl %bl,%edx
+840227c7:	b9 02 00 00 00       	mov    $0x2,%ecx
+840227cc:	e8 77 83 ff ff       	call   8401ab48 <@KeReleaseQueuedSpinLock@8>
+840227d1:	5b                   	pop    %ebx
+840227d2:	5e                   	pop    %esi
+840227d3:	5d                   	pop    %ebp
+840227d4:	c2 08 00             	ret    $0x8
+840227d7:	90                   	nop
+
+840227d8 <_MmMapIoSpace@16.constprop.0>:
+840227d8:	55                   	push   %ebp
+840227d9:	89 e5                	mov    %esp,%ebp
+840227db:	57                   	push   %edi
+840227dc:	56                   	push   %esi
+840227dd:	53                   	push   %ebx
+840227de:	83 ec 2c             	sub    $0x2c,%esp
+840227e1:	8b 45 08             	mov    0x8(%ebp),%eax
+840227e4:	8b 55 0c             	mov    0xc(%ebp),%edx
+840227e7:	89 c6                	mov    %eax,%esi
+840227e9:	0f ac d0 0c          	shrd   $0xc,%edx,%eax
+840227ed:	81 e6 ff 0f 00 00    	and    $0xfff,%esi
+840227f3:	c1 fa 0c             	sar    $0xc,%edx
+840227f6:	89 45 e8             	mov    %eax,-0x18(%ebp)
+840227f9:	31 c0                	xor    %eax,%eax
+840227fb:	8d                   	.byte 0x8d
+840227fc:	8e ff                	mov    %edi,%?
+840227fe:	0f                   	.byte 0xf
+	...

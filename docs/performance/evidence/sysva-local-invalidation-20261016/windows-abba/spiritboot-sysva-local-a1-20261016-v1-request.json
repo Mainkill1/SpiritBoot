@@ -1,0 +1,208 @@
+{
+  "id": "spiritboot-sysva-local-a1-20261016-v1",
+  "files": [
+    {
+      "Path": "fixture.iso",
+      "Length": 655360,
+      "Sha256": "f7c7b0e6941a7d86a9f79b19a248efd10a04e6ff38c48dad4f5ceaca18f9049b",
+      "Executable": false
+    },
+    {
+      "Path": "flash.bin",
+      "Length": 524288,
+      "Sha256": "e7c70bbdc2b766c397bff4119cc65cdc2629dfe4e9f8ff21e922d0e869bf2326",
+      "Executable": false
+    },
+    {
+      "Path": "native-launch.exe",
+      "Length": 78848,
+      "Sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "Executable": true
+    },
+    {
+      "Path": "state/eeprom.bin",
+      "Length": 256,
+      "Sha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5",
+      "Executable": false
+    },
+    {
+      "Path": "xemu.exe",
+      "Length": 44688777,
+      "Sha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.toml",
+      "Length": 523,
+      "Sha256": "45b3053a43958b07cf365ae8cc2c12c76da1c2dba504f351110494d0609968c1",
+      "Executable": false
+    }
+  ],
+  "job": {
+    "id": "spiritboot-sysva-local-a1-20261016-v1",
+    "targetOs": "windows",
+    "executable": "native-launch.exe",
+    "expectedExecutableSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+    "arguments": [
+      "-config_path",
+      "{packageDir}/xemu.toml",
+      "-m",
+      "64",
+      "-device",
+      "lpc47m157",
+      "-serial",
+      "file:{resultDir}/native-serial.log",
+      "-no-shutdown"
+    ],
+    "environment": {
+      "PR248_NATIVE_PACKAGE": "{packageDir}",
+      "PR248_NATIVE_EVIDENCE": "{resultDir}"
+    },
+    "workingDirectory": ".",
+    "launchMode": "direct",
+    "timeoutSeconds": 300,
+    "startPaused": false,
+    "requireInput": false,
+    "requiredFiles": [
+      "fixture.iso",
+      "flash.bin",
+      "native-launch.exe",
+      "state/eeprom.bin",
+      "xemu.exe",
+      "xemu.toml"
+    ],
+    "inputs": [
+      {
+        "path": "fixture.iso",
+        "hash": true,
+        "expectedSha256": "f7c7b0e6941a7d86a9f79b19a248efd10a04e6ff38c48dad4f5ceaca18f9049b",
+        "role": "native-regression-input"
+      },
+      {
+        "path": "flash.bin",
+        "hash": true,
+        "expectedSha256": "e7c70bbdc2b766c397bff4119cc65cdc2629dfe4e9f8ff21e922d0e869bf2326",
+        "role": "native-regression-input"
+      },
+      {
+        "path": "native-launch.exe",
+        "hash": true,
+        "expectedSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+        "role": "native-regression-input"
+      },
+      {
+        "path": "state/eeprom.bin",
+        "hash": true,
+        "expectedSha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5",
+        "role": "native-regression-input"
+      },
+      {
+        "path": "xemu.exe",
+        "hash": true,
+        "expectedSha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d",
+        "role": "emulator"
+      },
+      {
+        "path": "xemu.toml",
+        "hash": true,
+        "expectedSha256": "45b3053a43958b07cf365ae8cc2c12c76da1c2dba504f351110494d0609968c1",
+        "role": "native-regression-input"
+      }
+    ],
+    "tags": [
+      "SPIRITBOOT-SYSVA-SUSTAINED-ABBA",
+      "USER-POWERSHELL-PIPE",
+      "RELEASE64",
+      "POSITION:A1",
+      "ARM:control",
+      "ITERATIONS:1048576",
+      "SAMPLES:4"
+    ],
+    "operations": {
+      "mode": "diagnostic",
+      "allowDiagnostics": false,
+      "allowManualInput": false,
+      "allowPauseResume": false,
+      "allowPreview": false,
+      "allowBulkTransfers": false
+    },
+    "diagnostics": [],
+    "plan": [
+      {
+        "type": "wait_for_artifact",
+        "condition": {
+          "path": "native-serial.log",
+          "scope": "result",
+          "mustExist": true,
+          "containsText": "== kernel-performance end "
+        },
+        "pollIntervalMs": 100,
+        "timeoutMs": 240000
+      },
+      {
+        "type": "wait",
+        "delayMs": 500
+      },
+      {
+        "type": "quit"
+      }
+    ],
+    "runtimeState": {
+      "enabled": true,
+      "files": [
+        {
+          "source": "state/eeprom.bin",
+          "destination": "eeprom.bin",
+          "expectedSha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5"
+        }
+      ],
+      "diskAssets": [
+        {
+          "assetId": "pr256-clean-fatx-compat010-v1",
+          "destination": "hdd.qcow2",
+          "expectedSha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+          "retention": "deleteAfterEvidence"
+        }
+      ],
+      "keepOnSuccess": false,
+      "keepOnFailure": true,
+      "isolation": {
+        "cacheMode": "cold",
+        "cacheShaders": true,
+        "driverCache": "uncontrolled",
+        "allowUncontrolledDriverCache": true,
+        "requirePrivateGuestState": true,
+        "maximumBytes": 268435456,
+        "maximumFiles": 4096,
+        "deadlineSeconds": 15,
+        "readOnlyAssets": [
+          {
+            "field": "bootrom_path",
+            "assetId": "devbox-mcpx10-readonly-v1",
+            "expectedSha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335"
+          }
+        ]
+      }
+    },
+    "workload": {
+      "requirePlanCompletion": true
+    },
+    "experiment": {
+      "id": "spiritboot-sysva-local-invalidation-20261016",
+      "variant": "control",
+      "reference": "control",
+      "variedFactors": [
+        "bios"
+      ],
+      "controlledFactors": [
+        "fixture",
+        "xemu",
+        "config",
+        "eeprom",
+        "hdd",
+        "host",
+        "release-build"
+      ]
+    }
+  }
+}

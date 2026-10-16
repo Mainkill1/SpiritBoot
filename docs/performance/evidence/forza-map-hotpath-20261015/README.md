@@ -70,6 +70,12 @@ Release128 is
 `fdfcb2382d3b24a0d4aaa7f8037792b00bd82daf2640bf40d1b9b1f8c036f340`.
 Both assemble tree `2f6790bae801075928f1ff556aed1ef2d2938858`.
 
+These identities remain the historical Forza integration evidence. Later
+patches 0153 and 0154 do not rewrite those measurements. Patch 0154 closes the
+largest separately measured remaining firmware-owned SYSVA gap; its exact
+release images, A/B/B/A result and reproduction bundle are in
+[`../sysva-local-invalidation-20261016/`](../sysva-local-invalidation-20261016/).
+
 Two independent Windows release64 boots completed 32 passes and 32,768
 measured reads at QD12 with zero request, oracle, cleanup or warmup failures.
 Compared with the mean of the two retained-SG boots, the combined candidate
@@ -108,6 +114,8 @@ follow-up used 4,096x fixed work, 64 warmups, 16,384 iterations and 15.4--16.1
 seconds of measured work per run. All four records passed, and the current
 two-run mean was 1.95% slower, closing the short-sample signal. No leaf remains
 above the 20% threshold after sustained review. See `final-broad-xiso/`.
+The current image was faster in 119 of 144 leaves (82.64%) and slower in 25;
+this is below a 90% leaf-win target and is not represented as such.
 
 ## Rejected and superseded pump designs
 
@@ -138,6 +146,14 @@ software-controlled storage costs. The accepted pump and extent changes target
 the first three; packet preparation and ATA/stall attribution are separate
 focused reviews. Profiler wall/CPU timing is excluded because the plugin
 perturbs it.
+
+The 16 rows originally marked as follow-up candidates are now closed by the
+pump/native-adapter, FAT mapping/checkpoint, packet-preparation and ATA-cache
+patches, or by exact no-change review of `PataStartIo` and `port_leave`. The ATA
+settle-delay candidate was rejected after it caused optical menu corruption;
+the reviewed outcome retains required hardware and interrupt ordering. The
+later SYSVA campaign covers the remaining separately measured firmware-owned
+allocation gap.
 
 ## Reproduction map
 

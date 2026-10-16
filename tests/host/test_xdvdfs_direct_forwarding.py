@@ -11,12 +11,17 @@ PATCH_PATH = "patches/roswell/0153-xdvdfs-direct-forwarding.patch"
 
 
 class XdvdfsDirectForwardingTests(unittest.TestCase):
-    def test_candidate_is_last_and_hash_locked(self):
+    def test_candidate_is_ordered_and_hash_locked(self):
         lock = json.loads((ROOT / "sources/firmware-lock.json").read_text())
         entries = lock["repositories"]["roswell"]["patches"]
-        self.assertEqual(entries[-1]["path"], PATCH_PATH)
+        paths = [entry["path"] for entry in entries]
+        index = paths.index(PATCH_PATH)
         data = (ROOT / PATCH_PATH).read_bytes()
-        self.assertEqual(hashlib.sha256(data).hexdigest(), entries[-1]["sha256"])
+        self.assertEqual(hashlib.sha256(data).hexdigest(), entries[index]["sha256"])
+        self.assertLess(
+            index,
+            paths.index("patches/roswell/0154-system-va-local-invalidation.patch"),
+        )
 
     def test_admission_retains_unsafe_requests_on_existing_path(self):
         patch = (ROOT / PATCH_PATH).read_text()
