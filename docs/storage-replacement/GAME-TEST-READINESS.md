@@ -4,8 +4,8 @@ No fresh PGR2, Conker or complete DOA save-cycle pass is established on the
 current final PR248 image. A bounded earlier DOA human test is recorded below.
 The independent replacement is installed in the complete-candidate release
 link. Its current safe-default release64 SHA-256 is
-`6f4070f788355d88cf44f37b792a6aceb1e9ead91bc441fe04df800c0a0fc077`
-from assembled tree `59d31441244d43d7e304a85c6566cc268b9b8573`.
+`c416cc97dc1d78028a88827692fc3d9e277e66286912d20193b4365c386707b4`
+from assembled tree `5c4eefef8aea70f20d9615b107a7bfaac67b0bbb`.
 Ordinary boots retain the delayed ATA path. Acceleration requires an explicit
 session-only Advanced setting. Repeated race/loading qualification remains
 pending because the original missing-data symptom was sporadic.
@@ -34,7 +34,9 @@ failed qualification. Release64
 removes all automatic activation, restores the safe delay by default, and adds
 an explicit top-row toggle for all current Advanced experiments. It also adds
 the measured small-SYSVA local-invalidation path. A follow-up game run remains
-required.
+required. That image is now rejected after the operator reported worse Forza
+corruption. The current candidate rolls back local SYSVA invalidation and keeps
+asynchronous XDVDFS reads on the established ordered path.
 
 The exact final image has completed two independent release-only Steam Deck
 runs of the full 144-leaf/five-group XISO: 149/149 records passed per run with

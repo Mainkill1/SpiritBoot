@@ -1,0 +1,115 @@
+diff --git a/ntoskrnl/xb/mm/sysva.c b/ntoskrnl/xb/mm/sysva.c
+index 4784a5d..9fa8a76 100644
+--- a/ntoskrnl/xb/mm/sysva.c
++++ b/ntoskrnl/xb/mm/sysva.c
+@@ -30,10 +30,6 @@
+ static KSPIN_LOCK NxSysVaLock;
+ static LONG       NxSysVaReady = 0;
+ 
+-/* A few INVLPGs avoid the substantially broader CR3 reload while keeping
+- * large mappings on one bounded global invalidation. */
+-#define NXK_SYSVA_LOCAL_TLB_MAX 4
+-
+ /* Page supply (xb/mm/pagesupply.c).  Both require the PFN lock. */
+ extern PFN_NUMBER NTAPI NxkPageSupplyTakeZero(ULONG Color);
+ extern PFN_NUMBER NTAPI NxkPageSupplyTakeAny(ULONG Color);
+@@ -176,28 +172,18 @@ NxkSysVaAllocate(SIZE_T Size, ULONG Protect)
+             for (j = 0; j < i; j++)
+             {
+                 ULONG Idx = (ULONG)(Va >> PAGE_SHIFT) + j;
+-                PFN_NUMBER RollbackPfn = Pte[Idx] >> PAGE_SHIFT;
++                NxkPageSupplyReturn(Pte[Idx] >> PAGE_SHIFT);
+                 Pte[Idx] = 0;
+-                if (i <= NXK_SYSVA_LOCAL_TLB_MAX)
+-                    __invlpg((PVOID)(Va + ((ULONG_PTR)j << PAGE_SHIFT)));
+-                NxkPageSupplyReturn(RollbackPfn);
+             }
+             MiReleasePfnLock(PfnIrql);
+-            if (i > NXK_SYSVA_LOCAL_TLB_MAX)
+-                __writecr3(__readcr3());
++            __writecr3(__readcr3());
+             KeReleaseSpinLock(&NxSysVaLock, OldIrql);
+             return NULL;
+         }
+         Pte[(Va >> PAGE_SHIFT) + i] =
+             ((ULONG)Pfn << PAGE_SHIFT) | NXK_PTE_VALID;
+     }
+-    if (Pages <= NXK_SYSVA_LOCAL_TLB_MAX)
+-    {
+-        for (i = 0; i < Pages; i++)
+-            __invlpg((PVOID)(Va + ((ULONG_PTR)i << PAGE_SHIFT)));
+-    }
+-    else
+-        __writecr3(__readcr3());
++    __writecr3(__readcr3());
+ 
+     KeReleaseSpinLock(&NxSysVaLock, OldIrql);
+     return (PVOID)Va;
+@@ -231,15 +217,12 @@ NxkSysVaFree(PVOID VaPtr, SIZE_T Size)
+         if (!(PteVal & 1)) continue;           /* already free */
+ 
+         Pte[Idx] = 0;
+-        if (Pages <= NXK_SYSVA_LOCAL_TLB_MAX)
+-            __invlpg((PVOID)(Va + ((ULONG_PTR)i << PAGE_SHIFT)));
+         PfnIrql = MiAcquirePfnLock();
+         NxkPageSupplyReturn(PteVal >> PAGE_SHIFT);
+         MiReleasePfnLock(PfnIrql);
+         Freed++;
+     }
+-    if (Pages > NXK_SYSVA_LOCAL_TLB_MAX)
+-        __writecr3(__readcr3());
++    __writecr3(__readcr3());
+     KeReleaseSpinLock(&NxSysVaLock, OldIrql);
+ 
+     return Freed;
+diff --git a/tests/host/system-va-raw/cases.c b/tests/host/system-va-raw/cases.c
+index 670aea2..6ffd194 100644
+--- a/tests/host/system-va-raw/cases.c
++++ b/tests/host/system-va-raw/cases.c
+@@ -45,16 +45,7 @@ static void success(unsigned pages,unsigned low,unsigned mode,unsigned protect)
+     PVOID va=NxkSysVaAllocate((SIZE_T)pages*PAGE_SIZE,protect);
+     require(va==(PVOID)(uintptr_t)NXK_SYSMEM_BASE,"first-fit VA unchanged");
+     require(count_mapped()==pages,"exact page publication count");
+-    if (pages <= 4)
+-    {
+-        require(flushes==0,"small SYSVA allocation avoids a global TLB flush");
+-        require(invalidations==pages,"small SYSVA allocation invalidates each published VA");
+-    }
+-    else
+-    {
+-        require(flushes==1,"large SYSVA allocation uses one global TLB flush");
+-        require(invalidations==0,"large SYSVA allocation does not duplicate invalidation work");
+-    }
++    require(flushes==1,"one final CR3 after successful publication");
+     for(unsigned i=0;i<pages;++i){unsigned entry=((ULONG*)NXK_PTE_BASE)[0xd0000+i],p=entry>>12;
+         require((entry&0xfff)==NXK_PTE_VALID,"existing writable/WB PTE policy preserved for each Protect input");
+         require(p==(!XBOX_RESERVE_UPPER_RAM&&low>=NxpKernelLowPfn&&low<=NxpKernelHighPfn?low+pages+31-i:low+i),"physical allocation order unchanged");
+@@ -68,16 +59,6 @@ static void success(unsigned pages,unsigned low,unsigned mode,unsigned protect)
+     unsigned alloc_acq=acquisitions;
+     require(NxkSysVaFree(va,(SIZE_T)pages*PAGE_SIZE)==pages,"exact free result");
+     require(count_mapped()==0&&MmAvailablePages==pages+32,"free returns all data frames exactly once");
+-    if (pages <= 4)
+-    {
+-        require(flushes==0,"small SYSVA free avoids a global TLB flush");
+-        require(invalidations==pages*2,"small SYSVA free invalidates each cleared VA before reuse");
+-    }
+-    else
+-    {
+-        require(flushes==2,"large SYSVA free uses one additional global TLB flush");
+-        require(invalidations==0,"large SYSVA free does not duplicate invalidation work");
+-    }
+     printf("success upper=%d pages=%u mode=%u alloc_locks=%u free_locks=%u max_work=%u zero_locked=%u\n",XBOX_RESERVE_UPPER_RAM,pages,mode,alloc_acq,acquisitions-alloc_acq,max_lock_work,zero_locked);
+ }
+ static void shortage(unsigned pages,unsigned available,unsigned preback) {
+diff --git a/tests/host/upper-ram-reservation/check.py b/tests/host/upper-ram-reservation/check.py
+index 1112c95..9facae4 100644
+--- a/tests/host/upper-ram-reservation/check.py
++++ b/tests/host/upper-ram-reservation/check.py
+@@ -226,7 +226,6 @@ static void KeBugCheckEx(ULONG b,ULONG_PTR a,ULONG_PTR c,ULONG_PTR d,ULONG_PTR f
+ static void ExRaiseStatus(ULONG s) { (void)s; assert(!"unexpected pool exception"); }
+ static ULONG __readcr3(void) { return 0; }
+ static void __writecr3(ULONG p) { (void)p; }
+-static void __invlpg(PVOID p) { (void)p; }
+ typedef int32_t LONG;
+ #define _In_
+ #define _Inout_

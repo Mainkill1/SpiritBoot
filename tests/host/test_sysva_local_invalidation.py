@@ -11,13 +11,19 @@ PATCH_PATH = "patches/roswell/0154-system-va-local-invalidation.patch"
 
 
 class SysVaLocalInvalidationTests(unittest.TestCase):
-    def test_candidate_is_last_and_hash_locked(self):
+    def test_candidate_is_hash_locked_before_its_compatibility_revert(self):
         lock = json.loads((ROOT / "sources/firmware-lock.json").read_text())
-        entry = lock["repositories"]["roswell"]["patches"][-1]
+        entries = lock["repositories"]["roswell"]["patches"]
+        entry = next(item for item in entries if item["path"] == PATCH_PATH)
         self.assertEqual(entry["path"], PATCH_PATH)
         self.assertEqual(
             hashlib.sha256((ROOT / PATCH_PATH).read_bytes()).hexdigest(),
             entry["sha256"],
+        )
+        self.assertLess(
+            entries.index(entry),
+            next(i for i, item in enumerate(entries)
+                 if item["path"].endswith("0155-revert-sysva-local-invalidation.patch")),
         )
 
     def test_small_ranges_use_local_invalidation(self):

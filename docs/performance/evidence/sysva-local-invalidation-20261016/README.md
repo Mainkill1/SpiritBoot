@@ -8,6 +8,14 @@ per warm one-page `MmAllocateSystemMemory`/`MmFreeSystemMemory` pair with one
 the page supply. Ranges of one through four pages use this local path. Larger
 ranges retain one global invalidation after allocation and one after free.
 
+> **Compatibility disposition, 2026-10-16:** patch 0155 rolls this candidate
+> back after the first operator test of the containing release64 BIOS reported
+> worse sporadic Forza corruption. The benchmark below remains evidence for
+> the rejected microbenchmark candidate; it does not establish game
+> compatibility. Its workload omitted interleaved VA/frame reuse, MDL-backed
+> I/O, DMA, and the affected game route. See
+> `docs/performance/FORZA-CORRUPTION-CONTRACT-AUDIT-20261016.md`.
+
 The accepted Windows release64 A/B/B/A campaign ran four samples of 1,048,576
 allocate/write/verify/free operations in each of four boots. Every sample
 reported `correct=1`, all checksums were `789c9dc5`, and every guest emitted its
