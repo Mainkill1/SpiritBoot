@@ -9,7 +9,7 @@ body was inspected.
 
 ## Accepted batch
 
-The current release64 candidate combines seven bounded changes:
+The corrected release64 candidate combines six bounded changes:
 
 1. `0147-retained-pata-sg-workspace.patch` retains the single-active-command
    PATA scatter/gather workspace across requests. It removes 32,768 allocation
@@ -40,25 +40,33 @@ The current release64 candidate combines seven bounded changes:
    ordinary ATA reads while retaining IDENTIFY publication, invalidation and
    consumer ordering. It removes 99 dynamic i386 bookkeeping instructions on
    each ordinary-I/O route; the isolated bookkeeping slice improves 90.92%.
-6. `0152-ata-400ns-status-reads.patch` realizes the required Xbox ATA settle
-   interval with four serialized Alternate Status reads. The existing ordinary
-   Status read remains the first IRQ acknowledgement. Exact release code emits
-   four direct `in` instructions, so handwritten assembly would add no value.
-   Three uninstrumented native replays completed 49,152 operations with zero
-   failures; their mean end-to-end APC time improves 4.13%.
 
 Patch `0146-forza-map-queue-depth.patch` supplies the 16-entry HDD envelope
 needed to admit the title's observed 12-request burst. Patches 0147 through
-0152 optimize work inside that fixed-capacity route.
+0151 optimize work inside that fixed-capacity route.
 
-The combined image is SHA-256
-`00aa2536dbda14ee851665be98e903c32c9705996832b335bbab72ab81c8ead6`
-and assembled source tree
-`d79d23a68f97e58e2f0182062d291884289e2f08`.
+Patch `0152-ata-400ns-status-reads.patch` was removed after real-game testing
+exposed sporadic missing or corrupt Forza menu data. Four Alternate Status
+reads consume bus time on physical ATA hardware but zero elapsed guest time in
+xemu, so the candidate removed a required optical ATAPI settle interval. The
+active release restores `KeStallExecutionProcessor(1)`. The audit, before/after
+screenshots, rejected patch, and permanent regression guard are under
+`ata-stall/` and `forza-menu-corruption/`.
 
-Two independent clean release64 builds reproduce the same image. The matching
-release128 image is SHA-256
-`8562d4f3f5259e7bc999f4f98e1a2e1f2fdf668fd3f6ce9e559615667cb152ed`.
+The replacement `0152-qemu-ata-advanced-controls.patch` accelerates only an
+ATA hard disk whose decoded IDENTIFY model contains `QEMU`. The first
+IDENTIFY, every ATAPI/XISO operation, physical disks, and unknown devices keep
+the delay. Settings now opens a session-only Advanced page with Y; its ATA
+modes are automatic QEMU-HDD gating, forced safe delay, and an explicit
+all-device experiment. The hidden BACK credits action remains available but is
+no longer advertised. See
+`ata-stall/QEMU-HDD-AUTO-SETTLE.md` for the code and test contract.
+
+The QEMU-HDD-auto release64 image is
+`08afa8ab25c48765f51390a8bdfb41ccde298dbef23eb4048642f131bf0d215c`;
+release128 is
+`57bed876ca1c444876ccaaf6a023272b29cb1ea562889c384d8d64c4dcab98d7`.
+Both assemble tree `a43893a57251fb699e6ef9b27c53adcd035d6c9e`.
 
 Two independent Windows release64 boots completed 32 passes and 32,768
 measured reads at QD12 with zero request, oracle, cleanup or warmup failures.
@@ -69,7 +77,7 @@ improves end-to-end APC batch time by 0.79% and summed submission time by
 result governs. See `pump-v7-fatx-native-summary.json` and the exact request and
 analysis files.
 
-The fully integrated 0146--0152 image then completed two more independent
+The superseded 0146--0152 image completed two more independent
 Windows release64 boots: another 32 passes and 32,768 reads, again with zero
 request, oracle, cleanup or warmup failures. Against the retained-SG two-run
 mean, the final mean improves end-to-end APC batch time 3.93% and submission
@@ -78,7 +86,9 @@ batch time 3.16% and the overlapping post-return interval 13.13%; submission
 time is effectively unchanged (+0.02%). `return_after_apc` rises 14.65% versus
 retained-SG but accounts for only about 35.7 thousand ticks versus 48.4 million
 end-to-end ticks. It is reported rather than hidden and is not the governing
-load-time metric. See `final-integration/final-native-summary.json`.
+load-time metric. These performance values are historical evidence only because
+0152 failed the subsequent optical game load. See
+`final-integration/final-native-summary.json`.
 
 Human-driven Forza remains the final streaming acceptance gate. The synthetic
 fixture proves request correctness and a non-regressing measured route; it
@@ -138,8 +148,9 @@ perturbs it.
   sanitizer results and final Steam Deck A/B/B/A captures.
 - `ata-cache-capture/`: ordinary-I/O cache-bookkeeping proof, disassembly and
   isolated benchmark.
-- `ata-stall/`: complete stall caller inventory, ATA/IRQ proof and native
-  release replay measurements.
+- `ata-stall/`: rejected ATA settle optimization, test-gap analysis, regression
+  policy, and the earlier native measurements retained as negative evidence.
+- `forza-menu-corruption/`: exact source audit and failing/restored screenshots.
 - `pump-v7-host/`: final pump manifest and locked checksums.
 - `rust-pump-model/`: independent language state model and v5/v6 audits.
 - `deck-function-census/`: compact raw counters, full disposition ledger,
@@ -152,6 +163,6 @@ perturbs it.
 The current exact assembled source passes the extent oracle twice (12,056
 checks), 20,795 checkpoint checks, five real FAT/async coupling scenarios, 126
 allocation-free asynchronous-read checks, and the packet suite in plain,
-ASan/UBSan and MSan modes. The complete product host suite passes 529 tests
+ASan/UBSan and MSan modes. The complete product host suite passes 534 tests
 with 26 expected platform skips. Native execution uses release firmware
 without a debugger or firmware tracing.

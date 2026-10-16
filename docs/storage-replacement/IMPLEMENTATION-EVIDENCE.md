@@ -177,24 +177,26 @@ remain unchanged.
 
 ## Current final performance batch
 
-The exact current release stack adds the bounded Forza queue and hot-path
-patches 0146 through 0152. It assembles tree
-`d79d23a68f97e58e2f0182062d291884289e2f08`. Two clean release64 builds
-reproduce SHA-256
-`00aa2536dbda14ee851665be98e903c32c9705996832b335bbab72ab81c8ead6`;
+The exact corrected release stack adds the bounded Forza queue and hot-path
+patches 0146 through 0151. It assembles tree
+`a43893a57251fb699e6ef9b27c53adcd035d6c9e`. Release64 reproduces SHA-256
+`08afa8ab25c48765f51390a8bdfb41ccde298dbef23eb4048642f131bf0d215c`;
 release128 is
-`8562d4f3f5259e7bc999f4f98e1a2e1f2fdf668fd3f6ce9e559615667cb152ed`.
+`57bed876ca1c444876ccaaf6a023272b29cb1ea562889c384d8d64c4dcab98d7`.
 
-The complete product host suite passes 529 tests with 26 expected
+The complete product host suite passes 534 tests with 26 expected
 host-platform skips. Two independent Windows release64 boots completed 32
 Forza-shaped passes and 32,768 asynchronous FATX reads at queue depth 12 and
 900-page pressure, with zero request, oracle, warmup or cleanup failures. The
 final two-run mean improves end-to-end APC batch time 3.93% and submission time
 5.82% against the retained-SG control. Exact packet preparation on Steam Deck
 reduces weighted instructions 33.33%; ordinary ATA cache bookkeeping removes
-99 i386 instructions; the Xbox ATA settle path emits four direct Alternate
-Status reads and preserves the first IRQ-acknowledging Status read. Full inputs,
-limits and rejected designs are in
+99 i386 instructions. The proposed four-read Xbox ATA settle optimization was
+rejected after sporadic Forza menu corruption: xemu gives those reads zero
+elapsed guest time. The replacement accelerates only an IDENTIFY-proven QEMU
+ATA HDD target. ATAPI, physical, unknown, and first-identify paths retain
+`KeStallExecutionProcessor(1)`; CI checks those gates in the exact assembled
+source. Full inputs, limits and rejected designs are in
 `docs/performance/evidence/forza-map-hotpath-20261015/`.
 
 The exact image also completed two independent release-only Steam Deck runs of

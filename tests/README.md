@@ -51,9 +51,14 @@ and sanitizer builds; this is the executable oracle rather than the lock test.
 
 `tests/host/test_nxstorage_production.py` runs the final packet preparation
 oracle in plain, ASan/UBSan and, when Clang is available, MSan modes.
-`test_ata_cache_capture_candidate.py` and `test_ata_stall_candidate.py` lock the
-ordinary-I/O cache bypass and the four Alternate Status read protocol. Their
-release-disassembly and native-run evidence is under
+`test_ata_cache_capture_candidate.py` locks the ordinary-I/O cache bypass.
+`test_ata_stall_candidate.py` and `tools/check_ata_settle.py` prevent the
+rejected global zero-time Alternate Status implementation from returning.
+They verify that the assembled release keeps a real guest delay by default,
+detects QEMU only from an ATA HDD IDENTIFY model, excludes ATAPI from automatic
+acceleration, and exposes explicit session-only safe/all-device comparison
+modes through the Y Advanced menu. Their release-disassembly, native-run, and
+real-game failure evidence is under
 `docs/performance/evidence/forza-map-hotpath-20261015/`.
 
 The Steam Deck marker-bounded release census and the disposition for every

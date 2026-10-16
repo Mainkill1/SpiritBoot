@@ -1,0 +1,458 @@
+diff --git a/drivers/storage/ide/atapi/dev_identify.c b/drivers/storage/ide/atapi/dev_identify.c
+index 9ff347e8..786fc329 100644
+--- a/drivers/storage/ide/atapi/dev_identify.c
++++ b/drivers/storage/ide/atapi/dev_identify.c
+@@ -135,6 +135,36 @@ AtaDeviceIsXboxDrive(
+     return FALSE;
+ }
+ 
++#ifdef SARCH_XBOX
++extern volatile ULONG NxkQemuAtaDiskTargets;
++
++static
++VOID
++AtaDetectQemuDisk(
++    _In_ PATAPORT_DEVICE_EXTENSION DevExt,
++    _In_ UCHAR DeviceType)
++{
++    CHAR ModelNumber[41];
++    PUCHAR End;
++    ULONG Target;
++
++    if (DeviceType != DEV_ATA)
++        return;
++
++    End = AtaCopyIdStringUnsafe((PUCHAR)ModelNumber,
++                                DevExt->IdentifyDeviceData.ModelNumber,
++                                sizeof(ModelNumber) - 1);
++    *End = ANSI_NULL;
++    if (strstr(ModelNumber, "QEMU") == NULL)
++        return;
++
++    Target = DevExt->Device.AtaScsiAddress.TargetId;
++    if (Target < 32)
++        InterlockedOr((volatile LONG *)&NxkQemuAtaDiskTargets,
++                      (LONG)(1u << Target));
++}
++#endif
++
+ static
+ VOID
+ AtaCreateAtapiStandardInquiryData(
+@@ -330,6 +360,9 @@ AtaPortIdentifyDevice(
+                   DevExt->Device.LocalBuffer,
+                   sizeof(DevExt->IdentifyDeviceData));
+     DevExt->DeviceType = DeviceType;
++#ifdef SARCH_XBOX
++    AtaDetectQemuDisk(DevExt, DeviceType);
++#endif
+ 
+     if (IsSameDevice) {
+         (void)NxAtapiCachePublish(DevExt, IdentityResult);
+diff --git a/drivers/storage/ide/pciidex/pata.h b/drivers/storage/ide/pciidex/pata.h
+index dda0e178..16ced520 100644
+--- a/drivers/storage/ide/pciidex/pata.h
++++ b/drivers/storage/ide/pciidex/pata.h
+@@ -31,6 +31,42 @@
+ /** Delay of 400ns */
+ #define ATA_IO_WAIT()           KeStallExecutionProcessor(1)
+ 
++#if defined(SARCH_XBOX)
++#define NXK_EXPERIMENT_ATA_FORCE_SAFE 0x00000004UL
++#define NXK_EXPERIMENT_ATA_FORCE_ALL  0x00000008UL
++extern ULONG NxkExperimentalFlags;
++extern volatile ULONG NxkQemuAtaDiskTargets;
++
++FORCEINLINE
++VOID
++PataDeviceSelectWait(
++    _In_ PCHANNEL_DATA_PATA ChanData,
++    _In_ ULONG DeviceNumber)
++{
++    if ((NxkExperimentalFlags & NXK_EXPERIMENT_ATA_FORCE_SAFE) ||
++        !NxkQemuAtaDiskTargets ||
++        (!(NxkExperimentalFlags & NXK_EXPERIMENT_ATA_FORCE_ALL) &&
++         !(NxkQemuAtaDiskTargets & (1u << DeviceNumber))))
++    {
++        ATA_IO_WAIT();
++        return;
++    }
++
++    /*
++     * QEMU completes legacy port reads synchronously, so these reads are a
++     * command-ordering barrier rather than elapsed time. Auto mode admits this
++     * path only for an IDENTIFY-proven QEMU ATA disk. ATAPI remains on the
++     * delay unless the advanced all-device experiment is selected.
++     */
++    (void)READ_PORT_UCHAR(ChanData->Regs.Control);
++    (void)READ_PORT_UCHAR(ChanData->Regs.Control);
++    (void)READ_PORT_UCHAR(ChanData->Regs.Control);
++    (void)READ_PORT_UCHAR(ChanData->Regs.Control);
++}
++#else
++#define PataDeviceSelectWait(ChanData, DeviceNumber) ATA_IO_WAIT()
++#endif
++
+ #define NUM_TO_BITMAP(num)     (0xFFFFFFFF >> (RTL_BITS_OF(ULONG) - (num)))
+ 
+ /** Supported transfer modes by SATA devices */
+@@ -293,7 +329,7 @@ ATA_SELECT_DEVICE(
+ #endif
+ 
+     ATA_WRITE(ChanData->Regs.Device, DeviceSelect, ChanData, MRES_TF);
+-    ATA_IO_WAIT();
++    PataDeviceSelectWait(ChanData, DeviceNumber);
+ }
+ 
+ FORCEINLINE
+diff --git a/ntoskrnl/xb/boot_setup.c b/ntoskrnl/xb/boot_setup.c
+index 7961f6ae..9c55d34e 100644
+--- a/ntoskrnl/xb/boot_setup.c
++++ b/ntoskrnl/xb/boot_setup.c
+@@ -36,6 +36,7 @@ TEXT(label_audio, "Audio mode");
+ TEXT(label_ac3, "Dolby Digital (AC3)");
+ TEXT(label_dts, "DTS");
+ TEXT(label_contig_cache, "Advanced: contig cache");
++TEXT(label_ata_settle, "Emulator ATA acceleration");
+ TEXT(label_save, "Save and reboot");
+ TEXT(label_continue, "Discard and continue");
+ TEXT(text_unknown_preserved, "Unknown (preserved)");
+@@ -61,11 +62,15 @@ TEXT(text_off, "Off");
+ TEXT(text_review, "Review changes");
+ TEXT(text_no_changes, "No changes");
+ TEXT(text_no_writes, "No EEPROM writes");
++TEXT(text_ata_auto, "Auto (QEMU HDD)");
++TEXT(text_ata_safe, "Safe delay");
++TEXT(text_ata_all, "All QEMU devices (test)");
+ #undef TEXT
+ 
+ static const char *const labels[SB_ROW_COUNT] SB_INIT_DATA = {
+     label_language, label_shape, label_480p, label_720p, label_1080i,
+     label_pal60, label_audio, label_ac3, label_dts, label_contig_cache,
++    label_ata_settle,
+     label_save, label_continue
+ };
+ static const char *const languages[] SB_INIT_DATA = {
+@@ -113,6 +118,16 @@ SB_INIT_CODE static void edit(SbSetup *s, int direction)
+         s->edited.experimental ^= SB_EXPERIMENT_CONTIG_CACHE_ALIAS;
+         return;
+     }
++    if (s->row == SB_ATA_STATUS_SETTLE) {
++        static const uint32_t modes[] SB_INIT_DATA = {
++            0, SB_EXPERIMENT_ATA_FORCE_SAFE, SB_EXPERIMENT_ATA_FORCE_ALL
++        };
++        value = s->edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK;
++        value = next_value(value,modes,3,direction);
++        s->edited.experimental =
++            (s->edited.experimental & ~SB_EXPERIMENT_ATA_MODE_MASK) | value;
++        return;
++    }
+     if (s->row == SB_LANGUAGE) {
+         s->edited.language = next_value(s->edited.language,lang,9,direction);
+         return;
+@@ -146,6 +161,21 @@ SB_INIT_CODE static void save(SbSetup *s, const SbSettingsStore *store)
+     }
+ }
+ 
++SB_INIT_CODE static SbSetupRow
++main_row_next(SbSetupRow row, int direction)
++{
++    if (direction > 0) {
++        if (row < SB_DTS) return (SbSetupRow)(row + 1);
++        if (row == SB_DTS) return SB_SAVE;
++        if (row == SB_SAVE) return SB_CONTINUE;
++        return SB_LANGUAGE;
++    }
++    if (row == SB_LANGUAGE) return SB_CONTINUE;
++    if (row == SB_CONTINUE) return SB_SAVE;
++    if (row == SB_SAVE) return SB_DTS;
++    return (SbSetupRow)(row - 1);
++}
++
+ void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
+ {
+     uint32_t edges;
+@@ -180,6 +210,18 @@ void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
+                                        SB_CREDITS_PAGE_COUNT);
+         return;
+     }
++    if (s->state == SB_MENU_ADVANCED) {
++        if (edges == SB_B || edges == SB_Y) {
++            s->state = SB_MENU_EDIT;
++            s->row = SB_LANGUAGE;
++        } else if (edges == SB_UP || edges == SB_DOWN) {
++            s->row = s->row == SB_CONTIG_CACHE_ALIAS ?
++                     SB_ATA_STATUS_SETTLE : SB_CONTIG_CACHE_ALIAS;
++        } else if (edges == SB_LEFT || edges == SB_RIGHT || edges == SB_A) {
++            edit(s,edges == SB_LEFT ? -1 : 1);
++        }
++        return;
++    }
+     if (s->state == SB_MENU_RECOVERY) {
+         if (edges == SB_A) save(s,store);
+         return;
+@@ -198,8 +240,12 @@ void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
+         s->credits_page = 0;
+         return;
+     }
+-    if (edges == SB_UP) s->row = (SbSetupRow)((s->row+SB_ROW_COUNT-1u)%SB_ROW_COUNT);
+-    else if (edges == SB_DOWN) s->row = (SbSetupRow)((s->row+1u)%SB_ROW_COUNT);
++    if (edges == SB_Y) {
++        s->state = SB_MENU_ADVANCED;
++        s->row = SB_CONTIG_CACHE_ALIAS;
++    }
++    else if (edges == SB_UP) s->row = main_row_next(s->row,-1);
++    else if (edges == SB_DOWN) s->row = main_row_next(s->row,1);
+     else if (edges == SB_B || (edges == SB_A && s->row == SB_CONTINUE))
+         s->state = sb_setup_changed(s) ? SB_MENU_CONFIRM_DISCARD : SB_MENU_CONTINUE;
+     else if (edges == SB_X || (edges == SB_A && s->row == SB_SAVE)) request_save(s);
+@@ -230,6 +276,12 @@ void sb_setup_field_value(const SbSetup *s, SbSetupRow row, char *out, size_t si
+             text=languages[s->edited.language <= 9u ? s->edited.language : 0u];
+         else if (row == SB_CONTIG_CACHE_ALIAS)
+             text=(s->edited.experimental & SB_EXPERIMENT_CONTIG_CACHE_ALIAS) ? text_on : text_off;
++        else if (row == SB_ATA_STATUS_SETTLE) {
++            value = s->edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK;
++            text = value == SB_EXPERIMENT_ATA_FORCE_SAFE ? text_ata_safe :
++                   value == SB_EXPERIMENT_ATA_FORCE_ALL ? text_ata_all :
++                   text_ata_auto;
++        }
+         else {
+             value = (row < SB_AUDIO_MODE ? s->edited.video : s->edited.audio) & masks[row];
+             if (row == SB_ASPECT)
+diff --git a/ntoskrnl/xb/boot_setup.h b/ntoskrnl/xb/boot_setup.h
+index 7fcfc9b8..44a8c8df 100644
+--- a/ntoskrnl/xb/boot_setup.h
++++ b/ntoskrnl/xb/boot_setup.h
+@@ -19,7 +19,7 @@
+ 
+ /* Normalized inputs, NOT Xbox USB packet bits. Source includes device generation. */
+ enum { SB_START=1u, SB_UP=2u, SB_DOWN=4u, SB_LEFT=8u, SB_RIGHT=16u,
+-       SB_A=32u, SB_B=64u, SB_X=128u, SB_BACK=256u };
++       SB_A=32u, SB_B=64u, SB_X=128u, SB_BACK=256u, SB_Y=512u };
+ typedef struct { uint32_t ms, source, buttons; bool valid; } SbInput;
+ typedef enum { SB_GATE_WAIT, SB_GATE_ENTER, SB_GATE_BOOT } SbGateResult;
+ typedef struct {
+@@ -32,12 +32,19 @@ SB_INIT_CODE SbGateResult sb_boot_gate_poll(SbBootGate *gate, SbInput input);
+ /* Only standardized setting indices 7/8/9; no factory or key material. */
+ /* experimental is session-only. It is never written to the console EEPROM. */
+ typedef struct { uint32_t language, video, audio, experimental; } SbSettings;
+-enum { SB_EXPERIMENT_CONTIG_CACHE_ALIAS=1u, SB_EXPERIMENT_XDVDFS_ASYNC=2u };
++enum {
++    SB_EXPERIMENT_CONTIG_CACHE_ALIAS=1u,
++    SB_EXPERIMENT_XDVDFS_ASYNC=2u,
++    SB_EXPERIMENT_ATA_FORCE_SAFE=4u,
++    SB_EXPERIMENT_ATA_FORCE_ALL=8u,
++    SB_EXPERIMENT_ATA_MODE_MASK=12u
++};
+ enum { SB_LANGUAGE_WORD=1u, SB_VIDEO_WORD=2u, SB_AUDIO_WORD=4u };
+ typedef enum {
+     SB_LANGUAGE, SB_ASPECT, SB_480P, SB_720P, SB_1080I, SB_PAL60,
+     SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_STANDARD_FIELD_COUNT,
+-    SB_CONTIG_CACHE_ALIAS=SB_STANDARD_FIELD_COUNT, SB_FIELD_COUNT,
++    SB_CONTIG_CACHE_ALIAS=SB_STANDARD_FIELD_COUNT, SB_ATA_STATUS_SETTLE,
++    SB_FIELD_COUNT,
+     SB_SAVE=SB_FIELD_COUNT, SB_CONTINUE, SB_ROW_COUNT
+ } SbSetupRow;
+ #define SB_ALL_FIELDS ((1u << SB_FIELD_COUNT) - 1u)
+@@ -50,7 +57,8 @@ typedef struct {
+ } SbSettingsStore;
+ typedef enum {
+     SB_MENU_EDIT, SB_MENU_CONFIRM_SAVE, SB_MENU_CONFIRM_DISCARD,
+-    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY, SB_MENU_CREDITS
++    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY, SB_MENU_CREDITS,
++    SB_MENU_ADVANCED
+ } SbMenuState;
+ typedef struct {
+     SbSettings original, edited;
+diff --git a/ntoskrnl/xb/boot_xid.c b/ntoskrnl/xb/boot_xid.c
+index f07c0e9a..cd8b5717 100644
+--- a/ntoskrnl/xb/boot_xid.c
++++ b/ntoskrnl/xb/boot_xid.c
+@@ -102,6 +102,7 @@ bool sb_xid_decode_report(const uint8_t *r, size_t bytes, uint32_t *buttons)
+     if (r[4]) out |= SB_A;
+     if (r[5]) out |= SB_B;
+     if (r[6]) out |= SB_X;
++    if (r[7]) out |= SB_Y;
+     *buttons = out;
+     return true;
+ }
+diff --git a/ntoskrnl/xb/bootsetup_native.c b/ntoskrnl/xb/bootsetup_native.c
+index 2afd9da0..ab272e2f 100644
+--- a/ntoskrnl/xb/bootsetup_native.c
++++ b/ntoskrnl/xb/bootsetup_native.c
+@@ -138,7 +138,11 @@ static const CHAR BsPrompt[] = "Hold X to enter setup";
+ DATA_SEG("INITDATA")
+ static const CHAR BsMenuTitle[] =
+     "\r\n  SpiritBoot Settings\r\n"
+-    "  D-pad: move/edit  A: select  B: back  X: save  BACK: credits\r\n\r\n";
++    "  D-pad: move/edit  A: select  B: back  X: save  Y: advanced\r\n\r\n";
++DATA_SEG("INITDATA")
++static const CHAR BsAdvancedTitle[] =
++    "\r\n  SpiritBoot Advanced Settings\r\n"
++    "  D-pad: move/edit  A: select  B/Y: settings\r\n\r\n";
+ DATA_SEG("INITDATA")
+ static const CHAR BsMenuLine[] = "  %c %-20.20s %.19s";
+ DATA_SEG("INITDATA")
+@@ -836,11 +840,24 @@ static VOID
+ BsDrawMenuRow(const SbSetup *Setup, ULONG Row)
+ {
+     CHAR Value[48], Line[96];
+-    ULONG Y;
++    ULONG DisplayRow, Y;
+ 
+     if (Row >= SB_ROW_COUNT)
+         return;
+-    Y = BS_FIRST_ROW_Y + BS_ROW_PITCH * Row;
++    if (Setup->state == SB_MENU_ADVANCED)
++    {
++        if (Row < SB_STANDARD_FIELD_COUNT || Row >= SB_FIELD_COUNT)
++            return;
++        DisplayRow = Row - SB_STANDARD_FIELD_COUNT;
++    }
++    else
++    {
++        if (Row >= SB_STANDARD_FIELD_COUNT && Row < SB_FIELD_COUNT)
++            return;
++        DisplayRow = Row < SB_STANDARD_FIELD_COUNT ?
++                     Row : Row - (SB_FIELD_COUNT - SB_STANDARD_FIELD_COUNT);
++    }
++    Y = BS_FIRST_ROW_Y + BS_ROW_PITCH * DisplayRow;
+     sb_setup_field_value(Setup, (SbSetupRow)Row, Value, sizeof(Value));
+     _snprintf(Line, sizeof(Line), BsMenuLine,
+               Setup->row == (SbSetupRow)Row ? '>' : ' ',
+@@ -892,12 +909,13 @@ BsRenderMenuContent(const SbSetup *Setup)
+ {
+     ULONG Row;
+ 
+-    InbvSolidColorFill(BS_LEFT, BS_TITLE_TOP, BS_SCROLL_RIGHT,
+-                       BS_TITLE_BOTTOM, BV_COLOR_BLACK);
++    InbvSolidColorFill(BS_LEFT, BS_TITLE_TOP, BS_TEXT_RIGHT,
++                       BS_CONTENT_BOTTOM, BV_COLOR_BLACK);
+     InbvSetScrollRegion(BS_LEFT, BS_TITLE_TOP, BS_SCROLL_RIGHT,
+                         BS_CONTENT_BOTTOM);
+     InbvSetTextColor(BV_COLOR_WHITE);
+-    InbvDisplayString((PCHAR)BsMenuTitle);
++    InbvDisplayString((PCHAR)(Setup->state == SB_MENU_ADVANCED ?
++                             BsAdvancedTitle : BsMenuTitle));
+     for (Row = 0; Row < SB_ROW_COUNT; ++Row)
+         BsDrawMenuRow(Setup, Row);
+     BsRenderFooter(Setup);
+@@ -994,7 +1012,9 @@ NxkBootSetupRun(VOID)
+         else if (Setup.state != SB_MENU_CONTINUE &&
+                  Setup.state != SB_MENU_REBOOT)
+         {
+-            if (Before.state == SB_MENU_CREDITS)
++            if (Before.state == SB_MENU_CREDITS ||
++                ((Before.state == SB_MENU_ADVANCED) !=
++                 (Setup.state == SB_MENU_ADVANCED)))
+             {
+                 BsRenderMenuContent(&Setup);
+             }
+@@ -1012,7 +1032,9 @@ NxkBootSetupRun(VOID)
+     }
+     NxkExperimentalFlags = Setup.edited.experimental &
+                            (NXK_EXPERIMENT_CONTIG_CACHE_ALIAS |
+-                            NXK_EXPERIMENT_XDVDFS_ASYNC);
++                            NXK_EXPERIMENT_XDVDFS_ASYNC |
++                            NXK_EXPERIMENT_ATA_FORCE_SAFE |
++                            NXK_EXPERIMENT_ATA_FORCE_ALL);
+     if (NxkExperimentalFlags)
+         DbgPrint("SpiritBoot experimental flags: %08lx\n",
+                  NxkExperimentalFlags);
+diff --git a/ntoskrnl/xb/mm/init.c b/ntoskrnl/xb/mm/init.c
+index 46a885a8..f752b800 100644
+--- a/ntoskrnl/xb/mm/init.c
++++ b/ntoskrnl/xb/mm/init.c
+@@ -25,6 +25,7 @@
+ #include "mm.h"
+ 
+ ULONG NxkExperimentalFlags;
++volatile ULONG NxkQemuAtaDiskTargets;
+ #include "../../../boot/nxldr/boot-layout.h"
+ #include "../../../boot/nxldr/rom-kernel.h"
+ 
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index ef787cb8..862e877a 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -55,7 +55,11 @@
+  * zero so ordinary boots retain the reference-compatible behavior. */
+ #define NXK_EXPERIMENT_CONTIG_CACHE_ALIAS 0x00000001UL
+ #define NXK_EXPERIMENT_XDVDFS_ASYNC       0x00000002UL
++#define NXK_EXPERIMENT_ATA_FORCE_SAFE     0x00000004UL
++#define NXK_EXPERIMENT_ATA_FORCE_ALL      0x00000008UL
++#define NXK_EXPERIMENT_ATA_MODE_MASK      0x0000000cUL
+ extern ULONG NxkExperimentalFlags;
++extern volatile ULONG NxkQemuAtaDiskTargets;
+ 
+ /* i386 page-directory / page-table entry bits.
+  *
+diff --git a/tests/host/boot-menu-render/check.py b/tests/host/boot-menu-render/check.py
+index 5a9869c0..bdbf1676 100644
+--- a/tests/host/boot-menu-render/check.py
++++ b/tests/host/boot-menu-render/check.py
+@@ -53,9 +53,15 @@ required = {
+ for name, value in required.items():
+     assert re.search(rf"#define\s+{name}\s+{value}\b", native), name
+ assert 'BsMenuLine[] = "  %c %-20.20s %.19s";' in native
++assert "Y: advanced" in native
++assert "BACK: credits" not in native
+ 
+ loop = function_body(native, "NxkBootSetupRun")
+ assert "PreviousButtons" not in loop
++assert "(Before.state == SB_MENU_ADVANCED) !=" in loop
++assert not re.search(
++    r"Before\.state == SB_MENU_ADVANCED\s*\|\|\s*"
++    r"Setup\.state == SB_MENU_ADVANCED", loop)
+ assert "Input.buttons !=" not in loop
+ assert "Before = Setup;" in loop
+ assert "BsMenuDirtyRows(&Before, &Setup)" in loop
+@@ -90,10 +96,12 @@ typedef char *PCHAR;
+ typedef const char *PCSTR;
+ typedef enum {
+     SB_MENU_EDIT, SB_MENU_CONFIRM_SAVE, SB_MENU_CONFIRM_DISCARD,
+-    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY, SB_MENU_CREDITS
++    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY, SB_MENU_CREDITS,
++    SB_MENU_ADVANCED
+ } SbMenuState;
+ typedef unsigned SbSetupRow;
+-enum { SB_ROW_COUNT = 11, SB_CREDITS_PAGE_COUNT = 3 };
++enum { SB_STANDARD_FIELD_COUNT = 9, SB_FIELD_COUNT = 11,
++       SB_ROW_COUNT = 13, SB_CREDITS_PAGE_COUNT = 3 };
+ typedef struct {
+     SbSetupRow row;
+     SbMenuState state;
+@@ -121,6 +129,7 @@ typedef struct {
+ 
+ static const char BsMenuLine[] = "  %c %-20.20s %.19s";
+ static const char BsMenuTitle[] = "SpiritBoot Settings";
++static const char BsAdvancedTitle[] = "SpiritBoot Advanced Settings";
+ static const char BsConfirmSave1[] = "Save these settings and reboot?";
+ static const char BsConfirmSave2[] = "A: yes   B: no";
+ static const char BsConfirmDiscard1[] = "Discard changes and continue?";
+@@ -130,8 +139,8 @@ static const char BsRecovery2[] = "Press A to repair/retry.";
+ static const char * const BsCreditsPages[] = { "core", "testing", "research" };
+ static const char * const Labels[SB_ROW_COUNT] = {
+     "Language", "Aspect ratio", "480p", "720p", "1080i",
+-    "PAL-60", "Audio mode", "AC-3", "DTS", "Save settings",
+-    "Continue boot"
++    "PAL-60", "Audio mode", "AC-3", "DTS", "Contig cache",
++    "ATA acceleration", "Save settings", "Continue boot"
+ };
+ 
+ typedef struct { ULONG l, t, r, b; } Fill;
+@@ -252,6 +261,14 @@ int main(void)
+     BsRenderMenuContent(&after);
+     assert(blit_count == 0);
+     assert_no_logo_fill();
++
++    reset_spy();
++    after.state = SB_MENU_ADVANCED;
++    after.row = SB_STANDARD_FIELD_COUNT;
++    BsRenderMenuContent(&after);
++    assert(blit_count == 0 && string_count == 3);
++    assert(strstr(strings[0], "Advanced") != NULL);
++    assert_no_logo_fill();
+     return 0;
+ }
+ ''')

@@ -36,6 +36,7 @@ TEXT(label_audio, "Audio mode");
 TEXT(label_ac3, "Dolby Digital (AC3)");
 TEXT(label_dts, "DTS");
 TEXT(label_contig_cache, "Advanced: contig cache");
+TEXT(label_ata_settle, "Emulator ATA acceleration");
 TEXT(label_save, "Save and reboot");
 TEXT(label_continue, "Discard and continue");
 TEXT(text_unknown_preserved, "Unknown (preserved)");
@@ -61,11 +62,15 @@ TEXT(text_off, "Off");
 TEXT(text_review, "Review changes");
 TEXT(text_no_changes, "No changes");
 TEXT(text_no_writes, "No EEPROM writes");
+TEXT(text_ata_auto, "Auto (QEMU HDD)");
+TEXT(text_ata_safe, "Safe delay");
+TEXT(text_ata_all, "All QEMU devices (test)");
 #undef TEXT
 
 static const char *const labels[SB_ROW_COUNT] SB_INIT_DATA = {
     label_language, label_shape, label_480p, label_720p, label_1080i,
     label_pal60, label_audio, label_ac3, label_dts, label_contig_cache,
+    label_ata_settle,
     label_save, label_continue
 };
 static const char *const languages[] SB_INIT_DATA = {
@@ -113,6 +118,16 @@ SB_INIT_CODE static void edit(SbSetup *s, int direction)
         s->edited.experimental ^= SB_EXPERIMENT_CONTIG_CACHE_ALIAS;
         return;
     }
+    if (s->row == SB_ATA_STATUS_SETTLE) {
+        static const uint32_t modes[] SB_INIT_DATA = {
+            0, SB_EXPERIMENT_ATA_FORCE_SAFE, SB_EXPERIMENT_ATA_FORCE_ALL
+        };
+        value = s->edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK;
+        value = next_value(value,modes,3,direction);
+        s->edited.experimental =
+            (s->edited.experimental & ~SB_EXPERIMENT_ATA_MODE_MASK) | value;
+        return;
+    }
     if (s->row == SB_LANGUAGE) {
         s->edited.language = next_value(s->edited.language,lang,9,direction);
         return;
@@ -144,6 +159,21 @@ SB_INIT_CODE static void save(SbSetup *s, const SbSettingsStore *store)
         s->last_save = SB_COMMIT_UNCERTAIN;
         s->state = SB_MENU_RECOVERY;
     }
+}
+
+SB_INIT_CODE static SbSetupRow
+main_row_next(SbSetupRow row, int direction)
+{
+    if (direction > 0) {
+        if (row < SB_DTS) return (SbSetupRow)(row + 1);
+        if (row == SB_DTS) return SB_SAVE;
+        if (row == SB_SAVE) return SB_CONTINUE;
+        return SB_LANGUAGE;
+    }
+    if (row == SB_LANGUAGE) return SB_CONTINUE;
+    if (row == SB_CONTINUE) return SB_SAVE;
+    if (row == SB_SAVE) return SB_DTS;
+    return (SbSetupRow)(row - 1);
 }
 
 void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
@@ -180,6 +210,18 @@ void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
                                        SB_CREDITS_PAGE_COUNT);
         return;
     }
+    if (s->state == SB_MENU_ADVANCED) {
+        if (edges == SB_B || edges == SB_Y) {
+            s->state = SB_MENU_EDIT;
+            s->row = SB_LANGUAGE;
+        } else if (edges == SB_UP || edges == SB_DOWN) {
+            s->row = s->row == SB_CONTIG_CACHE_ALIAS ?
+                     SB_ATA_STATUS_SETTLE : SB_CONTIG_CACHE_ALIAS;
+        } else if (edges == SB_LEFT || edges == SB_RIGHT || edges == SB_A) {
+            edit(s,edges == SB_LEFT ? -1 : 1);
+        }
+        return;
+    }
     if (s->state == SB_MENU_RECOVERY) {
         if (edges == SB_A) save(s,store);
         return;
@@ -198,8 +240,12 @@ void sb_setup_input(SbSetup *s, SbInput in, const SbSettingsStore *store)
         s->credits_page = 0;
         return;
     }
-    if (edges == SB_UP) s->row = (SbSetupRow)((s->row+SB_ROW_COUNT-1u)%SB_ROW_COUNT);
-    else if (edges == SB_DOWN) s->row = (SbSetupRow)((s->row+1u)%SB_ROW_COUNT);
+    if (edges == SB_Y) {
+        s->state = SB_MENU_ADVANCED;
+        s->row = SB_CONTIG_CACHE_ALIAS;
+    }
+    else if (edges == SB_UP) s->row = main_row_next(s->row,-1);
+    else if (edges == SB_DOWN) s->row = main_row_next(s->row,1);
     else if (edges == SB_B || (edges == SB_A && s->row == SB_CONTINUE))
         s->state = sb_setup_changed(s) ? SB_MENU_CONFIRM_DISCARD : SB_MENU_CONTINUE;
     else if (edges == SB_X || (edges == SB_A && s->row == SB_SAVE)) request_save(s);
@@ -230,6 +276,12 @@ void sb_setup_field_value(const SbSetup *s, SbSetupRow row, char *out, size_t si
             text=languages[s->edited.language <= 9u ? s->edited.language : 0u];
         else if (row == SB_CONTIG_CACHE_ALIAS)
             text=(s->edited.experimental & SB_EXPERIMENT_CONTIG_CACHE_ALIAS) ? text_on : text_off;
+        else if (row == SB_ATA_STATUS_SETTLE) {
+            value = s->edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK;
+            text = value == SB_EXPERIMENT_ATA_FORCE_SAFE ? text_ata_safe :
+                   value == SB_EXPERIMENT_ATA_FORCE_ALL ? text_ata_all :
+                   text_ata_auto;
+        }
         else {
             value = (row < SB_AUDIO_MODE ? s->edited.video : s->edited.audio) & masks[row];
             if (row == SB_ASPECT)

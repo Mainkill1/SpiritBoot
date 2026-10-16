@@ -56,7 +56,8 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = d79d23a68f97e58e2f0182062d291884289e2f08
+            test "$actual_tree" = a43893a57251fb699e6ef9b27c53adcd035d6c9e
+            python3 /work/tools/check_ata_settle.py --source-root "$GUEST_SOURCE" >"$output/ata-settle.log" 2>&1
             python3 /work/tools/kernel_coverage.py --source-root "$GUEST_SOURCE" --check >"$output/kernel-coverage.log" 2>&1
             python3 /work/tools/check_kernel_semaphore_overflow.py --source-root "$GUEST_SOURCE" --platform xbox --output "$output/semaphore-xbox" >"$output/semaphore-xbox.log" 2>&1
             python3 /work/tools/check_kernel_semaphore_overflow.py --source-root "$GUEST_SOURCE" --platform nt --output "$output/semaphore-nt" >"$output/semaphore-nt.log" 2>&1
@@ -190,7 +191,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == 'd79d23a68f97e58e2f0182062d291884289e2f08', result
+          assert result['source_tree'] == 'a43893a57251fb699e6ef9b27c53adcd035d6c9e', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
