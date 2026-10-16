@@ -54,7 +54,7 @@ of privileged invalidations.
 
 ## Identities
 
-- Candidate assembled source tree: `2b1a5b77493d16fe05a226684e4db5d745300b3a`
+- Candidate assembled source tree: `59d31441244d43d7e304a85c6566cc268b9b8573`
 - Candidate release64 BIOS: `6f4070f788355d88cf44f37b792a6aceb1e9ead91bc441fe04df800c0a0fc077`
 - Control release64 BIOS: `e7c70bbdc2b766c397bff4119cc65cdc2629dfe4e9f8ff21e922d0e869bf2326`
 - Sustained XISO: `f7c7b0e6941a7d86a9f79b19a248efd10a04e6ff38c48dad4f5ceaca18f9049b`

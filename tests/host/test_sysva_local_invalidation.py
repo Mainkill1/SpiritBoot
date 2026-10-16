@@ -45,6 +45,11 @@ class SysVaLocalInvalidationTests(unittest.TestCase):
         ):
             self.assertIn(token, patch)
 
+    def test_upper_ram_production_fixture_mocks_local_invalidation(self):
+        patch = (ROOT / PATCH_PATH).read_text()
+        self.assertIn("tests/host/upper-ram-reservation/check.py", patch)
+        self.assertIn("static void __invlpg(PVOID p) { (void)p; }", patch)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -101,3 +101,15 @@ index 6ffd1943..670aea2c 100644
      printf("success upper=%d pages=%u mode=%u alloc_locks=%u free_locks=%u max_work=%u zero_locked=%u\n",XBOX_RESERVE_UPPER_RAM,pages,mode,alloc_acq,acquisitions-alloc_acq,max_lock_work,zero_locked);
  }
  static void shortage(unsigned pages,unsigned available,unsigned preback) {
+diff --git a/tests/host/upper-ram-reservation/check.py b/tests/host/upper-ram-reservation/check.py
+index 9facae4a..1112c95e 100644
+--- a/tests/host/upper-ram-reservation/check.py
++++ b/tests/host/upper-ram-reservation/check.py
+@@ -226,6 +226,7 @@ static void KeBugCheckEx(ULONG b,ULONG_PTR a,ULONG_PTR c,ULONG_PTR d,ULONG_PTR f
+ static void ExRaiseStatus(ULONG s) { (void)s; assert(!"unexpected pool exception"); }
+ static ULONG __readcr3(void) { return 0; }
+ static void __writecr3(ULONG p) { (void)p; }
++static void __invlpg(PVOID p) { (void)p; }
+ typedef int32_t LONG;
+ #define _In_
+ #define _Inout_
