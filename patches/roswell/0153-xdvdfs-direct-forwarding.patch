@@ -1,0 +1,380 @@
+diff --git a/drivers/filesystems/xdvdfs/xdvdfs.c b/drivers/filesystems/xdvdfs/xdvdfs.c
+--- a/drivers/filesystems/xdvdfs/xdvdfs.c
++++ b/drivers/filesystems/xdvdfs/xdvdfs.c
+@@ -110,6 +110,9 @@
+ 
+ static XDVD_GLOBALS XdvdGlobals;
+ 
++#define NXK_EXPERIMENT_XDVDFS_ASYNC 0x00000002UL
++extern ULONG NxkExperimentalFlags;
++
+ /*
+  * Volume control block.  Carried as DeviceExtension on the volume device
+  * object we publish when a disc is mounted.
+@@ -141,6 +144,149 @@
+     BOOLEAN            IsRoot;
+     UNICODE_STRING     Name;                   /* trailing buffer; basename   */
+ } XDVD_FCB, *PXDVD_FCB;
++
++
++typedef struct _XDVD_FORWARD_PLAN
++{
++    ULONGLONG AbsoluteOffset;
++    ULONG Length;
++} XDVD_FORWARD_PLAN, *PXDVD_FORWARD_PLAN;
++
++/* This admission helper is the C transcription of the frozen Rust request
++ * model. It performs no allocation, mapping, I/O, wait, or state mutation. */
++static BOOLEAN
++XdvdPlanForwardRead(_In_ PIRP Irp,
++                    _In_ PXDVD_FCB Fcb,
++                    _In_ PIO_STACK_LOCATION Sp,
++                    _Out_ PXDVD_FORWARD_PLAN Plan)
++{
++    LONGLONG signedOffset = Sp->Parameters.Read.ByteOffset.QuadPart;
++    ULONGLONG fileOffset;
++    ULONGLONG requested = Sp->Parameters.Read.Length;
++    ULONGLONG effective;
++    ULONGLONG fileBase;
++    ULONGLONG absoluteOffset;
++    PMDL mdl;
++    ULONGLONG described;
++    ULONGLONG pages;
++    ULONGLONG requiredSize;
++    ULONG_PTR dataAddress;
++
++    if (signedOffset < 0)
++        return FALSE;
++    fileOffset = (ULONGLONG)signedOffset;
++    if (requested == 0 || fileOffset >= Fcb->DataSize)
++        return FALSE;
++
++    effective = requested;
++    if (effective > (ULONGLONG)Fcb->DataSize - fileOffset)
++        effective = (ULONGLONG)Fcb->DataSize - fileOffset;
++
++    fileBase = (ULONGLONG)Fcb->DataSector << XDVD_SECTOR_SHIFT;
++    absoluteOffset = fileBase + fileOffset;
++    if (absoluteOffset < fileBase ||
++        absoluteOffset + effective < absoluteOffset)
++        return FALSE;
++    if ((absoluteOffset & (XDVD_SECTOR_SIZE - 1)) != 0 ||
++        (effective & (XDVD_SECTOR_SIZE - 1)) != 0)
++        return FALSE;
++    if ((Irp->Flags & (IRP_PAGING_IO | IRP_ASSOCIATED_IRP)) != 0 ||
++        Irp->CurrentLocation <= 1)
++        return FALSE;
++
++    mdl = Irp->MdlAddress;
++    if (mdl == NULL || mdl->Next != NULL)
++        return FALSE;
++    if ((mdl->MdlFlags &
++         (MDL_PAGES_LOCKED | MDL_SOURCE_IS_NONPAGED_POOL)) == 0)
++        return FALSE;
++
++    described = (ULONGLONG)mdl->ByteOffset + mdl->ByteCount;
++    pages = (described + PAGE_SIZE - 1) >> PAGE_SHIFT;
++    requiredSize = sizeof(MDL) + pages * sizeof(PFN_NUMBER);
++    if ((ULONGLONG)(USHORT)mdl->Size < requiredSize ||
++        (ULONGLONG)mdl->ByteCount < effective)
++        return FALSE;
++
++    if ((mdl->MdlFlags &
++         (MDL_MAPPED_TO_SYSTEM_VA | MDL_SOURCE_IS_NONPAGED_POOL)) != 0)
++        dataAddress = (ULONG_PTR)mdl->MappedSystemVa;
++    else
++        dataAddress = (ULONG_PTR)mdl->StartVa + mdl->ByteOffset;
++    if ((ULONGLONG)dataAddress + effective < (ULONGLONG)dataAddress ||
++        (dataAddress & Fcb->Vcb->TargetDevice->AlignmentRequirement) != 0)
++        return FALSE;
++
++    Plan->AbsoluteOffset = absoluteOffset;
++    Plan->Length = (ULONG)effective;
++    return TRUE;
++}
++
++static NTSTATUS NTAPI
++XdvdForwardReadComplete(_In_ PDEVICE_OBJECT DeviceObject,
++                        _Inout_ PIRP Irp,
++                        _In_ PVOID Context)
++{
++    PFILE_OBJECT fo = Context;
++    PIO_STACK_LOCATION sp = IoGetCurrentIrpStackLocation(Irp);
++    ULONG expected = sp->Parameters.Read.Length;
++
++    UNREFERENCED_PARAMETER(DeviceObject);
++    if (Irp->PendingReturned)
++        IoMarkIrpPending(Irp);
++
++    if (Irp->Cancel)
++    {
++        Irp->IoStatus.Status = STATUS_CANCELLED;
++        Irp->IoStatus.Information = 0;
++    }
++    else if (!NT_SUCCESS(Irp->IoStatus.Status))
++    {
++        Irp->IoStatus.Information = 0;
++    }
++    else if (Irp->IoStatus.Information < expected)
++    {
++        Irp->IoStatus.Status = STATUS_END_OF_FILE;
++        Irp->IoStatus.Information = 0;
++    }
++    else if (Irp->IoStatus.Information > expected)
++    {
++        Irp->IoStatus.Status = STATUS_DEVICE_PROTOCOL_ERROR;
++        Irp->IoStatus.Information = 0;
++    }
++    else
++    {
++        fo->CurrentByteOffset.QuadPart =
++            sp->Parameters.Read.ByteOffset.QuadPart + expected;
++    }
++    return STATUS_SUCCESS;
++}
++
++static NTSTATUS
++XdvdForwardRead(_In_ PIRP Irp,
++                _In_ PXDVD_FCB Fcb,
++                _Inout_ PIO_STACK_LOCATION Sp,
++                _In_ const XDVD_FORWARD_PLAN *Plan)
++{
++    PIO_STACK_LOCATION lower;
++    BOOLEAN asynchronous = !(Sp->FileObject->Flags & FO_SYNCHRONOUS_IO);
++    NTSTATUS status;
++
++    /* Retain the effective length in our stack location for completion. */
++    Sp->Parameters.Read.Length = Plan->Length;
++    IoCopyCurrentIrpStackLocationToNext(Irp);
++    lower = IoGetNextIrpStackLocation(Irp);
++    lower->Parameters.Read.ByteOffset.QuadPart = (LONGLONG)Plan->AbsoluteOffset;
++    lower->Parameters.Read.Length = Plan->Length;
++    lower->FileObject = NULL;
++    IoSetCompletionRoutine(Irp, XdvdForwardReadComplete, Sp->FileObject,
++                           TRUE, TRUE, TRUE);
++
++    if (asynchronous)
++        IoMarkIrpPending(Irp);
++    status = IoCallDriver(Fcb->Vcb->TargetDevice, Irp);
++    return asynchronous ? STATUS_PENDING : status;
++}
+ 
+ /*
+  * Per-handle (context-control-block) state.  Sits in FILE_OBJECT::FsContext2.
+@@ -845,6 +991,13 @@
+     fcb = (PXDVD_FCB)fo->FsContext;
+     if (fcb == NULL || fcb->Vcb == NULL || fcb->IsDirectory)
+         return XdvdCompleteRequest(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
++
++    if (NxkExperimentalFlags & NXK_EXPERIMENT_XDVDFS_ASYNC)
++    {
++        XDVD_FORWARD_PLAN plan;
++        if (XdvdPlanForwardRead(Irp, fcb, sp, &plan))
++            return XdvdForwardRead(Irp, fcb, sp, &plan);
++    }
+ 
+     fileOff = (ULONGLONG)sp->Parameters.Read.ByteOffset.QuadPart;
+     userLen = sp->Parameters.Read.Length;
+diff --git a/ntoskrnl/xb/boot_setup.c b/ntoskrnl/xb/boot_setup.c
+--- a/ntoskrnl/xb/boot_setup.c
++++ b/ntoskrnl/xb/boot_setup.c
+@@ -37,6 +37,7 @@
+ TEXT(label_dts, "DTS");
+ TEXT(label_advanced_all, "All advanced settings");
+ TEXT(label_contig_cache, "Advanced: contig cache");
++TEXT(label_xdvdfs_async, "Optical async reads");
+ TEXT(label_ata_settle, "Emulator ATA acceleration");
+ TEXT(label_save, "Save and reboot");
+ TEXT(label_continue, "Discard and continue");
+@@ -72,6 +73,7 @@
+     label_language, label_shape, label_480p, label_720p, label_1080i,
+     label_pal60, label_audio, label_ac3, label_dts, label_advanced_all,
+     label_contig_cache,
++    label_xdvdfs_async,
+     label_ata_settle,
+     label_save, label_continue
+ };
+@@ -126,6 +128,10 @@
+     }
+     if (s->row == SB_CONTIG_CACHE_ALIAS) {
+         s->edited.experimental ^= SB_EXPERIMENT_CONTIG_CACHE_ALIAS;
++        return;
++    }
++    if (s->row == SB_XDVDFS_ASYNC) {
++        s->edited.experimental ^= SB_EXPERIMENT_XDVDFS_ASYNC;
+         return;
+     }
+     if (s->row == SB_ATA_STATUS_SETTLE) {
+@@ -294,6 +300,8 @@
+         }
+         else if (row == SB_CONTIG_CACHE_ALIAS)
+             text=(s->edited.experimental & SB_EXPERIMENT_CONTIG_CACHE_ALIAS) ? text_on : text_off;
++        else if (row == SB_XDVDFS_ASYNC)
++            text=(s->edited.experimental & SB_EXPERIMENT_XDVDFS_ASYNC) ? text_on : text_off;
+         else if (row == SB_ATA_STATUS_SETTLE) {
+             value = s->edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK;
+             text = value == SB_EXPERIMENT_ATA_FORCE_ALL ? text_ata_all :
+diff --git a/ntoskrnl/xb/boot_setup.h b/ntoskrnl/xb/boot_setup.h
+--- a/ntoskrnl/xb/boot_setup.h
++++ b/ntoskrnl/xb/boot_setup.h
+@@ -38,14 +38,15 @@
+     SB_EXPERIMENT_ATA_FORCE_ALL=8u,
+     SB_EXPERIMENT_ATA_MODE_MASK=8u,
+     SB_EXPERIMENT_ADVANCED_ALL_MASK=
+-        SB_EXPERIMENT_CONTIG_CACHE_ALIAS | SB_EXPERIMENT_ATA_FORCE_ALL
++        SB_EXPERIMENT_CONTIG_CACHE_ALIAS | SB_EXPERIMENT_XDVDFS_ASYNC |
++        SB_EXPERIMENT_ATA_FORCE_ALL
+ };
+ enum { SB_LANGUAGE_WORD=1u, SB_VIDEO_WORD=2u, SB_AUDIO_WORD=4u };
+ typedef enum {
+     SB_LANGUAGE, SB_ASPECT, SB_480P, SB_720P, SB_1080I, SB_PAL60,
+     SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_STANDARD_FIELD_COUNT,
+     SB_ADVANCED_ALL=SB_STANDARD_FIELD_COUNT, SB_CONTIG_CACHE_ALIAS,
+-    SB_ATA_STATUS_SETTLE,
++    SB_XDVDFS_ASYNC, SB_ATA_STATUS_SETTLE,
+     SB_FIELD_COUNT,
+     SB_SAVE=SB_FIELD_COUNT, SB_CONTINUE, SB_ROW_COUNT
+ } SbSetupRow;
+diff --git a/tests/host/xdvdfs-read-completion/check.py b/tests/host/xdvdfs-read-completion/check.py
+--- a/tests/host/xdvdfs-read-completion/check.py
++++ b/tests/host/xdvdfs-read-completion/check.py
+@@ -2,7 +2,7 @@
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ """Exercise the production optical read dispatch and completion ordering."""
+ from pathlib import Path
+-import sys,importlib.util,subprocess
++import sys,importlib.util,subprocess,re
+ root=Path(sys.argv[2]).resolve() if len(sys.argv)>2 else Path(__file__).resolve().parents[3];out=Path(sys.argv[1]);out.mkdir(parents=True,exist_ok=True)
+ spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py');e=importlib.util.module_from_spec(spec);spec.loader.exec_module(e)
+ s=(root/'drivers/filesystems/xdvdfs/xdvdfs.c').read_text()
+@@ -44,7 +44,8 @@
+  (void)d;(void)off;memset(p,0x5a,length);*got=supplied;return readStatus;
+ }
+ '''
+-func=e.function(s,'XdvdCompleteRequest')+e.function(s[s.rfind('\n\n',0,s.index('XdvdDispatchRead(_In_')):],'XdvdDispatchRead')
++legacy=re.sub(r'\n    if \(NxkExperimentalFlags & NXK_EXPERIMENT_XDVDFS_ASYNC\)\n    \{.*?\n    \}\n', '\n', s, count=1, flags=re.S)
++func=e.function(legacy,'XdvdCompleteRequest')+e.function(legacy[legacy.rfind('\n\n',0,legacy.index('XdvdDispatchRead(_In_')):],'XdvdDispatchRead')
+ tests=r'''
+ static unsigned cases,failures;
+ static void run(int sync,ULONG len,ULONG offset,NTSTATUS backend,ULONG got,NTSTATUS expected,int pending){
+@@ -68,3 +69,4 @@
+ (out/'read.c').write_text(shim+func+tests)
+ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(out/'read.c'),'-o',str(out/'read')],check=True)
+ subprocess.run([str(out/'read')],check=True)
++subprocess.run([sys.executable, str(Path(__file__).with_name('check_forward.py')), str(out/'forward'), str(root)], check=True)
+diff --git a/tests/host/xdvdfs-read-completion/check_forward.py b/tests/host/xdvdfs-read-completion/check_forward.py
+new file mode 100755
+--- /dev/null
++++ b/tests/host/xdvdfs-read-completion/check_forward.py
+@@ -0,0 +1,111 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Exercise the production direct-forward admission and completion path."""
++from pathlib import Path
++import sys, importlib.util, subprocess
++
++root=Path(sys.argv[2]).resolve(); out=Path(sys.argv[1]); out.mkdir(parents=True,exist_ok=True)
++spec=importlib.util.spec_from_file_location('extract',root/'tests/host/kernel-performance/check.py')
++extract=importlib.util.module_from_spec(spec); spec.loader.exec_module(extract)
++source=(root/'drivers/filesystems/xdvdfs/xdvdfs.c').read_text()
++shim=r'''
++#include <stdint.h>
++#include <assert.h>
++#include <string.h>
++#include <stdio.h>
++#define _In_
++#define _Inout_
++#define _Out_
++#define NTAPI
++#define UNREFERENCED_PARAMETER(x) (void)(x)
++#define STATUS_SUCCESS 0
++#define STATUS_PENDING 0x103
++#define STATUS_INSUFFICIENT_RESOURCES ((int32_t)0xc000009a)
++#define STATUS_END_OF_FILE ((int32_t)0xc0000011)
++#define STATUS_DEVICE_PROTOCOL_ERROR ((int32_t)0xc0000186)
++#define STATUS_CANCELLED ((int32_t)0xc0000120)
++#define NT_SUCCESS(s) ((s)>=0)
++#define FO_SYNCHRONOUS_IO 2
++#define XDVD_SECTOR_SIZE 2048u
++#define XDVD_SECTOR_SHIFT 11
++#define TRUE 1
++#define FALSE 0
++#define IRP_NOCACHE 1
++#define IRP_PAGING_IO 2
++#define IRP_ASSOCIATED_IRP 8
++#define MDL_MAPPED_TO_SYSTEM_VA 1
++#define MDL_PAGES_LOCKED 2
++#define MDL_SOURCE_IS_NONPAGED_POOL 4
++#define PAGE_SIZE 4096
++#define PAGE_SHIFT 12
++typedef uint8_t BOOLEAN; typedef uint16_t USHORT; typedef int16_t CSHORT;
++typedef uint64_t ULONGLONG; typedef int64_t LONGLONG; typedef uint32_t ULONG;
++typedef uintptr_t ULONG_PTR; typedef int32_t NTSTATUS; typedef void *PVOID;
++typedef struct {int64_t QuadPart;} LARGE_INTEGER;
++typedef struct _DEVICE_OBJECT {ULONG AlignmentRequirement;} DEVICE_OBJECT,*PDEVICE_OBJECT;
++typedef struct _MDL {struct _MDL *Next; CSHORT Size,MdlFlags; void *Process,*MappedSystemVa,*StartVa; ULONG ByteCount,ByteOffset;} MDL,*PMDL;
++typedef ULONG PFN_NUMBER;
++typedef struct {PDEVICE_OBJECT TargetDevice;} VCB;
++typedef struct {VCB *Vcb; ULONG DataSector,DataSize; int IsDirectory;} FCB,*PXDVD_FCB;
++typedef struct _XDVD_FORWARD_PLAN {ULONGLONG AbsoluteOffset;ULONG Length;} XDVD_FORWARD_PLAN,*PXDVD_FORWARD_PLAN;
++typedef struct {void *FsContext; LARGE_INTEGER CurrentByteOffset; ULONG Flags;} FO,*PFILE_OBJECT;
++typedef struct _IRP IRP,*PIRP;
++typedef NTSTATUS (*PIO_COMPLETION_ROUTINE)(PDEVICE_OBJECT,PIRP,PVOID);
++typedef struct {PFILE_OBJECT FileObject; struct {struct {LARGE_INTEGER ByteOffset;ULONG Length;} Read;} Parameters; PIO_COMPLETION_ROUTINE CompletionRoutine; PVOID Context;} STACK,*PIO_STACK_LOCATION;
++struct _IRP {STACK Stacks[2]; PIO_STACK_LOCATION CurrentStackLocation; struct {NTSTATUS Status;ULONG_PTR Information;} IoStatus; PMDL MdlAddress; ULONG Flags; int CurrentLocation,PendingReturned,Cancel;};
++static unsigned pendingCalls,lowerCalls;
++static NTSTATUS lowerStatus;
++static PIO_STACK_LOCATION IoGetCurrentIrpStackLocation(PIRP p){return p->CurrentStackLocation;}
++static PIO_STACK_LOCATION IoGetNextIrpStackLocation(PIRP p){return p->CurrentStackLocation-1;}
++static void IoCopyCurrentIrpStackLocationToNext(PIRP p){*IoGetNextIrpStackLocation(p)=*IoGetCurrentIrpStackLocation(p);IoGetNextIrpStackLocation(p)->CompletionRoutine=0;IoGetNextIrpStackLocation(p)->Context=0;}
++static void IoSetCompletionRoutine(PIRP p,PIO_COMPLETION_ROUTINE f,PVOID c,int a,int b,int d){(void)a;(void)b;(void)d;IoGetNextIrpStackLocation(p)->CompletionRoutine=f;IoGetNextIrpStackLocation(p)->Context=c;}
++static void IoMarkIrpPending(PIRP p){p->PendingReturned=1;pendingCalls++;}
++static NTSTATUS IoCallDriver(PDEVICE_OBJECT d,PIRP p){(void)d;(void)p;lowerCalls++;return lowerStatus;}
++'''
++names=('XdvdPlanForwardRead','XdvdForwardReadComplete','XdvdForwardRead')
++functions=''.join(extract.function(source,name) for name in names)
++tests=r'''
++static unsigned checks,failures;
++#define CHECK(x) do{checks++;if(!(x)){printf("FAIL line %d: %s\n",__LINE__,#x);failures++;}}while(0)
++static void init(PIRP i,PFILE_OBJECT fo,PXDVD_FCB f,VCB *v,PDEVICE_OBJECT d,PMDL m){
++ memset(i,0,sizeof(*i));memset(fo,0,sizeof(*fo));memset(f,0,sizeof(*f));memset(m,0,sizeof(*m));
++ v->TargetDevice=d;f->Vcb=v;f->DataSector=100;f->DataSize=32768;fo->FsContext=f;
++ i->CurrentStackLocation=&i->Stacks[1];i->CurrentLocation=2;i->MdlAddress=m;i->Flags=IRP_NOCACHE;
++ i->Stacks[1].FileObject=fo;i->Stacks[1].Parameters.Read.Length=4096;i->Stacks[1].Parameters.Read.ByteOffset.QuadPart=0;
++ m->MdlFlags=MDL_PAGES_LOCKED|MDL_MAPPED_TO_SYSTEM_VA;m->MappedSystemVa=(void*)0x10000;m->StartVa=(void*)0x10000;m->ByteCount=4096;m->Size=sizeof(*m)+sizeof(PFN_NUMBER);
++}
++static void plan_cases(void){
++ IRP i;FO fo;FCB f;VCB v;DEVICE_OBJECT d={3};MDL m,chain;XDVD_FORWARD_PLAN p;
++ init(&i,&fo,&f,&v,&d,&m);CHECK(XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p)&&p.AbsoluteOffset==((ULONGLONG)100<<11)&&p.Length==4096);
++ i.Stacks[1].Parameters.Read.ByteOffset.QuadPart=-1;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);i.Stacks[1].Parameters.Read.ByteOffset.QuadPart=1;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);i.Stacks[1].Parameters.Read.Length=2049;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);i.Flags|=IRP_PAGING_IO;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);i.Flags|=IRP_ASSOCIATED_IRP;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);i.CurrentLocation=1;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);i.MdlAddress=0;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);m.Next=&chain;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);m.MdlFlags=MDL_MAPPED_TO_SYSTEM_VA;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);m.Size=sizeof(m);CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);m.ByteCount=2048;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);m.MappedSystemVa=(void*)0x10001;CHECK(!XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));
++ init(&i,&fo,&f,&v,&d,&m);f.DataSize=4096;i.Stacks[1].Parameters.Read.Length=8192;m.ByteCount=8192;m.Size=sizeof(m)+2*sizeof(PFN_NUMBER);CHECK(XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p)&&p.Length==4096);
++}
++static void completion_cases(void){
++ IRP i;FO fo;FCB f;VCB v;DEVICE_OBJECT d={3};MDL m;
++ init(&i,&fo,&f,&v,&d,&m);i.Stacks[1].Parameters.Read.ByteOffset.QuadPart=2048;i.IoStatus.Status=0;i.IoStatus.Information=4096;i.PendingReturned=1;pendingCalls=0;CHECK(XdvdForwardReadComplete(0,&i,&fo)==0&&fo.CurrentByteOffset.QuadPart==6144&&i.IoStatus.Information==4096&&pendingCalls==1);
++ init(&i,&fo,&f,&v,&d,&m);i.IoStatus.Status=0;i.IoStatus.Information=2048;CHECK(XdvdForwardReadComplete(0,&i,&fo)==0&&i.IoStatus.Status==STATUS_END_OF_FILE&&i.IoStatus.Information==0&&fo.CurrentByteOffset.QuadPart==0);
++ init(&i,&fo,&f,&v,&d,&m);i.IoStatus.Status=0;i.IoStatus.Information=8192;CHECK(XdvdForwardReadComplete(0,&i,&fo)==0&&i.IoStatus.Status==STATUS_DEVICE_PROTOCOL_ERROR&&i.IoStatus.Information==0);
++ init(&i,&fo,&f,&v,&d,&m);i.IoStatus.Status=STATUS_INSUFFICIENT_RESOURCES;i.IoStatus.Information=9;CHECK(XdvdForwardReadComplete(0,&i,&fo)==0&&i.IoStatus.Information==0);
++ init(&i,&fo,&f,&v,&d,&m);i.IoStatus.Status=0;i.IoStatus.Information=4096;i.Cancel=1;CHECK(XdvdForwardReadComplete(0,&i,&fo)==0&&i.IoStatus.Status==STATUS_CANCELLED&&i.IoStatus.Information==0);
++}
++static void forwarding_cases(void){
++ IRP i;FO fo;FCB f;VCB v;DEVICE_OBJECT d={3};MDL m;XDVD_FORWARD_PLAN p;
++ init(&i,&fo,&f,&v,&d,&m);CHECK(XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));pendingCalls=lowerCalls=0;lowerStatus=STATUS_PENDING;CHECK(XdvdForwardRead(&i,&f,&i.Stacks[1],&p)==STATUS_PENDING);CHECK(lowerCalls==1&&pendingCalls==1);CHECK(i.Stacks[0].Parameters.Read.ByteOffset.QuadPart==((LONGLONG)100<<11)&&i.Stacks[0].Parameters.Read.Length==4096&&i.Stacks[0].FileObject==0&&i.Stacks[0].CompletionRoutine==XdvdForwardReadComplete&&i.Stacks[0].Context==&fo);
++ init(&i,&fo,&f,&v,&d,&m);fo.Flags=FO_SYNCHRONOUS_IO;CHECK(XdvdPlanForwardRead(&i,&f,&i.Stacks[1],&p));pendingCalls=lowerCalls=0;lowerStatus=STATUS_SUCCESS;CHECK(XdvdForwardRead(&i,&f,&i.Stacks[1],&p)==STATUS_SUCCESS&&lowerCalls==1&&pendingCalls==0);
++}
++int main(void){plan_cases();completion_cases();forwarding_cases();printf("%u forwarding checks, %u failures\n",checks,failures);return failures?1:0;}
++'''
++(out/'forward.c').write_text(shim+functions+tests)
++subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(out/'forward.c'),'-o',str(out/'forward')],check=True)
++subprocess.run([str(out/'forward')],check=True)

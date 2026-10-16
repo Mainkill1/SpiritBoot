@@ -1,0 +1,248 @@
+{
+  "Id": "spiritboot-conker-xdvdfs-shape-release64-20261016-v1",
+  "Executable": "native-launch.exe",
+  "Arguments": [
+    "-config_path",
+    "{packageDir}/xemu.toml",
+    "-m",
+    "64",
+    "-device",
+    "lpc47m157",
+    "-serial",
+    "file:{resultDir}/serial.log",
+    "-no-shutdown",
+    "-plugin",
+    "{packageDir}/xdvdfs_trace_plugin.dll,output={resultDir}/xdvdfs-request-facts.tsv,report={resultDir}/xdvdfs-trace-report.json,pc=0x8404840c"
+  ],
+  "WorkingDirectory": ".",
+  "Environment": {
+    "PR248_NATIVE_PACKAGE": "{packageDir}",
+    "PR248_NATIVE_EVIDENCE": "{resultDir}",
+    "SB_GAME": "conker",
+    "SB_BIOS_ARM": "spiritboot",
+    "SB_MODE": "profile",
+    "SB_SAMPLE_SECONDS": "60",
+    "XEMU_FRAME_LOG": "{resultDir}/guest-frames.log",
+    "XEMU_FLIP_LOG": "{resultDir}/guest-flips.log",
+    "DISABLE_RTSS_LAYER": "1",
+    "DISABLE_VULKAN_OBS_CAPTURE": "1"
+  },
+  "TimeoutSeconds": 360,
+  "Tags": [
+    "spiritboot-real-game-profile",
+    "conker",
+    "release64",
+    "diagnostic-xdvdfs-request-shape",
+    "rust-model-input"
+  ],
+  "Plan": [
+    {
+      "Type": "wait_for_artifact",
+      "DelayMs": 0,
+      "Button": null,
+      "DurationMs": 100,
+      "Name": null,
+      "DiagnosticId": null,
+      "Condition": {
+        "Name": "",
+        "Scope": "result",
+        "Path": "performance.json",
+        "MustExist": true,
+        "MinimumBytes": 0,
+        "MinimumNonBlackPixelRatio": null,
+        "NonBlackPixelThreshold": 0,
+        "ImageRegion": null,
+        "ExpectedSha256": null,
+        "ContainsText": null,
+        "EqualsText": null
+      },
+      "TimeoutMs": 300000,
+      "PollIntervalMs": 500
+    },
+    {
+      "Type": "wait",
+      "DelayMs": 1000,
+      "Button": null,
+      "DurationMs": 100,
+      "Name": null,
+      "DiagnosticId": null,
+      "Condition": null,
+      "TimeoutMs": 10000,
+      "PollIntervalMs": 100
+    },
+    {
+      "Type": "quit",
+      "DelayMs": 0,
+      "Button": null,
+      "DurationMs": 100,
+      "Name": null,
+      "DiagnosticId": null,
+      "Condition": null,
+      "TimeoutMs": 10000,
+      "PollIntervalMs": 100
+    }
+  ],
+  "TargetOs": "windows",
+  "ExpectedExecutableSha256": "95af55de843e8aa2af9155d870adca277e4e93a56f8ebdfb401b9c5be23d7f94",
+  "RequiredFiles": [
+    "flash.bin",
+    "native-launch.exe",
+    "qemu.exe",
+    "state/eeprom.bin",
+    "xdvdfs_trace_plugin.dll",
+    "xemu.toml"
+  ],
+  "LaunchMode": "direct",
+  "SnapshotName": null,
+  "StartPaused": false,
+  "RequireInput": false,
+  "Diagnostics": [],
+  "RuntimeState": {
+    "Enabled": true,
+    "KeepOnSuccess": false,
+    "KeepOnFailure": true,
+    "Files": [
+      {
+        "Source": "state/eeprom.bin",
+        "Destination": "eeprom.bin",
+        "ExpectedSha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5"
+      }
+    ],
+    "DiskAssets": [
+      {
+        "AssetId": "pr256-clean-fatx-compat010-v1",
+        "ExpectedSha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+        "Destination": "hdd.qcow2",
+        "Retention": "deleteAfterEvidence"
+      }
+    ],
+    "Isolation": {
+      "CacheMode": "cold",
+      "CacheShaders": false,
+      "DriverCache": "uncontrolled",
+      "AllowUncontrolledDriverCache": true,
+      "SeedDirectory": null,
+      "SeedSha256": null,
+      "RequirePrivateGuestState": true,
+      "MaximumFiles": 8192,
+      "MaximumBytes": 536870912,
+      "DeadlineSeconds": 30,
+      "ReadOnlyAssets": [
+        {
+          "Field": "bootrom_path",
+          "AssetId": "devbox-mcpx10-readonly-v1",
+          "ExpectedSha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335"
+        },
+        {
+          "Field": "dvd_path",
+          "AssetId": "conker-usa-readonly-v1",
+          "ExpectedSha256": "9f9f4e20224865436d96664198d56559ed1f5762cf29410343bdcec4e70692ba"
+        }
+      ]
+    }
+  },
+  "Inputs": [
+    {
+      "Path": "flash.bin",
+      "Role": "diagnostic-input",
+      "Hash": true,
+      "ExpectedSha256": "b266d2a130c4c3c02cf396aea4af3d294107ccffbf04593e1d156d9a638b51cd"
+    },
+    {
+      "Path": "native-launch.exe",
+      "Role": "diagnostic-input",
+      "Hash": true,
+      "ExpectedSha256": "95af55de843e8aa2af9155d870adca277e4e93a56f8ebdfb401b9c5be23d7f94"
+    },
+    {
+      "Path": "qemu.exe",
+      "Role": "emulator",
+      "Hash": true,
+      "ExpectedSha256": "75a2abdd708ed761b8ba5d95cb5f37b259567d5434e7d499dad3952d5d8505f6"
+    },
+    {
+      "Path": "state/eeprom.bin",
+      "Role": "diagnostic-input",
+      "Hash": true,
+      "ExpectedSha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5"
+    },
+    {
+      "Path": "xdvdfs_trace_plugin.dll",
+      "Role": "diagnostic-input",
+      "Hash": true,
+      "ExpectedSha256": "6cbc87d4c1a307ba2f6be11ca0797301a504e5f458b58367109f28fe0e0a886c"
+    },
+    {
+      "Path": "xemu.toml",
+      "Role": "diagnostic-input",
+      "Hash": true,
+      "ExpectedSha256": "60ad884ddd5d32add17bee47b2d6106d2cfec8190d5cdda494b299fcc1e1cf9c"
+    }
+  ],
+  "Workload": {
+    "CorrectnessChecks": [],
+    "EvidenceRequirements": [
+      {
+        "Name": "request-facts",
+        "Scope": "result",
+        "Path": "xdvdfs-request-facts.tsv",
+        "MustExist": true,
+        "MinimumBytes": 1,
+        "MinimumNonBlackPixelRatio": null,
+        "NonBlackPixelThreshold": 0,
+        "ImageRegion": null,
+        "ExpectedSha256": null,
+        "ContainsText": null,
+        "EqualsText": null
+      },
+      {
+        "Name": "trace-report",
+        "Scope": "result",
+        "Path": "xdvdfs-trace-report.json",
+        "MustExist": true,
+        "MinimumBytes": 20,
+        "MinimumNonBlackPixelRatio": null,
+        "NonBlackPixelThreshold": 0,
+        "ImageRegion": null,
+        "ExpectedSha256": null,
+        "ContainsText": null,
+        "EqualsText": null
+      }
+    ],
+    "ReportedMetrics": [],
+    "MinimumMetricSamples": 0,
+    "RequirePlanCompletion": true
+  },
+  "Experiment": {
+    "Id": "conker-xdvdfs-shape-20261016",
+    "Variant": "release64-scalar-trace",
+    "Reference": null,
+    "VariedFactors": [
+      "diagnostic-plugin"
+    ],
+    "ControlledFactors": [
+      "bios",
+      "kernel",
+      "game",
+      "hdd",
+      "host"
+    ],
+    "RequireCorrectnessPass": true,
+    "RequireCompleteEvidence": true,
+    "AllowOperatorIntervention": false,
+    "AllowDiagnostics": true
+  },
+  "Operations": {
+    "Mode": "diagnostic",
+    "AllowPreview": false,
+    "AllowManualInput": false,
+    "AllowPauseResume": false,
+    "AllowDiagnostics": false,
+    "AllowBulkTransfers": true,
+    "PreviewAllowed": false,
+    "ManualInputAllowed": false,
+    "PauseResumeAllowed": false,
+    "DiagnosticsAllowed": false,
+    "BulkTransfersAllowed": true
+  }
+}

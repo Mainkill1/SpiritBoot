@@ -1,0 +1,11 @@
+--- a/ntoskrnl/xb/mm/init.c
++++ b/ntoskrnl/xb/mm/init.c
+@@ -24,7 +24,7 @@
+ 
+ #include "mm.h"
+ 
+-ULONG NxkExperimentalFlags;
++ULONG NxkExperimentalFlags = 0x00000002UL;
+ volatile ULONG NxkQemuAtaDiskTargets;
+ #include "../../../boot/nxldr/boot-layout.h"
+ #include "../../../boot/nxldr/rom-kernel.h"

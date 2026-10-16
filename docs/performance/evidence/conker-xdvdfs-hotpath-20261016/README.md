@@ -34,8 +34,11 @@ until media-generation and invalidation behavior are explicitly owned.
 6. Qualify exact release images with host contracts and repeated real-game
    load timing.
 
-Stages 1 and 2 are complete. Stage 3 is required before a native optimization
-or load-time percentage can be claimed.
+Stages 1 through 5 are complete. The accepted diagnostic counter found 89.98%
+of Conker file reads eligible for direct forwarding, and the native candidate
+is patch `0153-xdvdfs-direct-forwarding.patch`. Stage 6 uses repeated,
+uninstrumented release64 runs and remains a qualification gate; counter runs
+are never used as timing evidence.
 
 ## Safety boundary
 
@@ -43,4 +46,13 @@ The candidate does not remove hardware delays, change ATA selection, alter the
 lower optical segment size, cache directory data, or infer that a guest buffer
 is resident. Requests lacking complete ownership proof retain the existing
 path. See `rust-model/SPEC.md` for the frozen rules and
-`rust-model/PROVENANCE.md` for the separation record.
+`rust-model/PROVENANCE.md` for the separation record. The product setting is
+session-only, defaults off, and is also covered by **All advanced settings**.
+
+## Observation-method outcome
+
+The two QEMU plugin attempts are rejected. One prevented QMP initialization;
+the other used register discovery in an unsupported callback context and then
+stalled. The accepted firmware-side counter records only aggregate admission
+decisions and is removed from timing builds. See `collector/RESULTS.md` and
+`diagnostic-counter/RESULTS.md`.

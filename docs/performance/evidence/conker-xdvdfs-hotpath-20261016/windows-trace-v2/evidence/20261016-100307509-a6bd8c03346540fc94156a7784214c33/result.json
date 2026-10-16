@@ -1,0 +1,253 @@
+{
+  "runId": "20261016-100307509-a6bd8c03346540fc94156a7784214c33",
+  "job": "spiritboot-conker-xdvdfs-shape-release64-20261016-v2",
+  "jobPackage": "agent-spiritboot-conker-xdvdfs-shape-release64-20261016-v2",
+  "attempt": 1,
+  "status": "unresponsive",
+  "detail": "QMP watchdog threshold reached. This is not a guest-progress verdict.",
+  "startedUtc": "2026-10-16T10:03:07.5097623+00:00",
+  "endedUtc": "2026-10-16T10:03:55.8034213+00:00",
+  "durationMs": 48293.6592,
+  "processId": 27548,
+  "exitCode": -1,
+  "crash": {
+    "RunId": "20261016-100307509-a6bd8c03346540fc94156a7784214c33",
+    "ExecutableSha256": "95af55de843e8aa2af9155d870adca277e4e93a56f8ebdfb401b9c5be23d7f94",
+    "Platform": "windows",
+    "ProcessId": 27548,
+    "ExitCode": -1,
+    "RunnerTerminated": true,
+    "Crashed": false,
+    "Source": "runner",
+    "Code": null,
+    "Capture": "partial",
+    "Dump": "unavailable",
+    "Analysis": "unavailable",
+    "TopFrames": [],
+    "Issues": [
+      "windows_event_unavailable",
+      "matching_windows_dump_unavailable"
+    ]
+  },
+  "diagnosticBundle": "diagnostic-bundle.json",
+  "launchMode": "direct",
+  "snapshotName": null,
+  "startPaused": false,
+  "executable": "native-launch.exe",
+  "executableSha256": "95af55de843e8aa2af9155d870adca277e4e93a56f8ebdfb401b9c5be23d7f94",
+  "arguments": [
+    "-config_path",
+    "C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Queue\\Testing\\agent-spiritboot-conker-xdvdfs-shape-release64-20261016-v2/xemu.toml",
+    "-m",
+    "64",
+    "-device",
+    "lpc47m157",
+    "-serial",
+    "file:C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-100307509-a6bd8c03346540fc94156a7784214c33/serial.log",
+    "-no-shutdown",
+    "-plugin",
+    "C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Queue\\Testing\\agent-spiritboot-conker-xdvdfs-shape-release64-20261016-v2/xdvdfs_trace_plugin.dll,output=C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-100307509-a6bd8c03346540fc94156a7784214c33/xdvdfs-request-facts.tsv,report=C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-100307509-a6bd8c03346540fc94156a7784214c33/xdvdfs-trace-report.json,pc=0x8404840c",
+    "-qmp",
+    "tcp:127.0.0.1:60108,server=on,wait=off"
+  ],
+  "watchdog": {
+    "Failures": 3,
+    "LastSuccessUtc": null,
+    "Error": "No connection could be made because the target machine actively refused it."
+  },
+  "failureCaptureError": null,
+  "automaticDiagnostic": null,
+  "automaticDiagnosticError": "Diagnostic tool not found: procdump.exe",
+  "diagnostics": [
+    {
+      "Id": "auto-hang-100339770",
+      "Type": "hang_bundle",
+      "Status": "failed",
+      "StartedUtc": "2026-10-16T10:03:39.771099+00:00",
+      "EndedUtc": "2026-10-16T10:03:49.0306552+00:00",
+      "Directory": "C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-100307509-a6bd8c03346540fc94156a7784214c33\\diagnostics\\20261016-100339771-auto-hang-100339770",
+      "Detail": "System.IO.FileNotFoundException: Diagnostic tool not found: procdump.exe\r\n   at XemuTestRunner.Diagnostics.ToolProcess.RunAsync(String executable, IEnumerable\u00601 arguments, String workingDirectory, Int32 timeoutMs, CancellationToken cancellationToken, IReadOnlyDictionary\u00602 environment) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Diagnostics/ToolProcess.cs:line 77\r\n   at XemuTestRunner.Diagnostics.DiagnosticHub.CaptureHangBundleAsync(ActiveContext context, DiagnosticRecipe recipe, String directory, CancellationToken ct) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Diagnostics/DiagnosticHub.cs:line 581\r\n   at XemuTestRunner.Diagnostics.DiagnosticHub.RunAsync(ActiveContext context, DiagnosticRecipe recipe, CancellationToken cancellationToken, Boolean linkRunLifetime) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Diagnostics/DiagnosticHub.cs:line 215 Pause after diagnostic failed: No connection could be made because the target machine actively refused it.",
+      "Artifacts": []
+    }
+  ],
+  "operatorActivity": {
+    "Intervened": true,
+    "ManualInputs": 0,
+    "Pauses": 0,
+    "Screenshots": 0,
+    "PreviewCaptures": 0,
+    "BulkTransfers": 0,
+    "Diagnostics": 1,
+    "HostStateChanges": 0
+  },
+  "workload": {
+    "Correctness": "notEvaluated",
+    "Evidence": "incomplete",
+    "Checks": [
+      {
+        "Name": "request-facts",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "Artifact has 0 bytes; expected at least 1."
+      },
+      {
+        "Name": "trace-report",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "Required artifact is missing: C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-100307509-a6bd8c03346540fc94156a7784214c33\\xdvdfs-trace-report.json"
+      },
+      {
+        "Name": "plan_completion",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "The declared plan did not complete."
+      },
+      {
+        "Name": "run_storage_state",
+        "Passed": true,
+        "Category": "state",
+        "Detail": "Application cache and private guest inputs recorded; driver and OS caches remain explicitly disclosed limitations."
+      }
+    ],
+    "Measurements": []
+  },
+  "assessment": {
+    "Execution": "unresponsive",
+    "Correctness": "notEvaluated",
+    "Evidence": "incomplete",
+    "Comparison": "ineligible",
+    "ComparisonReasons": [
+      "Execution outcome is Unresponsive.",
+      "Correctness outcome is NotEvaluated; a passing correctness contract is required.",
+      "Evidence outcome is Incomplete; complete evidence is required."
+    ],
+    "Checks": [
+      {
+        "Name": "request-facts",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "Artifact has 0 bytes; expected at least 1."
+      },
+      {
+        "Name": "trace-report",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "Required artifact is missing: C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-100307509-a6bd8c03346540fc94156a7784214c33\\xdvdfs-trace-report.json"
+      },
+      {
+        "Name": "plan_completion",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "The declared plan did not complete."
+      },
+      {
+        "Name": "run_storage_state",
+        "Passed": true,
+        "Category": "state",
+        "Detail": "Application cache and private guest inputs recorded; driver and OS caches remain explicitly disclosed limitations."
+      }
+    ],
+    "IsExecutionSuccess": false,
+    "IsCorrectnessSuccess": true
+  },
+  "correctnessStatus": "notevaluated",
+  "evidenceStatus": "incomplete",
+  "comparisonStatus": "ineligible",
+  "experiment": {
+    "Id": "conker-xdvdfs-shape-20261016",
+    "Variant": "release64-scalar-trace",
+    "Reference": null,
+    "VariedFactors": [
+      "diagnostic-plugin"
+    ],
+    "ControlledFactors": [
+      "bios",
+      "kernel",
+      "game",
+      "hdd",
+      "host"
+    ],
+    "RequireCorrectnessPass": true,
+    "RequireCompleteEvidence": true,
+    "AllowOperatorIntervention": false,
+    "AllowDiagnostics": true
+  },
+  "operations": {
+    "Mode": "diagnostic",
+    "AllowPreview": false,
+    "AllowManualInput": false,
+    "AllowPauseResume": false,
+    "AllowDiagnostics": false,
+    "AllowBulkTransfers": true,
+    "PreviewAllowed": false,
+    "ManualInputAllowed": false,
+    "PauseResumeAllowed": false,
+    "DiagnosticsAllowed": false,
+    "BulkTransfersAllowed": true
+  },
+  "inputManifest": "input-manifest.json",
+  "controllerInput": null,
+  "runtimeDirectory": "C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Runtime\\20261016-100307509-a6bd8c03346540fc94156a7784214c33",
+  "hostInventory": "host-inventory.json",
+  "workstationStart": {
+    "Supported": true,
+    "Platform": "windows",
+    "SessionLocked": false,
+    "InputDesktop": "Default",
+    "DisplayState": "on",
+    "PowerState": "awake",
+    "PowerSource": "ac",
+    "BatteryPercent": 55,
+    "BatterySaver": false,
+    "UserIdleSeconds": 83,
+    "TimestampUtc": "2026-10-16T10:03:11.5663021+00:00",
+    "LastSessionChangeUtc": null,
+    "LastDisplayChangeUtc": "2026-10-14T23:38:03.0462238+00:00",
+    "LastSuspendUtc": null,
+    "LastResumeUtc": null,
+    "LastEvent": "display_on",
+    "EventSequence": 2,
+    "RenderingRisk": false
+  },
+  "workstationEnd": {
+    "Supported": true,
+    "Platform": "windows",
+    "SessionLocked": false,
+    "InputDesktop": "Default",
+    "DisplayState": "on",
+    "PowerState": "awake",
+    "PowerSource": "ac",
+    "BatteryPercent": 55,
+    "BatterySaver": false,
+    "UserIdleSeconds": 127,
+    "TimestampUtc": "2026-10-16T10:03:55.5682852+00:00",
+    "LastSessionChangeUtc": null,
+    "LastDisplayChangeUtc": "2026-10-14T23:38:03.0462238+00:00",
+    "LastSuspendUtc": null,
+    "LastResumeUtc": null,
+    "LastEvent": "display_on",
+    "EventSequence": 2,
+    "RenderingRisk": false
+  },
+  "host": {
+    "runnerVersion": "0.2.0\u002Bbaf56ca5164ab477cf7bc3c424705577df0100f5",
+    "machine": "DESKTOP-52C4KS5",
+    "os": "Microsoft Windows 10.0.19045",
+    "architecture": "X64",
+    "processArchitecture": "X64",
+    "processorCount": 16,
+    "dotnet": "10.0.12"
+  },
+  "monitoring": {
+    "intervalMs": 500,
+    "samples": 72,
+    "overruns": 0,
+    "droppedWriteSamples": 0,
+    "averageCollectorDutyPercent": 0.8101674999999999,
+    "maxCollectorDutyPercent": 1.1110200000000001,
+    "maxCollectorDurationMs": 5.5551,
+    "gpuProviders": [
+      "NVIDIA NVML"
+    ]
+  }
+}

@@ -1,0 +1,251 @@
+{
+  "runId": "20261016-095935554-961f6257fdec42d5a8ad0fe7cff0514d",
+  "job": "spiritboot-conker-xdvdfs-shape-release64-20261016-v1",
+  "jobPackage": "agent-spiritboot-conker-xdvdfs-shape-release64-20261016-v1",
+  "attempt": 1,
+  "status": "control_error",
+  "detail": "xemu launched, but runner control initialization failed: System.TimeoutException: xemu QMP did not become ready at 127.0.0.1:59473 within 10000 ms.\r\n ---\u003E System.TimeoutException: QMP query-status exceeded 1500 ms.\r\n   at XemuTestRunner.Control.XemuQmpClient.ExecuteAsync(String command, Object arguments, TimeSpan timeout, CancellationToken cancellationToken) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Control/XemuQmpClient.cs:line 38\r\n   at XemuTestRunner.Control.XemuControlManager.WaitUntilReadyAsync(CancellationToken cancellationToken) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Control/XemuControlManager.cs:line 116\r\n   --- End of inner exception stack trace ---\r\n   at XemuTestRunner.Control.XemuControlManager.WaitUntilReadyAsync(CancellationToken cancellationToken) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Control/XemuControlManager.cs:line 133\r\n   at XemuTestRunner.Runtime.RunnerEngine.ExecuteJobAsync(String package, Task serverTask, MetricCollector telemetry, CancellationToken ct) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Runtime/RunnerEngine.cs:line 710 Target intentionally left running because Reliability.PreserveTargetOnRunnerError is enabled. The package remains in Testing for inspection; stop xemu manually before retrying.",
+  "startedUtc": "2026-10-16T09:59:35.5547506+00:00",
+  "endedUtc": "2026-10-16T09:59:51.2045112+00:00",
+  "durationMs": 15649.7609,
+  "processId": 7308,
+  "exitCode": null,
+  "crash": {
+    "RunId": "20261016-095935554-961f6257fdec42d5a8ad0fe7cff0514d",
+    "ExecutableSha256": "95af55de843e8aa2af9155d870adca277e4e93a56f8ebdfb401b9c5be23d7f94",
+    "Platform": "windows",
+    "ProcessId": 7308,
+    "ExitCode": null,
+    "RunnerTerminated": false,
+    "Crashed": false,
+    "Source": "windowsExitStatus",
+    "Code": null,
+    "Capture": "targetNotTerminated",
+    "Dump": "notRequested",
+    "Analysis": "notRequested",
+    "TopFrames": [],
+    "Issues": [
+      "Postmortem collection does not attach to or preserve a live target."
+    ]
+  },
+  "diagnosticBundle": "diagnostic-bundle.json",
+  "launchMode": "direct",
+  "snapshotName": null,
+  "startPaused": false,
+  "executable": "native-launch.exe",
+  "executableSha256": "95af55de843e8aa2af9155d870adca277e4e93a56f8ebdfb401b9c5be23d7f94",
+  "arguments": [
+    "-config_path",
+    "C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Queue\\Testing\\agent-spiritboot-conker-xdvdfs-shape-release64-20261016-v1/xemu.toml",
+    "-m",
+    "64",
+    "-device",
+    "lpc47m157",
+    "-serial",
+    "file:C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-095935554-961f6257fdec42d5a8ad0fe7cff0514d/serial.log",
+    "-no-shutdown",
+    "-plugin",
+    "C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Queue\\Testing\\agent-spiritboot-conker-xdvdfs-shape-release64-20261016-v1/xdvdfs_trace_plugin.dll,output=C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-095935554-961f6257fdec42d5a8ad0fe7cff0514d/xdvdfs-request-facts.tsv,report=C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-095935554-961f6257fdec42d5a8ad0fe7cff0514d/xdvdfs-trace-report.json,pc=0x8404840c",
+    "-qmp",
+    "tcp:127.0.0.1:59473,server=on,wait=off"
+  ],
+  "watchdog": null,
+  "failureCaptureError": null,
+  "automaticDiagnostic": null,
+  "automaticDiagnosticError": null,
+  "diagnostics": [
+    {
+      "Id": "forza-status-post",
+      "Type": "qmp",
+      "Status": "completed",
+      "StartedUtc": "2026-10-16T08:02:19.7877235+00:00",
+      "EndedUtc": "2026-10-16T08:02:19.7930927+00:00",
+      "Directory": "C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-080021897-f569100e48624d02a0276b10a5fbb0eb\\diagnostics\\20261016-080219787-forza-status-post",
+      "Detail": null,
+      "Artifacts": [
+        "qmp-result.json"
+      ]
+    }
+  ],
+  "operatorActivity": {
+    "Intervened": false,
+    "ManualInputs": 0,
+    "Pauses": 0,
+    "Screenshots": 0,
+    "PreviewCaptures": 0,
+    "BulkTransfers": 0,
+    "Diagnostics": 0,
+    "HostStateChanges": 0
+  },
+  "workload": {
+    "Correctness": "notEvaluated",
+    "Evidence": "incomplete",
+    "Checks": [
+      {
+        "Name": "request-facts",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "Artifact has 0 bytes; expected at least 1."
+      },
+      {
+        "Name": "trace-report",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "Required artifact is missing: C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-095935554-961f6257fdec42d5a8ad0fe7cff0514d\\xdvdfs-trace-report.json"
+      },
+      {
+        "Name": "plan_completion",
+        "Passed": true,
+        "Category": "evidence",
+        "Detail": "The declared plan completed."
+      },
+      {
+        "Name": "run_storage_state",
+        "Passed": false,
+        "Category": "state",
+        "Detail": "State is unmanaged, incomplete, inherited, inconsistent with its policy, or its driver disk namespace is unverified without an explicit waiver. Read the run state summary."
+      }
+    ],
+    "Measurements": []
+  },
+  "assessment": {
+    "Execution": "runnerFailure",
+    "Correctness": "notEvaluated",
+    "Evidence": "incomplete",
+    "Comparison": "ineligible",
+    "ComparisonReasons": [
+      "Execution outcome is RunnerFailure.",
+      "Correctness outcome is NotEvaluated; a passing correctness contract is required.",
+      "Evidence outcome is Incomplete; complete evidence is required.",
+      "State is unmanaged, incomplete, inherited, inconsistent with its policy, or its driver disk namespace is unverified without an explicit waiver. Read the run state summary."
+    ],
+    "Checks": [
+      {
+        "Name": "request-facts",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "Artifact has 0 bytes; expected at least 1."
+      },
+      {
+        "Name": "trace-report",
+        "Passed": false,
+        "Category": "evidence",
+        "Detail": "Required artifact is missing: C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Results\\20261016-095935554-961f6257fdec42d5a8ad0fe7cff0514d\\xdvdfs-trace-report.json"
+      },
+      {
+        "Name": "plan_completion",
+        "Passed": true,
+        "Category": "evidence",
+        "Detail": "The declared plan completed."
+      },
+      {
+        "Name": "run_storage_state",
+        "Passed": false,
+        "Category": "state",
+        "Detail": "State is unmanaged, incomplete, inherited, inconsistent with its policy, or its driver disk namespace is unverified without an explicit waiver. Read the run state summary."
+      }
+    ],
+    "IsExecutionSuccess": false,
+    "IsCorrectnessSuccess": true
+  },
+  "correctnessStatus": "notevaluated",
+  "evidenceStatus": "incomplete",
+  "comparisonStatus": "ineligible",
+  "experiment": {
+    "Id": "conker-xdvdfs-shape-20261016",
+    "Variant": "release64-scalar-trace",
+    "Reference": null,
+    "VariedFactors": [
+      "diagnostic-plugin"
+    ],
+    "ControlledFactors": [
+      "bios",
+      "kernel",
+      "game",
+      "hdd",
+      "host"
+    ],
+    "RequireCorrectnessPass": true,
+    "RequireCompleteEvidence": true,
+    "AllowOperatorIntervention": false,
+    "AllowDiagnostics": true
+  },
+  "operations": {
+    "Mode": "diagnostic",
+    "AllowPreview": false,
+    "AllowManualInput": false,
+    "AllowPauseResume": false,
+    "AllowDiagnostics": false,
+    "AllowBulkTransfers": true,
+    "PreviewAllowed": false,
+    "ManualInputAllowed": false,
+    "PauseResumeAllowed": false,
+    "DiagnosticsAllowed": false,
+    "BulkTransfersAllowed": true
+  },
+  "inputManifest": "input-manifest.json",
+  "controllerInput": null,
+  "runtimeDirectory": "C:\\xemu-lab\\incoming\\pr184-register-read-windows\\workspace-v2\\Runtime\\20261016-095935554-961f6257fdec42d5a8ad0fe7cff0514d",
+  "hostInventory": "host-inventory.json",
+  "workstationStart": {
+    "Supported": true,
+    "Platform": "windows",
+    "SessionLocked": false,
+    "InputDesktop": "Default",
+    "DisplayState": "on",
+    "PowerState": "awake",
+    "PowerSource": "ac",
+    "BatteryPercent": 55,
+    "BatterySaver": false,
+    "UserIdleSeconds": 1069,
+    "TimestampUtc": "2026-10-16T09:59:39.4842261+00:00",
+    "LastSessionChangeUtc": null,
+    "LastDisplayChangeUtc": "2026-10-14T23:38:03.0462238+00:00",
+    "LastSuspendUtc": null,
+    "LastResumeUtc": null,
+    "LastEvent": "display_on",
+    "EventSequence": 2,
+    "RenderingRisk": false
+  },
+  "workstationEnd": {
+    "Supported": true,
+    "Platform": "windows",
+    "SessionLocked": false,
+    "InputDesktop": "Default",
+    "DisplayState": "on",
+    "PowerState": "awake",
+    "PowerSource": "ac",
+    "BatteryPercent": 55,
+    "BatterySaver": false,
+    "UserIdleSeconds": 1080,
+    "TimestampUtc": "2026-10-16T09:59:50.4803005+00:00",
+    "LastSessionChangeUtc": null,
+    "LastDisplayChangeUtc": "2026-10-14T23:38:03.0462238+00:00",
+    "LastSuspendUtc": null,
+    "LastResumeUtc": null,
+    "LastEvent": "display_on",
+    "EventSequence": 2,
+    "RenderingRisk": false
+  },
+  "host": {
+    "runnerVersion": "0.2.0\u002Bbaf56ca5164ab477cf7bc3c424705577df0100f5",
+    "machine": "DESKTOP-52C4KS5",
+    "os": "Microsoft Windows 10.0.19045",
+    "architecture": "X64",
+    "processArchitecture": "X64",
+    "processorCount": 16,
+    "dotnet": "10.0.12"
+  },
+  "monitoring": {
+    "intervalMs": 500,
+    "samples": 22,
+    "overruns": 0,
+    "droppedWriteSamples": 0,
+    "averageCollectorDutyPercent": 0.734858181818182,
+    "maxCollectorDutyPercent": 0.91992,
+    "maxCollectorDurationMs": 4.5996,
+    "gpuProviders": [
+      "NVIDIA NVML"
+    ]
+  }
+}

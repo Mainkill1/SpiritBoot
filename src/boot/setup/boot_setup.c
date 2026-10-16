@@ -37,6 +37,7 @@ TEXT(label_ac3, "Dolby Digital (AC3)");
 TEXT(label_dts, "DTS");
 TEXT(label_advanced_all, "All advanced settings");
 TEXT(label_contig_cache, "Advanced: contig cache");
+TEXT(label_xdvdfs_async, "Optical async reads");
 TEXT(label_ata_settle, "Emulator ATA acceleration");
 TEXT(label_save, "Save and reboot");
 TEXT(label_continue, "Discard and continue");
@@ -72,6 +73,7 @@ static const char *const labels[SB_ROW_COUNT] SB_INIT_DATA = {
     label_language, label_shape, label_480p, label_720p, label_1080i,
     label_pal60, label_audio, label_ac3, label_dts, label_advanced_all,
     label_contig_cache,
+    label_xdvdfs_async,
     label_ata_settle,
     label_save, label_continue
 };
@@ -126,6 +128,10 @@ SB_INIT_CODE static void edit(SbSetup *s, int direction)
     }
     if (s->row == SB_CONTIG_CACHE_ALIAS) {
         s->edited.experimental ^= SB_EXPERIMENT_CONTIG_CACHE_ALIAS;
+        return;
+    }
+    if (s->row == SB_XDVDFS_ASYNC) {
+        s->edited.experimental ^= SB_EXPERIMENT_XDVDFS_ASYNC;
         return;
     }
     if (s->row == SB_ATA_STATUS_SETTLE) {
@@ -294,6 +300,8 @@ void sb_setup_field_value(const SbSetup *s, SbSetupRow row, char *out, size_t si
         }
         else if (row == SB_CONTIG_CACHE_ALIAS)
             text=(s->edited.experimental & SB_EXPERIMENT_CONTIG_CACHE_ALIAS) ? text_on : text_off;
+        else if (row == SB_XDVDFS_ASYNC)
+            text=(s->edited.experimental & SB_EXPERIMENT_XDVDFS_ASYNC) ? text_on : text_off;
         else if (row == SB_ATA_STATUS_SETTLE) {
             value = s->edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK;
             text = value == SB_EXPERIMENT_ATA_FORCE_ALL ? text_ata_all :
