@@ -191,3 +191,25 @@ index 00000000..e1c24838
 +assert "NxkPageSupplyPin(pfn, FALSE)" not in sg
 +assert sg.index("NxkPageSupplyCanPin") < sg.index("NxkPageSupplyCommitPin") < sg.rindex("MiReleasePfnLock")
 +print("page-pin hot-path source checks: PASS")
+diff --git a/tests/host/system-va-raw/check.py b/tests/host/system-va-raw/check.py
+index 39cb304..3fd071b 100644
+--- a/tests/host/system-va-raw/check.py
++++ b/tests/host/system-va-raw/check.py
+@@ -21,7 +21,7 @@ spec = importlib.util.spec_from_file_location('extract', root/'tests/host/kernel
+ extract = importlib.util.module_from_spec(spec); spec.loader.exec_module(extract)
+ def function(source, name):
+     text = extract.function(source, name)
+-    signature = re.search(r'(?:static\s+)?(?:PFN_NUMBER|BOOLEAN|VOID|ULONG|PVOID|ULONG_PTR)\s+(?:NTAPI\s+)?' + name + r'\s*\(', text)
++    signature = re.search(r'(?:static\s+)?(?:__inline__\s+)?(?:__attribute__\(\([^)]*\)\)\s+)?(?:PFN_NUMBER|BOOLEAN|VOID|ULONG|PVOID|ULONG_PTR)\s+(?:NTAPI\s+)?' + name + r'\s*\(', text)
+     assert signature, name
+     return text[signature.start():]
+ supply = (root/'ntoskrnl/xb/mm/pagesupply.c').read_text()
+@@ -36,7 +36,7 @@ prefix = prefix.replace('    PULONG HeadPtr = NxpHeadFor(Page);',
+ names = ['NxkPageSupplyInitialize', 'NxkPageSupplyTakeAny', 'NxkPageSupplyTakeTitleAny',
+          'NxkPageSupplyTakeZero', 'NxkPageSupplyTakeTitleZero', 'NxkPageSupplyReturn',
+          'NxkPageSupplyIsFree', 'NxkPageSupplyTakeSpecific', 'NxkPageSupplySetOwner',
+-         'NxkPageSupplyGetOwner', 'NxkPageSupplyCanPin', 'NxkPageSupplyIsPinned',
++         'NxkPageSupplyGetOwner', 'NxpCanPin', 'NxkPageSupplyCanPin', 'NxkPageSupplyIsPinned',
+          'NxkPageSupplyPin']
+ if 'NxkPageSupplyTakeSystemBatch(' in supply:
+     names.append('NxkPageSupplyTakeSystemBatch')

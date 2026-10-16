@@ -41,6 +41,12 @@ class PagePinScalarCandidateTests(unittest.TestCase):
         self.assertIn('assert "NxkPageSupplyCanPin(Page, TRUE)" in try_unlock', patch)
         self.assertIn('assert "NxpCanPin(Page, TRUE)" not in try_unlock', patch)
 
+    def test_scalar_patch_keeps_system_va_fixture_buildable(self):
+        patch = (ROOT / "patches/roswell/0145-scalar-page-pin-hotpath.patch").read_text()
+        self.assertIn("diff --git a/tests/host/system-va-raw/check.py", patch)
+        self.assertIn("(?:__inline__\\s+)?", patch)
+        self.assertIn("'NxpCanPin', 'NxkPageSupplyCanPin'", patch)
+
 
 if __name__ == "__main__":
     unittest.main()

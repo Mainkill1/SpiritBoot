@@ -36,12 +36,12 @@ that file's Git diff is
 
 | Artifact | SHA-256 or tree |
 | --- | --- |
-| final assembled Roswell source tree | `8b350fa2ee031d2ddfe148c73056587f51ad1cc8` |
+| final assembled Roswell source tree | `3630bb06074fa78b6fb4d7cf844999bdd322e2b2` |
 | Roswell source revision | `1569e2e89fb47cc72b9c704a8884f98200432bd4` |
-| Roswell source worktree digest | `ca1558f0d48289b730eb7aeaacfe53e282a167d3d0b21ac8bccef13fb3819949` |
-| firmware lock | `0be542d222306e197be7f8242553d20225f861d08775ed4bb1d7a1e42970fff7` |
+| Roswell source worktree digest | `8379379995a718a4a0838d3c408eccf3056cbc74a12e3f711301a4157b2b6d2f` |
+| firmware lock | `fa68f96aba3245d2b5a8a606bec75b807196abb9d956d2267370daefead2fdbc` |
 | 0144 native workload patch | `76d3256b797c17d6f30ecd05bb3cbd373c4eb38206f65591ae5b4f43d612862d` |
-| 0145 product/hot-path patch | `45124339b795bb9fe4ae7150c0810b5d5a911e30ad347757f8903e00f559d585` |
+| 0145 product/hot-path patch | `73d3709491c2bd167062353199350ec91734a32fd8e1138cbc25766582372235` |
 | baseline release 64 MiB BIOS | `4b132b78cbcbd92aa0969919b38c5e804c9f1496f0267132a69457ba0c636319` |
 | candidate release 64 MiB BIOS | `d1404fe3d869df1c9cbce30f54db50f72e06e800bc6ccf8d5cd9f91ec7f9821d` |
 | baseline unstripped kernel | `77c101003441107b3d9f55302b77e88f04c38080531655863b7132d2040544b1` |
@@ -98,10 +98,11 @@ overflow, deferred free, aliasing, bounds, and cleanup. The production
 scatter/paging DMA fixture passed all 116 cases, including rejection on the
 third page after two commits and exact cleanup of allocations, IRPs, MDLs,
 references, locks, and pins. The focused product suite passed 93 tests; one
-root-only ownership fixture was skipped. Full host discovery passed 509 tests
-in 453.288 seconds with 26 environment-specific skips: the root ownership
+root-only ownership fixture was skipped. After adding the SYSVA extraction
+regression for the private inline predicate, final host discovery passed 510
+tests in 481.078 seconds with 26 environment-specific skips: the root ownership
 fixture and PowerShell-only Windows clock/DVD guards. The page-pin source-shape
-gate passed.
+gate and both SYSVA layouts passed.
 
 The exact correctness commands were:
 
