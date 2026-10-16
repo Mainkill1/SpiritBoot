@@ -27,7 +27,8 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0138-independent-nxdisk-owner.patch",
                      "0139-independent-nxcdrom-profile.patch",
                      "0140-independent-native-storage-adapter.patch",
-                     "0141-lower-cache-integration.patch"):
+                     "0141-lower-cache-integration.patch",
+                     "0143-native-storage-submit-hotpath.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -76,8 +77,8 @@ class NxStorageProductionTests(unittest.TestCase):
                                      capture_output=True, timeout=120,
                                      env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
             self.assertEqual(adapter.returncode, 0, adapter.stdout + adapter.stderr)
-            self.assertIn('adapter-plain: 26 adapter groups, 0 failures', adapter.stdout)
-            self.assertIn('adapter-sanitized: 26 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-plain: 27 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-sanitized: 27 adapter groups, 0 failures', adapter.stdout)
 
             driver = (source / 'drivers/storage/class/nxstorage/driver.c').read_text()
             self.assertIn('ZwCreateDirectoryObject(&context->object_directory', driver)
