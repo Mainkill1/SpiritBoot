@@ -1,6 +1,12 @@
 # PR #248 implementation evidence and open gates
 
-Status: **draft; the independent complete candidate boots and passes the full API regression in all four firmware profiles; broad compatibility, performance, and final license review remain open.** The old storage classes remain available only in the explicitly selected reference backend and are excluded from the complete-candidate link. This document is part of the one implementation PR, not a separate release or compliance claim.
+Status: **the independent complete candidate is implemented, excludes the
+identified incompatible storage-class archives from the release link, passes
+the complete host suite and has current release64 native streaming evidence;
+final operator game acceptance and physical-Xbox smoke testing remain open.**
+The old storage classes remain available only in the explicitly selected
+reference backend and are excluded from the complete-candidate link. This
+document is an engineering and corresponding-source record, not legal advice.
 
 The [native cutover bring-up](NATIVE-CUTOVER-BRINGUP-2026-10-15.md) records the
 three runtime divergences found after the aggressive class replacement: missing
@@ -169,6 +175,40 @@ adapter harness now passes 10 groups under plain and ASan/UBSan builds. This is
 deterministic host fault/race coverage; the existing native qualification limits
 remain unchanged.
 
-Open P4/P5: native correctness/fault/API/XISO/save/game/streaming matrix against the exact complete candidate, both approved rigs, all firmware profiles and RAM/ROM footprints, optimized-inline/helper source grants, exact corresponding source/notices, independent final review, and supported/unverified physical Xbox scope. PR #248 stays draft and issue #245 remains open until those gates pass.
+## Current final performance batch
+
+The exact current release stack adds the bounded Forza queue and hot-path
+patches 0146 through 0152. It assembles tree
+`d79d23a68f97e58e2f0182062d291884289e2f08`. Two clean release64 builds
+reproduce SHA-256
+`00aa2536dbda14ee851665be98e903c32c9705996832b335bbab72ab81c8ead6`;
+release128 is
+`8562d4f3f5259e7bc999f4f98e1a2e1f2fdf668fd3f6ce9e559615667cb152ed`.
+
+The complete product host suite passes 529 tests with 26 expected
+host-platform skips. Two independent Windows release64 boots completed 32
+Forza-shaped passes and 32,768 asynchronous FATX reads at queue depth 12 and
+900-page pressure, with zero request, oracle, warmup or cleanup failures. The
+final two-run mean improves end-to-end APC batch time 3.93% and submission time
+5.82% against the retained-SG control. Exact packet preparation on Steam Deck
+reduces weighted instructions 33.33%; ordinary ATA cache bookkeeping removes
+99 i386 instructions; the Xbox ATA settle path emits four direct Alternate
+Status reads and preserves the first IRQ-acknowledging Status read. Full inputs,
+limits and rejected designs are in
+`docs/performance/evidence/forza-map-hotpath-20261015/`.
+
+The exact image also completed two independent release-only Steam Deck runs of
+all 144 XISO leaves and five structural groups. Each run passed 149/149
+same-host records with no applicable oracle failures or functional-hash
+changes. The descriptive sum of two-run leaf means improved 8.09%. The only
+initial >20% leaf was rerun with 4,096x work in ABBA order; its 15.4--16.1
+second samples narrowed to +1.95%, so no broad-suite leaf remains over the
+review threshold. These results are under `final-broad-xiso/` in the evidence
+directory above.
+
+Remaining P5 operator gates are current-image Forza scenery streaming, DOA save
+reload, PGR2/Conker scene transitions and a physical-Xbox smoke test. These do
+not reopen the source/link result: the release candidate links the independent
+storage classes and excludes `libclasspnp.a`, `libdisk.a` and `libnxcdrom.a`.
 
 Cache qualification gap: the retained Xbox lower stack excludes ATA caching MODE SENSE, ATA passthrough and the standard write-cache property. Its SYNCHRONIZE CACHE implementation can return success without any ATA command for cache-unrecognized/disabled state or absent selected flush opcode. The approved read-only cache-query proposal exposes these facts without altering ATA execution; enabled/unknown cache without a verified flush path cannot be treated as durable. Native callback-time child reuse must preserve older dispatch/channel frames and device references as documented in the approved completion packet.

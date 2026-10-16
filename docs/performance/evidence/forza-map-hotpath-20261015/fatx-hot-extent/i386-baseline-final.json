@@ -1,0 +1,43 @@
+{
+  "target": "i386-unknown-none-elf",
+  "optimization": "-O2 freestanding",
+  "functions": {
+    "VfatPrepareSeekCache": {
+      "instructions": 68,
+      "branches": 5,
+      "calls": [
+        "ExAcquireFastMutex",
+        "ExReleaseFastMutex",
+        "ExAllocatePoolWithTag",
+        "memset",
+        "ExAcquireFastMutex",
+        "ExReleaseFastMutex",
+        "ExFreePool",
+        "ExReleaseFastMutex"
+      ],
+      "compiler_helpers": []
+    },
+    "VfatLookupSeekCheckpoint": {
+      "instructions": 54,
+      "branches": 8,
+      "calls": [],
+      "compiler_helpers": []
+    },
+    "VfatRememberSeekCheckpoint": {
+      "instructions": 64,
+      "branches": 7,
+      "calls": [],
+      "compiler_helpers": []
+    },
+    "VfatInvalidateSeekCheckpoints": {
+      "instructions": 24,
+      "branches": 1,
+      "calls": [
+        "ExAcquireFastMutex",
+        "memset",
+        "ExReleaseFastMutex"
+      ],
+      "compiler_helpers": []
+    }
+  }
+}

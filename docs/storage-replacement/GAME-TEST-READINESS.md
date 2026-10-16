@@ -1,6 +1,23 @@
 # Live game test readiness
 
-No fresh PGR2, Conker or complete DOA save-cycle pass is established by the current PR248 work. A bounded DOA human test is recorded below. The full replacement is not installed. The final pre-extraction release64 image, including the semaphore and public-kernel contract corrections, has SHA-256 `0f6e4f48269e0ef65bb27758e221b4bcdb707ef0cbf57c211d7e969866334d5e`. The earlier semaphore-only candidate `42ad0c392b97d195f6aacaa47b1c168f1f74038ddf3258257b21cfde99bcb647` is superseded; the published reference remains `c630d22f2353d3898024d510f0b402b64bccdb331781fe7885389f73d6200853`. API fixtures and allocation traces do not substitute for game tests.
+No fresh PGR2, Conker or complete DOA save-cycle pass is established on the
+current final PR248 image. A bounded earlier DOA human test is recorded below.
+The independent replacement is installed in the complete-candidate release
+link. Its current release64 SHA-256 is
+`00aa2536dbda14ee851665be98e903c32c9705996832b335bbab72ab81c8ead6`
+from assembled tree `d79d23a68f97e58e2f0182062d291884289e2f08`.
+The final pre-extraction image
+`0f6e4f48269e0ef65bb27758e221b4bcdb707ef0cbf57c211d7e969866334d5e`
+is now the historical game-test control; the published reference remains
+`c630d22f2353d3898024d510f0b402b64bccdb331781fe7885389f73d6200853`.
+API fixtures and allocation traces do not substitute for game tests.
+
+The exact final image has completed two independent release-only Steam Deck
+runs of the full 144-leaf/five-group XISO: 149/149 records passed per run with
+no applicable oracle failures or functional-hash changes. The only initial
+leaf above the 20% performance review threshold was cleared by a 4,096x-work
+ABBA rerun (1.95% slower, all four outcomes passing). This closes the broad
+synthetic gate while leaving the human game routes above pending.
 
 A read-only Windows catalog refresh on 2026-10-15 found these assets marked ready. Actual input hashes and the USER desktop/input route must be verified in each new candidate run.
 

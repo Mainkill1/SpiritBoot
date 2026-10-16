@@ -1,0 +1,1149 @@
+--- baseline
++++ v5
+@@ -5,563 +5,589 @@
+    4:	56                   	push   esi
+    5:	89 c6                	mov    esi,eax
+    7:	53                   	push   ebx
+-   8:	83 ec 44             	sub    esp,0x44
+-   b:	e8 00 00 00 00       	call   10 <FUNC+0x10>	c: DISP32	.text$lock
+-  10:	83 7e 68 00          	cmp    DWORD PTR [esi+0x68],0x0
+-  14:	0f 85 3d 05 00 00    	jne    557 <FUNC+0x557>
+-  1a:	c7 46 68 01 00 00 00 	mov    DWORD PTR [esi+0x68],0x1
+-  21:	89 f0                	mov    eax,esi
+-  23:	e8 00 00 00 00       	call   28 <FUNC+0x28>	24: DISP32	.text$unlock
+-  28:	89 f0                	mov    eax,esi
+-  2a:	31 db                	xor    ebx,ebx
+-  2c:	e8 00 00 00 00       	call   31 <FUNC+0x31>	2d: DISP32	.text$lock
+-  31:	31 d2                	xor    edx,edx
+-  33:	89 55 e8             	mov    DWORD PTR [ebp-0x18],edx
+-  36:	8b 56 50             	mov    edx,DWORD PTR [esi+0x50]
+-  39:	39 55 e8             	cmp    DWORD PTR [ebp-0x18],edx
+-  3c:	0f 83 ed 04 00 00    	jae    52f <FUNC+0x52f>
+-  42:	8b 7e 54             	mov    edi,DWORD PTR [esi+0x54]
+-  45:	8d 47 01             	lea    eax,[edi+0x1]
+-  48:	39 d0                	cmp    eax,edx
+-  4a:	75 02                	jne    4e <FUNC+0x4e>
+-  4c:	31 c0                	xor    eax,eax
+-  4e:	69 df f8 00 00 00    	imul   ebx,edi,0xf8
+-  54:	03 5e 4c             	add    ebx,DWORD PTR [esi+0x4c]
+-  57:	89 46 54             	mov    DWORD PTR [esi+0x54],eax
+-  5a:	83 bb cc 00 00 00 00 	cmp    DWORD PTR [ebx+0xcc],0x0
+-  61:	0f 84 c0 04 00 00    	je     527 <FUNC+0x527>
+-  67:	83 bb d8 00 00 00 00 	cmp    DWORD PTR [ebx+0xd8],0x0
+-  6e:	74 7e                	je     ee <FUNC+0xee>
+-  70:	83 bb e0 00 00 00 00 	cmp    DWORD PTR [ebx+0xe0],0x0
+-  77:	74 28                	je     a1 <FUNC+0xa1>
+-  79:	31 c0                	xor    eax,eax
+-  7b:	31 ff                	xor    edi,edi
+-  7d:	31 c9                	xor    ecx,ecx
+-  7f:	ba 02 00 00 00       	mov    edx,0x2
+-  84:	89 83 d8 00 00 00    	mov    DWORD PTR [ebx+0xd8],eax
+-  8a:	89 83 e0 00 00 00    	mov    DWORD PTR [ebx+0xe0],eax
+-  90:	89 83 dc 00 00 00    	mov    DWORD PTR [ebx+0xdc],eax
+-  96:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
+-  99:	89 45 ec             	mov    DWORD PTR [ebp-0x14],eax
+-  9c:	e9 c5 04 00 00       	jmp    566 <FUNC+0x566>
+-  a1:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
+-  a8:	75 0a                	jne    b4 <FUNC+0xb4>
+-  aa:	83 7e 6c 00          	cmp    DWORD PTR [esi+0x6c],0x0
+-  ae:	0f 84 73 04 00 00    	je     527 <FUNC+0x527>
+-  b4:	83 bb e8 00 00 00 00 	cmp    DWORD PTR [ebx+0xe8],0x0
+-  bb:	0f 85 66 04 00 00    	jne    527 <FUNC+0x527>
+-  c1:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
+-  c8:	0f 85 59 04 00 00    	jne    527 <FUNC+0x527>
+-  ce:	31 c0                	xor    eax,eax
+-  d0:	31 ff                	xor    edi,edi
+-  d2:	31 c9                	xor    ecx,ecx
+-  d4:	ba 03 00 00 00       	mov    edx,0x3
+-  d9:	c7 83 e8 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xe8],0x1
+-  e3:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
+-  e6:	89 45 ec             	mov    DWORD PTR [ebp-0x14],eax
+-  e9:	e9 78 04 00 00       	jmp    566 <FUNC+0x566>
+-  ee:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
+-  f5:	74 1d                	je     114 <FUNC+0x114>
+-  f7:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
+-  fe:	75 14                	jne    114 <FUNC+0x114>
+- 100:	c7 83 b8 00 00 00 f9 ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffff9
+- 10a:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
+- 114:	83 7e 6c 00          	cmp    DWORD PTR [esi+0x6c],0x0
+- 118:	74 26                	je     140 <FUNC+0x140>
+- 11a:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
+- 121:	75 1d                	jne    140 <FUNC+0x140>
+- 123:	83 bb b8 00 00 00 00 	cmp    DWORD PTR [ebx+0xb8],0x0
+- 12a:	75 0a                	jne    136 <FUNC+0x136>
+- 12c:	c7 83 b8 00 00 00 fc ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffffc
+- 136:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
+- 140:	83 bb d0 00 00 00 00 	cmp    DWORD PTR [ebx+0xd0],0x0
+- 147:	0f 85 1f 01 00 00    	jne    26c <FUNC+0x26c>
+- 14d:	8b 83 d4 00 00 00    	mov    eax,DWORD PTR [ebx+0xd4]
+- 153:	89 45 e0             	mov    DWORD PTR [ebp-0x20],eax
+- 156:	85 c0                	test   eax,eax
+- 158:	75 74                	jne    1ce <FUNC+0x1ce>
+- 15a:	83 7b 04 00          	cmp    DWORD PTR [ebx+0x4],0x0
+- 15e:	74 6e                	je     1ce <FUNC+0x1ce>
+- 160:	8b 46 50             	mov    eax,DWORD PTR [esi+0x50]
+- 163:	31 d2                	xor    edx,edx
+- 165:	89 45 dc             	mov    DWORD PTR [ebp-0x24],eax
+- 168:	8b 45 dc             	mov    eax,DWORD PTR [ebp-0x24]
+- 16b:	39 c2                	cmp    edx,eax
+- 16d:	74 5f                	je     1ce <FUNC+0x1ce>
+- 16f:	69 c2 f8 00 00 00    	imul   eax,edx,0xf8
+- 175:	03 46 4c             	add    eax,DWORD PTR [esi+0x4c]
+- 178:	83 b8 cc 00 00 00 00 	cmp    DWORD PTR [eax+0xcc],0x0
+- 17f:	74 3c                	je     1bd <FUNC+0x1bd>
+- 181:	8b 88 ac 00 00 00    	mov    ecx,DWORD PTR [eax+0xac]
+- 187:	89 4d d0             	mov    DWORD PTR [ebp-0x30],ecx
+- 18a:	8b 8b a8 00 00 00    	mov    ecx,DWORD PTR [ebx+0xa8]
+- 190:	39 88 a8 00 00 00    	cmp    DWORD PTR [eax+0xa8],ecx
+- 196:	8b 4d d0             	mov    ecx,DWORD PTR [ebp-0x30]
+- 199:	1b 8b ac 00 00 00    	sbb    ecx,DWORD PTR [ebx+0xac]
+- 19f:	73 1c                	jae    1bd <FUNC+0x1bd>
+- 1a1:	8b 48 04             	mov    ecx,DWORD PTR [eax+0x4]
+- 1a4:	83 f9 02             	cmp    ecx,0x2
+- 1a7:	74 17                	je     1c0 <FUNC+0x1c0>
+- 1a9:	f6 40 38 01          	test   BYTE PTR [eax+0x38],0x1
+- 1ad:	75 11                	jne    1c0 <FUNC+0x1c0>
+- 1af:	89 d8                	mov    eax,ebx
+- 1b1:	e8 00 00 00 00       	call   1b6 <FUNC+0x1b6>	1b2: DISP32	.text$cache_sync
+- 1b6:	49                   	dec    ecx
+- 1b7:	75 04                	jne    1bd <FUNC+0x1bd>
+- 1b9:	85 c0                	test   eax,eax
+- 1bb:	75 03                	jne    1c0 <FUNC+0x1c0>
+- 1bd:	42                   	inc    edx
+- 1be:	eb a8                	jmp    168 <FUNC+0x168>
+- 1c0:	89 da                	mov    edx,ebx
+- 1c2:	89 f0                	mov    eax,esi
+- 1c4:	e8 00 00 00 00       	call   1c9 <FUNC+0x1c9>	1c5: DISP32	.text$pending
+- 1c9:	e9 59 03 00 00       	jmp    527 <FUNC+0x527>
+- 1ce:	89 d8                	mov    eax,ebx
+- 1d0:	e8 00 00 00 00       	call   1d5 <FUNC+0x1d5>	1d1: DISP32	.text$cache_sync
+- 1d5:	85 c0                	test   eax,eax
+- 1d7:	0f 84 98 00 00 00    	je     275 <FUNC+0x275>
+- 1dd:	83 7d e0 00          	cmp    DWORD PTR [ebp-0x20],0x0
+- 1e1:	0f 85 8e 00 00 00    	jne    275 <FUNC+0x275>
+- 1e7:	8b 43 44             	mov    eax,DWORD PTR [ebx+0x44]
+- 1ea:	85 c0                	test   eax,eax
+- 1ec:	74 05                	je     1f3 <FUNC+0x1f3>
+- 1ee:	8b 53 40             	mov    edx,DWORD PTR [ebx+0x40]
+- 1f1:	eb 03                	jmp    1f6 <FUNC+0x1f6>
+- 1f3:	8b 56 24             	mov    edx,DWORD PTR [esi+0x24]
+- 1f6:	4a                   	dec    edx
+- 1f7:	74 7c                	je     275 <FUNC+0x275>
+- 1f9:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
+- 203:	85 c0                	test   eax,eax
+- 205:	74 05                	je     20c <FUNC+0x20c>
+- 207:	8b 43 40             	mov    eax,DWORD PTR [ebx+0x40]
+- 20a:	eb 03                	jmp    20f <FUNC+0x20f>
+- 20c:	8b 46 24             	mov    eax,DWORD PTR [esi+0x24]
+- 20f:	83 f8 02             	cmp    eax,0x2
+- 212:	75 0a                	jne    21e <FUNC+0x21e>
+- 214:	c7 83 b8 00 00 00 f7 ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffff7
+- 21e:	8b 83 b0 00 00 00    	mov    eax,DWORD PTR [ebx+0xb0]
+- 224:	8b 93 b4 00 00 00    	mov    edx,DWORD PTR [ebx+0xb4]
+- 22a:	8b 0b                	mov    ecx,DWORD PTR [ebx]
+- 22c:	8b bb b8 00 00 00    	mov    edi,DWORD PTR [ebx+0xb8]
+- 232:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
+- 235:	8b 83 c8 00 00 00    	mov    eax,DWORD PTR [ebx+0xc8]
+- 23b:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
+- 23e:	85 c0                	test   eax,eax
+- 240:	74 12                	je     254 <FUNC+0x254>
+- 242:	83 bb ec 00 00 00 00 	cmp    DWORD PTR [ebx+0xec],0x0
+- 249:	ba 01 00 00 00       	mov    edx,0x1
+- 24e:	75 02                	jne    252 <FUNC+0x252>
+- 250:	89 fa                	mov    edx,edi
+- 252:	89 10                	mov    DWORD PTR [eax],edx
+- 254:	31 c0                	xor    eax,eax
+- 256:	ba 04 00 00 00       	mov    edx,0x4
+- 25b:	89 83 c8 00 00 00    	mov    DWORD PTR [ebx+0xc8],eax
+- 261:	89 83 cc 00 00 00    	mov    DWORD PTR [ebx+0xcc],eax
+- 267:	e9 fa 02 00 00       	jmp    566 <FUNC+0x566>
+- 26c:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
+- 273:	74 a9                	je     21e <FUNC+0x21e>
+- 275:	8b 93 a4 00 00 00    	mov    edx,DWORD PTR [ebx+0xa4]
+- 27b:	8b 83 a0 00 00 00    	mov    eax,DWORD PTR [ebx+0xa0]
+- 281:	83 fa ff             	cmp    edx,0xffffffff
+- 284:	75 08                	jne    28e <FUNC+0x28e>
+- 286:	40                   	inc    eax
+- 287:	75 0d                	jne    296 <FUNC+0x296>
+- 289:	e9 29 02 00 00       	jmp    4b7 <FUNC+0x4b7>
+- 28e:	85 d2                	test   edx,edx
+- 290:	75 04                	jne    296 <FUNC+0x296>
+- 292:	85 c0                	test   eax,eax
+- 294:	74 0d                	je     2a3 <FUNC+0x2a3>
+- 296:	8d 43 48             	lea    eax,[ebx+0x48]
+- 299:	ba 50 00 00 00       	mov    edx,0x50
+- 29e:	e8 00 00 00 00       	call   2a3 <FUNC+0x2a3>	29f: DISP32	.text$clear_bytes
+- 2a3:	8b 83 98 00 00 00    	mov    eax,DWORD PTR [ebx+0x98]
+- 2a9:	8b 93 9c 00 00 00    	mov    edx,DWORD PTR [ebx+0x9c]
+- 2af:	89 7b 48             	mov    DWORD PTR [ebx+0x48],edi
+- 2b2:	89 43 50             	mov    DWORD PTR [ebx+0x50],eax
+- 2b5:	8b 83 a0 00 00 00    	mov    eax,DWORD PTR [ebx+0xa0]
+- 2bb:	89 53 54             	mov    DWORD PTR [ebx+0x54],edx
+- 2be:	8b 93 a4 00 00 00    	mov    edx,DWORD PTR [ebx+0xa4]
+- 2c4:	83 c0 01             	add    eax,0x1
+- 2c7:	83 d2 00             	adc    edx,0x0
+- 2ca:	89 83 a0 00 00 00    	mov    DWORD PTR [ebx+0xa0],eax
+- 2d0:	89 43 58             	mov    DWORD PTR [ebx+0x58],eax
+- 2d3:	8b 03                	mov    eax,DWORD PTR [ebx]
+- 2d5:	89 93 a4 00 00 00    	mov    DWORD PTR [ebx+0xa4],edx
+- 2db:	89 53 5c             	mov    DWORD PTR [ebx+0x5c],edx
+- 2de:	8b 93 d4 00 00 00    	mov    edx,DWORD PTR [ebx+0xd4]
+- 2e4:	89 43 60             	mov    DWORD PTR [ebx+0x60],eax
+- 2e7:	8b 43 30             	mov    eax,DWORD PTR [ebx+0x30]
+- 2ea:	85 d2                	test   edx,edx
+- 2ec:	89 43 64             	mov    DWORD PTR [ebx+0x64],eax
+- 2ef:	0f 95 c0             	setne  al
+- 2f2:	c1 e0 02             	shl    eax,0x2
+- 2f5:	88 83 88 00 00 00    	mov    BYTE PTR [ebx+0x88],al
+- 2fb:	85 d2                	test   edx,edx
+- 2fd:	0f 85 0b 02 00 00    	jne    50e <FUNC+0x50e>
+- 303:	c6 83 89 00 00 00 0a 	mov    BYTE PTR [ebx+0x89],0xa
+- 30a:	89 d8                	mov    eax,ebx
+- 30c:	e8 00 00 00 00       	call   311 <FUNC+0x311>	30d: DISP32	.text$cache_sync
+- 311:	85 c0                	test   eax,eax
+- 313:	74 0c                	je     321 <FUNC+0x321>
+- 315:	c6 83 8a 00 00 00 35 	mov    BYTE PTR [ebx+0x8a],0x35
+- 31c:	e9 ed 01 00 00       	jmp    50e <FUNC+0x50e>
+- 321:	8b 53 20             	mov    edx,DWORD PTR [ebx+0x20]
+- 324:	8b 4b 24             	mov    ecx,DWORD PTR [ebx+0x24]
+- 327:	8b 43 18             	mov    eax,DWORD PTR [ebx+0x18]
+- 32a:	89 53 70             	mov    DWORD PTR [ebx+0x70],edx
+- 32d:	8b 93 b0 00 00 00    	mov    edx,DWORD PTR [ebx+0xb0]
+- 333:	89 4b 74             	mov    DWORD PTR [ebx+0x74],ecx
+- 336:	8b 8b b4 00 00 00    	mov    ecx,DWORD PTR [ebx+0xb4]
+- 33c:	89 55 e8             	mov    DWORD PTR [ebp-0x18],edx
+- 33f:	8b 55 e8             	mov    edx,DWORD PTR [ebp-0x18]
+- 342:	03 53 28             	add    edx,DWORD PTR [ebx+0x28]
+- 345:	89 43 68             	mov    DWORD PTR [ebx+0x68],eax
+- 348:	01 d0                	add    eax,edx
+- 34a:	89 4d ec             	mov    DWORD PTR [ebp-0x14],ecx
+- 34d:	8b 55 ec             	mov    edx,DWORD PTR [ebp-0x14]
+- 350:	89 43 6c             	mov    DWORD PTR [ebx+0x6c],eax
+- 353:	89 45 dc             	mov    DWORD PTR [ebp-0x24],eax
+- 356:	8b 45 e8             	mov    eax,DWORD PTR [ebp-0x18]
+- 359:	03 43 08             	add    eax,DWORD PTR [ebx+0x8]
+- 35c:	13 53 0c             	adc    edx,DWORD PTR [ebx+0xc]
+- 35f:	89 53 7c             	mov    DWORD PTR [ebx+0x7c],edx
+- 362:	89 43 78             	mov    DWORD PTR [ebx+0x78],eax
+- 365:	8b 4e 58             	mov    ecx,DWORD PTR [esi+0x58]
+- 368:	89 45 d0             	mov    DWORD PTR [ebp-0x30],eax
+- 36b:	8b 46 04             	mov    eax,DWORD PTR [esi+0x4]
+- 36e:	89 55 d4             	mov    DWORD PTR [ebp-0x2c],edx
+- 371:	31 d2                	xor    edx,edx
+- 373:	89 45 d8             	mov    DWORD PTR [ebp-0x28],eax
+- 376:	b8 ff ff 00 00       	mov    eax,0xffff
+- 37b:	0f a5 c2             	shld   edx,eax,cl
+- 37e:	d3 e0                	shl    eax,cl
+- 380:	f6 c1 20             	test   cl,0x20
+- 383:	74 04                	je     389 <FUNC+0x389>
+- 385:	89 c2                	mov    edx,eax
+- 387:	31 c0                	xor    eax,eax
+- 389:	89 45 e0             	mov    DWORD PTR [ebp-0x20],eax
+- 38c:	8b 46 08             	mov    eax,DWORD PTR [esi+0x8]
+- 38f:	89 55 e4             	mov    DWORD PTR [ebp-0x1c],edx
+- 392:	31 d2                	xor    edx,edx
+- 394:	8b 7d e0             	mov    edi,DWORD PTR [ebp-0x20]
+- 397:	89 45 c8             	mov    DWORD PTR [ebp-0x38],eax
+- 39a:	8b 45 e4             	mov    eax,DWORD PTR [ebp-0x1c]
+- 39d:	89 55 cc             	mov    DWORD PTR [ebp-0x34],edx
+- 3a0:	39 7e 08             	cmp    DWORD PTR [esi+0x8],edi
+- 3a3:	89 45 e0             	mov    DWORD PTR [ebp-0x20],eax
+- 3a6:	8b 45 cc             	mov    eax,DWORD PTR [ebp-0x34]
+- 3a9:	1b 45 e0             	sbb    eax,DWORD PTR [ebp-0x20]
+- 3ac:	73 08                	jae    3b6 <FUNC+0x3b6>
+- 3ae:	31 c0                	xor    eax,eax
+- 3b0:	8b 7d c8             	mov    edi,DWORD PTR [ebp-0x38]
+- 3b3:	89 45 e0             	mov    DWORD PTR [ebp-0x20],eax
+- 3b6:	8b 46 14             	mov    eax,DWORD PTR [esi+0x14]
+- 3b9:	31 d2                	xor    edx,edx
+- 3bb:	0f a5 c2             	shld   edx,eax,cl
+- 3be:	d3 e0                	shl    eax,cl
+- 3c0:	f6 c1 20             	test   cl,0x20
+- 3c3:	74 04                	je     3c9 <FUNC+0x3c9>
+- 3c5:	89 c2                	mov    edx,eax
+- 3c7:	31 c0                	xor    eax,eax
+- 3c9:	39 f8                	cmp    eax,edi
+- 3cb:	89 d1                	mov    ecx,edx
+- 3cd:	1b 4d e0             	sbb    ecx,DWORD PTR [ebp-0x20]
+- 3d0:	73 05                	jae    3d7 <FUNC+0x3d7>
+- 3d2:	89 55 e0             	mov    DWORD PTR [ebp-0x20],edx
+- 3d5:	89 c7                	mov    edi,eax
+- 3d7:	8b 43 10             	mov    eax,DWORD PTR [ebx+0x10]
+- 3da:	8b 53 14             	mov    edx,DWORD PTR [ebx+0x14]
+- 3dd:	89 f9                	mov    ecx,edi
+- 3df:	2b 45 e8             	sub    eax,DWORD PTR [ebp-0x18]
+- 3e2:	1b 55 ec             	sbb    edx,DWORD PTR [ebp-0x14]
+- 3e5:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
+- 3e8:	39 7d e8             	cmp    DWORD PTR [ebp-0x18],edi
+- 3eb:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
+- 3ee:	8b 45 ec             	mov    eax,DWORD PTR [ebp-0x14]
+- 3f1:	1b 45 e0             	sbb    eax,DWORD PTR [ebp-0x20]
+- 3f4:	73 09                	jae    3ff <FUNC+0x3ff>
++   8:	83 ec 4c             	sub    esp,0x4c
++   b:	89 f0                	mov    eax,esi
++   d:	31 db                	xor    ebx,ebx
++   f:	e8 00 00 00 00       	call   14 <FUNC+0x14>	10: DISP32	.text$lock
++  14:	31 d2                	xor    edx,edx
++  16:	89 55 e8             	mov    DWORD PTR [ebp-0x18],edx
++  19:	8b 56 50             	mov    edx,DWORD PTR [esi+0x50]
++  1c:	39 55 e8             	cmp    DWORD PTR [ebp-0x18],edx
++  1f:	0f 83 15 05 00 00    	jae    53a <FUNC+0x53a>
++  25:	8b 46 54             	mov    eax,DWORD PTR [esi+0x54]
++  28:	89 45 e4             	mov    DWORD PTR [ebp-0x1c],eax
++  2b:	40                   	inc    eax
++  2c:	39 d0                	cmp    eax,edx
++  2e:	75 02                	jne    32 <FUNC+0x32>
++  30:	31 c0                	xor    eax,eax
++  32:	69 5d e4 f8 00 00 00 	imul   ebx,DWORD PTR [ebp-0x1c],0xf8
++  39:	03 5e 4c             	add    ebx,DWORD PTR [esi+0x4c]
++  3c:	89 46 54             	mov    DWORD PTR [esi+0x54],eax
++  3f:	83 bb cc 00 00 00 00 	cmp    DWORD PTR [ebx+0xcc],0x0
++  46:	0f 84 e6 04 00 00    	je     532 <FUNC+0x532>
++  4c:	83 bb d8 00 00 00 00 	cmp    DWORD PTR [ebx+0xd8],0x0
++  53:	74 7e                	je     d3 <FUNC+0xd3>
++  55:	83 bb e0 00 00 00 00 	cmp    DWORD PTR [ebx+0xe0],0x0
++  5c:	74 28                	je     86 <FUNC+0x86>
++  5e:	31 c0                	xor    eax,eax
++  60:	31 ff                	xor    edi,edi
++  62:	31 c9                	xor    ecx,ecx
++  64:	ba 02 00 00 00       	mov    edx,0x2
++  69:	89 83 d8 00 00 00    	mov    DWORD PTR [ebx+0xd8],eax
++  6f:	89 83 e0 00 00 00    	mov    DWORD PTR [ebx+0xe0],eax
++  75:	89 83 dc 00 00 00    	mov    DWORD PTR [ebx+0xdc],eax
++  7b:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
++  7e:	89 45 ec             	mov    DWORD PTR [ebp-0x14],eax
++  81:	e9 09 06 00 00       	jmp    68f <FUNC+0x68f>
++  86:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
++  8d:	75 0a                	jne    99 <FUNC+0x99>
++  8f:	83 7e 78 00          	cmp    DWORD PTR [esi+0x78],0x0
++  93:	0f 84 99 04 00 00    	je     532 <FUNC+0x532>
++  99:	83 bb e8 00 00 00 00 	cmp    DWORD PTR [ebx+0xe8],0x0
++  a0:	0f 85 8c 04 00 00    	jne    532 <FUNC+0x532>
++  a6:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
++  ad:	0f 85 7f 04 00 00    	jne    532 <FUNC+0x532>
++  b3:	31 c0                	xor    eax,eax
++  b5:	31 ff                	xor    edi,edi
++  b7:	31 c9                	xor    ecx,ecx
++  b9:	ba 03 00 00 00       	mov    edx,0x3
++  be:	c7 83 e8 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xe8],0x1
++  c8:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
++  cb:	89 45 ec             	mov    DWORD PTR [ebp-0x14],eax
++  ce:	e9 bc 05 00 00       	jmp    68f <FUNC+0x68f>
++  d3:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
++  da:	74 1d                	je     f9 <FUNC+0xf9>
++  dc:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
++  e3:	75 14                	jne    f9 <FUNC+0xf9>
++  e5:	c7 83 b8 00 00 00 f9 ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffff9
++  ef:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
++  f9:	83 7e 78 00          	cmp    DWORD PTR [esi+0x78],0x0
++  fd:	74 26                	je     125 <FUNC+0x125>
++  ff:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
++ 106:	75 1d                	jne    125 <FUNC+0x125>
++ 108:	83 bb b8 00 00 00 00 	cmp    DWORD PTR [ebx+0xb8],0x0
++ 10f:	75 0a                	jne    11b <FUNC+0x11b>
++ 111:	c7 83 b8 00 00 00 fc ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffffc
++ 11b:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
++ 125:	83 bb d0 00 00 00 00 	cmp    DWORD PTR [ebx+0xd0],0x0
++ 12c:	0f 85 3f 01 00 00    	jne    271 <FUNC+0x271>
++ 132:	8b 8b d4 00 00 00    	mov    ecx,DWORD PTR [ebx+0xd4]
++ 138:	85 c9                	test   ecx,ecx
++ 13a:	75 74                	jne    1b0 <FUNC+0x1b0>
++ 13c:	83 7b 04 00          	cmp    DWORD PTR [ebx+0x4],0x0
++ 140:	74 6e                	je     1b0 <FUNC+0x1b0>
++ 142:	8b 46 50             	mov    eax,DWORD PTR [esi+0x50]
++ 145:	31 d2                	xor    edx,edx
++ 147:	89 45 d8             	mov    DWORD PTR [ebp-0x28],eax
++ 14a:	8b 45 d8             	mov    eax,DWORD PTR [ebp-0x28]
++ 14d:	39 c2                	cmp    edx,eax
++ 14f:	74 5f                	je     1b0 <FUNC+0x1b0>
++ 151:	69 c2 f8 00 00 00    	imul   eax,edx,0xf8
++ 157:	03 46 4c             	add    eax,DWORD PTR [esi+0x4c]
++ 15a:	83 b8 cc 00 00 00 00 	cmp    DWORD PTR [eax+0xcc],0x0
++ 161:	74 3c                	je     19f <FUNC+0x19f>
++ 163:	8b b8 ac 00 00 00    	mov    edi,DWORD PTR [eax+0xac]
++ 169:	89 7d e0             	mov    DWORD PTR [ebp-0x20],edi
++ 16c:	8b bb a8 00 00 00    	mov    edi,DWORD PTR [ebx+0xa8]
++ 172:	39 b8 a8 00 00 00    	cmp    DWORD PTR [eax+0xa8],edi
++ 178:	8b 7d e0             	mov    edi,DWORD PTR [ebp-0x20]
++ 17b:	1b bb ac 00 00 00    	sbb    edi,DWORD PTR [ebx+0xac]
++ 181:	73 1c                	jae    19f <FUNC+0x19f>
++ 183:	8b 78 04             	mov    edi,DWORD PTR [eax+0x4]
++ 186:	83 ff 02             	cmp    edi,0x2
++ 189:	74 17                	je     1a2 <FUNC+0x1a2>
++ 18b:	f6 40 38 01          	test   BYTE PTR [eax+0x38],0x1
++ 18f:	75 11                	jne    1a2 <FUNC+0x1a2>
++ 191:	89 d8                	mov    eax,ebx
++ 193:	e8 00 00 00 00       	call   198 <FUNC+0x198>	194: DISP32	.text$cache_sync
++ 198:	4f                   	dec    edi
++ 199:	75 04                	jne    19f <FUNC+0x19f>
++ 19b:	85 c0                	test   eax,eax
++ 19d:	75 03                	jne    1a2 <FUNC+0x1a2>
++ 19f:	42                   	inc    edx
++ 1a0:	eb a8                	jmp    14a <FUNC+0x14a>
++ 1a2:	89 da                	mov    edx,ebx
++ 1a4:	89 f0                	mov    eax,esi
++ 1a6:	e8 00 00 00 00       	call   1ab <FUNC+0x1ab>	1a7: DISP32	.text$pending
++ 1ab:	e9 82 03 00 00       	jmp    532 <FUNC+0x532>
++ 1b0:	89 d8                	mov    eax,ebx
++ 1b2:	e8 00 00 00 00       	call   1b7 <FUNC+0x1b7>	1b3: DISP32	.text$cache_sync
++ 1b7:	85 c0                	test   eax,eax
++ 1b9:	0f 84 bb 00 00 00    	je     27a <FUNC+0x27a>
++ 1bf:	85 c9                	test   ecx,ecx
++ 1c1:	0f 85 b3 00 00 00    	jne    27a <FUNC+0x27a>
++ 1c7:	8b 43 44             	mov    eax,DWORD PTR [ebx+0x44]
++ 1ca:	85 c0                	test   eax,eax
++ 1cc:	74 05                	je     1d3 <FUNC+0x1d3>
++ 1ce:	8b 53 40             	mov    edx,DWORD PTR [ebx+0x40]
++ 1d1:	eb 03                	jmp    1d6 <FUNC+0x1d6>
++ 1d3:	8b 56 24             	mov    edx,DWORD PTR [esi+0x24]
++ 1d6:	4a                   	dec    edx
++ 1d7:	0f 84 9d 00 00 00    	je     27a <FUNC+0x27a>
++ 1dd:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
++ 1e7:	85 c0                	test   eax,eax
++ 1e9:	74 05                	je     1f0 <FUNC+0x1f0>
++ 1eb:	8b 43 40             	mov    eax,DWORD PTR [ebx+0x40]
++ 1ee:	eb 03                	jmp    1f3 <FUNC+0x1f3>
++ 1f0:	8b 46 24             	mov    eax,DWORD PTR [esi+0x24]
++ 1f3:	83 f8 02             	cmp    eax,0x2
++ 1f6:	75 0a                	jne    202 <FUNC+0x202>
++ 1f8:	c7 83 b8 00 00 00 f7 ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffff7
++ 202:	8b 83 b0 00 00 00    	mov    eax,DWORD PTR [ebx+0xb0]
++ 208:	8b 93 b4 00 00 00    	mov    edx,DWORD PTR [ebx+0xb4]
++ 20e:	8b 0b                	mov    ecx,DWORD PTR [ebx]
++ 210:	8b bb b8 00 00 00    	mov    edi,DWORD PTR [ebx+0xb8]
++ 216:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
++ 219:	8b 83 c8 00 00 00    	mov    eax,DWORD PTR [ebx+0xc8]
++ 21f:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
++ 222:	85 c0                	test   eax,eax
++ 224:	74 12                	je     238 <FUNC+0x238>
++ 226:	83 bb ec 00 00 00 00 	cmp    DWORD PTR [ebx+0xec],0x0
++ 22d:	ba 01 00 00 00       	mov    edx,0x1
++ 232:	75 02                	jne    236 <FUNC+0x236>
++ 234:	89 fa                	mov    edx,edi
++ 236:	89 10                	mov    DWORD PTR [eax],edx
++ 238:	31 c0                	xor    eax,eax
++ 23a:	83 bb 9c 00 00 00 ff 	cmp    DWORD PTR [ebx+0x9c],0xffffffff
++ 241:	89 83 c8 00 00 00    	mov    DWORD PTR [ebx+0xc8],eax
++ 247:	89 83 cc 00 00 00    	mov    DWORD PTR [ebx+0xcc],eax
++ 24d:	75 09                	jne    258 <FUNC+0x258>
++ 24f:	83 bb 98 00 00 00 ff 	cmp    DWORD PTR [ebx+0x98],0xffffffff
++ 256:	74 0f                	je     267 <FUNC+0x267>
++ 258:	8b 46 58             	mov    eax,DWORD PTR [esi+0x58]
++ 25b:	89 83 f4 00 00 00    	mov    DWORD PTR [ebx+0xf4],eax
++ 261:	8b 45 e4             	mov    eax,DWORD PTR [ebp-0x1c]
++ 264:	89 46 58             	mov    DWORD PTR [esi+0x58],eax
++ 267:	ba 04 00 00 00       	mov    edx,0x4
++ 26c:	e9 1e 04 00 00       	jmp    68f <FUNC+0x68f>
++ 271:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
++ 278:	74 88                	je     202 <FUNC+0x202>
++ 27a:	8b 93 a4 00 00 00    	mov    edx,DWORD PTR [ebx+0xa4]
++ 280:	8b 83 a0 00 00 00    	mov    eax,DWORD PTR [ebx+0xa0]
++ 286:	83 fa ff             	cmp    edx,0xffffffff
++ 289:	75 08                	jne    293 <FUNC+0x293>
++ 28b:	40                   	inc    eax
++ 28c:	75 0d                	jne    29b <FUNC+0x29b>
++ 28e:	e9 2c 02 00 00       	jmp    4bf <FUNC+0x4bf>
++ 293:	85 d2                	test   edx,edx
++ 295:	75 04                	jne    29b <FUNC+0x29b>
++ 297:	85 c0                	test   eax,eax
++ 299:	74 0d                	je     2a8 <FUNC+0x2a8>
++ 29b:	8d 43 48             	lea    eax,[ebx+0x48]
++ 29e:	ba 50 00 00 00       	mov    edx,0x50
++ 2a3:	e8 00 00 00 00       	call   2a8 <FUNC+0x2a8>	2a4: DISP32	.text$clear_bytes
++ 2a8:	8b 45 e4             	mov    eax,DWORD PTR [ebp-0x1c]
++ 2ab:	8b 93 9c 00 00 00    	mov    edx,DWORD PTR [ebx+0x9c]
++ 2b1:	89 43 48             	mov    DWORD PTR [ebx+0x48],eax
++ 2b4:	8b 83 98 00 00 00    	mov    eax,DWORD PTR [ebx+0x98]
++ 2ba:	89 53 54             	mov    DWORD PTR [ebx+0x54],edx
++ 2bd:	8b 93 a4 00 00 00    	mov    edx,DWORD PTR [ebx+0xa4]
++ 2c3:	89 43 50             	mov    DWORD PTR [ebx+0x50],eax
++ 2c6:	8b 83 a0 00 00 00    	mov    eax,DWORD PTR [ebx+0xa0]
++ 2cc:	83 c0 01             	add    eax,0x1
++ 2cf:	83 d2 00             	adc    edx,0x0
++ 2d2:	89 83 a0 00 00 00    	mov    DWORD PTR [ebx+0xa0],eax
++ 2d8:	89 43 58             	mov    DWORD PTR [ebx+0x58],eax
++ 2db:	8b 03                	mov    eax,DWORD PTR [ebx]
++ 2dd:	89 93 a4 00 00 00    	mov    DWORD PTR [ebx+0xa4],edx
++ 2e3:	89 53 5c             	mov    DWORD PTR [ebx+0x5c],edx
++ 2e6:	8b 93 d4 00 00 00    	mov    edx,DWORD PTR [ebx+0xd4]
++ 2ec:	89 43 60             	mov    DWORD PTR [ebx+0x60],eax
++ 2ef:	8b 43 30             	mov    eax,DWORD PTR [ebx+0x30]
++ 2f2:	85 d2                	test   edx,edx
++ 2f4:	89 43 64             	mov    DWORD PTR [ebx+0x64],eax
++ 2f7:	0f 95 c0             	setne  al
++ 2fa:	c1 e0 02             	shl    eax,0x2
++ 2fd:	88 83 88 00 00 00    	mov    BYTE PTR [ebx+0x88],al
++ 303:	85 d2                	test   edx,edx
++ 305:	0f 85 0b 02 00 00    	jne    516 <FUNC+0x516>
++ 30b:	c6 83 89 00 00 00 0a 	mov    BYTE PTR [ebx+0x89],0xa
++ 312:	89 d8                	mov    eax,ebx
++ 314:	e8 00 00 00 00       	call   319 <FUNC+0x319>	315: DISP32	.text$cache_sync
++ 319:	85 c0                	test   eax,eax
++ 31b:	74 0c                	je     329 <FUNC+0x329>
++ 31d:	c6 83 8a 00 00 00 35 	mov    BYTE PTR [ebx+0x8a],0x35
++ 324:	e9 ed 01 00 00       	jmp    516 <FUNC+0x516>
++ 329:	8b 53 20             	mov    edx,DWORD PTR [ebx+0x20]
++ 32c:	8b 4b 24             	mov    ecx,DWORD PTR [ebx+0x24]
++ 32f:	8b 43 18             	mov    eax,DWORD PTR [ebx+0x18]
++ 332:	89 53 70             	mov    DWORD PTR [ebx+0x70],edx
++ 335:	8b 93 b0 00 00 00    	mov    edx,DWORD PTR [ebx+0xb0]
++ 33b:	89 4b 74             	mov    DWORD PTR [ebx+0x74],ecx
++ 33e:	8b 8b b4 00 00 00    	mov    ecx,DWORD PTR [ebx+0xb4]
++ 344:	89 55 e8             	mov    DWORD PTR [ebp-0x18],edx
++ 347:	8b 55 e8             	mov    edx,DWORD PTR [ebp-0x18]
++ 34a:	03 53 28             	add    edx,DWORD PTR [ebx+0x28]
++ 34d:	89 43 68             	mov    DWORD PTR [ebx+0x68],eax
++ 350:	01 d0                	add    eax,edx
++ 352:	89 4d ec             	mov    DWORD PTR [ebp-0x14],ecx
++ 355:	8b 55 ec             	mov    edx,DWORD PTR [ebp-0x14]
++ 358:	89 43 6c             	mov    DWORD PTR [ebx+0x6c],eax
++ 35b:	89 45 e0             	mov    DWORD PTR [ebp-0x20],eax
++ 35e:	8b 45 e8             	mov    eax,DWORD PTR [ebp-0x18]
++ 361:	03 43 08             	add    eax,DWORD PTR [ebx+0x8]
++ 364:	13 53 0c             	adc    edx,DWORD PTR [ebx+0xc]
++ 367:	89 53 7c             	mov    DWORD PTR [ebx+0x7c],edx
++ 36a:	89 43 78             	mov    DWORD PTR [ebx+0x78],eax
++ 36d:	8b 4e 5c             	mov    ecx,DWORD PTR [esi+0x5c]
++ 370:	89 45 d0             	mov    DWORD PTR [ebp-0x30],eax
++ 373:	8b 46 04             	mov    eax,DWORD PTR [esi+0x4]
++ 376:	89 55 d4             	mov    DWORD PTR [ebp-0x2c],edx
++ 379:	31 d2                	xor    edx,edx
++ 37b:	89 45 cc             	mov    DWORD PTR [ebp-0x34],eax
++ 37e:	b8 ff ff 00 00       	mov    eax,0xffff
++ 383:	0f a5 c2             	shld   edx,eax,cl
++ 386:	d3 e0                	shl    eax,cl
++ 388:	f6 c1 20             	test   cl,0x20
++ 38b:	74 04                	je     391 <FUNC+0x391>
++ 38d:	89 c2                	mov    edx,eax
++ 38f:	31 c0                	xor    eax,eax
++ 391:	89 45 d8             	mov    DWORD PTR [ebp-0x28],eax
++ 394:	8b 46 08             	mov    eax,DWORD PTR [esi+0x8]
++ 397:	89 55 dc             	mov    DWORD PTR [ebp-0x24],edx
++ 39a:	31 d2                	xor    edx,edx
++ 39c:	8b 7d d8             	mov    edi,DWORD PTR [ebp-0x28]
++ 39f:	89 45 c0             	mov    DWORD PTR [ebp-0x40],eax
++ 3a2:	8b 45 dc             	mov    eax,DWORD PTR [ebp-0x24]
++ 3a5:	89 55 c4             	mov    DWORD PTR [ebp-0x3c],edx
++ 3a8:	39 7e 08             	cmp    DWORD PTR [esi+0x8],edi
++ 3ab:	89 45 d8             	mov    DWORD PTR [ebp-0x28],eax
++ 3ae:	8b 45 c4             	mov    eax,DWORD PTR [ebp-0x3c]
++ 3b1:	1b 45 d8             	sbb    eax,DWORD PTR [ebp-0x28]
++ 3b4:	73 08                	jae    3be <FUNC+0x3be>
++ 3b6:	31 c0                	xor    eax,eax
++ 3b8:	8b 7d c0             	mov    edi,DWORD PTR [ebp-0x40]
++ 3bb:	89 45 d8             	mov    DWORD PTR [ebp-0x28],eax
++ 3be:	8b 46 14             	mov    eax,DWORD PTR [esi+0x14]
++ 3c1:	31 d2                	xor    edx,edx
++ 3c3:	0f a5 c2             	shld   edx,eax,cl
++ 3c6:	d3 e0                	shl    eax,cl
++ 3c8:	f6 c1 20             	test   cl,0x20
++ 3cb:	74 04                	je     3d1 <FUNC+0x3d1>
++ 3cd:	89 c2                	mov    edx,eax
++ 3cf:	31 c0                	xor    eax,eax
++ 3d1:	39 f8                	cmp    eax,edi
++ 3d3:	89 d1                	mov    ecx,edx
++ 3d5:	1b 4d d8             	sbb    ecx,DWORD PTR [ebp-0x28]
++ 3d8:	73 05                	jae    3df <FUNC+0x3df>
++ 3da:	89 55 d8             	mov    DWORD PTR [ebp-0x28],edx
++ 3dd:	89 c7                	mov    edi,eax
++ 3df:	8b 43 10             	mov    eax,DWORD PTR [ebx+0x10]
++ 3e2:	8b 53 14             	mov    edx,DWORD PTR [ebx+0x14]
++ 3e5:	89 f9                	mov    ecx,edi
++ 3e7:	2b 45 e8             	sub    eax,DWORD PTR [ebp-0x18]
++ 3ea:	1b 55 ec             	sbb    edx,DWORD PTR [ebp-0x14]
++ 3ed:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
++ 3f0:	39 7d e8             	cmp    DWORD PTR [ebp-0x18],edi
++ 3f3:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
+  3f6:	8b 45 ec             	mov    eax,DWORD PTR [ebp-0x14]
+- 3f9:	8b 4d e8             	mov    ecx,DWORD PTR [ebp-0x18]
+- 3fc:	89 45 e0             	mov    DWORD PTR [ebp-0x20],eax
+- 3ff:	8b 45 d8             	mov    eax,DWORD PTR [ebp-0x28]
+- 402:	f7 66 0c             	mul    DWORD PTR [esi+0xc]
+- 405:	8b 7d d8             	mov    edi,DWORD PTR [ebp-0x28]
+- 408:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
+- 40b:	8b 45 dc             	mov    eax,DWORD PTR [ebp-0x24]
+- 40e:	4f                   	dec    edi
+- 40f:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
+- 412:	8b 55 ec             	mov    edx,DWORD PTR [ebp-0x14]
+- 415:	21 c7                	and    edi,eax
+- 417:	8b 45 e8             	mov    eax,DWORD PTR [ebp-0x18]
+- 41a:	89 4d e8             	mov    DWORD PTR [ebp-0x18],ecx
+- 41d:	8b 4d e0             	mov    ecx,DWORD PTR [ebp-0x20]
+- 420:	29 f8                	sub    eax,edi
+- 422:	89 4d ec             	mov    DWORD PTR [ebp-0x14],ecx
+- 425:	8b 4d e8             	mov    ecx,DWORD PTR [ebp-0x18]
+- 428:	83 da 00             	sbb    edx,0x0
+- 42b:	89 d7                	mov    edi,edx
+- 42d:	39 c8                	cmp    eax,ecx
+- 42f:	1b 7d ec             	sbb    edi,DWORD PTR [ebp-0x14]
+- 432:	73 06                	jae    43a <FUNC+0x43a>
+- 434:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
+- 437:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
+- 43a:	8b 46 5c             	mov    eax,DWORD PTR [esi+0x5c]
+- 43d:	31 d2                	xor    edx,edx
+- 43f:	f7 d2                	not    edx
+- 441:	f7 d0                	not    eax
+- 443:	23 45 e8             	and    eax,DWORD PTR [ebp-0x18]
+- 446:	23 55 ec             	and    edx,DWORD PTR [ebp-0x14]
+- 449:	75 08                	jne    453 <FUNC+0x453>
+- 44b:	85 c0                	test   eax,eax
+- 44d:	0f 84 91 00 00 00    	je     4e4 <FUNC+0x4e4>
+- 453:	89 83 80 00 00 00    	mov    DWORD PTR [ebx+0x80],eax
+- 459:	8b 55 d4             	mov    edx,DWORD PTR [ebp-0x2c]
+- 45c:	89 c7                	mov    edi,eax
+- 45e:	8b 4e 58             	mov    ecx,DWORD PTR [esi+0x58]
+- 461:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+- 464:	0f ad d0             	shrd   eax,edx,cl
+- 467:	d3 ea                	shr    edx,cl
+- 469:	f6 c1 20             	test   cl,0x20
+- 46c:	74 04                	je     472 <FUNC+0x472>
+- 46e:	89 d0                	mov    eax,edx
+- 470:	31 d2                	xor    edx,edx
+- 472:	d3 ef                	shr    edi,cl
+- 474:	8b 4b 04             	mov    ecx,DWORD PTR [ebx+0x4]
+- 477:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
+- 47a:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
+- 47d:	83 f9 01             	cmp    ecx,0x1
+- 480:	19 c0                	sbb    eax,eax
+- 482:	83 e0 fe             	and    eax,0xfffffffe
+- 485:	83 c0 2a             	add    eax,0x2a
+- 488:	83 f9 01             	cmp    ecx,0x1
+- 48b:	19 c9                	sbb    ecx,ecx
+- 48d:	88 83 8a 00 00 00    	mov    BYTE PTR [ebx+0x8a],al
+- 493:	8b 45 e8             	mov    eax,DWORD PTR [ebp-0x18]
+- 496:	66 c1 c7 08          	rol    di,0x8
+- 49a:	83 e1 c0             	and    ecx,0xffffffc0
+- 49d:	66 89 bb 91 00 00 00 	mov    WORD PTR [ebx+0x91],di
+- 4a4:	83 e9 80             	sub    ecx,0xffffff80
+- 4a7:	0f c8                	bswap  eax
+- 4a9:	89 83 8c 00 00 00    	mov    DWORD PTR [ebx+0x8c],eax
+- 4af:	89 8b 84 00 00 00    	mov    DWORD PTR [ebx+0x84],ecx
+- 4b5:	eb 57                	jmp    50e <FUNC+0x50e>
+- 4b7:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
+- 4be:	74 29                	je     4e9 <FUNC+0x4e9>
+- 4c0:	c7 46 6c 01 00 00 00 	mov    DWORD PTR [esi+0x6c],0x1
+- 4c7:	31 c0                	xor    eax,eax
+- 4c9:	83 bb b8 00 00 00 00 	cmp    DWORD PTR [ebx+0xb8],0x0
+- 4d0:	89 83 d4 00 00 00    	mov    DWORD PTR [ebx+0xd4],eax
+- 4d6:	75 2a                	jne    502 <FUNC+0x502>
+- 4d8:	c7 83 b8 00 00 00 fc ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffffc
+- 4e2:	eb 1e                	jmp    502 <FUNC+0x502>
+- 4e4:	83 c8 ff             	or     eax,0xffffffff
+- 4e7:	eb 05                	jmp    4ee <FUNC+0x4ee>
+- 4e9:	b8 fa ff ff ff       	mov    eax,0xfffffffa
+- 4ee:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
+- 4f5:	74 05                	je     4fc <FUNC+0x4fc>
+- 4f7:	b8 f9 ff ff ff       	mov    eax,0xfffffff9
+- 4fc:	89 83 b8 00 00 00    	mov    DWORD PTR [ebx+0xb8],eax
+- 502:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
+- 50c:	eb 25                	jmp    533 <FUNC+0x533>
+- 50e:	31 ff                	xor    edi,edi
+- 510:	31 c9                	xor    ecx,ecx
+- 512:	ba 01 00 00 00       	mov    edx,0x1
+- 517:	89 bb e8 00 00 00    	mov    DWORD PTR [ebx+0xe8],edi
+- 51d:	89 7d e8             	mov    DWORD PTR [ebp-0x18],edi
+- 520:	89 7d ec             	mov    DWORD PTR [ebp-0x14],edi
+- 523:	31 ff                	xor    edi,edi
+- 525:	eb 3f                	jmp    566 <FUNC+0x566>
+- 527:	ff 45 e8             	inc    DWORD PTR [ebp-0x18]
+- 52a:	e9 07 fb ff ff       	jmp    36 <FUNC+0x36>
+- 52f:	85 db                	test   ebx,ebx
+- 531:	74 1f                	je     552 <FUNC+0x552>
+- 533:	83 bb cc 00 00 00 00 	cmp    DWORD PTR [ebx+0xcc],0x0
+- 53a:	74 16                	je     552 <FUNC+0x552>
+- 53c:	83 bb d0 00 00 00 00 	cmp    DWORD PTR [ebx+0xd0],0x0
+- 543:	74 0d                	je     552 <FUNC+0x552>
+- 545:	83 bb d8 00 00 00 00 	cmp    DWORD PTR [ebx+0xd8],0x0
+- 54c:	0f 84 cf fa ff ff    	je     21 <FUNC+0x21>
+- 552:	31 db                	xor    ebx,ebx
+- 554:	89 5e 68             	mov    DWORD PTR [esi+0x68],ebx
+- 557:	89 f0                	mov    eax,esi
+- 559:	e8 00 00 00 00       	call   55e <FUNC+0x55e>	55a: DISP32	.text$unlock
+- 55e:	83 c4 44             	add    esp,0x44
+- 561:	5b                   	pop    ebx
+- 562:	5e                   	pop    esi
+- 563:	5f                   	pop    edi
+- 564:	5d                   	pop    ebp
+- 565:	c3                   	ret
+- 566:	89 f0                	mov    eax,esi
+- 568:	89 55 e0             	mov    DWORD PTR [ebp-0x20],edx
+- 56b:	89 4d dc             	mov    DWORD PTR [ebp-0x24],ecx
+- 56e:	e8 00 00 00 00       	call   573 <FUNC+0x573>	56f: DISP32	.text$unlock
+- 573:	8b 55 e0             	mov    edx,DWORD PTR [ebp-0x20]
+- 576:	8b 46 28             	mov    eax,DWORD PTR [esi+0x28]
+- 579:	8b 4d dc             	mov    ecx,DWORD PTR [ebp-0x24]
+- 57c:	83 fa 04             	cmp    edx,0x4
+- 57f:	89 45 e0             	mov    DWORD PTR [ebp-0x20],eax
+- 582:	75 24                	jne    5a8 <FUNC+0x5a8>
+- 584:	8b 45 e8             	mov    eax,DWORD PTR [ebp-0x18]
+- 587:	8b 55 ec             	mov    edx,DWORD PTR [ebp-0x14]
+- 58a:	89 7c 24 08          	mov    DWORD PTR [esp+0x8],edi
+- 58e:	89 4c 24 04          	mov    DWORD PTR [esp+0x4],ecx
+- 592:	89 44 24 0c          	mov    DWORD PTR [esp+0xc],eax
+- 596:	8b 45 e0             	mov    eax,DWORD PTR [ebp-0x20]
+- 599:	89 54 24 10          	mov    DWORD PTR [esp+0x10],edx
+- 59d:	89 04 24             	mov    DWORD PTR [esp],eax
+- 5a0:	ff 56 48             	call   DWORD PTR [esi+0x48]
+- 5a3:	e9 80 fa ff ff       	jmp    28 <FUNC+0x28>
+- 5a8:	8b 45 e0             	mov    eax,DWORD PTR [ebp-0x20]
+- 5ab:	8d 7b 48             	lea    edi,[ebx+0x48]
+- 5ae:	83 fa 03             	cmp    edx,0x3
+- 5b1:	89 7c 24 04          	mov    DWORD PTR [esp+0x4],edi
+- 5b5:	89 04 24             	mov    DWORD PTR [esp],eax
+- 5b8:	75 08                	jne    5c2 <FUNC+0x5c2>
+- 5ba:	ff 56 40             	call   DWORD PTR [esi+0x40]
+- 5bd:	e9 66 fa ff ff       	jmp    28 <FUNC+0x28>
+- 5c2:	83 fa 02             	cmp    edx,0x2
+- 5c5:	0f 85 35 01 00 00    	jne    700 <FUNC+0x700>
+- 5cb:	ff 56 3c             	call   DWORD PTR [esi+0x3c]
+- 5ce:	89 f0                	mov    eax,esi
+- 5d0:	e8 00 00 00 00       	call   5d5 <FUNC+0x5d5>	5d1: DISP32	.text$lock
+- 5d5:	8b 93 bc 00 00 00    	mov    edx,DWORD PTR [ebx+0xbc]
+- 5db:	8b 8b c0 00 00 00    	mov    ecx,DWORD PTR [ebx+0xc0]
+- 5e1:	85 d2                	test   edx,edx
+- 5e3:	7f 08                	jg     5ed <FUNC+0x5ed>
+- 5e5:	39 8b 80 00 00 00    	cmp    DWORD PTR [ebx+0x80],ecx
+- 5eb:	73 05                	jae    5f2 <FUNC+0x5f2>
+- 5ed:	ba fa ff ff ff       	mov    edx,0xfffffffa
+- 5f2:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
+- 5f9:	74 4b                	je     646 <FUNC+0x646>
+- 5fb:	31 c9                	xor    ecx,ecx
+- 5fd:	89 8b d4 00 00 00    	mov    DWORD PTR [ebx+0xd4],ecx
++ 3f9:	1b 45 d8             	sbb    eax,DWORD PTR [ebp-0x28]
++ 3fc:	73 09                	jae    407 <FUNC+0x407>
++ 3fe:	8b 45 ec             	mov    eax,DWORD PTR [ebp-0x14]
++ 401:	8b 4d e8             	mov    ecx,DWORD PTR [ebp-0x18]
++ 404:	89 45 d8             	mov    DWORD PTR [ebp-0x28],eax
++ 407:	8b 45 cc             	mov    eax,DWORD PTR [ebp-0x34]
++ 40a:	f7 66 0c             	mul    DWORD PTR [esi+0xc]
++ 40d:	8b 7d cc             	mov    edi,DWORD PTR [ebp-0x34]
++ 410:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
++ 413:	8b 45 e0             	mov    eax,DWORD PTR [ebp-0x20]
++ 416:	4f                   	dec    edi
++ 417:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
++ 41a:	8b 55 ec             	mov    edx,DWORD PTR [ebp-0x14]
++ 41d:	21 c7                	and    edi,eax
++ 41f:	8b 45 e8             	mov    eax,DWORD PTR [ebp-0x18]
++ 422:	89 4d e8             	mov    DWORD PTR [ebp-0x18],ecx
++ 425:	8b 4d d8             	mov    ecx,DWORD PTR [ebp-0x28]
++ 428:	29 f8                	sub    eax,edi
++ 42a:	89 4d ec             	mov    DWORD PTR [ebp-0x14],ecx
++ 42d:	8b 4d e8             	mov    ecx,DWORD PTR [ebp-0x18]
++ 430:	83 da 00             	sbb    edx,0x0
++ 433:	39 c8                	cmp    eax,ecx
++ 435:	89 d1                	mov    ecx,edx
++ 437:	1b 4d ec             	sbb    ecx,DWORD PTR [ebp-0x14]
++ 43a:	73 06                	jae    442 <FUNC+0x442>
++ 43c:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
++ 43f:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
++ 442:	8b 46 60             	mov    eax,DWORD PTR [esi+0x60]
++ 445:	31 d2                	xor    edx,edx
++ 447:	f7 d2                	not    edx
++ 449:	f7 d0                	not    eax
++ 44b:	23 45 e8             	and    eax,DWORD PTR [ebp-0x18]
++ 44e:	23 55 ec             	and    edx,DWORD PTR [ebp-0x14]
++ 451:	75 08                	jne    45b <FUNC+0x45b>
++ 453:	85 c0                	test   eax,eax
++ 455:	0f 84 91 00 00 00    	je     4ec <FUNC+0x4ec>
++ 45b:	89 83 80 00 00 00    	mov    DWORD PTR [ebx+0x80],eax
++ 461:	8b 55 d4             	mov    edx,DWORD PTR [ebp-0x2c]
++ 464:	89 c7                	mov    edi,eax
++ 466:	8b 4e 5c             	mov    ecx,DWORD PTR [esi+0x5c]
++ 469:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
++ 46c:	0f ad d0             	shrd   eax,edx,cl
++ 46f:	d3 ea                	shr    edx,cl
++ 471:	f6 c1 20             	test   cl,0x20
++ 474:	74 04                	je     47a <FUNC+0x47a>
++ 476:	89 d0                	mov    eax,edx
++ 478:	31 d2                	xor    edx,edx
++ 47a:	d3 ef                	shr    edi,cl
++ 47c:	8b 4b 04             	mov    ecx,DWORD PTR [ebx+0x4]
++ 47f:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
++ 482:	89 55 ec             	mov    DWORD PTR [ebp-0x14],edx
++ 485:	83 f9 01             	cmp    ecx,0x1
++ 488:	19 c0                	sbb    eax,eax
++ 48a:	83 e0 fe             	and    eax,0xfffffffe
++ 48d:	83 c0 2a             	add    eax,0x2a
++ 490:	83 f9 01             	cmp    ecx,0x1
++ 493:	19 c9                	sbb    ecx,ecx
++ 495:	88 83 8a 00 00 00    	mov    BYTE PTR [ebx+0x8a],al
++ 49b:	8b 45 e8             	mov    eax,DWORD PTR [ebp-0x18]
++ 49e:	66 c1 c7 08          	rol    di,0x8
++ 4a2:	83 e1 c0             	and    ecx,0xffffffc0
++ 4a5:	66 89 bb 91 00 00 00 	mov    WORD PTR [ebx+0x91],di
++ 4ac:	83 e9 80             	sub    ecx,0xffffff80
++ 4af:	0f c8                	bswap  eax
++ 4b1:	89 83 8c 00 00 00    	mov    DWORD PTR [ebx+0x8c],eax
++ 4b7:	89 8b 84 00 00 00    	mov    DWORD PTR [ebx+0x84],ecx
++ 4bd:	eb 57                	jmp    516 <FUNC+0x516>
++ 4bf:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
++ 4c6:	74 29                	je     4f1 <FUNC+0x4f1>
++ 4c8:	c7 46 78 01 00 00 00 	mov    DWORD PTR [esi+0x78],0x1
++ 4cf:	31 c0                	xor    eax,eax
++ 4d1:	83 bb b8 00 00 00 00 	cmp    DWORD PTR [ebx+0xb8],0x0
++ 4d8:	89 83 d4 00 00 00    	mov    DWORD PTR [ebx+0xd4],eax
++ 4de:	75 2a                	jne    50a <FUNC+0x50a>
++ 4e0:	c7 83 b8 00 00 00 fc ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffffc
++ 4ea:	eb 1e                	jmp    50a <FUNC+0x50a>
++ 4ec:	83 c8 ff             	or     eax,0xffffffff
++ 4ef:	eb 05                	jmp    4f6 <FUNC+0x4f6>
++ 4f1:	b8 fa ff ff ff       	mov    eax,0xfffffffa
++ 4f6:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
++ 4fd:	74 05                	je     504 <FUNC+0x504>
++ 4ff:	b8 f9 ff ff ff       	mov    eax,0xfffffff9
++ 504:	89 83 b8 00 00 00    	mov    DWORD PTR [ebx+0xb8],eax
++ 50a:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
++ 514:	eb 28                	jmp    53e <FUNC+0x53e>
++ 516:	31 ff                	xor    edi,edi
++ 518:	31 c9                	xor    ecx,ecx
++ 51a:	ba 01 00 00 00       	mov    edx,0x1
++ 51f:	89 bb e8 00 00 00    	mov    DWORD PTR [ebx+0xe8],edi
++ 525:	89 7d e8             	mov    DWORD PTR [ebp-0x18],edi
++ 528:	89 7d ec             	mov    DWORD PTR [ebp-0x14],edi
++ 52b:	31 ff                	xor    edi,edi
++ 52d:	e9 5d 01 00 00       	jmp    68f <FUNC+0x68f>
++ 532:	ff 45 e8             	inc    DWORD PTR [ebp-0x18]
++ 535:	e9 df fa ff ff       	jmp    19 <FUNC+0x19>
++ 53a:	85 db                	test   ebx,ebx
++ 53c:	74 1f                	je     55d <FUNC+0x55d>
++ 53e:	83 bb cc 00 00 00 00 	cmp    DWORD PTR [ebx+0xcc],0x0
++ 545:	74 16                	je     55d <FUNC+0x55d>
++ 547:	83 bb d0 00 00 00 00 	cmp    DWORD PTR [ebx+0xd0],0x0
++ 54e:	74 0d                	je     55d <FUNC+0x55d>
++ 550:	83 bb d8 00 00 00 00 	cmp    DWORD PTR [ebx+0xd8],0x0
++ 557:	0f 84 8a 00 00 00    	je     5e7 <FUNC+0x5e7>
++ 55d:	31 db                	xor    ebx,ebx
++ 55f:	89 5e 74             	mov    DWORD PTR [esi+0x74],ebx
++ 562:	e9 14 01 00 00       	jmp    67b <FUNC+0x67b>
++ 567:	83 fa 02             	cmp    edx,0x2
++ 56a:	0f 85 83 00 00 00    	jne    5f3 <FUNC+0x5f3>
++ 570:	ff 56 3c             	call   DWORD PTR [esi+0x3c]
++ 573:	89 f0                	mov    eax,esi
++ 575:	e8 00 00 00 00       	call   57a <FUNC+0x57a>	576: DISP32	.text$lock
++ 57a:	8b 93 bc 00 00 00    	mov    edx,DWORD PTR [ebx+0xbc]
++ 580:	8b 8b c0 00 00 00    	mov    ecx,DWORD PTR [ebx+0xc0]
++ 586:	85 d2                	test   edx,edx
++ 588:	0f 8f 61 01 00 00    	jg     6ef <FUNC+0x6ef>
++ 58e:	39 8b 80 00 00 00    	cmp    DWORD PTR [ebx+0x80],ecx
++ 594:	0f 82 55 01 00 00    	jb     6ef <FUNC+0x6ef>
++ 59a:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
++ 5a1:	0f 84 7f 01 00 00    	je     726 <FUNC+0x726>
++ 5a7:	31 c9                	xor    ecx,ecx
++ 5a9:	89 8b d4 00 00 00    	mov    DWORD PTR [ebx+0xd4],ecx
++ 5af:	85 d2                	test   edx,edx
++ 5b1:	0f 85 42 01 00 00    	jne    6f9 <FUNC+0x6f9>
++ 5b7:	f6 83 c4 00 00 00 01 	test   BYTE PTR [ebx+0xc4],0x1
++ 5be:	0f 85 35 01 00 00    	jne    6f9 <FUNC+0x6f9>
++ 5c4:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
++ 5cb:	74 14                	je     5e1 <FUNC+0x5e1>
++ 5cd:	c7 83 b8 00 00 00 f9 ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffff9
++ 5d7:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
++ 5e1:	8b 45 e4             	mov    eax,DWORD PTR [ebp-0x1c]
++ 5e4:	89 46 54             	mov    DWORD PTR [esi+0x54],eax
++ 5e7:	89 f0                	mov    eax,esi
++ 5e9:	e8 00 00 00 00       	call   5ee <FUNC+0x5ee>	5ea: DISP32	.text$unlock
++ 5ee:	e9 18 fa ff ff       	jmp    b <FUNC+0xb>
++ 5f3:	ff 56 34             	call   DWORD PTR [esi+0x34]
++ 5f6:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
++ 5f9:	89 f0                	mov    eax,esi
++ 5fb:	e8 00 00 00 00       	call   600 <FUNC+0x600>	5fc: DISP32	.text$lock
++ 600:	8b 55 e8             	mov    edx,DWORD PTR [ebp-0x18]
+  603:	85 d2                	test   edx,edx
+- 605:	75 09                	jne    610 <FUNC+0x610>
+- 607:	f6 83 c4 00 00 00 01 	test   BYTE PTR [ebx+0xc4],0x1
+- 60e:	74 24                	je     634 <FUNC+0x634>
+- 610:	c7 46 6c 01 00 00 00 	mov    DWORD PTR [esi+0x6c],0x1
+- 617:	83 bb b8 00 00 00 00 	cmp    DWORD PTR [ebx+0xb8],0x0
+- 61e:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
+- 628:	75 0a                	jne    634 <FUNC+0x634>
+- 62a:	c7 83 b8 00 00 00 fc ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffffc
+- 634:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
+- 63b:	0f 84 e0 f9 ff ff    	je     21 <FUNC+0x21>
+- 641:	e9 75 01 00 00       	jmp    7bb <FUNC+0x7bb>
+- 646:	89 d8                	mov    eax,ebx
+- 648:	e8 00 00 00 00       	call   64d <FUNC+0x64d>	649: DISP32	.text$cache_sync
+- 64d:	85 c0                	test   eax,eax
+- 64f:	75 15                	jne    666 <FUNC+0x666>
+- 651:	39 8b 80 00 00 00    	cmp    DWORD PTR [ebx+0x80],ecx
+- 657:	72 0d                	jb     666 <FUNC+0x666>
+- 659:	01 8b b0 00 00 00    	add    DWORD PTR [ebx+0xb0],ecx
+- 65f:	83 93 b4 00 00 00 00 	adc    DWORD PTR [ebx+0xb4],0x0
+- 666:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
+- 66d:	75 24                	jne    693 <FUNC+0x693>
+- 66f:	83 7e 6c 00          	cmp    DWORD PTR [esi+0x6c],0x0
+- 673:	74 0b                	je     680 <FUNC+0x680>
+- 675:	85 d2                	test   edx,edx
+- 677:	74 21                	je     69a <FUNC+0x69a>
+- 679:	83 fa f9             	cmp    edx,0xfffffff9
+- 67c:	75 21                	jne    69f <FUNC+0x69f>
+- 67e:	eb 1a                	jmp    69a <FUNC+0x69a>
+- 680:	85 d2                	test   edx,edx
+- 682:	75 1b                	jne    69f <FUNC+0x69f>
+- 684:	ba fb ff ff ff       	mov    edx,0xfffffffb
+- 689:	3b 8b 80 00 00 00    	cmp    ecx,DWORD PTR [ebx+0x80]
+- 68f:	75 0e                	jne    69f <FUNC+0x69f>
+- 691:	eb 14                	jmp    6a7 <FUNC+0x6a7>
+- 693:	ba f9 ff ff ff       	mov    edx,0xfffffff9
+- 698:	eb 05                	jmp    69f <FUNC+0x69f>
+- 69a:	ba fc ff ff ff       	mov    edx,0xfffffffc
+- 69f:	89 93 b8 00 00 00    	mov    DWORD PTR [ebx+0xb8],edx
+- 6a5:	eb 33                	jmp    6da <FUNC+0x6da>
+- 6a7:	89 d8                	mov    eax,ebx
+- 6a9:	e8 00 00 00 00       	call   6ae <FUNC+0x6ae>	6aa: DISP32	.text$cache_sync
+- 6ae:	85 c0                	test   eax,eax
+- 6b0:	75 28                	jne    6da <FUNC+0x6da>
+- 6b2:	8b 83 b0 00 00 00    	mov    eax,DWORD PTR [ebx+0xb0]
+- 6b8:	8b 4b 14             	mov    ecx,DWORD PTR [ebx+0x14]
+- 6bb:	39 8b b4 00 00 00    	cmp    DWORD PTR [ebx+0xb4],ecx
+- 6c1:	75 21                	jne    6e4 <FUNC+0x6e4>
+- 6c3:	3b 43 10             	cmp    eax,DWORD PTR [ebx+0x10]
+- 6c6:	75 1c                	jne    6e4 <FUNC+0x6e4>
+- 6c8:	f6 43 38 01          	test   BYTE PTR [ebx+0x38],0x1
+- 6cc:	74 0c                	je     6da <FUNC+0x6da>
+- 6ce:	c7 83 f0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xf0],0x1
+- 6d8:	eb 0a                	jmp    6e4 <FUNC+0x6e4>
+- 6da:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
+- 6e4:	f6 83 c4 00 00 00 01 	test   BYTE PTR [ebx+0xc4],0x1
+- 6eb:	0f 84 30 f9 ff ff    	je     21 <FUNC+0x21>
+- 6f1:	c7 83 d4 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd4],0x1
+- 6fb:	e9 21 f9 ff ff       	jmp    21 <FUNC+0x21>
+- 700:	ff 56 34             	call   DWORD PTR [esi+0x34]
+- 703:	89 45 e8             	mov    DWORD PTR [ebp-0x18],eax
+- 706:	89 f0                	mov    eax,esi
+- 708:	e8 00 00 00 00       	call   70d <FUNC+0x70d>	709: DISP32	.text$lock
+- 70d:	8b 55 e8             	mov    edx,DWORD PTR [ebp-0x18]
+- 710:	85 d2                	test   edx,edx
+- 712:	74 44                	je     758 <FUNC+0x758>
+- 714:	7e 05                	jle    71b <FUNC+0x71b>
+- 716:	ba fa ff ff ff       	mov    edx,0xfffffffa
+- 71b:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
+- 722:	74 1e                	je     742 <FUNC+0x742>
+- 724:	c7 46 6c 01 00 00 00 	mov    DWORD PTR [esi+0x6c],0x1
+- 72b:	31 c0                	xor    eax,eax
+- 72d:	83 bb b8 00 00 00 00 	cmp    DWORD PTR [ebx+0xb8],0x0
+- 734:	89 83 d4 00 00 00    	mov    DWORD PTR [ebx+0xd4],eax
+- 73a:	0f 85 85 00 00 00    	jne    7c5 <FUNC+0x7c5>
+- 740:	eb 40                	jmp    782 <FUNC+0x782>
+- 742:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
+- 749:	74 05                	je     750 <FUNC+0x750>
+- 74b:	ba f9 ff ff ff       	mov    edx,0xfffffff9
+- 750:	89 93 b8 00 00 00    	mov    DWORD PTR [ebx+0xb8],edx
+- 756:	eb 6d                	jmp    7c5 <FUNC+0x7c5>
+- 758:	83 7e 6c 00          	cmp    DWORD PTR [esi+0x6c],0x0
+- 75c:	74 30                	je     78e <FUNC+0x78e>
+- 75e:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
+- 765:	75 27                	jne    78e <FUNC+0x78e>
+- 767:	89 f0                	mov    eax,esi
+- 769:	e8 00 00 00 00       	call   76e <FUNC+0x76e>	76a: DISP32	.text$unlock
+- 76e:	89 7c 24 04          	mov    DWORD PTR [esp+0x4],edi
+- 772:	8b 46 28             	mov    eax,DWORD PTR [esi+0x28]
+- 775:	89 04 24             	mov    DWORD PTR [esp],eax
+- 778:	ff 56 3c             	call   DWORD PTR [esi+0x3c]
+- 77b:	89 f0                	mov    eax,esi
+- 77d:	e8 00 00 00 00       	call   782 <FUNC+0x782>	77e: DISP32	.text$lock
+- 782:	c7 83 b8 00 00 00 fc ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffffc
+- 78c:	eb 37                	jmp    7c5 <FUNC+0x7c5>
+- 78e:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
+- 795:	74 3d                	je     7d4 <FUNC+0x7d4>
+- 797:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
+- 79e:	75 34                	jne    7d4 <FUNC+0x7d4>
+- 7a0:	89 f0                	mov    eax,esi
+- 7a2:	e8 00 00 00 00       	call   7a7 <FUNC+0x7a7>	7a3: DISP32	.text$unlock
+- 7a7:	89 7c 24 04          	mov    DWORD PTR [esp+0x4],edi
+- 7ab:	8b 46 28             	mov    eax,DWORD PTR [esi+0x28]
+- 7ae:	89 04 24             	mov    DWORD PTR [esp],eax
+- 7b1:	ff 56 3c             	call   DWORD PTR [esi+0x3c]
+- 7b4:	89 f0                	mov    eax,esi
+- 7b6:	e8 00 00 00 00       	call   7bb <FUNC+0x7bb>	7b7: DISP32	.text$lock
+- 7bb:	c7 83 b8 00 00 00 f9 ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffff9
+- 7c5:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
+- 7cf:	e9 4d f8 ff ff       	jmp    21 <FUNC+0x21>
+- 7d4:	c7 83 d8 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd8],0x1
+- 7de:	89 f0                	mov    eax,esi
+- 7e0:	c7 83 dc 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xdc],0x1
+- 7ea:	e8 00 00 00 00       	call   7ef <FUNC+0x7ef>	7eb: DISP32	.text$unlock
+- 7ef:	89 7c 24 04          	mov    DWORD PTR [esp+0x4],edi
+- 7f3:	8b 46 28             	mov    eax,DWORD PTR [esi+0x28]
+- 7f6:	89 04 24             	mov    DWORD PTR [esp],eax
+- 7f9:	ff 56 38             	call   DWORD PTR [esi+0x38]
+- 7fc:	89 c7                	mov    edi,eax
+- 7fe:	89 f0                	mov    eax,esi
+- 800:	e8 00 00 00 00       	call   805 <FUNC+0x805>	801: DISP32	.text$lock
+- 805:	85 ff                	test   edi,edi
+- 807:	75 0d                	jne    816 <FUNC+0x816>
+- 809:	83 bb e0 00 00 00 00 	cmp    DWORD PTR [ebx+0xe0],0x0
+- 810:	0f 85 0b f8 ff ff    	jne    21 <FUNC+0x21>
+- 816:	89 da                	mov    edx,ebx
+- 818:	89 f0                	mov    eax,esi
+- 81a:	e8 00 00 00 00       	call   81f <FUNC+0x81f>	81b: DISP32	.text$pending
+- 81f:	e9 fd f7 ff ff       	jmp    21 <FUNC+0x21>
++ 605:	0f 85 d5 01 00 00    	jne    7e0 <FUNC+0x7e0>
++ 60b:	83 7e 78 00          	cmp    DWORD PTR [esi+0x78],0x0
++ 60f:	0f 85 0b 02 00 00    	jne    820 <FUNC+0x820>
++ 615:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
++ 61c:	0f 85 32 02 00 00    	jne    854 <FUNC+0x854>
++ 622:	c7 83 d8 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd8],0x1
++ 62c:	89 f0                	mov    eax,esi
++ 62e:	c7 83 dc 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xdc],0x1
++ 638:	e8 00 00 00 00       	call   63d <FUNC+0x63d>	639: DISP32	.text$unlock
++ 63d:	89 7c 24 04          	mov    DWORD PTR [esp+0x4],edi
++ 641:	8b 46 28             	mov    eax,DWORD PTR [esi+0x28]
++ 644:	89 04 24             	mov    DWORD PTR [esp],eax
++ 647:	ff 56 38             	call   DWORD PTR [esi+0x38]
++ 64a:	89 c7                	mov    edi,eax
++ 64c:	89 f0                	mov    eax,esi
++ 64e:	e8 00 00 00 00       	call   653 <FUNC+0x653>	64f: DISP32	.text$lock
++ 653:	85 ff                	test   edi,edi
++ 655:	0f 84 3a 02 00 00    	je     895 <FUNC+0x895>
++ 65b:	89 da                	mov    edx,ebx
++ 65d:	89 f0                	mov    eax,esi
++ 65f:	e8 00 00 00 00       	call   664 <FUNC+0x664>	660: DISP32	.text$pending
++ 664:	85 ff                	test   edi,edi
++ 666:	0f 84 36 02 00 00    	je     8a2 <FUNC+0x8a2>
++ 66c:	8b 83 e0 00 00 00    	mov    eax,DWORD PTR [ebx+0xe0]
++ 672:	0b 46 74             	or     eax,DWORD PTR [esi+0x74]
++ 675:	0f 85 27 02 00 00    	jne    8a2 <FUNC+0x8a2>
++ 67b:	31 c0                	xor    eax,eax
++ 67d:	89 46 70             	mov    DWORD PTR [esi+0x70],eax
++ 680:	89 f0                	mov    eax,esi
++ 682:	e8 00 00 00 00       	call   687 <FUNC+0x687>	683: DISP32	.text$unlock
++ 687:	83 c4 4c             	add    esp,0x4c
++ 68a:	5b                   	pop    ebx
++ 68b:	5e                   	pop    esi
++ 68c:	5f                   	pop    edi
++ 68d:	5d                   	pop    ebp
++ 68e:	c3                   	ret
++ 68f:	89 f0                	mov    eax,esi
++ 691:	89 55 d8             	mov    DWORD PTR [ebp-0x28],edx
++ 694:	89 4d e0             	mov    DWORD PTR [ebp-0x20],ecx
++ 697:	e8 00 00 00 00       	call   69c <FUNC+0x69c>	698: DISP32	.text$unlock
++ 69c:	8b 55 d8             	mov    edx,DWORD PTR [ebp-0x28]
++ 69f:	8b 46 28             	mov    eax,DWORD PTR [esi+0x28]
++ 6a2:	8b 4d e0             	mov    ecx,DWORD PTR [ebp-0x20]
++ 6a5:	83 fa 04             	cmp    edx,0x4
++ 6a8:	89 45 d8             	mov    DWORD PTR [ebp-0x28],eax
++ 6ab:	75 24                	jne    6d1 <FUNC+0x6d1>
++ 6ad:	8b 45 e8             	mov    eax,DWORD PTR [ebp-0x18]
++ 6b0:	8b 55 ec             	mov    edx,DWORD PTR [ebp-0x14]
++ 6b3:	89 7c 24 08          	mov    DWORD PTR [esp+0x8],edi
++ 6b7:	89 4c 24 04          	mov    DWORD PTR [esp+0x4],ecx
++ 6bb:	89 44 24 0c          	mov    DWORD PTR [esp+0xc],eax
++ 6bf:	8b 45 d8             	mov    eax,DWORD PTR [ebp-0x28]
++ 6c2:	89 54 24 10          	mov    DWORD PTR [esp+0x10],edx
++ 6c6:	89 04 24             	mov    DWORD PTR [esp],eax
++ 6c9:	ff 56 48             	call   DWORD PTR [esi+0x48]
++ 6cc:	e9 3a f9 ff ff       	jmp    b <FUNC+0xb>
++ 6d1:	8b 45 d8             	mov    eax,DWORD PTR [ebp-0x28]
++ 6d4:	8d 7b 48             	lea    edi,[ebx+0x48]
++ 6d7:	83 fa 03             	cmp    edx,0x3
++ 6da:	89 7c 24 04          	mov    DWORD PTR [esp+0x4],edi
++ 6de:	89 04 24             	mov    DWORD PTR [esp],eax
++ 6e1:	0f 85 80 fe ff ff    	jne    567 <FUNC+0x567>
++ 6e7:	ff 56 40             	call   DWORD PTR [esi+0x40]
++ 6ea:	e9 1c f9 ff ff       	jmp    b <FUNC+0xb>
++ 6ef:	ba fa ff ff ff       	mov    edx,0xfffffffa
++ 6f4:	e9 a1 fe ff ff       	jmp    59a <FUNC+0x59a>
++ 6f9:	c7 46 78 01 00 00 00 	mov    DWORD PTR [esi+0x78],0x1
++ 700:	83 bb b8 00 00 00 00 	cmp    DWORD PTR [ebx+0xb8],0x0
++ 707:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
++ 711:	0f 85 ad fe ff ff    	jne    5c4 <FUNC+0x5c4>
++ 717:	c7 83 b8 00 00 00 fc ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffffc
++ 721:	e9 9e fe ff ff       	jmp    5c4 <FUNC+0x5c4>
++ 726:	89 d8                	mov    eax,ebx
++ 728:	e8 00 00 00 00       	call   72d <FUNC+0x72d>	729: DISP32	.text$cache_sync
++ 72d:	85 c0                	test   eax,eax
++ 72f:	75 15                	jne    746 <FUNC+0x746>
++ 731:	39 8b 80 00 00 00    	cmp    DWORD PTR [ebx+0x80],ecx
++ 737:	72 0d                	jb     746 <FUNC+0x746>
++ 739:	01 8b b0 00 00 00    	add    DWORD PTR [ebx+0xb0],ecx
++ 73f:	83 93 b4 00 00 00 00 	adc    DWORD PTR [ebx+0xb4],0x0
++ 746:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
++ 74d:	75 24                	jne    773 <FUNC+0x773>
++ 74f:	83 7e 78 00          	cmp    DWORD PTR [esi+0x78],0x0
++ 753:	74 0b                	je     760 <FUNC+0x760>
++ 755:	85 d2                	test   edx,edx
++ 757:	74 21                	je     77a <FUNC+0x77a>
++ 759:	83 fa f9             	cmp    edx,0xfffffff9
++ 75c:	75 21                	jne    77f <FUNC+0x77f>
++ 75e:	eb 1a                	jmp    77a <FUNC+0x77a>
++ 760:	85 d2                	test   edx,edx
++ 762:	75 1b                	jne    77f <FUNC+0x77f>
++ 764:	ba fb ff ff ff       	mov    edx,0xfffffffb
++ 769:	3b 8b 80 00 00 00    	cmp    ecx,DWORD PTR [ebx+0x80]
++ 76f:	75 0e                	jne    77f <FUNC+0x77f>
++ 771:	eb 14                	jmp    787 <FUNC+0x787>
++ 773:	ba f9 ff ff ff       	mov    edx,0xfffffff9
++ 778:	eb 05                	jmp    77f <FUNC+0x77f>
++ 77a:	ba fc ff ff ff       	mov    edx,0xfffffffc
++ 77f:	89 93 b8 00 00 00    	mov    DWORD PTR [ebx+0xb8],edx
++ 785:	eb 33                	jmp    7ba <FUNC+0x7ba>
++ 787:	89 d8                	mov    eax,ebx
++ 789:	e8 00 00 00 00       	call   78e <FUNC+0x78e>	78a: DISP32	.text$cache_sync
++ 78e:	85 c0                	test   eax,eax
++ 790:	75 28                	jne    7ba <FUNC+0x7ba>
++ 792:	8b 83 b0 00 00 00    	mov    eax,DWORD PTR [ebx+0xb0]
++ 798:	8b 4b 14             	mov    ecx,DWORD PTR [ebx+0x14]
++ 79b:	39 8b b4 00 00 00    	cmp    DWORD PTR [ebx+0xb4],ecx
++ 7a1:	75 21                	jne    7c4 <FUNC+0x7c4>
++ 7a3:	3b 43 10             	cmp    eax,DWORD PTR [ebx+0x10]
++ 7a6:	75 1c                	jne    7c4 <FUNC+0x7c4>
++ 7a8:	f6 43 38 01          	test   BYTE PTR [ebx+0x38],0x1
++ 7ac:	74 0c                	je     7ba <FUNC+0x7ba>
++ 7ae:	c7 83 f0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xf0],0x1
++ 7b8:	eb 0a                	jmp    7c4 <FUNC+0x7c4>
++ 7ba:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
++ 7c4:	f6 83 c4 00 00 00 01 	test   BYTE PTR [ebx+0xc4],0x1
++ 7cb:	0f 84 10 fe ff ff    	je     5e1 <FUNC+0x5e1>
++ 7d1:	c7 83 d4 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd4],0x1
++ 7db:	e9 01 fe ff ff       	jmp    5e1 <FUNC+0x5e1>
++ 7e0:	7e 05                	jle    7e7 <FUNC+0x7e7>
++ 7e2:	ba fa ff ff ff       	mov    edx,0xfffffffa
++ 7e7:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
++ 7ee:	74 1a                	je     80a <FUNC+0x80a>
++ 7f0:	c7 46 78 01 00 00 00 	mov    DWORD PTR [esi+0x78],0x1
++ 7f7:	31 d2                	xor    edx,edx
++ 7f9:	83 bb b8 00 00 00 00 	cmp    DWORD PTR [ebx+0xb8],0x0
++ 800:	89 93 d4 00 00 00    	mov    DWORD PTR [ebx+0xd4],edx
++ 806:	75 7e                	jne    886 <FUNC+0x886>
++ 808:	eb 3e                	jmp    848 <FUNC+0x848>
++ 80a:	83 bb e4 00 00 00 00 	cmp    DWORD PTR [ebx+0xe4],0x0
++ 811:	74 05                	je     818 <FUNC+0x818>
++ 813:	ba f9 ff ff ff       	mov    edx,0xfffffff9
++ 818:	89 93 b8 00 00 00    	mov    DWORD PTR [ebx+0xb8],edx
++ 81e:	eb 66                	jmp    886 <FUNC+0x886>
++ 820:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
++ 827:	0f 85 e8 fd ff ff    	jne    615 <FUNC+0x615>
++ 82d:	89 f0                	mov    eax,esi
++ 82f:	e8 00 00 00 00       	call   834 <FUNC+0x834>	830: DISP32	.text$unlock
++ 834:	89 7c 24 04          	mov    DWORD PTR [esp+0x4],edi
++ 838:	8b 46 28             	mov    eax,DWORD PTR [esi+0x28]
++ 83b:	89 04 24             	mov    DWORD PTR [esp],eax
++ 83e:	ff 56 3c             	call   DWORD PTR [esi+0x3c]
++ 841:	89 f0                	mov    eax,esi
++ 843:	e8 00 00 00 00       	call   848 <FUNC+0x848>	844: DISP32	.text$lock
++ 848:	c7 83 b8 00 00 00 fc ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffffc
++ 852:	eb 32                	jmp    886 <FUNC+0x886>
++ 854:	83 bb d4 00 00 00 00 	cmp    DWORD PTR [ebx+0xd4],0x0
++ 85b:	0f 85 c1 fd ff ff    	jne    622 <FUNC+0x622>
++ 861:	89 f0                	mov    eax,esi
++ 863:	e8 00 00 00 00       	call   868 <FUNC+0x868>	864: DISP32	.text$unlock
++ 868:	89 7c 24 04          	mov    DWORD PTR [esp+0x4],edi
++ 86c:	8b 46 28             	mov    eax,DWORD PTR [esi+0x28]
++ 86f:	89 04 24             	mov    DWORD PTR [esp],eax
++ 872:	ff 56 3c             	call   DWORD PTR [esi+0x3c]
++ 875:	89 f0                	mov    eax,esi
++ 877:	e8 00 00 00 00       	call   87c <FUNC+0x87c>	878: DISP32	.text$lock
++ 87c:	c7 83 b8 00 00 00 f9 ff ff ff 	mov    DWORD PTR [ebx+0xb8],0xfffffff9
++ 886:	c7 83 d0 00 00 00 01 00 00 00 	mov    DWORD PTR [ebx+0xd0],0x1
++ 890:	e9 52 fd ff ff       	jmp    5e7 <FUNC+0x5e7>
++ 895:	83 bb e0 00 00 00 00 	cmp    DWORD PTR [ebx+0xe0],0x0
++ 89c:	0f 84 b9 fd ff ff    	je     65b <FUNC+0x65b>
++ 8a2:	8b 46 74             	mov    eax,DWORD PTR [esi+0x74]
++ 8a5:	85 c0                	test   eax,eax
++ 8a7:	0f 84 3a fd ff ff    	je     5e7 <FUNC+0x5e7>
++ 8ad:	48                   	dec    eax
++ 8ae:	89 46 74             	mov    DWORD PTR [esi+0x74],eax
++ 8b1:	e9 31 fd ff ff       	jmp    5e7 <FUNC+0x5e7>
++ 8b6:	90                   	nop
++ 8b7:	90                   	nop
+ 

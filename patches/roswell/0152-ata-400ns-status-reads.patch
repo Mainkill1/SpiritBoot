@@ -1,0 +1,75 @@
+diff --git a/drivers/storage/ide/pciidex/pata.h b/drivers/storage/ide/pciidex/pata.h
+--- a/drivers/storage/ide/pciidex/pata.h
++++ b/drivers/storage/ide/pciidex/pata.h
+@@ -28,9 +28,6 @@
+ #define PC98_ATA_BANK                0x432
+ #define PC98_ATA_BANK_32BIT_PORT     0x08
+ 
+-/** Delay of 400ns */
+-#define ATA_IO_WAIT()           KeStallExecutionProcessor(1)
+-
+ #define NUM_TO_BITMAP(num)     (0xFFFFFFFF >> (RTL_BITS_OF(ULONG) - (num)))
+ 
+ /** Supported transfer modes by SATA devices */
+@@ -260,6 +257,22 @@
+ #define ATA_READ(Port, Ctx, MmioFlag) \
+     AtaReadPortUchar(Port, (Ctx)->ChanInfo & CHANNEL_FLAG_##MmioFlag)
+ 
++/**
++ * Let the selected device settle for at least 400 ns without acknowledging
++ * its command interrupt. Four serialized alternate-status reads provide the
++ * ATA-defined delay while preserving the IRQ state.
++ */
++#if defined(SARCH_XBOX)
++#define ATA_IO_WAIT(Ctx) do { \
++    (VOID)READ_PORT_UCHAR((Ctx)->Regs.Control); \
++    (VOID)READ_PORT_UCHAR((Ctx)->Regs.Control); \
++    (VOID)READ_PORT_UCHAR((Ctx)->Regs.Control); \
++    (VOID)READ_PORT_UCHAR((Ctx)->Regs.Control); \
++} while (0)
++#else
++#define ATA_IO_WAIT(Ctx) KeStallExecutionProcessor(1)
++#endif
++
+ #define ATA_WRITE(Port, Value, Ctx, MmioFlag) \
+     AtaWritePortUchar(Port, Value, (Ctx)->ChanInfo & CHANNEL_FLAG_##MmioFlag)
+ 
+@@ -293,7 +306,7 @@
+ #endif
+ 
+     ATA_WRITE(ChanData->Regs.Device, DeviceSelect, ChanData, MRES_TF);
+-    ATA_IO_WAIT();
++    ATA_IO_WAIT(ChanData);
+ }
+ 
+ FORCEINLINE
+diff --git a/drivers/storage/ide/pciidex/chipset/pata_io.c b/drivers/storage/ide/pciidex/chipset/pata_io.c
+--- a/drivers/storage/ide/pciidex/chipset/pata_io.c
++++ b/drivers/storage/ide/pciidex/chipset/pata_io.c
+@@ -304,7 +304,7 @@
+     ATA_WRITE(ChanData->Regs.Control, Control | IDE_DC_ALWAYS, ChanData, MRES_CTRL);
+ 
+     /* Seems to be needed */
+-    ATA_IO_WAIT();
++    ATA_IO_WAIT(ChanData);
+ 
+     /* Workaround for VIA chipsets that reset the DEV bit after interrupt mode change */
+     if (ChanData->Controller->Pci.VendorID == PCI_VEN_VIA)
+@@ -954,7 +954,7 @@
+         return FALSE;
+ 
+     /* Need to wait for a valid status */
+-    ATA_IO_WAIT();
++    ATA_IO_WAIT(ChanData);
+ 
+     /* Wait for busy to clear */
+     IdeStatus = ATA_WAIT(ChanData, ATA_TIME_BUSY_NORMAL, IDE_STATUS_BUSY, 0);
+@@ -1179,7 +1179,7 @@
+     while (TRUE)
+     {
+         /* Need to wait for a valid status */
+-        ATA_IO_WAIT();
++        ATA_IO_WAIT(ChanData);
+ 
+         /* Do a quick check here for a busy */
+         IdeStatus = ATA_WAIT(ChanData, ATA_TIME_BUSY_POLL, IDE_STATUS_BUSY, 0);

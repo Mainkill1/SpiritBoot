@@ -1,0 +1,121 @@
+diff --git a/drivers/storage/class/nxstorage/request.c b/drivers/storage/class/nxstorage/request.c
+index 2cef7fb..a22c67f 100644
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -182,12 +182,12 @@ static void pump(nx_device *d)
+     lock(d);
+     if (d->pumping) { unlock(d); return; }
+     d->pumping=1;
+-    unlock(d);
++    unsigned lock_held=1;
+     for (;;) {
+         enum { NONE, SEND, RETIRE, CANCEL, COMPLETE } action=NONE;
+         nx_slot *s=NULL; uint32_t index=0;
+         void *parent=NULL; nx_status final=NX_OK; uint64_t bytes=0;
+-        lock(d);
++        if(!lock_held) { lock(d); lock_held=1; }
+         for (uint32_t scanned=0;scanned<d->count;++scanned) {
+             index=d->cursor; d->cursor=index+1u==d->count ? 0:index+1u;
+             s=&d->slots[index];
+@@ -225,42 +225,41 @@ static void pump(nx_device *d)
+         }
+         if (action==NONE) {
+             /* A command construction failure created a terminal runnable slot. */
+-            if (s && s->active && s->terminal && !s->inflight) { unlock(d); continue; }
++            if (s && s->active && s->terminal && !s->inflight) continue;
+             d->pumping=0; unlock(d); return;
+         }
+-        unlock(d);
++        unlock(d); lock_held=0;
+         if (action==COMPLETE) {
+             d->port.complete(d->port.context,parent,final,bytes);
+         } else if (action==CANCEL) {
+             d->port.cancel(d->port.context,&s->command);
+         } else if (action==RETIRE) {
+             d->port.retire(d->port.context,&s->command);
+-            lock(d); record_result(d,s); unlock(d);
++            lock(d); record_result(d,s); lock_held=1;
+         } else {
+             nx_status prepared=d->port.prepare(d->port.context,&s->command);
+-            lock(d);
++            lock(d); lock_held=1;
+             if (prepared!=NX_OK) {
+                 preparation_failed(d,s,prepared>NX_OK ? NX_PROTOCOL_ERROR:prepared);
+-                unlock(d); continue;
++                continue;
+             }
+             if (d->quarantined && !s->recovery) {
+-                unlock(d); d->port.retire(d->port.context,&s->command);
+-                lock(d); s->final_status=NX_IO_ERROR; s->terminal=1; unlock(d); continue;
++                unlock(d); lock_held=0; d->port.retire(d->port.context,&s->command);
++                lock(d); lock_held=1; s->final_status=NX_IO_ERROR; s->terminal=1; continue;
+             }
+             if (s->cancelled && !s->recovery) {
+-                unlock(d); d->port.retire(d->port.context,&s->command);
+-                lock(d); s->final_status=NX_CANCELLED; s->terminal=1; unlock(d); continue;
++                unlock(d); lock_held=0; d->port.retire(d->port.context,&s->command);
++                lock(d); lock_held=1; s->final_status=NX_CANCELLED; s->terminal=1; continue;
+             }
+             /* Submission commit: subsequent cancellation may race with the
+              * unlocked port call, so it must cancel/drain committed transport. */
+             s->inflight=1; s->prepared=1;
+-            unlock(d);
++            unlock(d); lock_held=0;
+             int submitted_pending=d->port.submit(d->port.context,&s->command);
+-            lock(d);
++            lock(d); lock_held=1;
+             /* A return value never proves lower ownership ended. A broken
+              * adapter that omits its terminal report keeps the pages live. */
+             if (submitted_pending || !s->done) pending(d,s);
+-            unlock(d);
+         }
+     }
+ }
+diff --git a/tests/host/nxstorage/request_test.c b/tests/host/nxstorage/request_test.c
+index 96388f1..83267cf 100644
+--- a/tests/host/nxstorage/request_test.c
++++ b/tests/host/nxstorage/request_test.c
+@@ -33,7 +33,7 @@ typedef struct fixture {
+     nx_command held[4], log[40];
+     unsigned held_live[4], resource_live[4];
+     unsigned commands, prepares, retires, cancels, fail_prepare;
+-    unsigned depth, max_depth, lock_depth;
++    unsigned depth, max_depth, lock_depth, lock_entries;
+     int delayed, pending_inline, cancel_delivers, delay_sync;
+     int omit_terminal, cancel_preparing;
+     unsigned null_completions;
+@@ -45,7 +45,7 @@ typedef struct fixture {
+     size_t buffer_size;
+ } fixture;
+ 
+-static void enter(void *p) { fixture *f=p; MUST(f->lock_depth == 0); f->lock_depth=1; }
++static void enter(void *p) { fixture *f=p; MUST(f->lock_depth == 0); f->lock_depth=1; ++f->lock_entries; }
+ static void leave(void *p) { fixture *f=p; MUST(f->lock_depth == 1); f->lock_depth=0; }
+ static nx_status prepare(void *p, const nx_command *c)
+ {
+@@ -227,6 +227,17 @@ static int one_inline_read_owns_until_return(void)
+     CHECK(f.buffer[512]==20 && f.buffer[1023]==29 && f.buffer[511]==0xa5);
+     cleanup(&f); return 1;
+ }
++/* The pump already owns the state lock when it becomes the dispatcher.  A
++ * first pending request must not drop and reacquire it before selecting work. */
++static int first_pending_submit_keeps_pump_entry_lock(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delayed=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,512);
++    unsigned before=f.lock_entries;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    CHECK(f.lock_entries-before==5);
++    finish_held(&f,h.slot,NX_OK,512,0); cleanup(&f); return 1;
++}
+ /* Break: dispatch success hides pending or stale callbacks complete a new parent. */
+ static int pending_duplicate_generation(void)
+ {
+@@ -789,6 +800,7 @@ int main(void)
+         {"zero_domain_guards",zero_domain_guards},
+         {"rejects_invalid_input",rejects_invalid_input}, {"zero_has_no_transport",zero_has_no_transport},
+         {"one_inline_read_owns_until_return",one_inline_read_owns_until_return},
++        {"first_pending_submit_keeps_pump_entry_lock",first_pending_submit_keeps_pump_entry_lock},
+         {"pending_duplicate_generation",pending_duplicate_generation},
+         {"inline_pending_still_marks_parent",inline_pending_still_marks_parent},
+         {"long_inline_sequence_is_iterative",long_inline_sequence_is_iterative},

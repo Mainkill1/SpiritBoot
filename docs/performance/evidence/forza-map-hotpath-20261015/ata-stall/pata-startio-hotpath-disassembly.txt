@@ -1,0 +1,75 @@
+BASELINE 4ee1e203c08499a2c32e8aca42edc41465cecfe2ecd62bd9d2e6608bc478f664
+84034948 <_PataStartIo>:
+84034948:	55                   	push   ebp
+84034949:	89 e5                	mov    ebp,esp
+8403494b:	57                   	push   edi
+8403494c:	56                   	push   esi
+8403494d:	53                   	push   ebx
+8403494e:	83 ec 1c             	sub    esp,0x1c
+84034951:	8b 5d 08             	mov    ebx,DWORD PTR [ebp+0x8]
+84034954:	8b 75 0c             	mov    esi,DWORD PTR [ebp+0xc]
+84034957:	8b 43 54             	mov    eax,DWORD PTR [ebx+0x54]
+8403495a:	8b 7e 24             	mov    edi,DWORD PTR [esi+0x24]
+8403495d:	83 4b 60 01          	or     DWORD PTR [ebx+0x60],0x1
+84034961:	8a 4f 0a             	mov    cl,BYTE PTR [edi+0xa]
+84034964:	85 c0                	test   eax,eax
+84034966:	79 24                	jns    8403498c <_PataStartIo+0x44>
+84034968:	8b 57 04             	mov    edx,DWORD PTR [edi+0x4]
+8403496b:	83 e2 0f             	and    edx,0xf
+8403496e:	3a 93 c0 00 00 00    	cmp    dl,BYTE PTR [ebx+0xc0]
+84034974:	74 16                	je     8403498c <_PataStartIo+0x44>
+84034976:	83 e0 01             	and    eax,0x1
+84034979:	88 93 c0 00 00 00    	mov    BYTE PTR [ebx+0xc0],dl
+8403497f:	d0 ea                	shr    dl,1
+84034981:	c1 e0 03             	shl    eax,0x3
+84034984:	09 d0                	or     eax,edx
+84034986:	ba 32 04 00 00       	mov    edx,0x432
+8403498b:	ee                   	out    dx,al
+8403498c:	8b 93 98 00 00 00    	mov    edx,DWORD PTR [ebx+0x98]
+84034992:	89 c8                	mov    eax,ecx
+84034994:	ee                   	out    dx,al
+84034995:	c7 04 24 01 00 00 00 	mov    DWORD PTR [esp],0x1
+8403499c:	e8 c6 e5 fc ff       	call   84002f67 <_KeStallExecutionProcessor@4>
+840349a1:	50                   	push   eax
+840349a2:	c7 45 e8 b8 0b 00 00 	mov    DWORD PTR [ebp-0x18],0xbb8
+840349a9:	89 1c 24             	mov    DWORD PTR [esp],ebx
+840349ac:	ff 53 74             	call   DWORD PTR [ebx+0x74]
+
+CANDIDATE 5a9f14f0fd17985b547f85e2876311bc87353c0eadfc340506e4bd54461ea0bb
+84034940 <_PataStartIo>:
+84034940:	55                   	push   ebp
+84034941:	89 e5                	mov    ebp,esp
+84034943:	57                   	push   edi
+84034944:	56                   	push   esi
+84034945:	53                   	push   ebx
+84034946:	83 ec 1c             	sub    esp,0x1c
+84034949:	8b 5d 08             	mov    ebx,DWORD PTR [ebp+0x8]
+8403494c:	8b 75 0c             	mov    esi,DWORD PTR [ebp+0xc]
+8403494f:	8b 43 54             	mov    eax,DWORD PTR [ebx+0x54]
+84034952:	8b 7e 24             	mov    edi,DWORD PTR [esi+0x24]
+84034955:	83 4b 60 01          	or     DWORD PTR [ebx+0x60],0x1
+84034959:	8a 4f 0a             	mov    cl,BYTE PTR [edi+0xa]
+8403495c:	85 c0                	test   eax,eax
+8403495e:	79 24                	jns    84034984 <_PataStartIo+0x44>
+84034960:	8b 57 04             	mov    edx,DWORD PTR [edi+0x4]
+84034963:	83 e2 0f             	and    edx,0xf
+84034966:	3a 93 c0 00 00 00    	cmp    dl,BYTE PTR [ebx+0xc0]
+8403496c:	74 16                	je     84034984 <_PataStartIo+0x44>
+8403496e:	83 e0 01             	and    eax,0x1
+84034971:	88 93 c0 00 00 00    	mov    BYTE PTR [ebx+0xc0],dl
+84034977:	d0 ea                	shr    dl,1
+84034979:	c1 e0 03             	shl    eax,0x3
+8403497c:	09 d0                	or     eax,edx
+8403497e:	ba 32 04 00 00       	mov    edx,0x432
+84034983:	ee                   	out    dx,al
+84034984:	8b 93 98 00 00 00    	mov    edx,DWORD PTR [ebx+0x98]
+8403498a:	89 c8                	mov    eax,ecx
+8403498c:	ee                   	out    dx,al
+8403498d:	8b 93 a0 00 00 00    	mov    edx,DWORD PTR [ebx+0xa0]
+84034993:	ec                   	in     al,dx
+84034994:	ec                   	in     al,dx
+84034995:	ec                   	in     al,dx
+84034996:	ec                   	in     al,dx
+84034997:	c7 45 e8 b8 0b 00 00 	mov    DWORD PTR [ebp-0x18],0xbb8
+8403499e:	89 1c 24             	mov    DWORD PTR [esp],ebx
+840349a1:	ff 53 74             	call   DWORD PTR [ebx+0x74]

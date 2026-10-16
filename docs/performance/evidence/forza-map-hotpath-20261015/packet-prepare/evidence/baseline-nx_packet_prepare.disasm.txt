@@ -1,0 +1,272 @@
+8404fcf8 <_nx_packet_prepare.constprop.0>:
+8404fcf8:	55                   	push   ebp
+8404fcf9:	89 e5                	mov    ebp,esp
+8404fcfb:	57                   	push   edi
+8404fcfc:	56                   	push   esi
+8404fcfd:	53                   	push   ebx
+8404fcfe:	89 c3                	mov    ebx,eax
+8404fd00:	83 ec 44             	sub    esp,0x44
+8404fd03:	8b 00                	mov    eax,DWORD PTR [eax]
+8404fd05:	89 55 d0             	mov    DWORD PTR [ebp-0x30],edx
+8404fd08:	89 4d cc             	mov    DWORD PTR [ebp-0x34],ecx
+8404fd0b:	89 45 c8             	mov    DWORD PTR [ebp-0x38],eax
+8404fd0e:	c7 45 d4 01 00 00 00 	mov    DWORD PTR [ebp-0x2c],0x1
+8404fd15:	85 c0                	test   eax,eax
+8404fd17:	0f 84 43 03 00 00    	je     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd1d:	83 7b 04 00          	cmp    DWORD PTR [ebx+0x4],0x0
+8404fd21:	0f 84 39 03 00 00    	je     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd27:	83 7b 0c 00          	cmp    DWORD PTR [ebx+0xc],0x0
+8404fd2b:	0f 84 2f 03 00 00    	je     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd31:	8b 40 74             	mov    eax,DWORD PTR [eax+0x74]
+8404fd34:	85 c0                	test   eax,eax
+8404fd36:	0f 85 24 03 00 00    	jne    84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd3c:	83 7a 54 00          	cmp    DWORD PTR [edx+0x54],0x0
+8404fd40:	0f 84 1a 03 00 00    	je     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd46:	0f b6 42 50          	movzx  eax,BYTE PTR [edx+0x50]
+8404fd4a:	84 c0                	test   al,al
+8404fd4c:	0f 84 0e 03 00 00    	je     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd52:	8b 7d c8             	mov    edi,DWORD PTR [ebp-0x38]
+8404fd55:	0f be 57 18          	movsx  edx,BYTE PTR [edi+0x18]
+8404fd59:	84 d2                	test   dl,dl
+8404fd5b:	0f 8e ff 02 00 00    	jle    84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd61:	39 c2                	cmp    edx,eax
+8404fd63:	0f 82 f7 02 00 00    	jb     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd69:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+8404fd6c:	8b 40 44             	mov    eax,DWORD PTR [eax+0x44]
+8404fd6f:	85 c0                	test   eax,eax
+8404fd71:	0f 84 e9 02 00 00    	je     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd77:	8b 7d d0             	mov    edi,DWORD PTR [ebp-0x30]
+8404fd7a:	8b 7f 48             	mov    edi,DWORD PTR [edi+0x48]
+8404fd7d:	89 7d bc             	mov    DWORD PTR [ebp-0x44],edi
+8404fd80:	85 ff                	test   edi,edi
+8404fd82:	0f 84 d8 02 00 00    	je     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd88:	8b 7d d0             	mov    edi,DWORD PTR [ebp-0x30]
+8404fd8b:	8b 7f 20             	mov    edi,DWORD PTR [edi+0x20]
+8404fd8e:	39 f8                	cmp    eax,edi
+8404fd90:	0f 82 ca 02 00 00    	jb     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fd96:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+8404fd99:	8b 40 4c             	mov    eax,DWORD PTR [eax+0x4c]
+8404fd9c:	89 45 c0             	mov    DWORD PTR [ebp-0x40],eax
+8404fd9f:	3d ff 0f 00 00       	cmp    eax,0xfff
+8404fda4:	0f 87 b6 02 00 00    	ja     84050060 <_nx_packet_prepare.constprop.0+0x368>
+8404fdaa:	8b 4d c0             	mov    ecx,DWORD PTR [ebp-0x40]
+8404fdad:	40                   	inc    eax
+8404fdae:	21 c1                	and    ecx,eax
+8404fdb0:	89 4d d4             	mov    DWORD PTR [ebp-0x2c],ecx
+8404fdb3:	0f 85 a0 02 00 00    	jne    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fdb9:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+8404fdbc:	80 78 28 00          	cmp    BYTE PTR [eax+0x28],0x0
+8404fdc0:	75 17                	jne    8404fdd9 <_nx_packet_prepare.constprop.0+0xe1>
+8404fdc2:	8a 40 29             	mov    al,BYTE PTR [eax+0x29]
+8404fdc5:	8d 50 fa             	lea    edx,[eax-0x6]
+8404fdc8:	80 e2 fb             	and    dl,0xfb
+8404fdcb:	74 31                	je     8404fdfe <_nx_packet_prepare.constprop.0+0x106>
+8404fdcd:	83 e8 0c             	sub    eax,0xc
+8404fdd0:	a8 fb                	test   al,0xfb
+8404fdd2:	74 2a                	je     8404fdfe <_nx_packet_prepare.constprop.0+0x106>
+8404fdd4:	e9 80 02 00 00       	jmp    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fdd9:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+8404fddc:	66 83 78 28 04       	cmp    WORD PTR [eax+0x28],0x4
+8404fde1:	0f 85 72 02 00 00    	jne    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fde7:	85 ff                	test   edi,edi
+8404fde9:	0f 85 6a 02 00 00    	jne    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fdef:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+8404fdf2:	83 78 24 00          	cmp    DWORD PTR [eax+0x24],0x0
+8404fdf6:	0f 85 5d 02 00 00    	jne    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fdfc:	eb 09                	jmp    8404fe07 <_nx_packet_prepare.constprop.0+0x10f>
+8404fdfe:	8b 4b 08             	mov    ecx,DWORD PTR [ebx+0x8]
+8404fe01:	85 ff                	test   edi,edi
+8404fe03:	75 14                	jne    8404fe19 <_nx_packet_prepare.constprop.0+0x121>
+8404fe05:	eb e8                	jmp    8404fdef <_nx_packet_prepare.constprop.0+0xf7>
+8404fe07:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+8404fe0a:	83 78 1c 00          	cmp    DWORD PTR [eax+0x1c],0x0
+8404fe0e:	0f 84 05 01 00 00    	je     8404ff19 <_nx_packet_prepare.constprop.0+0x221>
+8404fe14:	e9 40 02 00 00       	jmp    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe19:	85 c9                	test   ecx,ecx
+8404fe1b:	0f 84 38 02 00 00    	je     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe21:	83 39 00             	cmp    DWORD PTR [ecx],0x0
+8404fe24:	0f 85 2f 02 00 00    	jne    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe2a:	8b 41 14             	mov    eax,DWORD PTR [ecx+0x14]
+8404fe2d:	85 c0                	test   eax,eax
+8404fe2f:	0f 84 24 02 00 00    	je     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe35:	8b 75 d0             	mov    esi,DWORD PTR [ebp-0x30]
+8404fe38:	8b 76 24             	mov    esi,DWORD PTR [esi+0x24]
+8404fe3b:	8d 56 c0             	lea    edx,[esi-0x40]
+8404fe3e:	89 75 b8             	mov    DWORD PTR [ebp-0x48],esi
+8404fe41:	83 e2 bf             	and    edx,0xffffffbf
+8404fe44:	0f 85 0f 02 00 00    	jne    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe4a:	8b 51 10             	mov    edx,DWORD PTR [ecx+0x10]
+8404fe4d:	f7 c2 ff 0f 00 00    	test   edx,0xfff
+8404fe53:	0f 85 00 02 00 00    	jne    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe59:	8b 71 18             	mov    esi,DWORD PTR [ecx+0x18]
+8404fe5c:	89 75 b8             	mov    DWORD PTR [ebp-0x48],esi
+8404fe5f:	81 fe ff 0f 00 00    	cmp    esi,0xfff
+8404fe65:	0f 87 ee 01 00 00    	ja     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe6b:	01 f2                	add    edx,esi
+8404fe6d:	89 d1                	mov    ecx,edx
+8404fe6f:	01 c1                	add    ecx,eax
+8404fe71:	0f 82 e2 01 00 00    	jb     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe77:	8b 4d d0             	mov    ecx,DWORD PTR [ebp-0x30]
+8404fe7a:	3b 51 18             	cmp    edx,DWORD PTR [ecx+0x18]
+8404fe7d:	0f 85 d6 01 00 00    	jne    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe83:	8b 4d d0             	mov    ecx,DWORD PTR [ebp-0x30]
+8404fe86:	8b 71 1c             	mov    esi,DWORD PTR [ecx+0x1c]
+8404fe89:	39 d6                	cmp    esi,edx
+8404fe8b:	0f 82 c8 01 00 00    	jb     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe91:	89 f1                	mov    ecx,esi
+8404fe93:	29 d1                	sub    ecx,edx
+8404fe95:	39 c8                	cmp    eax,ecx
+8404fe97:	0f 82 bc 01 00 00    	jb     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404fe9d:	89 c1                	mov    ecx,eax
+8404fe9f:	29 f1                	sub    ecx,esi
+8404fea1:	01 ca                	add    edx,ecx
+8404fea3:	39 fa                	cmp    edx,edi
+8404fea5:	0f 82 ae 01 00 00    	jb     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404feab:	89 f1                	mov    ecx,esi
+8404fead:	01 f9                	add    ecx,edi
+8404feaf:	0f 82 a4 01 00 00    	jb     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404feb5:	85 75 c0             	test   DWORD PTR [ebp-0x40],esi
+8404feb8:	0f 85 9b 01 00 00    	jne    84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404febe:	31 d2                	xor    edx,edx
+8404fec0:	03 45 b8             	add    eax,DWORD PTR [ebp-0x48]
+8404fec3:	83 d2 00             	adc    edx,0x0
+8404fec6:	05 ff 0f 00 00       	add    eax,0xfff
+8404fecb:	83 d2 00             	adc    edx,0x0
+8404fece:	0f ac d0 0c          	shrd   eax,edx,0xc
+8404fed2:	c1 ea 0c             	shr    edx,0xc
+8404fed5:	89 55 c4             	mov    DWORD PTR [ebp-0x3c],edx
+8404fed8:	31 d2                	xor    edx,edx
+8404feda:	89 45 c0             	mov    DWORD PTR [ebp-0x40],eax
+8404fedd:	89 d0                	mov    eax,edx
+8404fedf:	8b 4d c0             	mov    ecx,DWORD PTR [ebp-0x40]
+8404fee2:	39 4b 14             	cmp    DWORD PTR [ebx+0x14],ecx
+8404fee5:	1b 45 c4             	sbb    eax,DWORD PTR [ebp-0x3c]
+8404fee8:	0f 82 6b 01 00 00    	jb     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404feee:	89 f8                	mov    eax,edi
+8404fef0:	31 d2                	xor    edx,edx
+8404fef2:	05 ff 0f 00 00       	add    eax,0xfff
+8404fef7:	83 d2 00             	adc    edx,0x0
+8404fefa:	81 e6 ff 0f 00 00    	and    esi,0xfff
+8404ff00:	01 f0                	add    eax,esi
+8404ff02:	83 d2 00             	adc    edx,0x0
+8404ff05:	31 ff                	xor    edi,edi
+8404ff07:	0f ac d0 0c          	shrd   eax,edx,0xc
+8404ff0b:	c1 ea 0c             	shr    edx,0xc
+8404ff0e:	39 45 bc             	cmp    DWORD PTR [ebp-0x44],eax
+8404ff11:	19 d7                	sbb    edi,edx
+8404ff13:	0f 82 40 01 00 00    	jb     84050059 <_nx_packet_prepare.constprop.0+0x361>
+8404ff19:	c7 44 24 04 03 01 00 	mov    DWORD PTR [esp+0x4],0x103
+8404ff20:	00 
+8404ff21:	8b 45 c8             	mov    eax,DWORD PTR [ebp-0x38]
+8404ff24:	89 04 24             	mov    DWORD PTR [esp],eax
+8404ff27:	e8 70 56 fc ff       	call   8401559c <_IoReuseIrp@8.constprop.0>
+8404ff2c:	ba 40 00 00 00       	mov    edx,0x40
+8404ff31:	50                   	push   eax
+8404ff32:	50                   	push   eax
+8404ff33:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ff36:	e8 0d e6 ff ff       	call   8404e548 <_clear_bytes.lto_priv.0.lto_priv.0>
+8404ff3b:	8b 43 0c             	mov    eax,DWORD PTR [ebx+0xc]
+8404ff3e:	8b 53 10             	mov    edx,DWORD PTR [ebx+0x10]
+8404ff41:	e8 02 e6 ff ff       	call   8404e548 <_clear_bytes.lto_priv.0.lto_priv.0>
+8404ff46:	8b 7d d0             	mov    edi,DWORD PTR [ebp-0x30]
+8404ff49:	31 c0                	xor    eax,eax
+8404ff4b:	83 7f 20 00          	cmp    DWORD PTR [edi+0x20],0x0
+8404ff4f:	74 03                	je     8404ff54 <_nx_packet_prepare.constprop.0+0x25c>
+8404ff51:	8b 43 08             	mov    eax,DWORD PTR [ebx+0x8]
+8404ff54:	8b 13                	mov    edx,DWORD PTR [ebx]
+8404ff56:	89 42 6c             	mov    DWORD PTR [edx+0x6c],eax
+8404ff59:	8b 03                	mov    eax,DWORD PTR [ebx]
+8404ff5b:	ba 24 00 00 00       	mov    edx,0x24
+8404ff60:	8b 70 5c             	mov    esi,DWORD PTR [eax+0x5c]
+8404ff63:	8d 46 dc             	lea    eax,[esi-0x24]
+8404ff66:	e8 dd e5 ff ff       	call   8404e548 <_clear_bytes.lto_priv.0.lto_priv.0>
+8404ff6b:	c6 46 dc 0b          	mov    BYTE PTR [esi-0x24],0xb
+8404ff6f:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ff72:	8b 7d d0             	mov    edi,DWORD PTR [ebp-0x30]
+8404ff75:	89 46 e0             	mov    DWORD PTR [esi-0x20],eax
+8404ff78:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+8404ff7b:	8b 40 54             	mov    eax,DWORD PTR [eax+0x54]
+8404ff7e:	89 46 f8             	mov    DWORD PTR [esi-0x8],eax
+8404ff81:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+8404ff84:	8b 40 58             	mov    eax,DWORD PTR [eax+0x58]
+8404ff87:	c6 46 df e0          	mov    BYTE PTR [esi-0x21],0xe0
+8404ff8b:	89 46 fc             	mov    DWORD PTR [esi-0x4],eax
+8404ff8e:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ff91:	66 c7 00 40 00       	mov    WORD PTR [eax],0x40
+8404ff96:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ff99:	8a 57 28             	mov    dl,BYTE PTR [edi+0x28]
+8404ff9c:	88 50 02             	mov    BYTE PTR [eax+0x2],dl
+8404ff9f:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ffa2:	8a 57 29             	mov    dl,BYTE PTR [edi+0x29]
+8404ffa5:	88 50 0a             	mov    BYTE PTR [eax+0xa],dl
+8404ffa8:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ffab:	8b 53 10             	mov    edx,DWORD PTR [ebx+0x10]
+8404ffae:	88 50 0b             	mov    BYTE PTR [eax+0xb],dl
+8404ffb1:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ffb4:	8b 57 24             	mov    edx,DWORD PTR [edi+0x24]
+8404ffb7:	89 50 0c             	mov    DWORD PTR [eax+0xc],edx
+8404ffba:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ffbd:	8b 57 20             	mov    edx,DWORD PTR [edi+0x20]
+8404ffc0:	89 50 10             	mov    DWORD PTR [eax+0x10],edx
+8404ffc3:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ffc6:	8b 57 3c             	mov    edx,DWORD PTR [edi+0x3c]
+8404ffc9:	89 50 14             	mov    DWORD PTR [eax+0x14],edx
+8404ffcc:	31 c0                	xor    eax,eax
+8404ffce:	83 7f 20 00          	cmp    DWORD PTR [edi+0x20],0x0
+8404ffd2:	74 03                	je     8404ffd7 <_nx_packet_prepare.constprop.0+0x2df>
+8404ffd4:	8b 47 1c             	mov    eax,DWORD PTR [edi+0x1c]
+8404ffd7:	8b 53 04             	mov    edx,DWORD PTR [ebx+0x4]
+8404ffda:	89 42 18             	mov    DWORD PTR [edx+0x18],eax
+8404ffdd:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ffe0:	8b 53 0c             	mov    edx,DWORD PTR [ebx+0xc]
+8404ffe3:	89 50 1c             	mov    DWORD PTR [eax+0x1c],edx
+8404ffe6:	8b 43 04             	mov    eax,DWORD PTR [ebx+0x4]
+8404ffe9:	8b 13                	mov    edx,DWORD PTR [ebx]
+8404ffeb:	89 50 24             	mov    DWORD PTR [eax+0x24],edx
+8404ffee:	31 c0                	xor    eax,eax
+8404fff0:	8b 75 d0             	mov    esi,DWORD PTR [ebp-0x30]
+8404fff3:	8b 7b 04             	mov    edi,DWORD PTR [ebx+0x4]
+8404fff6:	0f b6 56 29          	movzx  edx,BYTE PTR [esi+0x29]
+8404fffa:	89 7d c8             	mov    DWORD PTR [ebp-0x38],edi
+8404fffd:	39 d0                	cmp    eax,edx
+8404ffff:	73 11                	jae    84050012 <_nx_packet_prepare.constprop.0+0x31a>
+84050001:	8b 7d d0             	mov    edi,DWORD PTR [ebp-0x30]
+84050004:	8b 75 c8             	mov    esi,DWORD PTR [ebp-0x38]
+84050007:	8a 54 07 2a          	mov    dl,BYTE PTR [edi+eax*1+0x2a]
+8405000b:	88 54 06 30          	mov    BYTE PTR [esi+eax*1+0x30],dl
+8405000f:	40                   	inc    eax
+84050010:	eb de                	jmp    8404fff0 <_nx_packet_prepare.constprop.0+0x2f8>
+84050012:	8b 03                	mov    eax,DWORD PTR [ebx]
+84050014:	8b 53 10             	mov    edx,DWORD PTR [ebx+0x10]
+84050017:	8d 7d d8             	lea    edi,[ebp-0x28]
+8405001a:	b9 06 00 00 00       	mov    ecx,0x6
+8405001f:	f3 a5                	rep movs DWORD PTR es:[edi],DWORD PTR ds:[esi]
+84050021:	8b 4d c8             	mov    ecx,DWORD PTR [ebp-0x38]
+84050024:	89 45 c0             	mov    DWORD PTR [ebp-0x40],eax
+84050027:	8b 43 0c             	mov    eax,DWORD PTR [ebx+0xc]
+8405002a:	8b 7d c0             	mov    edi,DWORD PTR [ebp-0x40]
+8405002d:	8b 5d cc             	mov    ebx,DWORD PTR [ebp-0x34]
+84050030:	89 45 bc             	mov    DWORD PTR [ebp-0x44],eax
+84050033:	8b 45 d0             	mov    eax,DWORD PTR [ebp-0x30]
+84050036:	8b 75 bc             	mov    esi,DWORD PTR [ebp-0x44]
+84050039:	8b 40 20             	mov    eax,DWORD PTR [eax+0x20]
+8405003c:	89 3b                	mov    DWORD PTR [ebx],edi
+8405003e:	8d 7b 10             	lea    edi,[ebx+0x10]
+84050041:	89 4b 04             	mov    DWORD PTR [ebx+0x4],ecx
+84050044:	b9 06 00 00 00       	mov    ecx,0x6
+84050049:	89 73 08             	mov    DWORD PTR [ebx+0x8],esi
+8405004c:	8d 75 d8             	lea    esi,[ebp-0x28]
+8405004f:	f3 a5                	rep movs DWORD PTR es:[edi],DWORD PTR ds:[esi]
+84050051:	89 43 28             	mov    DWORD PTR [ebx+0x28],eax
+84050054:	89 53 2c             	mov    DWORD PTR [ebx+0x2c],edx
+84050057:	eb 07                	jmp    84050060 <_nx_packet_prepare.constprop.0+0x368>
+84050059:	c7 45 d4 01 00 00 00 	mov    DWORD PTR [ebp-0x2c],0x1
+84050060:	8b 45 d4             	mov    eax,DWORD PTR [ebp-0x2c]
+84050063:	8d 65 f4             	lea    esp,[ebp-0xc]
+84050066:	5b                   	pop    ebx
+84050067:	5e                   	pop    esi
+84050068:	5f                   	pop    edi
+84050069:	5d                   	pop    ebp
+8405006a:	c3                   	ret
+8405006b:	90                   	nop
+

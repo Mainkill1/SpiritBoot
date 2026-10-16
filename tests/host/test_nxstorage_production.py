@@ -28,7 +28,11 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0139-independent-nxcdrom-profile.patch",
                      "0140-independent-native-storage-adapter.patch",
                      "0141-lower-cache-integration.patch",
-                     "0143-native-storage-submit-hotpath.patch"):
+                     "0143-native-storage-submit-hotpath.patch",
+                     "0146-forza-map-queue-depth.patch",
+                     "0147-retained-pata-sg-workspace.patch",
+                     "0148-native-storage-qd12-hotpath.patch",
+                     "0150-native-packet-prepare-hotpath.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -58,8 +62,10 @@ class NxStorageProductionTests(unittest.TestCase):
                                     capture_output=True, timeout=120,
                                     env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
             self.assertEqual(packet.returncode, 0, packet.stdout + packet.stderr)
-            self.assertIn('packet-plain: ', packet.stdout)
-            self.assertIn('packet-sanitized: ', packet.stdout)
+            self.assertIn('packet-plain: 10 groups, 0 failures', packet.stdout)
+            self.assertIn('packet-sanitized: 10 groups, 0 failures', packet.stdout)
+            if 'packet-msan:' in packet.stdout and 'SKIP' not in packet.stdout:
+                self.assertIn('packet-msan: 10 groups, 0 failures', packet.stdout)
             sense = subprocess.run([sys.executable, str(source / 'tests/host/nxstorage-sense/check.py')],
                                    text=True, capture_output=True, timeout=120,
                                    env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
@@ -77,8 +83,8 @@ class NxStorageProductionTests(unittest.TestCase):
                                      capture_output=True, timeout=120,
                                      env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
             self.assertEqual(adapter.returncode, 0, adapter.stdout + adapter.stderr)
-            self.assertIn('adapter-plain: 27 adapter groups, 0 failures', adapter.stdout)
-            self.assertIn('adapter-sanitized: 27 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-plain: 28 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-sanitized: 28 adapter groups, 0 failures', adapter.stdout)
 
             driver = (source / 'drivers/storage/class/nxstorage/driver.c').read_text()
             self.assertIn('ZwCreateDirectoryObject(&context->object_directory', driver)
@@ -86,6 +92,9 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertLess(driver.index('ZwCreateDirectoryObject(&context->object_directory'),
                             driver.index('NxNativeCreateClassDevice(context->driver'))
             self.assertIn('driver->MajorFunction[IRP_MJ_PNP]=NxNativeDispatchPnp', driver)
+            self.assertIn('NX_NATIVE_DISK_SLOTS = 16, NX_NATIVE_CDROM_SLOTS = 8', driver)
+            self.assertIn('init.SlotCount=NX_NATIVE_DISK_SLOTS;', driver)
+            self.assertIn('NX_NATIVE_CDROM_SLOTS);', driver)
 
     def test_locked_lower_cache_route_uses_real_transaction_facts(self):
         lock = json.loads((ROOT / 'sources/firmware-lock.json').read_text())

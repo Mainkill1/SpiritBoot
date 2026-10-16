@@ -60,4 +60,8 @@ class ActualRecorderTests(unittest.TestCase):
         for case in ('raw-d1-q1-p0-synthetic.warm','raw-d0-q4-p0-synthetic.warm','raw-d0-q1-p900-synthetic.warm','raw-d0-q1-p0-synthetic.cold-ish'):
             with self.subTest(case=case):
                 rejected=subprocess.run([str(self.selection),case],capture_output=True,text=True);self.assertEqual(rejected.returncode,2,rejected.stdout+rejected.stderr)
+    def test_actual_selection_accepts_dedicated_forza_map_stream(self):
+        value=subprocess.run([str(self.selection),'forza-map-stream-d0-q12-p900.warm'],capture_output=True,text=True)
+        self.assertEqual(value.returncode,0,value.stdout+value.stderr)
+        self.assertIn('d=0 q=12 p=900 warm=1',value.stdout)
 if __name__=='__main__':unittest.main(verbosity=2)

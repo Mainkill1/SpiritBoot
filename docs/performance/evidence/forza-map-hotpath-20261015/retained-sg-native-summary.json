@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "experiment": "forza-map-stream-retained-sg-20261015",
+  "purpose": "Qualify a retained PATA scatter/gather workspace without changing request scheduling or completion semantics.",
+  "candidate": {
+    "biosSha256": "f7f22399a2448b71b2cdb93e696c131648c6805d753ca0e3225ec1caaf2a84ef",
+    "biosBytes": 524288,
+    "sourceTree": "e65870455d2af1bfcc7b187b629a7e3988021491",
+    "patchSha256": "7fc90c71f590c14ccf1f927b1cc9d0927f8682ddb5b6e5b398279ed6c0a208a7",
+    "buildType": "release",
+    "memoryMiB": 64,
+    "debugger": false,
+    "firmwareTracing": false
+  },
+  "fixture": {
+    "path": "tests/xbe/forza-map-stream/forza-map-stream.iso",
+    "sha256": "d095682b8691b0c43deae66530a7ccd553d8bc828b4fe4537469b86c463b4b6b",
+    "passes": 16,
+    "operationsPerPass": 1024,
+    "queueDepth": 12,
+    "pressurePages": 900
+  },
+  "structuralEffect": {
+    "hotSgAllocFreePairsRemovedPerMeasuredPass": 1024,
+    "hotSgAllocFreePairsRemovedWholeFixture": 32768,
+    "transientAllocatorBytesRemovedWholeFixture": 28573696,
+    "requestPumpChanged": false
+  },
+  "hostMicrobenchmark": {
+    "samples": 101,
+    "operations_per_sample": 1024,
+    "sg_buffer_bytes": 1288,
+    "allocated_median_ns": 15540,
+    "retained_median_ns": 2550,
+    "speedup_percent": 509.412,
+    "hot_allocations": 103424,
+    "hot_frees": 103424,
+    "callbacks": 206848,
+    "mapped_bytes": 13555990528
+  },
+  "candidateRuns": [
+    {
+      "position": "G1",
+      "jobId": "forza-map-stream-retained-sg-g1-20261015-v1",
+      "runId": "20261016-063406242-8a9852d482f042c3a35061018a82de67",
+      "serialBytes": 6971239,
+      "serialSha256": "e497bb5c6e29aa8b67ee2a22e39859e3955b5d36e13640a22f3595fd9382d56f",
+      "analysis": {
+        "status": "qualified",
+        "reasons": [],
+        "passes": 16,
+        "operations": 16384,
+        "queue_high_water_min": 12,
+        "pressure_pages": 900,
+        "reported_failures": 0,
+        "warmup_oracle_failures": 0,
+        "oracle_failure_records": 0,
+        "malformed_records": [],
+        "error_stages": [],
+        "apc_batch_ticks": [
+          47670553,
+          48335540,
+          47049640,
+          49240033,
+          51166060,
+          49482107,
+          48641194,
+          48471940,
+          49590273,
+          51125873,
+          51712100,
+          48989893,
+          49559620,
+          52012987,
+          49750433,
+          49855447
+        ],
+        "apc_batch_median_ticks": 49520863.5,
+        "timing_median_ticks": {
+          "apc_batch": 49520863.5,
+          "caller_batch": 49520863.5,
+          "submit_sum": 44235873.5,
+          "post_return_to_apc_sum": 171635886.0,
+          "return_after_apc_sum": 30651.5
+        }
+      }
+    },
+    {
+      "position": "G2",
+      "jobId": "forza-map-stream-retained-sg-g2-20261015-v1",
+      "runId": "20261016-063606469-0ea987340f594d8f85e9fd89ee0ad8f7",
+      "serialBytes": 6972009,
+      "serialSha256": "925648d1b430a55e954e6e971e2f54d335faf5c9fcdadfbfe9116f39ca5df8d0",
+      "analysis": {
+        "status": "qualified",
+        "reasons": [],
+        "passes": 16,
+        "operations": 16384,
+        "queue_high_water_min": 12,
+        "pressure_pages": 900,
+        "reported_failures": 0,
+        "warmup_oracle_failures": 0,
+        "oracle_failure_records": 0,
+        "malformed_records": [],
+        "error_stages": [],
+        "apc_batch_ticks": [
+          48919640,
+          50241840,
+          49667860,
+          52468900,
+          51383494,
+          53371780,
+          53419300,
+          50190800,
+          49249126,
+          50763240,
+          51742093,
+          50315174,
+          50983166,
+          52769200,
+          52004700,
+          51720606
+        ],
+        "apc_batch_median_ticks": 51183330.0,
+        "timing_median_ticks": {
+          "apc_batch": 51183330.0,
+          "caller_batch": 51183330.0,
+          "submit_sum": 45288975.5,
+          "post_return_to_apc_sum": 186163411.0,
+          "return_after_apc_sum": 31679.0
+        }
+      }
+    }
+  ],
+  "queue16Controls": [
+    {
+      "position": "C1",
+      "jobId": "forza-map-stream-corrected-c1-20261015-v1",
+      "runId": "20261016-052754062-6a08ff95ebc04ed283d9d6d2861f53da",
+      "analysis": {
+        "status": "qualified",
+        "reasons": [],
+        "passes": 16,
+        "operations": 16384,
+        "queue_high_water_min": 12,
+        "pressure_pages": 900,
+        "reported_failures": 0,
+        "warmup_oracle_failures": 0,
+        "error_stages": [],
+        "apc_batch_ticks": [
+          48672507,
+          51618967,
+          53267647,
+          52311013,
+          51170753,
+          51886560,
+          52276106,
+          49393960,
+          53131980,
+          50787440,
+          53028947,
+          52743240,
+          53977293,
+          54183726,
+          52143666,
+          51620727
+        ],
+        "apc_batch_median_ticks": 52209886.0,
+        "timing_median_ticks": {
+          "apc_batch": 52209886.0,
+          "caller_batch": 52209886.0,
+          "submit_sum": 43852468.5,
+          "post_return_to_apc_sum": 205893553.0,
+          "return_after_apc_sum": 37329.0
+        }
+      }
+    },
+    {
+      "position": "C2",
+      "jobId": "forza-map-stream-corrected-c2-20261015-v1",
+      "runId": "20261016-052954380-b7f5734e4d7e464ea2a5418ac595f797",
+      "analysis": {
+        "status": "qualified",
+        "reasons": [],
+        "passes": 16,
+        "operations": 16384,
+        "queue_high_water_min": 12,
+        "pressure_pages": 900,
+        "reported_failures": 0,
+        "warmup_oracle_failures": 0,
+        "error_stages": [],
+        "apc_batch_ticks": [
+          49335733,
+          49486286,
+          49510487,
+          51543433,
+          52588580,
+          49887860,
+          53060480,
+          54158500,
+          52024427,
+          51588460,
+          50768080,
+          53373246,
+          52168086,
+          53926400,
+          52914546,
+          51076226
+        ],
+        "apc_batch_median_ticks": 51806443.5,
+        "timing_median_ticks": {
+          "apc_batch": 51806443.5,
+          "caller_batch": 51806443.5,
+          "submit_sum": 44894580.5,
+          "post_return_to_apc_sum": 194391566.0,
+          "return_after_apc_sum": 45101.0
+        }
+      }
+    }
+  ],
+  "pairwise": {
+    "C1_to_G1": {
+      "status": "qualified",
+      "candidate_over_reference": 0.9484959132069356,
+      "candidate_change_percent": -5.150408679306439,
+      "reference_median_ticks": 52209886.0,
+      "candidate_median_ticks": 49520863.5,
+      "timing_change_percent": {
+        "apc_batch": -5.150408679306439,
+        "caller_batch": -5.150408679306439,
+        "post_return_to_apc_sum": -16.63853311618747,
+        "return_after_apc_sum": -17.888237027512123,
+        "submit_sum": 0.874306539892955
+      }
+    },
+    "C1_to_G2": {
+      "status": "qualified",
+      "candidate_over_reference": 0.9803378999908179,
+      "candidate_change_percent": -1.9662100009182115,
+      "reference_median_ticks": 52209886.0,
+      "candidate_median_ticks": 51183330.0,
+      "timing_change_percent": {
+        "apc_batch": -1.9662100009182115,
+        "caller_batch": -1.9662100009182115,
+        "post_return_to_apc_sum": -9.582690527468818,
+        "return_after_apc_sum": -15.135685392054432,
+        "submit_sum": 3.27577226353859
+      }
+    },
+    "C2_to_G1": {
+      "status": "qualified",
+      "candidate_over_reference": 0.9558823218582839,
+      "candidate_change_percent": -4.411767814171608,
+      "reference_median_ticks": 51806443.5,
+      "candidate_median_ticks": 49520863.5,
+      "timing_change_percent": {
+        "apc_batch": -4.411767814171608,
+        "caller_batch": -4.411767814171608,
+        "post_return_to_apc_sum": -11.706104574516363,
+        "return_after_apc_sum": -32.03809228176758,
+        "submit_sum": -1.4672305491305382
+      }
+    },
+    "C2_to_G2": {
+      "status": "qualified",
+      "candidate_over_reference": 0.987972278004376,
+      "candidate_change_percent": -1.2027721995623963,
+      "reference_median_ticks": 51806443.5,
+      "candidate_median_ticks": 51183330.0,
+      "timing_change_percent": {
+        "apc_batch": -1.2027721995623963,
+        "caller_batch": -1.2027721995623963,
+        "post_return_to_apc_sum": -4.232773658503275,
+        "return_after_apc_sum": -29.75987228664553,
+        "submit_sum": 0.8784913359419777
+      }
+    },
+    "G1_to_G2": {
+      "status": "qualified",
+      "candidate_over_reference": 1.0335710321367881,
+      "candidate_change_percent": 3.3571032136788137,
+      "reference_median_ticks": 49520863.5,
+      "candidate_median_ticks": 51183330.0,
+      "timing_change_percent": {
+        "apc_batch": 3.3571032136788137,
+        "caller_batch": 3.3571032136788137,
+        "post_return_to_apc_sum": 8.46415358615622,
+        "return_after_apc_sum": 3.3522013604554424,
+        "submit_sum": 2.3806515316126875
+      }
+    }
+  },
+  "aggregate": {
+    "controlMeanApcBatchTicks": 52008164.75,
+    "candidateMeanApcBatchTicks": 50352096.75,
+    "apcBatchChangePercent": -3.184246181269068,
+    "controlMeanSubmitSumTicks": 44373524.5,
+    "candidateMeanSubmitSumTicks": 44762424.5,
+    "submitSumChangePercent": 0.8764235078960292,
+    "controlMeanPostReturnToApcTicks": 200142559.5,
+    "candidateMeanPostReturnToApcTicks": 178899648.5,
+    "postReturnToApcChangePercent": -10.613889945781374
+  },
+  "limits": [
+    "Standalone replay excludes rendering and game CPU work.",
+    "Human-driven Forza remains the game-level acceptance gate.",
+    "Host SG microbenchmark is isolated and is not an end-to-end prediction."
+  ]
+}

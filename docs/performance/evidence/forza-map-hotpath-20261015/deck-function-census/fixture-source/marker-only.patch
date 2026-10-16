@@ -1,0 +1,29 @@
+--- a/tools/storage_io_long16/recorder.c	2026-10-15 19:04:19.207969919 -0700
++++ b/tools/storage_io_long16/recorder.c	2026-10-15 23:54:43.944319320 -0700
+@@ -47,6 +47,16 @@
+ static ULONG verified_operations,verified_bytes;
+ static bool raw_device;
+ static NTSTATUS seed_flush_status;
++/* Diagnostic-only phase markers.  They bracket the unchanged 1,024-request
++ * measured batch and are deliberately outside its timing timestamps. */
++__attribute__((noinline, used)) void profile_phase_begin(void)
++{
++ __asm__ __volatile__("" ::: "memory");
++}
++__attribute__((noinline, used)) void profile_phase_end(void)
++{
++ __asm__ __volatile__("" ::: "memory");
++}
+ #ifdef STORAGE_IO_HOST_TEST
+ ULONGLONG recorder_host_ticks(void);
+ static ULONGLONG ticks(void){return recorder_host_ticks();}
+@@ -153,7 +163,9 @@
+  if(!free_pages(&pages)||(pressure_target&&pages!=900)){error="pressure-before-measurement";goto done;}
+  tap_comment("STORAGE-IO-V6-META version=6 fixture_generation=6 counter=rdtsc nominal_hz=%llu timing=order_aware_submit_and_apc oracle=post_batch_full_bytes route=%s dataset=%u qd_requested=%u pressure_target=%u cache=%s payload_bytes=%u slab_bytes=%u records_bytes=%u raw_base=%llu seed_flush_status=%08x",NOMINAL_HZ,raw_device?"raw-device":"fatx-file",(unsigned)(raw_device?0:dataset),(unsigned)depth,(unsigned)pressure_target,warm?"warm":"cold-ish",(unsigned)payload_bytes,(unsigned)slab_bytes,(unsigned)sizeof(records),raw_device?RAW_DEVICE_BASE:0,(unsigned)seed_flush_status);
+  phase("measured_ready"); /* No buffer work, verification or output between first issue and last APC entry. */
++ profile_phase_begin();
+  if(!run_batch(depth)){error="measured-timeout";goto done;}
++ profile_phase_end();
+  phase("timing_end");oracle_failures=verify_all();failures=oracle_failures;setup=true;
+  for(ULONG i=0;i<COUNT;i++){struct Observation *o=&records[i];tap_comment("STORAGE-IO-V6-OP index=%u offset=%u bytes=%u alignment=%u slice_offset=%u slice_bytes=%u issue=%llu submit_return=%llu apc_entry=%llu ready=%llu apc_lifetime_ticks=%llu submit_ticks=%llu post_return_to_apc_ticks=%llu return_after_apc_ticks=%llu completion_order=%s submit_status=%08x io_status=%08x information=%u apcs=%u pointer_match=%u oracle_good=%u",(unsigned)i,(unsigned)o->request->offset,(unsigned)o->request->length,(unsigned)o->request->alignment,(unsigned)o->slice_offset,(unsigned)o->slice_bytes,o->issue,o->submit_return,o->apc_entry,o->ready,o->ready>=o->issue?o->ready-o->issue:0,o->submit_return>=o->issue?o->submit_return-o->issue:0,o->ready>=o->submit_return?o->ready-o->submit_return:0,o->submit_return>o->ready?o->submit_return-o->ready:0,o->ready<o->submit_return?"apc-before-return":"return-before-apc",(unsigned)o->submit,(unsigned)o->callback_status,(unsigned)o->callback_information,(unsigned)o->apcs,(unsigned)o->pointer_match,o->oracle_good?1u:0u);}
+  tap_comment("STORAGE-IO-V6-CASE operations_expected=%u operations_completed=%u bytes_completed=%u apc_batch_ticks=%llu caller_batch_ticks=%llu first_issue=%llu last_ready=%llu last_caller=%llu caller_lifetime_sum_ticks=%llu submit_sum_ticks=%llu post_return_to_apc_sum_ticks=%llu return_after_apc_sum_ticks=%llu caller_occupancy=issue_to_apc_entry qd_requested=%u max_active_slots=%u measured_pages_before=%u failures=%u oracle=post_batch_full_bytes route=%s",(unsigned)COUNT,(unsigned)verified_operations,(unsigned)verified_bytes,apc_batch_ticks,caller_batch_ticks,first_issue,last_ready,last_caller,lifetime_ticks,submit_ticks,post_return_ticks,return_after_apc_ticks,(unsigned)depth,(unsigned)max_active_slots,(unsigned)pages,(unsigned)failures,raw_device?"raw-device":"fatx-file");

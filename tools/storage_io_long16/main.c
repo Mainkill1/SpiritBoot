@@ -22,6 +22,7 @@ static bool select_case(ULONG *dataset,ULONG *depth,ULONG *pressure,bool *warm,c
  const char *plan=strstr(configuration,"\"resolved_plan\"");const char *tests=plan?strstr(plan,"\"tests\""):NULL;if(!tests||!string_value(tests,"id",selected,capacity))return false;
  const char *first=strstr(tests,"\"id\"");if(!first||strstr(first+4,"\"id\""))return false;
  if(!strcmp(selected,"raw-d0-q1-p0-synthetic.warm")){*dataset=2;*depth=1;*pressure=0;*warm=true;return true;}
+ if(!strcmp(selected,"forza-map-stream-d0-q12-p900.warm")){*dataset=0;*depth=12;*pressure=900;*warm=true;return true;}
  unsigned d,q,p;char cache[16],canonical[96];int end=0;
  if(sscanf(selected,"fatx-d%u-q%u-p%u-synthetic.%15s%n",&d,&q,&p,cache,&end)!=4||selected[end]!=0)return false;
  if(d>1||(q!=1&&q!=4&&q!=12)||(p!=0&&p!=900)||(strcmp(cache,"warm")&&strcmp(cache,"cold-ish")))return false;
@@ -33,10 +34,13 @@ int main(void){
  tap_version(13);tap_plan(1);ULONG dataset,depth,pressure;bool warm;char selected[96];
  if(!select_case(&dataset,&depth,&pressure,&warm,selected,sizeof(selected))){tap_comment("STORAGE-IO-V6-ERROR stage=case-selection");tap_not_ok(1,"generation6 private configuration selection");finish();}
  tap_comment("STORAGE-IO-V6-SELECTION id=%s protocol_version=6",selected);
+ bool forza=!strcmp(selected,"forza-map-stream-d0-q12-p900.warm");
+ if(forza)tap_comment("STORAGE-FORZA-MAP-META version=1 source=public-api-metadata requests=1024 observed_title_high_water=10 reference_high_water=12 measured_qd=12 pressure_pages=900 passes=16");
  int failed=0;
  for(ULONG pass=0;pass<MEASUREMENT_PASSES;pass++){
   tap_comment("STORAGE-IO-V7-PASS index=%u count=%u",(unsigned)(pass+1),(unsigned)MEASUREMENT_PASSES);
+  if(forza)tap_comment("STORAGE-FORZA-MAP-PASS index=%u count=%u",(unsigned)(pass+1),(unsigned)MEASUREMENT_PASSES);
   if(recorder_execute(dataset,depth,pressure,warm)){failed=1;break;}
  }
- if(failed)tap_not_ok(1,"generation6 order-aware raw/file timing with complete byte oracle long-run");else tap_ok(1,"generation6 order-aware raw/file timing with complete byte oracle long-run");finish();
+ if(failed)tap_not_ok(1,forza?"Forza map streaming public request replay":"generation6 order-aware raw/file timing with complete byte oracle long-run");else tap_ok(1,forza?"Forza map streaming public request replay":"generation6 order-aware raw/file timing with complete byte oracle long-run");finish();
 }

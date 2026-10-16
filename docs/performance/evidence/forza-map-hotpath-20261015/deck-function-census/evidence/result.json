@@ -1,0 +1,235 @@
+{
+  "runId": "20261016-065809185-372316c894b54f5c902ac9b4be7281ae",
+  "job": "forza-map-stream-sg-phase-profile-deck-20261015-v1",
+  "jobPackage": "agent-forza-map-stream-sg-phase-profile-deck-20261015-v1",
+  "attempt": 1,
+  "status": "completed",
+  "detail": null,
+  "startedUtc": "2026-10-16T06:58:09.1850354+00:00",
+  "endedUtc": "2026-10-16T07:00:02.9881891+00:00",
+  "durationMs": 113803.1538,
+  "processId": 20642,
+  "exitCode": 0,
+  "crash": {
+    "RunId": "20261016-065809185-372316c894b54f5c902ac9b4be7281ae",
+    "ExecutableSha256": "95bf0ae6c73e19c3696807fb1810e4f3e8ce8929397f14da286e5973a342e459",
+    "Platform": "linux",
+    "ProcessId": 20642,
+    "ExitCode": 0,
+    "RunnerTerminated": false,
+    "Crashed": false,
+    "Source": "waitpid",
+    "Code": null,
+    "Capture": "notNeeded",
+    "Dump": "notRequested",
+    "Analysis": "notRequested",
+    "TopFrames": [],
+    "Issues": []
+  },
+  "diagnosticBundle": "diagnostic-bundle.json",
+  "launchMode": "direct",
+  "snapshotName": null,
+  "startPaused": false,
+  "executable": "xemu",
+  "executableSha256": "95bf0ae6c73e19c3696807fb1810e4f3e8ce8929397f14da286e5973a342e459",
+  "arguments": [
+    "-config_path",
+    "/home/deck/xemu-performance/pr30-disk-assets-live/workspace/Queue/Testing/agent-forza-map-stream-sg-phase-profile-deck-20261015-v1/xemu.toml",
+    "-m",
+    "64",
+    "-device",
+    "lpc47m157",
+    "-serial",
+    "file:/home/deck/xemu-performance/pr30-disk-assets-live/workspace/Results/20261016-065809185-372316c894b54f5c902ac9b4be7281ae/serial.log",
+    "-plugin",
+    "/home/deck/xemu-performance/pr30-disk-assets-live/workspace/Queue/Testing/agent-forza-map-stream-sg-phase-profile-deck-20261015-v1/phase_function_profile.so,entries=/home/deck/xemu-performance/pr30-disk-assets-live/workspace/Queue/Testing/agent-forza-map-stream-sg-phase-profile-deck-20261015-v1/spiritboot-sg.functions,output=/home/deck/xemu-performance/pr30-disk-assets-live/workspace/Results/20261016-065809185-372316c894b54f5c902ac9b4be7281ae/phase-profile.ndjson,begin=0x110e0,end=0x110f0",
+    "-perfmap",
+    "-no-shutdown",
+    "-qmp",
+    "tcp:127.0.0.1:33155,server=on,wait=off"
+  ],
+  "watchdog": null,
+  "failureCaptureError": null,
+  "automaticDiagnostic": null,
+  "automaticDiagnosticError": null,
+  "diagnostics": [],
+  "operatorActivity": {
+    "Intervened": false,
+    "ManualInputs": 0,
+    "Pauses": 0,
+    "Screenshots": 0,
+    "PreviewCaptures": 0,
+    "BulkTransfers": 0,
+    "Diagnostics": 0,
+    "HostStateChanges": 0
+  },
+  "workload": {
+    "Correctness": "notEvaluated",
+    "Evidence": "complete",
+    "Checks": [
+      {
+        "Name": "phase-profile",
+        "Passed": true,
+        "Category": "evidence",
+        "Detail": "result:phase-profile.ndjson satisfied the declared requirement."
+      },
+      {
+        "Name": "serial",
+        "Passed": true,
+        "Category": "evidence",
+        "Detail": "result:serial.log satisfied the declared requirement."
+      },
+      {
+        "Name": "plan_completion",
+        "Passed": true,
+        "Category": "evidence",
+        "Detail": "The declared plan completed."
+      },
+      {
+        "Name": "run_storage_state",
+        "Passed": true,
+        "Category": "state",
+        "Detail": "Application cache and private guest inputs recorded; driver and OS caches remain explicitly disclosed limitations."
+      }
+    ],
+    "Measurements": []
+  },
+  "assessment": {
+    "Execution": "completed",
+    "Correctness": "notEvaluated",
+    "Evidence": "complete",
+    "Comparison": "ineligible",
+    "ComparisonReasons": [
+      "Correctness outcome is NotEvaluated; a passing correctness contract is required."
+    ],
+    "Checks": [
+      {
+        "Name": "phase-profile",
+        "Passed": true,
+        "Category": "evidence",
+        "Detail": "result:phase-profile.ndjson satisfied the declared requirement."
+      },
+      {
+        "Name": "serial",
+        "Passed": true,
+        "Category": "evidence",
+        "Detail": "result:serial.log satisfied the declared requirement."
+      },
+      {
+        "Name": "plan_completion",
+        "Passed": true,
+        "Category": "evidence",
+        "Detail": "The declared plan completed."
+      },
+      {
+        "Name": "run_storage_state",
+        "Passed": true,
+        "Category": "state",
+        "Detail": "Application cache and private guest inputs recorded; driver and OS caches remain explicitly disclosed limitations."
+      }
+    ],
+    "IsExecutionSuccess": true,
+    "IsCorrectnessSuccess": true
+  },
+  "correctnessStatus": "notevaluated",
+  "evidenceStatus": "complete",
+  "comparisonStatus": "ineligible",
+  "experiment": {
+    "Id": "forza-map-stream-sg-phase-profile-20261015",
+    "Variant": "retained-sg-phase-census",
+    "Reference": null,
+    "VariedFactors": [
+      "diagnostic-plugin",
+      "marker-only-fixture"
+    ],
+    "ControlledFactors": [
+      "bios",
+      "kernel",
+      "request-metadata",
+      "hdd",
+      "host"
+    ],
+    "RequireCorrectnessPass": true,
+    "RequireCompleteEvidence": true,
+    "AllowOperatorIntervention": false,
+    "AllowDiagnostics": true
+  },
+  "operations": {
+    "Mode": "diagnostic",
+    "AllowPreview": false,
+    "AllowManualInput": false,
+    "AllowPauseResume": false,
+    "AllowDiagnostics": false,
+    "AllowBulkTransfers": true,
+    "PreviewAllowed": false,
+    "ManualInputAllowed": false,
+    "PauseResumeAllowed": false,
+    "DiagnosticsAllowed": false,
+    "BulkTransfersAllowed": true
+  },
+  "inputManifest": "input-manifest.json",
+  "controllerInput": null,
+  "runtimeDirectory": "/home/deck/xemu-performance/pr30-disk-assets-live/workspace/Runtime/20261016-065809185-372316c894b54f5c902ac9b4be7281ae",
+  "hostInventory": "host-inventory.json",
+  "workstationStart": {
+    "Supported": false,
+    "Platform": "linux",
+    "SessionLocked": null,
+    "InputDesktop": null,
+    "DisplayState": "unknown",
+    "PowerState": "unknown",
+    "PowerSource": "unknown",
+    "BatteryPercent": null,
+    "BatterySaver": null,
+    "UserIdleSeconds": null,
+    "TimestampUtc": "2026-10-16T02:24:39.8062687+00:00",
+    "LastSessionChangeUtc": null,
+    "LastDisplayChangeUtc": null,
+    "LastSuspendUtc": null,
+    "LastResumeUtc": null,
+    "LastEvent": "workstation monitoring is currently implemented for Windows only",
+    "EventSequence": 1,
+    "RenderingRisk": false
+  },
+  "workstationEnd": {
+    "Supported": false,
+    "Platform": "linux",
+    "SessionLocked": null,
+    "InputDesktop": null,
+    "DisplayState": "unknown",
+    "PowerState": "unknown",
+    "PowerSource": "unknown",
+    "BatteryPercent": null,
+    "BatterySaver": null,
+    "UserIdleSeconds": null,
+    "TimestampUtc": "2026-10-16T02:24:39.8062687+00:00",
+    "LastSessionChangeUtc": null,
+    "LastDisplayChangeUtc": null,
+    "LastSuspendUtc": null,
+    "LastResumeUtc": null,
+    "LastEvent": "workstation monitoring is currently implemented for Windows only",
+    "EventSequence": 1,
+    "RenderingRisk": false
+  },
+  "host": {
+    "runnerVersion": "0.2.0\u002B3aa5e059d52339bf4b14725260e124322c30beca",
+    "machine": "MainDeck",
+    "os": "SteamOS",
+    "architecture": "X64",
+    "processArchitecture": "X64",
+    "processorCount": 8,
+    "dotnet": "10.0.12"
+  },
+  "monitoring": {
+    "intervalMs": 500,
+    "samples": 228,
+    "overruns": 0,
+    "droppedWriteSamples": 0,
+    "averageCollectorDutyPercent": 0.35345096491228056,
+    "maxCollectorDutyPercent": 1.0783200000000002,
+    "maxCollectorDurationMs": 5.3916,
+    "gpuProviders": [
+      "Linux DRM sysfs"
+    ]
+  }
+}

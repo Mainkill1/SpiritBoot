@@ -1,0 +1,282 @@
+--- a/drivers/storage/class/nxstorage/native_packet.c
++++ b/drivers/storage/class/nxstorage/native_packet.c
+@@ -7,6 +7,17 @@
+ 
+ enum { EXECUTE=0, RELEASE_QUEUE=4, DATA_IN=0x40, DATA_OUT=0x80,
+        SCSI_MAJOR=0x0b, INVOKE_ALL=0xe0, SRB_FROZEN=0x40, SRB_SENSE=0x80 };
++
++#ifdef NX_NATIVE_TARGET
++typedef char nx_srb_size_is_word_multiple[
++    sizeof(SCSI_REQUEST_BLOCK)%sizeof(uint32_t)==0 ? 1 : -1];
++typedef char nx_stack_size_is_word_multiple[
++    sizeof(IO_STACK_LOCATION)%sizeof(uint32_t)==0 ? 1 : -1];
++typedef char nx_srb_alignment_is_word[
++    __alignof__(SCSI_REQUEST_BLOCK)>=__alignof__(uint32_t) ? 1 : -1];
++typedef char nx_stack_alignment_is_word[
++    __alignof__(IO_STACK_LOCATION)>=__alignof__(uint32_t) ? 1 : -1];
++#endif
+ 
+ static void clear_bytes(void *p, size_t n)
+ {
+@@ -20,6 +31,64 @@
+ #endif
+     uint8_t *b=p;
+     for (size_t i=0;i<n;++i) b[i]=0;
++}
++
++/* SRBs and I/O stack locations are native objects, so their addresses and
++ * sizes have word alignment.  Keep the byte-safe helper for caller-supplied
++ * sense storage, but do not make every retained-object reset rediscover facts
++ * carried by its type. */
++static __inline__ __attribute__((always_inline))
++void clear_native_object(void *p, size_t n)
++{
++#ifdef NX_NATIVE_TARGET
++    uint32_t *wide=p;
++    size_t count=n/sizeof(*wide);
++    __asm__ __volatile__("rep stosl" : "+D"(wide), "+c"(count) : "a"(0) : "memory");
++#else
++    clear_bytes(p,n);
++#endif
++}
++
++static void copy_cdb(uint8_t destination[16], const uint8_t source[16],
++                     unsigned length)
++{
++    typedef uint16_t unaligned_u16 __attribute__((aligned(1),may_alias));
++    typedef uint32_t unaligned_u32 __attribute__((aligned(1),may_alias));
++    /* Length was admitted before this helper.  These GNU unaligned aliases
++     * express the native x86 operation without making the C source claim that
++     * the compact command bytes have natural word alignment. */
++    /* READ(10)/WRITE(10) is the measured common game path.  Keeping it
++     * outside the defensive switch prevents the release compiler from adding
++     * three other length comparisons ahead of it. */
++    if (__builtin_expect(length==10,1)) {
++        *(unaligned_u32 *)(destination+0)=*(const unaligned_u32 *)(source+0);
++        *(unaligned_u32 *)(destination+4)=*(const unaligned_u32 *)(source+4);
++        *(unaligned_u16 *)(destination+8)=*(const unaligned_u16 *)(source+8);
++        return;
++    }
++    switch(length) {
++    case 0:
++        break;
++    case 6:
++        *(unaligned_u32 *)(destination+0)=*(const unaligned_u32 *)(source+0);
++        *(unaligned_u16 *)(destination+4)=*(const unaligned_u16 *)(source+4);
++        break;
++    case 12:
++        *(unaligned_u32 *)(destination+0)=*(const unaligned_u32 *)(source+0);
++        *(unaligned_u32 *)(destination+4)=*(const unaligned_u32 *)(source+4);
++        *(unaligned_u32 *)(destination+8)=*(const unaligned_u32 *)(source+8);
++        break;
++    case 16:
++        *(unaligned_u32 *)(destination+0)=*(const unaligned_u32 *)(source+0);
++        *(unaligned_u32 *)(destination+4)=*(const unaligned_u32 *)(source+4);
++        *(unaligned_u32 *)(destination+8)=*(const unaligned_u32 *)(source+8);
++        *(unaligned_u32 *)(destination+12)=*(const unaligned_u32 *)(source+12);
++        break;
++    default:
++        /* The caller admits only 0, 6, 10, 12, or 16.  Keep this defensive
++         * no-access arm if the helper is reused incorrectly. */
++        break;
++    }
+ }
+ 
+ static int data_range(const nx_packet_resources *r, const nx_packet_command *c)
+@@ -37,9 +106,12 @@
+         c->bytes>mdl->ByteCount-(c->data_virtual-base) ||
+         c->bytes>UINTPTR_MAX-c->data_virtual ||
+         (c->data_virtual & c->alignment_mask)) return 0;
+-    uint64_t pages=((uint64_t)mdl->ByteOffset+mdl->ByteCount+NX_PACKET_PAGE_BYTES-1u)/NX_PACKET_PAGE_BYTES;
+-    uint64_t segment_pages=((c->data_virtual & (NX_PACKET_PAGE_BYTES-1u))+
+-        (uint64_t)c->bytes+NX_PACKET_PAGE_BYTES-1u)/NX_PACKET_PAGE_BYTES;
++    /* The containment checks above prove both inclusive endpoints fit in the
++     * native address width.  The page counts therefore need no 64-bit helper
++     * arithmetic on i386. */
++    uintptr_t pages=(((uintptr_t)mdl->ByteOffset+mdl->ByteCount-1u)/NX_PACKET_PAGE_BYTES)+1u;
++    uintptr_t segment_pages=((c->data_virtual & (NX_PACKET_PAGE_BYTES-1u))+
++        c->bytes-1u)/NX_PACKET_PAGE_BYTES+1u;
+     return pages<=r->pfn_capacity && segment_pages<=c->max_pages;
+ }
+ 
+@@ -65,11 +137,11 @@
+     /* Ownership/thread association are caller preconditions, not inferred from
+      * numeric addresses. Reuse resets packet state but frees no MDL or sense. */
+     IoReuseIrp(r->child,(NTSTATUS)0x103);
+-    clear_bytes(r->srb,sizeof(*r->srb));
++    clear_native_object(r->srb,sizeof(*r->srb));
+     clear_bytes(r->sense,r->sense_capacity);
+     r->child->MdlAddress=c->bytes ? r->mdl:NULL;
+     PIO_STACK_LOCATION next=r->child->Tail.Overlay.CurrentStackLocation-1;
+-    clear_bytes(next,sizeof(*next));
++    clear_native_object(next,sizeof(*next));
+     next->MajorFunction=SCSI_MAJOR;
+     next->Parameters.Scsi.Srb=r->srb;
+     next->CompletionRoutine=c->completion;
+@@ -85,7 +157,7 @@
+     r->srb->DataBuffer=c->bytes ? (void *)c->data_virtual:NULL;
+     r->srb->SenseInfoBuffer=r->sense;
+     r->srb->OriginalRequest=r->child;
+-    for (unsigned i=0;i<c->cdb_length;++i) r->srb->Cdb[i]=c->cdb[i];
++    copy_cdb(r->srb->Cdb,c->cdb,c->cdb_length);
+     *ticket=(nx_packet_ticket){r->child,r->srb,r->sense,c->token,c->bytes,r->sense_capacity};
+     return NX_PACKET_OK;
+ }
+--- a/tests/host/nxstorage/native_packet_test.c
++++ b/tests/host/nxstorage/native_packet_test.c
+@@ -3,6 +3,15 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <stdlib.h>
++#if defined(__has_feature)
++#if __has_feature(memory_sanitizer)
++#include <sanitizer/msan_interface.h>
++#define NX_PACKET_MSAN 1
++#endif
++#endif
++#ifndef NX_PACKET_MSAN
++#define NX_PACKET_MSAN 0
++#endif
+ #define CHECK(x) do { if (!(x)) { fprintf(stderr,"%s:%d %s\n",__func__,__LINE__,#x); return 0; } } while(0)
+ #define MUST(x) do { if (!(x)) abort(); } while(0)
+ typedef struct fixture {
+@@ -185,6 +194,96 @@
+     CHECK(nx_packet_capture(NULL,&r)==NX_PACKET_INVALID);
+     return 1;
+ }
++static int release_queue_does_not_read_cdb(void)
++{
++    fixture f;init(&f);
++    f.command.function=4;f.command.cdb_length=0;f.command.bytes=0;
++    f.command.direction=0;f.command.data_virtual=0;f.command.mdl_virtual=0;
++    f.resources.mdl=NULL;
++    memset(f.command.cdb,0xa5,sizeof(f.command.cdb));
++#if NX_PACKET_MSAN
++    __msan_poison(f.command.cdb,sizeof(f.command.cdb));
++#endif
++    CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++    CHECK(f.srb.Function==4 && !f.srb.CdbLength);
++    for(unsigned i=0;i<sizeof(f.srb.Cdb);++i) CHECK(f.srb.Cdb[i]==0);
++#if NX_PACKET_MSAN
++    __msan_unpoison(f.command.cdb,sizeof(f.command.cdb));
++#endif
++    return 1;
++}
++static int poisoned_reuse_clears_exact_cdb_extents(void)
++{
++    static const unsigned lengths[]={6,10,12,16};
++    for(unsigned round=0;round<1024;++round) {
++        fixture f;init(&f);
++        unsigned length=lengths[round&3u];
++        f.command.cdb_length=(uint8_t)length;
++        for(unsigned i=0;i<16;++i) f.command.cdb[i]=(uint8_t)(0x40u+i+round);
++        memset(&f.srb,(int)(0x80u|(round&0x7fu)),sizeof(f.srb));
++        memset(f.sense,(int)(1u+(round&0x7fu)),sizeof(f.sense));
++        memset(&f.stack[2],(int)(0x55u^(round&0xffu)),sizeof(f.stack[2]));
++#if NX_PACKET_MSAN
++        __msan_poison(f.command.cdb+length,sizeof(f.command.cdb)-length);
++#endif
++        CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++#if NX_PACKET_MSAN
++        __msan_unpoison(f.command.cdb+length,sizeof(f.command.cdb)-length);
++#endif
++        for(unsigned i=0;i<length;++i) CHECK(f.srb.Cdb[i]==f.command.cdb[i]);
++        for(unsigned i=length;i<16;++i) CHECK(f.srb.Cdb[i]==0);
++        for(unsigned i=0;i<sizeof(f.sense);++i) CHECK(f.sense[i]==0);
++        CHECK(f.stack[2].MajorFunction==0x0b && !f.stack[2].MinorFunction &&
++              !f.stack[2].Flags && f.stack[2].Control==0xe0);
++        CHECK(f.stack[2].Parameters.Scsi.Srb==&f.srb &&
++              f.stack[2].CompletionRoutine==completion && f.stack[2].Context==&f);
++        CHECK(!f.srb.NextSrb && !f.srb.SrbExtension && !f.srb.InternalStatus);
++        CHECK(f.ticket.child==&f.child && f.ticket.srb==&f.srb &&
++              f.ticket.sense==f.sense && f.ticket.submitted_bytes==4096);
++    }
++    return 1;
++}
++static int page_extent_reduction_matches_wide_oracle(void)
++{
++    uint32_t state=0x3d2e1f09u;
++    for(unsigned round=0;round<4096;++round) {
++        fixture f;init(&f);
++        state=state*1664525u+1013904223u;uint32_t offset=state&4095u;
++        state=state*1664525u+1013904223u;uint32_t count=(state&0xfffffu)+1u;
++        state=state*1664525u+1013904223u;uint32_t delta=state%count;
++        state=state*1664525u+1013904223u;uint32_t bytes=(state%(count-delta))+1u;
++        uintptr_t start=(uintptr_t)((state&0xffff0u)<<12);
++        f.mdl.StartVa=(void *)start;f.mdl.ByteOffset=offset;f.mdl.ByteCount=count;
++        f.command.mdl_virtual=start+offset;
++        f.command.data_virtual=f.command.mdl_virtual+delta;f.command.bytes=bytes;
++        f.command.max_bytes=UINT32_MAX;f.command.alignment_mask=0;
++        uint64_t wide_pages=((uint64_t)offset+count+4095u)/4096u;
++        uint64_t wide_segment=((f.command.data_virtual&4095u)+(uint64_t)bytes+4095u)/4096u;
++        f.resources.pfn_capacity=(uint32_t)wide_pages;
++        f.command.max_pages=(uint32_t)wide_segment;
++        CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++        if(wide_pages>1) {
++            init(&f);f.mdl.StartVa=(void *)start;f.mdl.ByteOffset=offset;f.mdl.ByteCount=count;
++            f.command.mdl_virtual=start+offset;f.command.data_virtual=f.command.mdl_virtual+delta;
++            f.command.bytes=bytes;f.command.max_bytes=UINT32_MAX;f.command.alignment_mask=0;
++            f.resources.pfn_capacity=(uint32_t)wide_pages-1u;
++            f.command.max_pages=(uint32_t)wide_segment;
++            CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_INVALID);
++            CHECK(reuse_calls==0 && f.srb.Length==0xa5a5u);
++        }
++    }
++    fixture edge;init(&edge);edge.mdl.StartVa=0;edge.mdl.ByteOffset=4095;
++    edge.mdl.ByteCount=UINT32_MAX;edge.command.mdl_virtual=4095;
++    edge.command.data_virtual=4095;edge.command.bytes=1;edge.command.max_bytes=UINT32_MAX;
++    edge.resources.pfn_capacity=1048577;edge.command.max_pages=1;
++    CHECK(nx_packet_prepare(&edge.resources,&edge.command,&edge.ticket)==NX_PACKET_OK);
++    init(&edge);edge.mdl.StartVa=0;edge.mdl.ByteOffset=4095;
++    edge.mdl.ByteCount=UINT32_MAX;edge.command.mdl_virtual=4095;
++    edge.command.data_virtual=4095;edge.command.bytes=1;edge.command.max_bytes=UINT32_MAX;
++    edge.resources.pfn_capacity=1048576;edge.command.max_pages=1;
++    CHECK(nx_packet_prepare(&edge.resources,&edge.command,&edge.ticket)==NX_PACKET_INVALID);
++    return 1;
++}
+ /* Production packet/core interoperability, not a native lifecycle adapter. */
+ typedef struct core_fixture {
+     fixture packet; nx_device device; nx_slot slot;
+@@ -241,10 +340,13 @@
+         {"terminal_copy",copies_terminal_before_reuse},
+         {"bounded_terminal",bounded_terminal_failures},
+         {"core_zero_domain",core_zero_domain_write_through},
+-        {"sense_extent_cdb16",sense_extent_and_cdb16}};
++        {"sense_extent_cdb16",sense_extent_and_cdb16},
++        {"release_queue_no_cdb_read",release_queue_does_not_read_cdb},
++        {"poisoned_reuse_cdb_extents",poisoned_reuse_clears_exact_cdb_extents},
++        {"page_extent_reduction",page_extent_reduction_matches_wide_oracle}};
+     unsigned failed=0;
+     for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
+         int ok=cases[i].run();printf("%s %s\n",ok?"PASS":"FAIL",cases[i].name);failed+=!ok;
+     }
+-    printf("7 groups, %u failures\n",failed);return failed?1:0;
+-}
++    printf("10 groups, %u failures\n",failed);return failed?1:0;
++}
+--- a/tests/host/nxstorage/check_packet.py
++++ b/tests/host/nxstorage/check_packet.py
+@@ -2,6 +2,7 @@
+ """Run the actual unlinked owned packet functions and existing request core."""
+ from pathlib import Path
+ import os
++import shutil
+ import subprocess
+ import sys
+ root=Path(__file__).resolve().parents[3]
+@@ -20,3 +21,15 @@
+         env=dict(os.environ,ASAN_OPTIONS='detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1',UBSAN_OPTIONS='halt_on_error=1'))
+     (out/(name+'.log')).write_text(result.stdout+result.stderr)
+     print(name+': '+result.stdout.splitlines()[-1])
++msan_cc=shutil.which(os.environ.get('MSAN_CC','clang'))
++if msan_cc:
++    name='packet-msan'
++    exe=out/name
++    flags=['-fsanitize=memory','-fno-omit-frame-pointer','-fPIE','-pie']
++    subprocess.run([msan_cc]+base[1:]+flags+inputs+['-o',str(exe)],check=True)
++    result=subprocess.run([str(exe)],check=True,text=True,capture_output=True,
++        env=dict(os.environ,MSAN_OPTIONS='halt_on_error=1'))
++    (out/(name+'.log')).write_text(result.stdout+result.stderr)
++    print(name+': '+result.stdout.splitlines()[-1])
++else:
++    print('packet-msan: SKIP (set MSAN_CC to a MemorySanitizer-capable clang)')

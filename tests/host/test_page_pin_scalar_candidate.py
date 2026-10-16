@@ -14,11 +14,13 @@ class PagePinScalarCandidateTests(unittest.TestCase):
         lock = json.loads((ROOT / "sources/firmware-lock.json").read_text())
         entries = lock["repositories"]["roswell"]["patches"]
         paths = [entry["path"] for entry in entries]
-        self.assertEqual(paths[-2:], [
+        expected = [
             "patches/roswell/0144-page-pin-native-workload.patch",
             "patches/roswell/0145-scalar-page-pin-hotpath.patch",
-        ])
-        for entry in entries[-2:]:
+        ]
+        start = paths.index(expected[0])
+        self.assertEqual(paths[start:start + len(expected)], expected)
+        for entry in entries[start:start + len(expected)]:
             data = (ROOT / entry["path"]).read_bytes()
             self.assertEqual(hashlib.sha256(data).hexdigest(), entry["sha256"])
 
