@@ -214,6 +214,8 @@ static void audio_edit_preserves_unknown_bits(void) {
 static void advanced_cache_alias_is_session_only(void) {
     Store f={0}; SbSettingsStore io={&f,commit}; SbSetup s; char text[32];
     sb_setup_open(&s,initial(),SB_ALL_FIELDS); press(&s,SB_Y,&io);
+    assert(s.state==SB_MENU_ADVANCED && s.row==SB_ADVANCED_ALL);
+    press(&s,SB_DOWN,&io);
     assert(s.state==SB_MENU_ADVANCED && s.row==SB_CONTIG_CACHE_ALIAS);
     press(&s,SB_A,&io);
     assert(s.edited.experimental==SB_EXPERIMENT_CONTIG_CACHE_ALIAS);
@@ -224,29 +226,49 @@ static void advanced_cache_alias_is_session_only(void) {
     assert(s.state==SB_MENU_EDIT && s.row==SB_LANGUAGE && f.calls==0);
     assert(s.edited.experimental==SB_EXPERIMENT_CONTIG_CACHE_ALIAS);
 }
+static void advanced_all_toggle_is_explicit_and_session_only(void) {
+    Store f={0}; SbSettingsStore io={&f,commit}; SbSetup s; char text[32];
+    sb_setup_open(&s,initial(),SB_ALL_FIELDS); press(&s,SB_Y,&io);
+    assert(s.state==SB_MENU_ADVANCED && s.row==SB_ADVANCED_ALL);
+    sb_setup_field_value(&s,SB_ADVANCED_ALL,text,sizeof(text));
+    assert(strcmp(text,"Off")==0);
+    press(&s,SB_A,&io);
+    assert((s.edited.experimental & SB_EXPERIMENT_ADVANCED_ALL_MASK)==
+           SB_EXPERIMENT_ADVANCED_ALL_MASK);
+    assert(sb_setup_changed(&s)==0 && f.calls==0);
+    sb_setup_field_value(&s,SB_ADVANCED_ALL,text,sizeof(text));
+    assert(strcmp(text,"On")==0);
+    press(&s,SB_DOWN,&io);
+    press(&s,SB_A,&io);
+    press(&s,SB_UP,&io);
+    sb_setup_field_value(&s,SB_ADVANCED_ALL,text,sizeof(text));
+    assert(strcmp(text,"Mixed")==0);
+    press(&s,SB_A,&io);
+    assert((s.edited.experimental & SB_EXPERIMENT_ADVANCED_ALL_MASK)==
+           SB_EXPERIMENT_ADVANCED_ALL_MASK);
+    press(&s,SB_A,&io);
+    assert((s.edited.experimental & SB_EXPERIMENT_ADVANCED_ALL_MASK)==0);
+}
 static void advanced_ata_settle_is_explicit_and_session_only(void) {
     Store f={0}; SbSettingsStore io={&f,commit}; SbSetup s; char text[32];
     sb_setup_open(&s,initial(),SB_ALL_FIELDS);
     press(&s,SB_Y,&io);
     press(&s,SB_DOWN,&io);
+    press(&s,SB_DOWN,&io);
     assert(s.state==SB_MENU_ADVANCED && s.row==SB_ATA_STATUS_SETTLE);
-    press(&s,SB_A,&io);
-    assert(s.edited.experimental==SB_EXPERIMENT_ATA_FORCE_SAFE);
-    assert(sb_setup_changed(&s)==0 && f.calls==0);
     sb_setup_field_value(&s,SB_ATA_STATUS_SETTLE,text,sizeof(text));
     assert(strcmp(text,"Safe delay")==0);
+    assert((s.edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK)==0);
     press(&s,SB_A,&io);
     assert(s.edited.experimental==SB_EXPERIMENT_ATA_FORCE_ALL);
+    assert(sb_setup_changed(&s)==0 && f.calls==0);
     sb_setup_field_value(&s,SB_ATA_STATUS_SETTLE,text,sizeof(text));
-    assert(strcmp(text,"All QEMU devices (test)")==0);
+    assert(strcmp(text,"All devices (test)")==0);
     press(&s,SB_A,&io);
     assert((s.edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK)==0);
-    sb_setup_field_value(&s,SB_ATA_STATUS_SETTLE,text,sizeof(text));
-    assert(strcmp(text,"Auto (QEMU HDD)")==0);
-    press(&s,SB_A,&io);
     press(&s,SB_Y,&io);
     assert(s.state==SB_MENU_EDIT && s.row==SB_LANGUAGE);
-    assert(s.edited.experimental==SB_EXPERIMENT_ATA_FORCE_SAFE);
+    assert(s.edited.experimental==0);
 }
 static void main_navigation_skips_advanced_rows(void) {
     SbSetup s; sb_setup_open(&s,initial(),SB_ALL_FIELDS);
@@ -480,6 +502,7 @@ int main(void) {
     RUN(language_wrap_and_unknown_value); RUN(video_edit_preserves_unknown_bits);
     RUN(aspect_modes_are_mutually_exclusive); RUN(audio_edit_preserves_unknown_bits);
     RUN(advanced_cache_alias_is_session_only);
+    RUN(advanced_all_toggle_is_explicit_and_session_only);
     RUN(advanced_ata_settle_is_explicit_and_session_only);
     RUN(main_navigation_skips_advanced_rows);
     RUN(unavailable_fields_cannot_be_changed); RUN(conflicting_buttons_are_ignored);

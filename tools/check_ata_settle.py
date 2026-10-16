@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the safe and QEMU-gated ATA device-select settle paths."""
+"""Validate safe-default and explicitly enabled ATA select settle paths."""
 
 import argparse
 from pathlib import Path
@@ -31,27 +31,27 @@ def check(source_root: Path) -> None:
 
     required_header_tokens = (
         "PataDeviceSelectWait",
-        "NXK_EXPERIMENT_ATA_FORCE_SAFE",
         "NXK_EXPERIMENT_ATA_FORCE_ALL",
-        "NxkQemuAtaDiskTargets",
         "ATA_IO_WAIT();",
     )
     for token in required_header_tokens:
         if token not in text:
-            raise ValueError(f"missing QEMU ATA settle guard: {token}")
+            raise ValueError(f"missing explicit ATA settle guard: {token}")
     helper = text[text.index("PataDeviceSelectWait"):]
     helper = helper[:helper.index("#else")]
     if helper.count("READ_PORT_UCHAR(ChanData->Regs.Control)") != 4:
-        raise ValueError("QEMU fast settle must perform exactly four status reads")
-    safe = helper.find("NXK_EXPERIMENT_ATA_FORCE_SAFE")
-    qemu_present = helper.find("!NxkQemuAtaDiskTargets")
-    force_all = helper.find("NXK_EXPERIMENT_ATA_FORCE_ALL")
-    target = helper.find("NxkQemuAtaDiskTargets &")
-    delay = helper.find("ATA_IO_WAIT();")
-    if not (0 <= safe < qemu_present < force_all < target < delay):
         raise ValueError(
-            "safe override and positive QEMU detection must dominate the "
-            "all-device override and target gate before the delayed fallback")
+            "the explicit ATA fast path must perform exactly four status reads")
+    force_all = helper.find("NXK_EXPERIMENT_ATA_FORCE_ALL")
+    delay = helper.find("ATA_IO_WAIT();")
+    if not (0 <= force_all < delay):
+        raise ValueError(
+            "the explicit all-device flag must be checked before the delayed "
+            "default fallback")
+    if "NxkQemuAtaDiskTargets" in helper or "ATA_QEMU_HDD" in helper:
+        raise ValueError(
+            "the ATA fast path must not automatically activate from QEMU "
+            "detection; it requires the explicit advanced setting")
 
     required_identify_tokens = (
         "AtaDetectQemuDisk",
@@ -73,8 +73,8 @@ def main() -> int:
     except ValueError as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
-    print("PASS: ATA settle retains its delay and limits acceleration to "
-          "IDENTIFY-proven QEMU HDD targets")
+    print("PASS: ATA settle defaults to a real delay and acceleration requires "
+          "the explicit advanced all-device setting")
     return 0
 
 

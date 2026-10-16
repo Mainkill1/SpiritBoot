@@ -53,20 +53,22 @@ active release restores `KeStallExecutionProcessor(1)`. The audit, before/after
 screenshots, rejected patch, and permanent regression guard are under
 `ata-stall/` and `forza-menu-corruption/`.
 
-The replacement `0152-qemu-ata-advanced-controls.patch` accelerates only an
-ATA hard disk whose decoded IDENTIFY model contains `QEMU`. The first
-IDENTIFY, every ATAPI/XISO operation, physical disks, and unknown devices keep
-the delay. Settings now opens a session-only Advanced page with Y; its ATA
-modes are automatic QEMU-HDD gating, forced safe delay, and an explicit
-all-device experiment. The hidden BACK credits action remains available but is
-no longer advertised. See
-`ata-stall/QEMU-HDD-AUTO-SETTLE.md` for the code and test contract.
+The replacement `0152-emulator-advanced-controls.patch` keeps the delayed
+ATA select path as the default. Y opens a session-only Advanced page whose top
+row toggles every current experiment and reports Off, On, or Mixed. Individual
+contiguous-cache and ATA rows remain available. QEMU ATA-HDD detection is
+retained only as an unconsumed future capability signal; it cannot change ATA
+timing. The hidden BACK credits action remains available. See
+`ata-stall/EXPLICIT-ADVANCED-ATA.md` for the code and test contract.
 
-The QEMU-HDD-auto release64 image is
-`08afa8ab25c48765f51390a8bdfb41ccde298dbef23eb4048642f131bf0d215c`;
-release128 is
-`57bed876ca1c444876ccaaf6a023272b29cb1ea562889c384d8d64c4dcab98d7`.
-Both assemble tree `a43893a57251fb699e6ef9b27c53adcd035d6c9e`.
+The preceding automatic-QEMU release64 image
+`08afa8ab25c48765f51390a8bdfb41ccde298dbef23eb4048642f131bf0d215c`
+froze during operator testing and is rejected. The safe-default replacement
+release64 image is
+`b266d2a130c4c3c02cf396aea4af3d294107ccffbf04593e1d156d9a638b51cd`.
+Release128 is
+`fdfcb2382d3b24a0d4aaa7f8037792b00bd82daf2640bf40d1b9b1f8c036f340`.
+Both assemble tree `2f6790bae801075928f1ff556aed1ef2d2938858`.
 
 Two independent Windows release64 boots completed 32 passes and 32,768
 measured reads at QD12 with zero request, oracle, cleanup or warmup failures.
@@ -163,6 +165,6 @@ perturbs it.
 The current exact assembled source passes the extent oracle twice (12,056
 checks), 20,795 checkpoint checks, five real FAT/async coupling scenarios, 126
 allocation-free asynchronous-read checks, and the packet suite in plain,
-ASan/UBSan and MSan modes. The complete product host suite passes 534 tests
+ASan/UBSan and MSan modes. The complete product host suite passes 535 tests
 with 26 expected platform skips. Native execution uses release firmware
 without a debugger or firmware tracing.

@@ -83,9 +83,9 @@ the candidate achieved them by deleting effective wait time and failed a game
 load. Patches 0146 through 0151 retain their independent correctness and
 performance evidence.
 
-The later
-[QEMU HDD automatic design](QEMU-HDD-AUTO-SETTLE.md) keeps this rejection
-intact while applying the four-read barrier only after ATA IDENTIFY proves a
-QEMU hard disk. ATAPI, physical, unknown, and first-identify paths retain the
-known delay. The advanced all-device mode exists only for explicit comparison.
+The later [explicit Advanced design](EXPLICIT-ADVANCED-ATA.md) keeps this
+rejection intact. Every ordinary boot retains the delay. Four status reads are
+available only after the operator enables the session-only experiment. QEMU
+IDENTIFY detection remains recorded for future capabilities but does not alter
+timing.
 

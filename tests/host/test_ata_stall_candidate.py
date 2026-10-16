@@ -13,14 +13,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class AtaStallCandidateTests(unittest.TestCase):
     @staticmethod
-    def _valid_gated_header():
+    def _valid_explicit_header():
         return (
             "#define ATA_IO_WAIT() KeStallExecutionProcessor(1)\n"
             "PataDeviceSelectWait() {\n"
-            " if (NXK_EXPERIMENT_ATA_FORCE_SAFE ||\n"
-            "     !NxkQemuAtaDiskTargets ||\n"
-            "     (!NXK_EXPERIMENT_ATA_FORCE_ALL &&\n"
-            "      !(NxkQemuAtaDiskTargets & 1))) { ATA_IO_WAIT(); return; }\n"
+            " if (!(NxkExperimentalFlags & NXK_EXPERIMENT_ATA_FORCE_ALL))\n"
+            "     { ATA_IO_WAIT(); return; }\n"
             + " READ_PORT_UCHAR(ChanData->Regs.Control);\n" * 4
             + "}\n#else\n")
 
@@ -49,19 +47,20 @@ class AtaStallCandidateTests(unittest.TestCase):
         self.assertNotIn("patches/roswell/0152-ata-400ns-status-reads.patch",
                          paths)
 
-    def test_replacement_is_qemu_disk_gated_and_locked(self):
+    def test_replacement_is_explicit_and_locked(self):
         lock = json.loads((ROOT / "sources/firmware-lock.json").read_text())
         entries = lock["repositories"]["roswell"]["patches"]
-        path = "patches/roswell/0152-qemu-ata-advanced-controls.patch"
+        path = "patches/roswell/0152-emulator-advanced-controls.patch"
         paths = [entry["path"] for entry in entries]
         self.assertIn(path, paths)
         patch = (ROOT / path).read_text()
         for token in ("AtaDetectQemuDisk", "DeviceType != DEV_ATA",
-                      "NxkQemuAtaDiskTargets", "NXK_EXPERIMENT_ATA_FORCE_SAFE",
+                      "NxkQemuAtaDiskTargets", "SB_ADVANCED_ALL",
+                      "SB_EXPERIMENT_ADVANCED_ALL_MASK",
                       "NXK_EXPERIMENT_ATA_FORCE_ALL", "SB_MENU_ADVANCED",
                       "if (r[7]) out |= SB_Y"):
             self.assertIn(token, patch)
-        self.assertIn("!NxkQemuAtaDiskTargets", patch)
+        self.assertNotIn("NXK_EXPERIMENT_ATA_QEMU_HDD", patch)
         self.assertNotIn(
             '+    "  D-pad: move/edit  A: select  B: back  X: save  '
             'BACK: credits',
@@ -82,7 +81,7 @@ class AtaStallCandidateTests(unittest.TestCase):
             self.assertIn(token, report)
 
     def test_assembled_source_check_requires_a_real_guest_delay(self):
-        result = self._run_settle_check(self._valid_gated_header())
+        result = self._run_settle_check(self._valid_explicit_header())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_assembled_source_check_rejects_zero_time_status_reads(self):
@@ -98,11 +97,20 @@ class AtaStallCandidateTests(unittest.TestCase):
 
     def test_assembled_source_check_rejects_atapi_qemu_detection(self):
         result = self._run_settle_check(
-            self._valid_gated_header(),
+            self._valid_explicit_header(),
             "AtaDetectQemuDisk\nstrstr(ModelNumber, \"QEMU\");\n"
             "NxkQemuAtaDiskTargets |= 1;\n")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("DeviceType != DEV_ATA", result.stdout + result.stderr)
+
+    def test_assembled_source_check_rejects_automatic_qemu_enablement(self):
+        result = self._run_settle_check(
+            self._valid_explicit_header().replace(
+                "if (!(NxkExperimentalFlags & NXK_EXPERIMENT_ATA_FORCE_ALL))",
+                "if (!NxkQemuAtaDiskTargets && "
+                "!(NxkExperimentalFlags & NXK_EXPERIMENT_ATA_FORCE_ALL))"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must not automatically", result.stdout + result.stderr)
 
     def test_release_ci_checks_the_assembled_ata_settle_path(self):
         workflow = (ROOT / ".github/workflows/firmware.yml").read_text()

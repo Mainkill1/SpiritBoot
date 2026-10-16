@@ -178,13 +178,14 @@ remain unchanged.
 ## Current final performance batch
 
 The exact corrected release stack adds the bounded Forza queue and hot-path
-patches 0146 through 0151. It assembles tree
-`a43893a57251fb699e6ef9b27c53adcd035d6c9e`. Release64 reproduces SHA-256
-`08afa8ab25c48765f51390a8bdfb41ccde298dbef23eb4048642f131bf0d215c`;
+patches 0146 through 0151 plus safe-default Advanced controls in 0152. It
+assembles tree `2f6790bae801075928f1ff556aed1ef2d2938858`. Release64 reproduces
+SHA-256
+`b266d2a130c4c3c02cf396aea4af3d294107ccffbf04593e1d156d9a638b51cd`;
 release128 is
-`57bed876ca1c444876ccaaf6a023272b29cb1ea562889c384d8d64c4dcab98d7`.
+`fdfcb2382d3b24a0d4aaa7f8037792b00bd82daf2640bf40d1b9b1f8c036f340`.
 
-The complete product host suite passes 534 tests with 26 expected
+The complete product host suite passes 535 tests with 26 expected
 host-platform skips. Two independent Windows release64 boots completed 32
 Forza-shaped passes and 32,768 asynchronous FATX reads at queue depth 12 and
 900-page pressure, with zero request, oracle, warmup or cleanup failures. The
@@ -193,10 +194,11 @@ final two-run mean improves end-to-end APC batch time 3.93% and submission time
 reduces weighted instructions 33.33%; ordinary ATA cache bookkeeping removes
 99 i386 instructions. The proposed four-read Xbox ATA settle optimization was
 rejected after sporadic Forza menu corruption: xemu gives those reads zero
-elapsed guest time. The replacement accelerates only an IDENTIFY-proven QEMU
-ATA HDD target. ATAPI, physical, unknown, and first-identify paths retain
-`KeStallExecutionProcessor(1)`; CI checks those gates in the exact assembled
-source. Full inputs, limits and rejected designs are in
+elapsed guest time. A later automatic QEMU-HDD candidate also froze during
+operator testing and is rejected. The replacement keeps
+`KeStallExecutionProcessor(1)` for every ordinary boot and permits acceleration
+only after an explicit session-only Advanced choice; CI checks this in the
+exact assembled source. Full inputs, limits and rejected designs are in
 `docs/performance/evidence/forza-map-hotpath-20261015/`.
 
 The exact image also completed two independent release-only Steam Deck runs of

@@ -55,7 +55,7 @@ epoch. `source` identifies the supplied pristine checkout; `source_directory`
 is the actual source used by CMake and guest builds; `build_directory` and
 `output_directory` identify their outputs. `base_source_tree` is the pristine
 tree and `source_tree` is the patched Git index tree, including new guest tests.
-The current reviewed patched tree is `a43893a57251fb699e6ef9b27c53adcd035d6c9e`.
+The current reviewed patched tree is `2f6790bae801075928f1ff556aed1ef2d2938858`.
 The base epoch is exported as `SOURCE_DATE_EPOCH` to avoid wall-clock PE linker
 timestamps. Each build uses a fresh configure tree so previous CMake cache flags,
 compiler selections, or timestamps cannot leak into a newly attributed image.

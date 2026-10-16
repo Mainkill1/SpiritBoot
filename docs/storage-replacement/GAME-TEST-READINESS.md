@@ -3,21 +3,19 @@
 No fresh PGR2, Conker or complete DOA save-cycle pass is established on the
 current final PR248 image. A bounded earlier DOA human test is recorded below.
 The independent replacement is installed in the complete-candidate release
-link. Its current QEMU-HDD-auto release64 SHA-256 is
-`08afa8ab25c48765f51390a8bdfb41ccde298dbef23eb4048642f131bf0d215c`
-from assembled tree `a43893a57251fb699e6ef9b27c53adcd035d6c9e`.
-The immediately preceding safe-delay image restored the complete Forza profile
-menu in the first human isolation run. The current image keeps that optical
-delay while accelerating only an IDENTIFY-proven QEMU ATA hard disk. Repeated
-race/loading qualification remains pending because the original missing-data
-symptom was sporadic.
+link. Its current safe-default release64 SHA-256 is
+`b266d2a130c4c3c02cf396aea4af3d294107ccffbf04593e1d156d9a638b51cd`
+from assembled tree `2f6790bae801075928f1ff556aed1ef2d2938858`.
+Ordinary boots retain the delayed ATA path. Acceleration requires an explicit
+session-only Advanced setting. Repeated race/loading qualification remains
+pending because the original missing-data symptom was sporadic.
 The final pre-extraction image
 `0f6e4f48269e0ef65bb27758e221b4bcdb707ef0cbf57c211d7e969866334d5e`
 is now the historical game-test control; the published reference remains
 `c630d22f2353d3898024d510f0b402b64bccdb331781fe7885389f73d6200853`.
 API fixtures and allocation traces do not substitute for game tests.
 
-## QEMU-HDD-auto operator result, 2026-10-16
+## Rejected automatic-QEMU operator result, 2026-10-16
 
 The operator tested interim release64
 `45e8c609d6e35688ff54690d4a79430618ed190016fc5fd0262b6ddebfb75392`.
@@ -29,9 +27,13 @@ run is a failed release qualification and does not establish the crash cause.
 
 Release64
 `08afa8ab25c48765f51390a8bdfb41ccde298dbef23eb4048642f131bf0d215c`
-fixes the redraw condition and additionally requires positive QEMU-HDD
-detection before the experimental all-device timing mode can activate. A
-follow-up game run remains required.
+fixed the redraw condition but automatically accelerated a detected QEMU HDD.
+The operator later reported freezing in that automatic mode, so the image is a
+failed qualification. Release64
+`b266d2a130c4c3c02cf396aea4af3d294107ccffbf04593e1d156d9a638b51cd`
+removes all automatic activation, restores the safe delay by default, and adds
+an explicit top-row toggle for all current Advanced experiments. A follow-up
+game run remains required.
 
 The exact final image has completed two independent release-only Steam Deck
 runs of the full 144-leaf/five-group XISO: 149/149 records passed per run with
