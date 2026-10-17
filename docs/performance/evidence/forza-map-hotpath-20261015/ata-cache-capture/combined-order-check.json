@@ -1,0 +1,33 @@
+{
+  "base": "assembled release64 source through product patch 0149",
+  "order": [
+    "0150-native-packet-prepare-hotpath.patch",
+    "0151-ata-cache-capture-hotpath.patch"
+  ],
+  "checks": [
+    "0150 git apply --check --whitespace=error-all passed on 0149",
+    "0150 applied to isolated minimal 0149 tree",
+    "0151 git apply --check --whitespace=error-all passed after applied 0150",
+    "0151 applied successfully after 0150",
+    "0151 git apply --check --whitespace=error-all passed in the full isolated 0150 release source tree"
+  ],
+  "patch_sha256": {
+    "0150-native-packet-prepare-hotpath.patch": "916f41321d44d1493b8d686926a7eb4c161c0c3b85c807d96bc6db166d803f3c",
+    "0151-ata-cache-capture-hotpath.patch": "80dd78a0f3ee6d4b54a5677d174cb7e20f83c844d4398e57dc53aecd9179756d"
+  },
+  "independence": {
+    "0150_files": [
+      "drivers/storage/class/nxstorage/native_packet.c",
+      "tests/host/nxstorage/native_packet_test.c"
+    ],
+    "0151_files": [
+      "drivers/storage/class/nxstorage/native_capture.inc",
+      "drivers/storage/ide/atapi/scsi.c",
+      "tests/host/atapi-cache-hotpath/cache_hotpath_test.c",
+      "tests/host/atapi-cache-hotpath/check.py"
+    ],
+    "overlap": []
+  },
+  "base_source_tree_through_0149": "a8f3fc46e27bc8e0f51f23708a02a73237565b2e",
+  "source_tree_after_0150_only": "92c25b513752b18f45fa4c0cc1c8619de82238f9"
+}

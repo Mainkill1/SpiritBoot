@@ -1,0 +1,621 @@
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/native_packet.c
+@@ -0,0 +1,109 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "native_packet.h"
++
++enum { EXECUTE=0, RELEASE_QUEUE=4, DATA_IN=0x40, DATA_OUT=0x80,
++       SCSI_MAJOR=0x0b, INVOKE_ALL=0xe0, SRB_FROZEN=0x40, SRB_SENSE=0x80 };
++
++static void clear_bytes(void *p, size_t n)
++{
++    uint8_t *b=p;
++    for (size_t i=0;i<n;++i) b[i]=0;
++}
++
++static int data_range(const nx_packet_resources *r, const nx_packet_command *c)
++{
++    PMDL mdl=r->mdl;
++    if (!c->bytes) return c->direction==0 && c->data_virtual==0;
++    if (!mdl || mdl->Next || !mdl->ByteCount ||
++        (c->direction!=DATA_IN && c->direction!=DATA_OUT)) return 0;
++    uintptr_t start=(uintptr_t)mdl->StartVa;
++    if ((start & (NX_PACKET_PAGE_BYTES-1u)) || mdl->ByteOffset>=NX_PACKET_PAGE_BYTES ||
++        mdl->ByteOffset>UINTPTR_MAX-start) return 0;
++    uintptr_t base=start+mdl->ByteOffset;
++    if (mdl->ByteCount>UINTPTR_MAX-base || c->mdl_virtual!=base || c->data_virtual<base ||
++        c->data_virtual-base>mdl->ByteCount ||
++        c->bytes>mdl->ByteCount-(c->data_virtual-base) ||
++        c->bytes>UINTPTR_MAX-c->data_virtual ||
++        (c->data_virtual & c->alignment_mask)) return 0;
++    uint64_t pages=((uint64_t)mdl->ByteOffset+mdl->ByteCount+NX_PACKET_PAGE_BYTES-1u)/NX_PACKET_PAGE_BYTES;
++    uint64_t segment_pages=((c->data_virtual & (NX_PACKET_PAGE_BYTES-1u))+
++        (uint64_t)c->bytes+NX_PACKET_PAGE_BYTES-1u)/NX_PACKET_PAGE_BYTES;
++    return pages<=r->pfn_capacity && segment_pages<=c->max_pages;
++}
++
++nx_packet_status nx_packet_prepare(const nx_packet_resources *r,
++    const nx_packet_command *c, nx_packet_ticket *ticket)
++{
++    if (!r || !c || !ticket || !r->child || !r->srb || !r->sense ||
++        !r->sense_capacity || r->sense_capacity>NX_PACKET_SENSE_MAX ||
++        r->driver_owned_idle!=1 || r->thread_unlinked!=1 || r->child->CancelRoutine ||
++        !c->completion || !c->lower_stack_count || r->child->StackCount<=0 ||
++        c->lower_stack_count>(unsigned)r->child->StackCount ||
++        !c->timeout_seconds || c->timeout_seconds>c->timeout_limit_seconds ||
++        !c->max_bytes || !c->max_pages || c->bytes>c->max_bytes ||
++        c->alignment_mask>=NX_PACKET_PAGE_BYTES ||
++        (c->alignment_mask & (c->alignment_mask+1u))) return NX_PACKET_INVALID;
++    if (c->function==EXECUTE) {
++        if (c->cdb_length!=6 && c->cdb_length!=10 && c->cdb_length!=12 && c->cdb_length!=16)
++            return NX_PACKET_INVALID;
++    } else if (c->function!=RELEASE_QUEUE || c->cdb_length || c->bytes || c->direction)
++        return NX_PACKET_INVALID;
++    if (!data_range(r,c)) return NX_PACKET_INVALID;
++
++    /* Ownership/thread association are caller preconditions, not inferred from
++     * numeric addresses. Reuse resets packet state but frees no MDL or sense. */
++    IoReuseIrp(r->child,(NTSTATUS)0x103);
++    clear_bytes(r->srb,sizeof(*r->srb));
++    clear_bytes(r->sense,r->sense_capacity);
++    r->child->MdlAddress=c->bytes ? r->mdl:NULL;
++    PIO_STACK_LOCATION next=r->child->Tail.Overlay.CurrentStackLocation-1;
++    clear_bytes(next,sizeof(*next));
++    next->MajorFunction=SCSI_MAJOR;
++    next->Parameters.Scsi.Srb=r->srb;
++    next->CompletionRoutine=c->completion;
++    next->Context=c->completion_context;
++    next->Control=INVOKE_ALL;
++    r->srb->Length=(USHORT)sizeof(*r->srb);
++    r->srb->Function=c->function;
++    r->srb->CdbLength=c->cdb_length;
++    r->srb->SenseInfoBufferLength=(UCHAR)r->sense_capacity;
++    r->srb->SrbFlags=c->direction;
++    r->srb->DataTransferLength=c->bytes;
++    r->srb->TimeOutValue=c->timeout_seconds;
++    r->srb->DataBuffer=c->bytes ? (void *)c->data_virtual:NULL;
++    r->srb->SenseInfoBuffer=r->sense;
++    r->srb->OriginalRequest=r->child;
++    for (unsigned i=0;i<c->cdb_length;++i) r->srb->Cdb[i]=c->cdb[i];
++    *ticket=(nx_packet_ticket){r->child,r->srb,r->sense,c->token,c->bytes,r->sense_capacity};
++    return NX_PACKET_OK;
++}
++
++nx_packet_status nx_packet_capture(const nx_packet_ticket *t, nx_packet_result *out)
++{
++    if (!t || !out || !t->child || !t->srb || !t->sense ||
++        !t->supplied_sense || t->supplied_sense>NX_PACKET_SENSE_MAX) return NX_PACKET_INVALID;
++    nx_packet_result result;
++    clear_bytes(&result,sizeof(result));
++    result.token=t->token;
++    result.status=(uint32_t)t->child->IoStatus.Status;
++    result.reported_bytes=t->child->IoStatus.Information;
++    result.srb_status=t->srb->SrbStatus;
++    result.srb_base=result.srb_status & ~(SRB_FROZEN|SRB_SENSE);
++    result.scsi_status=t->srb->ScsiStatus;
++    result.queue_frozen=(result.srb_status & SRB_FROZEN)!=0;
++    result.autosense_valid=(result.srb_status & SRB_SENSE)!=0;
++    nx_packet_status status=NX_PACKET_OK;
++    if (result.status==0x103u || result.reported_bytes>t->submitted_bytes ||
++        ((result.status & 0x80000000u)==0 && result.srb_base==0)) status=NX_PACKET_PROTOCOL;
++    if (result.autosense_valid) {
++        unsigned count=t->srb->SenseInfoBufferLength;
++        if (t->srb->SenseInfoBuffer!=t->sense || count>t->supplied_sense)
++            status=NX_PACKET_PROTOCOL;
++        else {
++            result.sense_bytes=count;
++            for (unsigned i=0;i<count;++i) result.sense[i]=t->sense[i];
++        }
++    }
++    *out=result;
++    return status;
++}
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/native_packet.h
+@@ -0,0 +1,62 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_NATIVE_PACKET_H
++#define NX_NATIVE_PACKET_H
++#include <stddef.h>
++#include <stdint.h>
++#include "request.h"
++/* Admitted IRP/MDL/SRB/platform declarations must precede this header. */
++enum { NX_PACKET_SENSE_MAX=96, NX_PACKET_PAGE_BYTES=4096 };
++typedef enum nx_packet_status { NX_PACKET_OK, NX_PACKET_INVALID, NX_PACKET_PROTOCOL } nx_packet_status;
++typedef struct nx_packet_resources {
++    PIRP child;
++    PSCSI_REQUEST_BLOCK srb;
++    PMDL mdl;
++    uint8_t *sense;
++    uint32_t sense_capacity;
++    /* Trusted platform evidence: valid, resident single descriptor and actual
++     * PFN-vector capacity. This module neither walks nor invents PFNs. */
++    uint32_t pfn_capacity;
++    unsigned driver_owned_idle, thread_unlinked;
++} nx_packet_resources;
++typedef struct nx_packet_command {
++    nx_token token;
++    uintptr_t mdl_virtual, data_virtual;
++    uint32_t bytes, direction;
++    uint8_t function, cdb_length, cdb[16];
++    uint32_t timeout_seconds, timeout_limit_seconds;
++    uint32_t max_bytes, max_pages, alignment_mask;
++    uint8_t lower_stack_count;
++    PIO_COMPLETION_ROUTINE completion;
++    void *completion_context;
++} nx_packet_command;
++/* Immutable per-submission copy, held by the future owner through capture.
++ * Contains native pointers only as source locators, never a rundown guarantee. */
++typedef struct nx_packet_ticket {
++    PIRP child;
++    PSCSI_REQUEST_BLOCK srb;
++    uint8_t *sense;
++    nx_token token;
++    uint32_t submitted_bytes, supplied_sense;
++} nx_packet_ticket;
++typedef struct nx_packet_result {
++    nx_token token;
++    uint32_t status;
++    uint64_t reported_bytes;
++    uint8_t srb_status, srb_base, scsi_status, queue_frozen, autosense_valid;
++    uint32_t sense_bytes;
++    uint8_t sense[NX_PACKET_SENSE_MAX];
++} nx_packet_result;
++/* Caller owns nonoverlapping writable resources, live borrowed MDL/pages and
++ * idle driver-allocated child. No concurrent mutation, installed cancel routine
++ * or thread association. Reuse is not retirement and is not made safe here.
++ * Invalid preparation changes neither resources nor ticket. No submission,
++ * allocation, mapping, cancellation, parent completion or resource release.
++ * Target is the already selected retained ATAPI PDO: that lower fills
++ * PathId/TargetId/Lun and clears SrbExtension for its own transport scratch.
++ * This is not a generic miniport-facing builder or caller-owned scratch API. */
++nx_packet_status nx_packet_prepare(const nx_packet_resources *, const nx_packet_command *, nx_packet_ticket *);
++/* Caller establishes terminal ownership and source residency. Copy before any
++ * recycle. A protocol result retains raw status/count, but authorizes no bytes
++ * or completion. Result has no pointers into native packet/sense storage. */
++nx_packet_status nx_packet_capture(const nx_packet_ticket *, nx_packet_result *);
++#endif
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/packet_srb_declaration.h
+@@ -0,0 +1,55 @@
++/*
++ * scsi.h
++ *
++ * Interface between SCSI miniport drivers and the SCSI port driver.
++ *
++ * This file is part of the w32api package.
++ *
++ * Contributors:
++ *   Created by Casper S. Hornstrup <chorns@users.sourceforge.net>
++ *
++ * THIS SOFTWARE IS NOT COPYRIGHTED
++ *
++ * This source code is offered for use in the public domain. You may
++ * use, modify or distribute it freely.
++ *
++ * This code is distributed in the hope that it will be useful but
++ * WITHOUT ANY WARRANTY. ALL WARRANTIES, EXPRESS OR IMPLIED ARE HEREBY
++ * DISCLAIMED. This includes but is not limited to warranties of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ *
++ */
++
++/* Selected public declaration only; annotations omitted, anonymous union
++ * expressed directly. Original public-domain notice retained; no helpers. */
++#pragma once
++typedef struct _SCSI_REQUEST_BLOCK {
++  USHORT Length;
++  UCHAR Function;
++  UCHAR SrbStatus;
++  UCHAR ScsiStatus;
++  UCHAR PathId;
++  UCHAR TargetId;
++  UCHAR Lun;
++  UCHAR QueueTag;
++  UCHAR QueueAction;
++  UCHAR CdbLength;
++  UCHAR SenseInfoBufferLength;
++  ULONG SrbFlags;
++  ULONG DataTransferLength;
++  ULONG TimeOutValue;
++  PVOID DataBuffer;
++  PVOID SenseInfoBuffer;
++  struct _SCSI_REQUEST_BLOCK *NextSrb;
++  PVOID OriginalRequest;
++  PVOID SrbExtension;
++  union {
++    ULONG InternalStatus;
++    ULONG QueueSortKey;
++    ULONG LinkTimeoutValue;
++  };
++#if defined(_WIN64)
++  ULONG Reserved;
++#endif
++  UCHAR Cdb[16];
++} SCSI_REQUEST_BLOCK, *PSCSI_REQUEST_BLOCK;
+--- /dev/null
++++ b/tests/host/nxstorage/check_packet.py
+@@ -0,0 +1,22 @@
++#!/usr/bin/env python3
++"""Run the actual unlinked owned packet functions and existing request core."""
++from pathlib import Path
++import os
++import subprocess
++import sys
++root=Path(__file__).resolve().parents[3]
++source=root/'drivers/storage/class/nxstorage'
++tests=Path(__file__).resolve().parent
++out=Path(sys.argv[1]).resolve()
++out.mkdir(parents=True,exist_ok=True)
++cc=os.environ.get('CC','clang')
++base=[cc,'-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-I'+str(source),
++      '-include',str(tests/'packet_host_platform.h')]
++inputs=[str(source/'native_packet.c'),str(source/'request.c'),str(tests/'native_packet_test.c')]
++for name,flags in [('packet-plain',[]),('packet-sanitized',['-fsanitize=address,undefined','-fno-omit-frame-pointer'])]:
++    exe=out/name
++    subprocess.run(base+flags+inputs+['-o',str(exe)],check=True)
++    result=subprocess.run([str(exe)],check=True,text=True,capture_output=True,
++        env=dict(os.environ,ASAN_OPTIONS='detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1',UBSAN_OPTIONS='halt_on_error=1'))
++    (out/(name+'.log')).write_text(result.stdout+result.stderr)
++    print(name+': '+result.stdout.splitlines()[-1])
+--- /dev/null
++++ b/tests/host/nxstorage/native_packet_test.c
+@@ -0,0 +1,250 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "native_packet.h"
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#define CHECK(x) do { if (!(x)) { fprintf(stderr,"%s:%d %s\n",__func__,__LINE__,#x); return 0; } } while(0)
++#define MUST(x) do { if (!(x)) abort(); } while(0)
++typedef struct fixture {
++    IRP child; IO_STACK_LOCATION stack[3]; SCSI_REQUEST_BLOCK srb;
++    MDL mdl; uint32_t pfns[3]; uint8_t physical[3][4096], sense[96];
++    nx_packet_resources resources; nx_packet_command command; nx_packet_ticket ticket;
++} fixture;
++static fixture *active;
++static unsigned reuse_calls;
++static void cancel_marker(void *d, PIRP i) { (void)d; (void)i; }
++static NTSTATUS completion(void *d, PIRP i, void *c) { (void)d;(void)i;(void)c;return 0; }
++VOID IoReuseIrp(PIRP i, NTSTATUS status)
++{
++    MUST(active && i==&active->child && !i->CancelRoutine);
++    int8_t count=i->StackCount; ++reuse_calls;
++    memset(i,0,sizeof(*i)); i->StackCount=count; i->CurrentLocation=count+1;
++    i->Tail.Overlay.CurrentStackLocation=active->stack+count; i->IoStatus.Status=status;
++}
++static void init(fixture *f)
++{
++    memset(f,0,sizeof(*f)); active=f; reuse_calls=0;
++    f->child.StackCount=3; f->child.IoStatus.Status=-9;
++    f->mdl.StartVa=(void *)(uintptr_t)0; f->mdl.ByteCount=8192;
++    f->mdl.MappedSystemVa=f->physical; /* Deliberately distinct CPU alias. */
++    f->pfns[0]=2; f->pfns[1]=2; f->pfns[2]=0;
++    f->resources=(nx_packet_resources){&f->child,&f->srb,&f->mdl,f->sense,96,2,1,1};
++    f->command=(nx_packet_command){.token={1,2,3},.mdl_virtual=0,.data_virtual=0,
++        .bytes=4096,.direction=0x80,.function=0,.cdb_length=10,.cdb={0x2a},
++        .timeout_seconds=30,.timeout_limit_seconds=120,.max_bytes=8192,.max_pages=2,
++        .alignment_mask=0,.lower_stack_count=2,.completion=completion,.completion_context=f};
++    memset(&f->srb,0xa5,sizeof(f->srb)); memset(f->sense,0xa5,sizeof(f->sense));
++    memset(&f->ticket,0xa5,sizeof(f->ticket));
++}
++/* Consume the packet's original-domain address via independently owned PFNs.
++ * Never treat that numeric address as a dereferenceable host pointer. */
++static uint8_t physical_byte(fixture *f, unsigned offset)
++{
++    MUST(f->srb.OriginalRequest==&f->child && f->child.MdlAddress==&f->mdl);
++    uintptr_t domain=(uintptr_t)f->mdl.StartVa+f->mdl.ByteOffset;
++    uintptr_t at=(uintptr_t)f->srb.DataBuffer-domain+f->mdl.ByteOffset+offset;
++    MUST(at<f->mdl.ByteCount+f->mdl.ByteOffset);
++    return f->physical[f->pfns[at/4096]][at%4096];
++}
++static int prepares_zero_domain_and_fragmented_subranges(void)
++{
++    fixture f; init(&f); memset(f.physical[2],0x62,4096);
++    MDL saved=f.mdl;
++    CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++    CHECK(reuse_calls==1 && !memcmp(&saved,&f.mdl,sizeof(saved)));
++    CHECK(f.child.MdlAddress==&f.mdl && f.srb.OriginalRequest==&f.child);
++    CHECK(f.stack[2].MajorFunction==0x0b && f.stack[2].Parameters.Scsi.Srb==&f.srb);
++    CHECK(f.stack[2].CompletionRoutine==completion && f.stack[2].Context==&f);
++    CHECK(f.stack[2].Control==0xe0 && f.srb.Length==sizeof(f.srb));
++    CHECK(f.srb.CdbLength==10 && f.srb.Cdb[0]==0x2a && f.srb.Cdb[15]==0);
++    CHECK(f.srb.DataBuffer==NULL && f.srb.DataTransferLength==4096 && f.srb.SrbFlags==0x80);
++    CHECK(f.srb.TimeOutValue==30 && f.srb.SenseInfoBuffer==f.sense && f.srb.SenseInfoBufferLength==96);
++    CHECK(!f.srb.SrbExtension && !f.srb.NextSrb && !f.srb.InternalStatus);
++    CHECK(!f.srb.PathId && !f.srb.TargetId && !f.srb.Lun);
++    CHECK(!f.sense[0] && !f.sense[95] && physical_byte(&f,0)==0x62);
++    f.command.data_virtual=4096;
++    CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++    CHECK((uintptr_t)f.srb.DataBuffer==4096 && physical_byte(&f,4095)==0x62);
++    /* A different PFN for the next subrange must remain a different page. */
++    f.pfns[1]=0; f.physical[0][0]=0x18; CHECK(physical_byte(&f,0)==0x18);
++    CHECK(f.ticket.token.command==3 && f.ticket.submitted_bytes==4096);
++    return 1;
++}
++static int rejects_before_mutation(void)
++{
++    for (unsigned n=0;n<27;++n) {
++        fixture f; init(&f);
++        switch(n) {
++            case 0:f.resources.mdl=NULL;break;
++            case 1:f.mdl.Next=&f.mdl;break;
++            case 2:f.resources.pfn_capacity=1;break;
++            case 3:f.command.data_virtual=8192;break;
++            case 4:f.command.mdl_virtual=1;break;
++            case 5:f.command.data_virtual=1;f.command.alignment_mask=511;break;
++            case 6:f.command.data_virtual=4096;f.command.bytes=4097;break;
++            case 7:f.command.max_bytes=2048;break;
++            case 8:f.command.data_virtual=1;f.command.max_pages=1;break;
++            case 9:f.resources.driver_owned_idle=0;break;
++            case 10:f.resources.thread_unlinked=0;break;
++            case 11:f.command.lower_stack_count=4;break;
++            case 12:f.command.cdb_length=17;break;
++            case 13:f.command.direction=0xc0;break;
++            case 14:f.command.timeout_seconds=121;break;
++            case 15:f.resources.sense_capacity=97;break;
++            case 16:f.command.function=7;break;
++            case 17:f.mdl.StartVa=(void *)(UINTPTR_MAX-4095);f.mdl.ByteOffset=4095;
++                    f.command.mdl_virtual=UINTPTR_MAX;f.command.data_virtual=UINTPTR_MAX;break;
++            case 18:f.command.completion=NULL;break;
++            case 19:f.command.alignment_mask=5;break;
++            case 20:f.child.CancelRoutine=cancel_marker;break;
++            case 21:f.child.StackCount=0;break;
++            case 22:f.command.lower_stack_count=0;break;
++            case 23:f.command.timeout_seconds=0;break;
++            case 24:f.command.max_pages=0;break;
++            case 25:f.resources.sense=NULL;break;
++            case 26:f.mdl.StartVa=(void *)(UINTPTR_MAX-4095);f.command.bytes=512;
++                    f.command.mdl_virtual=UINTPTR_MAX-4095;f.command.data_virtual=UINTPTR_MAX-4095;break;
++        }
++        fixture before=f;
++        CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_INVALID);
++        CHECK(!memcmp(&before,&f,sizeof(f)) && reuse_calls==0);
++    }
++    return 1;
++}
++static int allows_odd_domain_and_nodata(void)
++{
++    fixture f; init(&f); f.mdl.StartVa=(void *)(uintptr_t)4096;f.mdl.ByteOffset=1;
++    f.mdl.ByteCount=4096;f.command.mdl_virtual=4097;f.command.data_virtual=4097;
++    CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++    CHECK((uintptr_t)f.srb.DataBuffer==4097 && f.child.MdlAddress==&f.mdl);
++    f.command.bytes=0;f.command.direction=0;f.command.data_virtual=0;f.command.mdl_virtual=0;
++    f.command.cdb[0]=0;f.command.cdb_length=6;f.resources.mdl=NULL;
++    CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++    CHECK(!f.child.MdlAddress && !f.srb.DataBuffer && !f.srb.DataTransferLength);
++    f.command.function=4;f.command.cdb_length=0;
++    CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++    CHECK(f.srb.Function==4 && !f.srb.CdbLength);
++    return 1;
++}
++static int copies_terminal_before_reuse(void)
++{
++    fixture f;init(&f);CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++    f.child.IoStatus.Status=(int32_t)0x80000005u;f.child.IoStatus.Information=12;
++    f.srb.SrbStatus=0xd2;f.srb.ScsiStatus=2;f.srb.SenseInfoBufferLength=3;
++    f.sense[0]=0x70;f.sense[1]=0x12;f.sense[2]=0x34;
++    nx_packet_result r;
++    CHECK(nx_packet_capture(&f.ticket,&r)==NX_PACKET_OK);
++    CHECK(r.status==0x80000005u && r.reported_bytes==12 && r.srb_status==0xd2);
++    CHECK(r.srb_base==0x12 && r.queue_frozen && r.autosense_valid && r.scsi_status==2);
++    CHECK(r.sense_bytes==3 && r.sense[0]==0x70 && r.sense[2]==0x34 && r.sense[3]==0);
++    memset(&f.child,0xa5,sizeof(f.child));memset(&f.srb,0xa5,sizeof(f.srb));memset(f.sense,0xa5,sizeof(f.sense));
++    CHECK(r.token.slot==1 && r.token.generation==2 && r.token.command==3 && r.sense[2]==0x34);
++    return 1;
++}
++static int bounded_terminal_failures(void)
++{
++    for (unsigned n=0;n<11;++n) {
++        fixture f;init(&f);CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++        f.child.IoStatus.Status=0;f.child.IoStatus.Information=4096;f.srb.SrbStatus=1;
++        switch(n) {
++            case 0:f.child.IoStatus.Information=4097;break;
++            case 1:f.child.IoStatus.Status=0x103;break;
++            case 2:f.srb.SrbStatus=0;break;
++            case 3:f.srb.SrbStatus=0x81;f.srb.SenseInfoBufferLength=97;break;
++            case 4:f.srb.SrbStatus=0x81;f.srb.SenseInfoBuffer=(void *)(uintptr_t)1;break;
++            case 5:f.child.IoStatus.Status=(int32_t)0xc00000b5u;f.child.IoStatus.Information=0;f.srb.SrbStatus=9;break;
++            case 6:f.child.IoStatus.Status=(int32_t)0xc000009au;f.child.IoStatus.Information=0;f.srb.SrbStatus=0x30;break;
++            case 7:f.child.IoStatus.Information=12;break;
++            case 8:f.child.IoStatus.Status=0x40000000;break;
++            case 9:f.child.IoStatus.Status=0x40000000;f.srb.SrbStatus=0;break;
++            case 10:f.child.IoStatus.Status=(int32_t)0xc000009au;f.child.IoStatus.Information=0;f.srb.SrbStatus=0;break;
++        }
++        nx_packet_result r;CHECK(nx_packet_capture(&f.ticket,&r)==((n<5 || n==9)?NX_PACKET_PROTOCOL:NX_PACKET_OK));
++        CHECK(r.reported_bytes==f.child.IoStatus.Information && r.status==(uint32_t)f.child.IoStatus.Status);
++        CHECK(r.sense_bytes==0 && r.sense[95]==0);
++        if(n==7) CHECK(r.reported_bytes==12 && f.srb.DataTransferLength==4096);
++    }
++    return 1;
++}
++static int sense_extent_and_cdb16(void)
++{
++    fixture f; init(&f); f.resources.sense_capacity=8; f.command.cdb_length=16;
++    for(unsigned i=0;i<16;++i) f.command.cdb[i]=(uint8_t)(0xa0+i);
++    CHECK(nx_packet_prepare(&f.resources,&f.command,&f.ticket)==NX_PACKET_OK);
++    CHECK(f.srb.Cdb[15]==0xaf && f.srb.SenseInfoBufferLength==8);
++    CHECK(!f.sense[7] && f.sense[8]==0xa5 && f.sense[95]==0xa5);
++    f.srb.SrbStatus=0x81;f.child.IoStatus.Status=0;f.child.IoStatus.Information=4096;
++    f.sense[7]=0x5c; nx_packet_result r;
++    CHECK(nx_packet_capture(&f.ticket,&r)==NX_PACKET_OK);
++    CHECK(r.sense_bytes==8 && r.sense[7]==0x5c && !r.sense[8]);
++    f.srb.SenseInfoBufferLength=9;
++    CHECK(nx_packet_capture(&f.ticket,&r)==NX_PACKET_PROTOCOL && !r.sense_bytes);
++    f.srb.SrbStatus=1; f.srb.SenseInfoBuffer=(void *)(uintptr_t)1;
++    CHECK(nx_packet_capture(&f.ticket,&r)==NX_PACKET_OK && !r.sense_bytes);
++    CHECK(nx_packet_prepare(NULL,&f.command,&f.ticket)==NX_PACKET_INVALID);
++    CHECK(nx_packet_capture(NULL,&r)==NX_PACKET_INVALID);
++    return 1;
++}
++/* Production packet/core interoperability, not a native lifecycle adapter. */
++typedef struct core_fixture {
++    fixture packet; nx_device device; nx_slot slot;
++    unsigned commands, retired, completed, pending, locked;
++    uintptr_t addresses[3]; uint8_t opcodes[3]; nx_status status; uint64_t bytes;
++} core_fixture;
++static void core_enter(void *v) { core_fixture *f=v;MUST(!f->locked);f->locked=1; }
++static void core_leave(void *v) { core_fixture *f=v;MUST(f->locked);f->locked=0; }
++static nx_status core_prepare(void *v,const nx_command *c)
++{
++    core_fixture *f=v; nx_packet_command p=f->packet.command;
++    p.token=c->token;p.mdl_virtual=c->mdl_virtual;p.data_virtual=c->data_virtual;
++    p.bytes=c->bytes;p.direction=c->direction;p.function=c->function;p.cdb_length=c->cdb_length;
++    memset(p.cdb,0,sizeof(p.cdb));memcpy(p.cdb,c->cdb,c->cdb_length);
++    return nx_packet_prepare(&f->packet.resources,&p,&f->packet.ticket)==NX_PACKET_OK ? NX_OK:NX_INVALID;
++}
++static int core_submit(void *v,const nx_command *c)
++{
++    core_fixture *f=v;MUST(f->commands<3 && !f->locked);
++    f->addresses[f->commands]=(uintptr_t)f->packet.srb.DataBuffer;
++    f->opcodes[f->commands++]=f->packet.srb.Cdb[0];
++    f->packet.child.IoStatus.Status=0;f->packet.child.IoStatus.Information=c->bytes;
++    f->packet.srb.SrbStatus=1;nx_packet_result r;
++    MUST(nx_packet_capture(&f->packet.ticket,&r)==NX_PACKET_OK);
++    nx_lower_done(&f->device,r.token,NX_OK,(uint32_t)r.reported_bytes,0);
++    return 0;
++}
++static void core_retire(void *v,const nx_command *c) { core_fixture *f=v;(void)c;++f->retired; }
++static void core_cancel(void *v,const nx_command *c) { (void)v;(void)c;abort(); }
++static void core_pending(void *v,void *p) { core_fixture *f=v;MUST(p==f);++f->pending; }
++static void core_complete(void *v,void *p,nx_status s,uint64_t n)
++{ core_fixture *f=v;MUST(p==f && !f->locked);++f->completed;f->status=s;f->bytes=n; }
++static int core_zero_domain_write_through(void)
++{
++    core_fixture f;memset(&f,0,sizeof(f));init(&f.packet);
++    nx_config cfg={512,4096,4096,1,0,256,65536,0,NX_CACHE_ENABLED};
++    nx_port port={&f,core_enter,core_leave,core_prepare,core_submit,core_retire,core_cancel,core_pending,core_complete};
++    CHECK(nx_device_init(&f.device,&cfg,&port,&f.slot,1,sizeof(f.slot))==NX_OK);
++    nx_request r={.parent=&f,.operation=NX_WRITE,.offset=0,.bytes=8192,
++        .mdl_virtual=0,.mdl_bytes=8192,.lease=&f,.flags=NX_WRITE_THROUGH,.mdl_present=1};
++    nx_handle h;CHECK(nx_start(&f.device,&r,&h)==NX_OK);
++    CHECK(f.completed==1 && f.status==NX_OK && f.bytes==8192 && !f.pending);
++    CHECK(f.commands==3 && f.retired==3 && f.addresses[0]==0 && f.addresses[1]==4096);
++    CHECK(f.opcodes[0]==0x2a && f.opcodes[1]==0x2a && f.opcodes[2]==0x35);
++    CHECK(f.packet.mdl.ByteCount==8192 && f.packet.mdl.MappedSystemVa==f.packet.physical);
++    return 1;
++}
++int main(void)
++{
++    struct {const char *name; int (*run)(void);} cases[]={
++        {"zero_domain_fragmented",prepares_zero_domain_and_fragmented_subranges},
++        {"reject_before_mutation",rejects_before_mutation},
++        {"odd_and_nodata",allows_odd_domain_and_nodata},
++        {"terminal_copy",copies_terminal_before_reuse},
++        {"bounded_terminal",bounded_terminal_failures},
++        {"core_zero_domain",core_zero_domain_write_through},
++        {"sense_extent_cdb16",sense_extent_and_cdb16}};
++    unsigned failed=0;
++    for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
++        int ok=cases[i].run();printf("%s %s\n",ok?"PASS":"FAIL",cases[i].name);failed+=!ok;
++    }
++    printf("7 groups, %u failures\n",failed);return failed?1:0;
++}
+--- /dev/null
++++ b/tests/host/nxstorage/packet_host_platform.h
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_PACKET_HOST_PLATFORM_H
++#define NX_PACKET_HOST_PLATFORM_H
++#include <stdint.h>
++#include <stddef.h>
++#define NTAPI
++#define FASTCALL
++typedef void VOID, *PVOID;
++typedef uint8_t UCHAR, BOOLEAN;
++typedef uint16_t USHORT;
++typedef uint32_t ULONG;
++typedef int32_t NTSTATUS;
++typedef struct _MDL { struct _MDL *Next; int16_t Size, MdlFlags;
++    void *Process, *MappedSystemVa, *StartVa; ULONG ByteCount, ByteOffset; } MDL, *PMDL;
++struct _IRP;
++typedef NTSTATUS (*PIO_COMPLETION_ROUTINE)(void *,struct _IRP *,void *);
++typedef void (*PDRIVER_CANCEL)(void *,struct _IRP *);
++struct _SCSI_REQUEST_BLOCK;
++typedef struct _IO_STACK_LOCATION {
++    UCHAR MajorFunction, MinorFunction, Flags, Control;
++    union { struct { struct _SCSI_REQUEST_BLOCK *Srb; } Scsi; } Parameters;
++    PIO_COMPLETION_ROUTINE CompletionRoutine; void *Context;
++} IO_STACK_LOCATION, *PIO_STACK_LOCATION;
++typedef struct _IRP {
++    struct { NTSTATUS Status; uintptr_t Information; } IoStatus;
++    PMDL MdlAddress;
++    int8_t StackCount, CurrentLocation;
++    BOOLEAN Cancel;
++    PDRIVER_CANCEL CancelRoutine;
++    struct { struct { PIO_STACK_LOCATION CurrentStackLocation; } Overlay; } Tail;
++} IRP, *PIRP;
++#include "packet_srb_declaration.h"
++VOID IoReuseIrp(PIRP, NTSTATUS);
++#endif
+--- /dev/null
++++ b/tests/host/nxstorage/packet_native_assertions.c
+@@ -0,0 +1,30 @@
++/* Original assertions from root-admitted numeric target oracle. */
++#include "native_packet.h"
++_Static_assert(sizeof(SCSI_REQUEST_BLOCK) == 64, "SRB sizeof");
++_Static_assert(__alignof__(SCSI_REQUEST_BLOCK) == 4, "SRB alignof");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, Length) == 0, "SRB Length");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, Function) == 2, "SRB Function");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, SrbStatus) == 3, "SRB SrbStatus");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, ScsiStatus) == 4, "SRB ScsiStatus");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, PathId) == 5, "SRB PathId");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, TargetId) == 6, "SRB TargetId");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, Lun) == 7, "SRB Lun");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, QueueTag) == 8, "SRB QueueTag");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, QueueAction) == 9, "SRB QueueAction");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, CdbLength) == 10, "SRB CdbLength");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, SenseInfoBufferLength) == 11, "SRB SenseInfoBufferLength");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, SrbFlags) == 12, "SRB SrbFlags");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, DataTransferLength) == 16, "SRB DataTransferLength");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, TimeOutValue) == 20, "SRB TimeOutValue");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, DataBuffer) == 24, "SRB DataBuffer");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, SenseInfoBuffer) == 28, "SRB SenseInfoBuffer");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, NextSrb) == 32, "SRB NextSrb");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, OriginalRequest) == 36, "SRB OriginalRequest");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, SrbExtension) == 40, "SRB SrbExtension");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, InternalStatus) == 44, "SRB InternalStatus");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, QueueSortKey) == 44, "SRB QueueSortKey");
++_Static_assert(__builtin_offsetof(SCSI_REQUEST_BLOCK, Cdb) == 48, "SRB Cdb");
++_Static_assert(sizeof(((SCSI_REQUEST_BLOCK *)0)->Cdb)==16,"CDB capacity");
++_Static_assert(sizeof(((SCSI_REQUEST_BLOCK *)0)->DataTransferLength)==4,"SRB count width");
++_Static_assert(sizeof(((IRP *)0)->IoStatus.Information)==4,"native IOSB byte width");
++_Static_assert(sizeof(uintptr_t)==4,"target original-domain width");
+--- /dev/null
++++ b/tests/host/nxstorage/packet_native_platform.h
+@@ -0,0 +1,4 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "native-types.h"
++#include "target-api-declarations.h"
++#include "packet_srb_declaration.h"
+--- /dev/null
++++ b/tests/target/native_packet/stddef.h
+@@ -0,0 +1,9 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Original freestanding compilation shim using compiler scalar builtins only.
++ * No SDK declarations, layout, functions or imported header bodies. */
++#ifndef NX_PACKET_FREESTANDING_STDDEF_H
++#define NX_PACKET_FREESTANDING_STDDEF_H
++typedef __SIZE_TYPE__ size_t;
++#define NULL ((void *)0)
++#define offsetof(type, member) __builtin_offsetof(type, member)
++#endif
+--- /dev/null
++++ b/tests/target/native_packet/stdint.h
+@@ -0,0 +1,16 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Original freestanding compilation shim using compiler scalar builtins only. */
++#ifndef NX_PACKET_FREESTANDING_STDINT_H
++#define NX_PACKET_FREESTANDING_STDINT_H
++typedef __UINT8_TYPE__ uint8_t;
++typedef __UINT16_TYPE__ uint16_t;
++typedef __UINT32_TYPE__ uint32_t;
++typedef __INT32_TYPE__ int32_t;
++typedef __UINT64_TYPE__ uint64_t;
++typedef __INT64_TYPE__ int64_t;
++typedef __UINTPTR_TYPE__ uintptr_t;
++#define UINT32_MAX __UINT32_MAX__
++#define UINT64_MAX __UINT64_MAX__
++#define UINTPTR_MAX __UINTPTR_MAX__
++#define UINT64_C(value) value##ULL
++#endif

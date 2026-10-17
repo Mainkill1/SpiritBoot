@@ -1,0 +1,28 @@
+{
+  "build": "clang -O3 -DNDEBUG (release host)",
+  "workload": {
+    "queue_depth": 12,
+    "bytes_per_read": 4096,
+    "batches_per_sample": 1000000,
+    "samples_per_process_median": 5,
+    "operations_per_process": 60000000,
+    "process_runs": 3
+  },
+  "baseline": {
+    "median_ns_per_io": 182.9,
+    "runs": [
+      182.9,
+      183.02,
+      182.3
+    ]
+  },
+  "candidate_v2": {
+    "median_ns_per_io": 150.13,
+    "runs": [
+      150.13,
+      149.94,
+      150.67
+    ]
+  },
+  "improvement_percent": 17.916894477856758
+}

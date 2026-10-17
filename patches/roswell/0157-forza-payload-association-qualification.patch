@@ -1,0 +1,83 @@
+diff --git a/ntoskrnl/xb/boot_setup.c b/ntoskrnl/xb/boot_setup.c
+index 392dc50299..e19094f185 100644
+--- a/ntoskrnl/xb/boot_setup.c
++++ b/ntoskrnl/xb/boot_setup.c
+@@ -37,7 +37,7 @@ TEXT(label_ac3, "Dolby Digital (AC3)");
+ TEXT(label_dts, "DTS");
+ TEXT(label_advanced_all, "All advanced settings");
+ TEXT(label_contig_cache, "Advanced: contig cache");
+-TEXT(label_xdvdfs_async, "Optical async reads");
++TEXT(label_xdvdfs_async, "Optical direct reads");
+ TEXT(label_ata_settle, "Emulator ATA acceleration");
+ TEXT(label_save, "Save and reboot");
+ TEXT(label_continue, "Discard and continue");
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index f6f2d4a817..b451ce739c 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -42,6 +42,7 @@ static NTSTATUS completion_reentry_status;
+ static PIRP lower_call_child;
+ static unsigned child_reuse_before_lower_return;
+ static unsigned burst_complete_during_submit,burst_seed;
++static unsigned stamp_read_payloads;
+ static void publish_host_cache_from_descriptor(void);
+ 
+ static void remember(void **live,void *pointer){for(unsigned i=0;i<128;++i)if(!live[i]){live[i]=pointer;return;}abort();}
+@@ -92,6 +93,15 @@ NTSTATUS ZwClose(HANDLE h){(void)h;return STATUS_SUCCESS;}
+ static NTSTATUS complete_specific_child(PIRP child,NTSTATUS status,ULONG bytes,UCHAR srb_status)
+ {
+     MUST(child);PIO_STACK_LOCATION s=child->Tail.Overlay.CurrentStackLocation-1;
++    PSCSI_REQUEST_BLOCK srb=s->Parameters.Scsi.Srb;
++    if(stamp_read_payloads && NT_SUCCESS(status) && srb &&
++       srb->Cdb[0]==0x28 && srb->DataBuffer && bytes>=8) {
++        uint32_t lba=((uint32_t)srb->Cdb[2]<<24)|((uint32_t)srb->Cdb[3]<<16)|
++                     ((uint32_t)srb->Cdb[4]<<8)|srb->Cdb[5];
++        uint8_t *data=srb->DataBuffer;
++        memcpy(data,&lba,sizeof(lba));
++        lba=~lba;memcpy(data+bytes-sizeof(lba),&lba,sizeof(lba));
++    }
+     child->IoStatus.Status=status;child->IoStatus.Information=bytes;s->Parameters.Scsi.Srb->SrbStatus=srb_status;
+     if(active_child==child)active_child=NULL;
+     for(unsigned index=0;index<pending_child_count;++index) if(pending_children[index]==child) {
+@@ -328,9 +338,15 @@ static int randomized_qd12_bursts_complete_1024_reads(void)
+ {
+     enum { WINDOW=12,TOTAL=1024 };
+     PDEVICE_OBJECT d=make_device(16);parent_fixture reads[WINDOW];unsigned active[WINDOW]={0};
++    unsigned request_index[WINDOW]={0};
++    uint8_t *payloads=aligned_alloc(4096,WINDOW*4096);
+     unsigned submitted=0,completed=0;lower_pending=1;pending_child_count=0;
++    CHECK(payloads!=NULL);memset(payloads,0xa5,WINDOW*4096);stamp_read_payloads=1;
+     for(unsigned i=0;i<WINDOW;++i) {
+         init_parent(&reads[i],IRP_MJ_READ,4096);lower_calls=0;
++        reads[i].mdl.StartVa=payloads+i*4096;
++        reads[i].stack.Parameters.Read.ByteOffset=(int64_t)(submitted%256u)*4096;
++        request_index[i]=submitted;
+         CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
+         active[i]=1;++submitted;
+     }
+@@ -341,16 +357,25 @@ static int randomized_qd12_bursts_complete_1024_reads(void)
+             CHECK(complete_specific_child(pending_children[pick],STATUS_SUCCESS,4096,1)==STATUS_MORE_PROCESSING_REQUIRED);
+         }
+         for(unsigned i=0;i<WINDOW;++i) if(active[i]&&reads[i].irp.host_completed) {
++            uint32_t expected=(request_index[i]%256u)*8u,first,last;
++            memcpy(&first,payloads+i*4096,sizeof(first));
++            memcpy(&last,payloads+(i+1u)*4096-sizeof(last),sizeof(last));
++            CHECK(first==expected&&last==~expected);
+             active[i]=0;++completed;
+         }
+         for(unsigned i=0;i<WINDOW&&submitted<TOTAL;++i) if(!active[i]) {
+             init_parent(&reads[i],IRP_MJ_READ,4096);lower_calls=0;
++            memset(payloads+i*4096,0xa5,4096);
++            reads[i].mdl.StartVa=payloads+i*4096;
++            reads[i].stack.Parameters.Read.ByteOffset=(int64_t)(submitted%256u)*4096;
++            request_index[i]=submitted;
+             CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
+             active[i]=1;++submitted;
+         }
+         CHECK(pending_child_count<=WINDOW);
+     }
+     CHECK(submitted==TOTAL&&!pending_child_count);
++    stamp_read_payloads=0;free(payloads);
+     burst_complete_during_submit=0;lower_pending=0;return 1;
+ }
+ /* Break: a cancelled parent reaches lower transport before commit, or committed transport is not drained once. */

@@ -1,0 +1,195 @@
+{
+  "acceptance": {
+    "P1_pass": false,
+    "calibration_pass": false,
+    "candidate_reference_comparison": false,
+    "counter_frequency_measured": false,
+    "durability_verified": null,
+    "performance_eligible": false,
+    "private_structural_counters": null,
+    "real_flushes": null
+  },
+  "case": "fatx-d0-q12-p900-synthetic.warm",
+  "coverage": {
+    "all36_qualified": false,
+    "native_qualified_leaves": 1,
+    "other_matrix_families_unqualified_leaves": 12,
+    "remaining_supported_leaves": 23,
+    "supported_FATX_leaves": 24
+  },
+  "finished_utc": "2026-10-15T02:43:49.7224218+00:00",
+  "inputs": {
+    "EEPROM_sha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5",
+    "HDD_prepared_sha256": "5195389324fb2009cc748a8135b4fb858c685700bf800b2bc847b268a5f929c3",
+    "HDD_source_seed_asset_id": "pr256-clean-fatx-compat010-v1",
+    "HDD_source_seed_sha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+    "firmware_role": "local_64MiB_semaphore_overflow_fix_image",
+    "firmware_sha256": "42ad0c392b97d195f6aacaa47b1c168f1f74038ddf3258257b21cfde99bcb647",
+    "fixture_iso_bytes": 720896,
+    "fixture_iso_sha256": "f2aa311c157f5f4055a89e7d1e21209cd919d9069f6a398adac2588295ee7d73",
+    "owned_desktop_launcher_sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+    "published_c630_reference": false,
+    "recorder_xbe_bytes": 147456,
+    "recorder_xbe_sha256": "7158fdb09ae2fe14cd97855301eaf7fd49e47a3d8ac1aaea08eb0db97f8b9a84",
+    "xemu_role": "PR356_fixed_release",
+    "xemu_sha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d"
+  },
+  "job_id": "pr248-io-v3-fatx-d0-q12-p900-warm-20261015-v1",
+  "limitations": [
+    "One specified native functional case only; no native performance or full-matrix qualification.",
+    "900 free pages is a before-META snapshot, not a continuously observed invariant.",
+    "Caller lifetime occupancy and active slots are not private device queue depth.",
+    "Nominal 733333333 Hz and raw ticks do not independently qualify frequency or absolute duration.",
+    "OS page cache and GPU driver cache remained uncontrolled.",
+    "V3 metric excludes the full post-batch oracle and cannot be directly compared with V2 timing."
+  ],
+  "raw_runner_observations": {
+    "Intervened": true,
+    "comparison_ready_reported": true,
+    "correctness": "notEvaluated",
+    "driver_namespace_verified": false,
+    "exit_code": 0,
+    "manual_inputs": 0,
+    "pauses": 0,
+    "post_END_diagnostics": 1,
+    "run_state_status": "complete",
+    "status": "completed",
+    "uncontrolled": [
+      "os-page-cache",
+      "driver-cache"
+    ]
+  },
+  "raw_verification": {
+    "evidence_files": [
+      {
+        "bytes": 279872,
+        "path": "native-serial.log",
+        "sha256": "7f14214f53f1212a2119046e074aeae483b2ef3b252ff9c73b252f391f585db9"
+      },
+      {
+        "bytes": 6668,
+        "path": "result.json",
+        "sha256": "3f1588dde0e0451fbd623897d5e197f74777b9df5cf4abbf1f199c9aee642aff"
+      },
+      {
+        "bytes": 3296,
+        "path": "input-manifest.json",
+        "sha256": "97af33ba7ed0384dc0ff87b8e8f9e1a3401614e7b84af33f693913eaffc3d637"
+      },
+      {
+        "bytes": 822,
+        "path": "runtime-state.json",
+        "sha256": "b2b078f6a6750230f84f69d0b37891ea87a8c411e1fde069f79ac531befcb7c8"
+      },
+      {
+        "bytes": 582,
+        "path": "runtime-cleanup.json",
+        "sha256": "b2d49ff9e3431bf4c36087296ad737c695b65b5b560481edb5f2385df693b961"
+      },
+      {
+        "bytes": 971,
+        "path": "native-user-launch.txt",
+        "sha256": "860474ba0abd14fee6b74e3912eb96e4a1e3087f1edf807001356a008b3644cc"
+      },
+      {
+        "bytes": 303,
+        "path": "native-job-lifetime.txt",
+        "sha256": "6666e67a58fd22cb01e9d704272eefb90d65415618519aacefbe4c045a8cab86"
+      },
+      {
+        "bytes": 99,
+        "path": "native-pipe-server-lifetime.txt",
+        "sha256": "b65098c9865ab7da9ce0ace6b6317b0ea4b0712923125b437a171f8e2f3e039d"
+      },
+      {
+        "bytes": 102,
+        "path": "native-pipe-client-lifetime.txt",
+        "sha256": "adf9891617a8b689c7673fe668c0f2a91eaa18aacad84a404e652f0f829fb15b"
+      },
+      {
+        "bytes": 5206,
+        "path": "diagnostics/run-state/report.json",
+        "sha256": "159f77851708e2680a272852d59143220362924b514256af76fd8f1fe39b3e5f"
+      },
+      {
+        "bytes": 1293,
+        "path": "diagnostics/run-state/config-effective.toml",
+        "sha256": "229587048f30c2ef84c40249cf9799b4f9f4fbac56c8deeae2dcaffd8652540c"
+      },
+      {
+        "bytes": 40,
+        "path": "diagnostics/20261015-024349404-v3-status-post/qmp-result.json",
+        "sha256": "6f36c58df9f1069215406d16f00ea1b02396baf5e7c665bde0d85ed793874e39"
+      }
+    ],
+    "native_input_manifest_sha256": "11b9d5df0c94112d0959f52fd46acf03c96eb2edf2ac3e2fc38f3ea0b529a8e2",
+    "request_sha256": "dd8e2fe278b9a3c367886d02e5936ee7c184b22549035cca828a983f17f6a9aa",
+    "verification_report_sha256": "9aae416ff4d5f2d154753c287637539fb4c0d5ec02ac5fd60f79671ff2098ff3",
+    "verifier_sha256": "d733a9c6242bd8c98436c9cae5c12ae4e21a87f207fb772f780652cd73567ea5"
+  },
+  "rig": {
+    "PowerShell_version": "5.1.19041.6456",
+    "desktop": "Default",
+    "desktop_user": "Codex",
+    "guest_memory_mib": 64,
+    "launch_transport": "protected_owned_PowerShell_named_pipe",
+    "platform": "Windows Ryzen approved secondary",
+    "renderer": "VULKAN",
+    "session": 1,
+    "vsync": false,
+    "window": "1280x720",
+    "window_station": "WinSta0"
+  },
+  "run_id": "20261015-024337394-24ab598cc42146a5b1628ed922f9e13c",
+  "schema_version": 1,
+  "scope": "one-case generation3 public FATX recorder native functional qualification",
+  "source_provenance": {
+    "path": "../../tests/xbe/storage-io-recorder-v3/source-provenance.json",
+    "sha256": "5c2b89f3b4a7924540654586b5e85624504316c6804432096952ed28c1f5c248"
+  },
+  "source_review": {
+    "native_actions_by_reviewer": 0,
+    "post_review_metadata_normalization": "public-input-lineage staging prefixes changed to repository-relative paths; compiled/test source bytes and copied content hashes unchanged",
+    "receipt_sha256": "440f71d7873d9b839ee8bba54fbc28e799efe5b747f070bb2a9d84cb17a1ca05",
+    "verdict": "no_critical_or_important_findings_in_bounded_read_only_review"
+  },
+  "started_utc": "2026-10-15T02:43:37.3948044+00:00",
+  "verification_status": "one_case_native_functional_qualified",
+  "verified_results": {
+    "all_slices_disjoint_aligned_in_bounds": true,
+    "average_caller_lifetimes": {
+      "denominator": 41549786,
+      "numerator": 244589318
+    },
+    "batch_ticks": 41549786,
+    "caller_lifetime_sum_ticks": 244589318,
+    "complete_payload_and_canary_oracle": "post_batch_full_bytes",
+    "every_APC_count": 1,
+    "every_IOSB_pointer_matches": true,
+    "every_post_batch_oracle_good": true,
+    "every_returned_byte_count_matches_vector": true,
+    "evidence_finalized": true,
+    "failures": 0,
+    "first_issue_tick": 5234696644,
+    "guest_cleanup_complete": true,
+    "host_target_and_server_exit_confirmed": true,
+    "last_APC_ready_tick": 5276246430,
+    "maximum_active_caller_slots": 12,
+    "measured_free_pages_before_META": 900,
+    "operations_completed": 1024,
+    "operations_expected": 1024,
+    "owned_active_descendants_after_cleanup": 0,
+    "payload_bytes_verified": 10871296,
+    "per_operation_completion_status": "00000000",
+    "per_operation_submit_status": "00000103",
+    "post_END_QMP_status": {
+      "running": false,
+      "status": "shutdown"
+    },
+    "private_HDD_deleted_after_evidence": true,
+    "requested_active_slots": 12,
+    "resident_slab_bytes": 14823424,
+    "static_records_bytes": 81920,
+    "warmup_oracle_failures": 0
+  }
+}

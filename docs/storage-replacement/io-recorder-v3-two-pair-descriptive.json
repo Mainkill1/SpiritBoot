@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "kind": "generation3-public-fatx-recorder-two-pair-descriptive-summary",
+  "case": "fatx-d0-q12-p900-synthetic.warm",
+  "pair_orders": [["spiritboot", "complex"], ["complex", "spiritboot"]],
+  "identities": {
+    "complex_bios_sha256": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+    "spiritboot_bios_sha256": "42ad0c392b97d195f6aacaa47b1c168f1f74038ddf3258257b21cfde99bcb647",
+    "fixture_iso_sha256": "f2aa311c157f5f4055a89e7d1e21209cd919d9069f6a398adac2588295ee7d73",
+    "xemu_sha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d"
+  },
+  "observations": {
+    "complex": [
+      {"run_id": "20261015-024827216-9d985d2ab9d44a16af1b565da4c62465", "order_within_pair": 2, "batch_ticks": 24632153, "caller_lifetime_sum_ticks": 252508225},
+      {"run_id": "20261015-025028975-fb8572443f504fa4ad4779fcdd8efc18", "order_within_pair": 1, "batch_ticks": 25685440, "caller_lifetime_sum_ticks": 286876199}
+    ],
+    "spiritboot": [
+      {"run_id": "20261015-024337394-24ab598cc42146a5b1628ed922f9e13c", "order_within_pair": 1, "batch_ticks": 41549786, "caller_lifetime_sum_ticks": 244589318},
+      {"run_id": "20261015-025042862-371650071ec8483da61de43240242317", "order_within_pair": 2, "batch_ticks": 40584574, "caller_lifetime_sum_ticks": 259535590}
+    ]
+  },
+  "aggregate": {
+    "complex_mean_batch_ticks": 25158796.5,
+    "complex_mean_nominal_microseconds": 34307.449788321566,
+    "complex_pooled_caller_lifetime_per_batch_tick": 10.719599087341082,
+    "spiritboot_mean_batch_ticks": 41067180,
+    "spiritboot_mean_nominal_microseconds": 56000.70002545486,
+    "spiritboot_pooled_caller_lifetime_per_batch_tick": 6.137807709221817,
+    "pair_spiritboot_to_complex_batch_ratios": [1.686810974257914, 1.5800614667297894],
+    "ratio_of_mean_batch_ticks_spiritboot_to_complex": 1.6323189386264958
+  },
+  "correctness": {
+    "operations_per_run": 1024,
+    "payload_bytes_per_run": 10871296,
+    "requested_and_max_active_slots": 12,
+    "measured_pages_before": 900,
+    "warmup_oracle_failures": 0,
+    "measured_failures": 0,
+    "cleanup_complete": true
+  },
+  "verification_sha256": {
+    "first_spiritboot": "9aae416ff4d5f2d154753c287637539fb4c0d5ec02ac5fd60f79671ff2098ff3",
+    "first_complex": "7c4d1a426b1133ddfb7236f54cbdce820d807ff3838db4375a3821c153b23980",
+    "reverse_order_pair": "2bfdd406f6040feed92fdd71b0c68540bf42ed2ce8540b42bde349edc7041e9d"
+  },
+  "performance_acceptance_eligible": false,
+  "interpretation": "Both orderings reproduce a longer batch interval and lower caller occupancy for SpiritBoot in this one warm, pressure-900-page, queue-depth-12 FATX read case.",
+  "limitations": [
+    "Two observations per BIOS are insufficient for confidence intervals or an acceptance decision.",
+    "OS and GPU-driver caches and temporal drift were disclosed but uncontrolled.",
+    "Nominal microseconds use the recorder's 733333333 Hz label; the rate was not independently measured.",
+    "This one synthetic FATX-read case cannot establish overall BIOS or game performance.",
+    "These observations predate a frozen confirmatory schedule and cannot be admitted to one."
+  ]
+}

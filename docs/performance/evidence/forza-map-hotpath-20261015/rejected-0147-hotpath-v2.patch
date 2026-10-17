@@ -1,0 +1,327 @@
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -33,6 +33,7 @@
+     nx_lcq_observation cache_observation;
+     unsigned cache_guard;
+     unsigned control_active, control_recovery, control_recovery_failed;
++    struct NX_NATIVE_ENVELOPE *next_free;
+ 
+ } NX_NATIVE_ENVELOPE;
+ 
+@@ -45,6 +46,7 @@
+     nx_slot *slots;
+     NX_NATIVE_ENVELOPE *envelopes;
+     ULONG count;
++    NX_NATIVE_ENVELOPE *free_envelopes;
+     unsigned sealed, quarantined;
+     KEVENT drain_event;
+ 
+@@ -358,11 +360,13 @@
+ 
+ static void release_envelope_locked(NX_NATIVE_ENVELOPE *envelope)
+ {
+-    if(envelope->completed && !envelope->dispatch_active && !envelope->cancel_active) {
++    if(envelope->active && envelope->completed && !envelope->dispatch_active && !envelope->cancel_active) {
+         envelope->active=0;
+         envelope->parent=NULL;
+         envelope->handle_valid=0;
+         envelope->terminal_ready=0;
++        envelope->next_free=envelope->adapter->free_envelopes;
++        envelope->adapter->free_envelopes=envelope;
+         (void)KeSetEvent(&envelope->adapter->drain_event,IO_NO_INCREMENT,FALSE);
+     }
+ }
+@@ -694,6 +698,8 @@
+             sizeof(adapter->envelopes[index].control_data),FALSE,FALSE,NULL);
+         if(!adapter->envelopes[index].child || !adapter->envelopes[index].control_mdl) goto no_memory;
+         MmBuildMdlForNonPagedPool(adapter->envelopes[index].control_mdl);
++        adapter->envelopes[index].next_free=adapter->free_envelopes;
++        adapter->free_envelopes=&adapter->envelopes[index];
+     }
+     port.context=adapter;port.enter=port_enter;port.leave=port_leave;
+     port.prepare=port_prepare;port.submit=port_submit;port.retire=port_retire;
+@@ -767,7 +773,6 @@
+     nx_request request;
+     nx_handle handle;
+     nx_status result;
+-    ULONG index;
+     KIRQL cancel_irql;
+     unsigned cancel_after=0;
+     nx_lcq_observation cache_observation={0};
+@@ -784,10 +789,9 @@
+         parent->IoStatus.Information=0;IofCompleteRequest(parent,IO_NO_INCREMENT);
+         return STATUS_DEVICE_NOT_READY;
+     }
+-    if(!adapter->sealed) {
+-        for(index=0;index<adapter->count;++index) if(!adapter->envelopes[index].active) {
+-            envelope=&adapter->envelopes[index];break;
+-        }
++    if(!adapter->sealed && adapter->free_envelopes) {
++        envelope=adapter->free_envelopes;
++        adapter->free_envelopes=envelope->next_free;
+     }
+     if(envelope) {
+         envelope->active=1;envelope->dispatch_active=1;envelope->parent=parent;
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -73,7 +73,9 @@
+         return NX_INVALID;
+     clear_bytes(d,sizeof(*d));
+     clear_bytes(slots,(size_t)count*sizeof(*slots));
+-    d->config=*c; d->port=*p; d->slots=slots; d->count=count;
++    d->config=*c; d->port=*p; d->slots=slots; d->count=count; d->free_head=0;
++    for (uint32_t i=0;i<count;++i)
++        slots[i].free_next=i+1u==count ? UINT32_MAX:i+1u;
+     d->sector_mask=c->sector_bytes-1u;
+     for (uint32_t sector=c->sector_bytes;sector>1u;sector>>=1) ++d->sector_shift;
+     return NX_OK;
+@@ -177,16 +179,13 @@
+ 
+ /* All transport calls occur outside the short state lock. One pump owns all
+  * command mutation. Inline callbacks publish results and return immediately. */
+-static void pump(nx_device *d)
+-{
+-    lock(d);
+-    if (d->pumping) { unlock(d); return; }
+-    d->pumping=1;
+-    unlock(d);
++static void run_pump(nx_device *d)
++{
+     for (;;) {
+         enum { NONE, SEND, RETIRE, CANCEL, COMPLETE } action=NONE;
+         nx_slot *s=NULL; uint32_t index=0;
+         void *parent=NULL; nx_status final=NX_OK; uint64_t bytes=0;
++        unsigned complete_read=0;
+         lock(d);
+         for (uint32_t scanned=0;scanned<d->count;++scanned) {
+             index=d->cursor; d->cursor=index+1u==d->count ? 0:index+1u;
+@@ -215,8 +214,13 @@
+             }
+             if (s->terminal && !s->recovery) {
+                 action=COMPLETE; parent=s->request.parent; final=s->final_status; bytes=s->transferred;
++                complete_read=s->request.operation==NX_READ && !d->quarantined;
+                 if (s->dispatch_result) *s->dispatch_result=s->pending ? NX_PENDING:final;
+-                s->dispatch_result=NULL; s->active=0; break;
++                s->dispatch_result=NULL; s->active=0;
++                if (s->generation!=UINT64_MAX) {
++                    s->free_next=d->free_head; d->free_head=index;
++                }
++                break;
+             }
+             nx_status built=build_command(d,s,index);
+             if (built!=NX_OK) { preparation_failed(d,s,built); action=NONE; break; }
+@@ -231,11 +235,16 @@
+         unlock(d);
+         if (action==COMPLETE) {
+             d->port.complete(d->port.context,parent,final,bytes);
++            if (complete_read) {
++                lock(d);
++                if (!d->wake) { d->pumping=0; unlock(d); return; }
++                d->wake=0; unlock(d);
++            }
+         } else if (action==CANCEL) {
+             d->port.cancel(d->port.context,&s->command);
+         } else if (action==RETIRE) {
+             d->port.retire(d->port.context,&s->command);
+-            lock(d); record_result(d,s); unlock(d);
++            lock(d); record_result(d,s); d->cursor=index; unlock(d);
+         } else {
+             nx_status prepared=d->port.prepare(d->port.context,&s->command);
+             lock(d);
+@@ -260,7 +269,10 @@
+             /* A return value never proves lower ownership ended. A broken
+              * adapter that omits its terminal report keeps the pages live. */
+             if (submitted_pending || !s->done) pending(d,s);
+-            unlock(d);
++            if (submitted_pending && !s->done && !d->wake) {
++                d->pumping=0; unlock(d); return;
++            }
++            d->wake=0; unlock(d);
+         }
+     }
+ }
+@@ -274,20 +286,23 @@
+         d->port.complete(d->port.context,r->parent,result,0); return result;
+     }
+     lock(d);
+-    uint32_t index;
+-    for (index=0;index<d->count;++index)
+-        if (!d->slots[index].active && d->slots[index].generation!=UINT64_MAX) break;
+-    if (d->quarantined || index==d->count || d->order==UINT64_MAX) {
++    uint32_t index=d->free_head;
++    if (d->quarantined || index==UINT32_MAX || d->order==UINT64_MAX) {
+         result=d->quarantined ? NX_IO_ERROR:NX_NO_MEMORY;
+         unlock(d); d->port.complete(d->port.context,r->parent,result,0); return result;
+     }
+     nx_slot *s=&d->slots[index]; uint64_t generation=s->generation+1u;
+-    clear_bytes(s,sizeof(*s)); s->generation=generation; s->order=++d->order;
++    d->free_head=s->free_next;
++    clear_bytes(&s->command,offsetof(nx_slot,free_next)-offsetof(nx_slot,command));
++    s->generation=generation; s->order=++d->order;
+     s->request=*r; s->active=1; s->dispatch_result=&result;
+     handle->slot=index; handle->generation=generation;
+-    if (d->pumping) pending(d,s);
++    d->cursor=index;
++    unsigned run=!d->pumping;
++    if (run) d->pumping=1;
++    else { pending(d,s); d->wake=1; }
+     unlock(d);
+-    pump(d);
++    if (run) run_pump(d);
+     lock(d);
+     if (s->active && s->generation==generation && s->dispatch_result==&result) {
+         pending(d,s); s->dispatch_result=NULL; result=NX_PENDING;
+@@ -299,26 +314,37 @@
+ void nx_lower_done(nx_device *d, nx_token token, nx_status status, uint32_t bytes, uint32_t flags)
+ {
+     if (!d || token.slot>=d->count) return;
++    unsigned run=0;
+     lock(d); nx_slot *s=&d->slots[token.slot];
+     if (!s->active || !s->inflight || !s->prepared || s->done ||
+         s->generation!=token.generation || s->command.token.command!=token.command) {
+         unlock(d); return;
+     }
+     s->lower_status=status; s->lower_bytes=bytes; s->lower_flags=flags; s->done=1;
+-    unlock(d); pump(d);
++    d->cursor=token.slot;
++    if (!d->pumping) { d->pumping=1; run=1; }
++    else d->wake=1;
++    unlock(d); if (run) run_pump(d);
+ }
+ 
+ void nx_cancel(nx_device *d, nx_handle handle)
+ {
+     if (!d || handle.slot>=d->count) return;
++    unsigned run=0;
+     lock(d); nx_slot *s=&d->slots[handle.slot];
+-    if (s->active && s->generation==handle.generation) s->cancelled=1;
+-    unlock(d); pump(d);
++    if (s->active && s->generation==handle.generation) {
++        s->cancelled=1; d->cursor=handle.slot;
++        if (!d->pumping) { d->pumping=1; run=1; }
++        else d->wake=1;
++    }
++    unlock(d); if (run) run_pump(d);
+ }
+ 
+ void nx_quarantine(nx_device *d)
+ {
+     if (!d) return;
+-    lock(d); d->quarantined=1; unlock(d);
+-    pump(d);
+-}
++    unsigned run;
++    lock(d); d->quarantined=1; run=!d->pumping;
++    if (run) d->pumping=1; else d->wake=1;
++    unlock(d); if (run) run_pump(d);
++}
+--- a/drivers/storage/class/nxstorage/request.h
++++ b/drivers/storage/class/nxstorage/request.h
+@@ -74,15 +74,16 @@
+     nx_status *dispatch_result;
+     unsigned active, terminal, recovery, inflight, prepared, done;
+     unsigned cancelled, cancel_sent, pending, syncing;
++    uint32_t free_next;
+ } nx_slot;
+ typedef struct nx_device {
+     nx_config config;
+     nx_port port;
+     nx_slot *slots;
+-    uint32_t count, cursor;
++    uint32_t count, cursor, free_head;
+     uint32_t sector_shift, sector_mask;
+     uint64_t order;
+-    unsigned pumping, quarantined;
++    unsigned pumping, wake, quarantined;
+ } nx_device;
+ 
+ /* Last argument is the actual caller-provided slot storage byte capacity. */
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -39,6 +39,8 @@
+ static PDEVICE_OBJECT completion_reentry_device;
+ static PIRP completion_reentry_parent;
+ static NTSTATUS completion_reentry_status;
++static PIRP lower_call_child;
++static unsigned child_reuse_before_lower_return;
+ static void publish_host_cache_from_descriptor(void);
+ 
+ static void remember(void **live,void *pointer){for(unsigned i=0;i<128;++i)if(!live[i]){live[i]=pointer;return;}abort();}
+@@ -52,7 +54,7 @@
+     cancel_parent->Cancel=TRUE;cancel_parent->CancelIrql=0;
+     routine(created_device,cancel_parent);
+ }
+-VOID IoReuseIrp(PIRP i,NTSTATUS s){if(cancel_during_prepare){cancel_during_prepare=0;cancel_now();}int8_t n=i->StackCount;PIO_STACK_LOCATION base=i->Tail.Overlay.CurrentStackLocation-n;memset(i,0,sizeof(*i));i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=base+n;i->IoStatus.Status=s;}
++VOID IoReuseIrp(PIRP i,NTSTATUS s){if(i==lower_call_child)++child_reuse_before_lower_return;if(cancel_during_prepare){cancel_during_prepare=0;cancel_now();}int8_t n=i->StackCount;PIO_STACK_LOCATION base=i->Tail.Overlay.CurrentStackLocation-n;memset(i,0,sizeof(*i));i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=base+n;i->IoStatus.Status=s;}
+ PIRP IoAllocateIrp(CCHAR n,BOOLEAN q){(void)q;++irp_allocations;unsigned call=irp_calls++;if((int)call==irp_fail_call)return NULL;size_t z=sizeof(IRP)+(size_t)n*sizeof(IO_STACK_LOCATION);PIRP i=calloc(1,z);if(i){remember(live_irps,i);i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=(PIO_STACK_LOCATION)(i+1)+n;}return i;}
+ VOID IoFreeIrp(PIRP i){if(!forget(live_irps,i)){++invalid_irp_frees;return;}++free_irps;free(i);}
+ 
+@@ -159,7 +161,9 @@
+         status=STATUS_IO_DEVICE_ERROR;srb_status=0x84;bytes=0;}
+     else if(srb->Function==4&&release_failure){status=STATUS_IO_DEVICE_ERROR;srb_status=4;bytes=0;}
+     else if(srb->Function==0&&freeze_next){freeze_next=0;status=STATUS_IO_DEVICE_ERROR;srb_status=0x44;bytes=0;}
++    MUST(!lower_call_child);lower_call_child=child;
+     MUST(complete_specific_child(child,status,bytes,srb_status)==STATUS_MORE_PROCESSING_REQUIRED);
++    MUST(lower_call_child==child);lower_call_child=NULL;
+ 
+     return STATUS_SUCCESS;
+ }
+@@ -296,16 +300,17 @@
+ /* Completing A may synchronously dispatch B after A's core slot is free while
+  * A's adapter envelope is still owned by its outer dispatch.  The command
+  * lease must keep B's reused core slot paired with B's distinct envelope. */
+-static int completion_reentry_keeps_envelope_lease(void)
++static int completion_reentry_waits_for_lower_return_and_keeps_envelope_lease(void)
+ {
+     PDEVICE_OBJECT d=make_device(2);parent_fixture a,b;
+     lower_calls=0;lower_pending=0;init_parent(&a,IRP_MJ_READ,512);init_parent(&b,IRP_MJ_READ,512);
+     completion_reentry_device=d;completion_reentry_parent=&b.irp;
+-    completion_reentry_status=STATUS_IO_DEVICE_ERROR;
++    completion_reentry_status=STATUS_IO_DEVICE_ERROR;child_reuse_before_lower_return=0;
+     CHECK(NxNativeDispatchReadWrite(d,&a.irp)==STATUS_SUCCESS);
+     CHECK(!completion_reentry_parent&&completion_reentry_status==STATUS_PENDING);
+     CHECK(a.irp.host_completed&&b.irp.host_completed&&lower_calls==2);
+     CHECK(a.irp.IoStatus.Status==STATUS_SUCCESS&&b.irp.IoStatus.Status==STATUS_SUCCESS);
++    CHECK(!child_reuse_before_lower_return&&!lower_call_child);
+     completion_reentry_device=NULL;return 1;
+ }
+ /* Break: a cancelled parent reaches lower transport before commit, or committed transport is not drained once. */
+@@ -811,4 +816,4 @@
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_keeps_envelope_lease();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();printf("27 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();printf("27 adapter groups, %u failures\n",f);return f?1:0;}
+--- a/tests/host/nxstorage/request_test.c
++++ b/tests/host/nxstorage/request_test.c
+@@ -243,6 +243,22 @@
+     finish_held(&f,next.slot,NX_OK,512,0); CHECK(b.completions==1 && b.status==NX_OK);
+     cleanup(&f); return 1;
+ }
++/* Break: a generation-exhausted slot is returned to the admission free list
++ * and can wrap an old handle into a live request. */
++static int exhausted_generation_is_retired_from_free_list(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg));
++    f.slots[f.dev.free_head].generation=UINT64_MAX-1u;
++    parent a=fresh(),b=fresh(); nx_handle first,next;
++    nx_request r=request(&f,&a,NX_READ,0,512);
++    CHECK(nx_start(&f.dev,&r,&first)==NX_OK);
++    CHECK(first.slot==0 && first.generation==UINT64_MAX && a.completions==1);
++    r=request(&f,&b,NX_READ,512,512);
++    CHECK(nx_start(&f.dev,&r,&next)==NX_OK);
++    CHECK(next.slot!=first.slot && next.generation==1 && b.completions==1);
++    nx_cancel(&f.dev,first); CHECK(b.completions==1);
++    cleanup(&f); return 1;
++}
+ /* Break: pending returned after inline completion is omitted from parent pending semantics. */
+ static int inline_pending_still_marks_parent(void)
+ {
+@@ -790,6 +806,7 @@
+         {"rejects_invalid_input",rejects_invalid_input}, {"zero_has_no_transport",zero_has_no_transport},
+         {"one_inline_read_owns_until_return",one_inline_read_owns_until_return},
+         {"pending_duplicate_generation",pending_duplicate_generation},
++        {"exhausted_generation_is_retired_from_free_list",exhausted_generation_is_retired_from_free_list},
+         {"inline_pending_still_marks_parent",inline_pending_still_marks_parent},
+         {"long_inline_sequence_is_iterative",long_inline_sequence_is_iterative},
+         {"respects_page_and_block_limits",respects_page_and_block_limits},

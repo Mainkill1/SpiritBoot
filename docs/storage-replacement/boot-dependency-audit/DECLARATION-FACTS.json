@@ -1,0 +1,226 @@
+{
+  "schema": "pr248-boot-declaration-facts-v1",
+  "source_binding": "SOURCE-BINDING.json",
+  "facts_are": "numeric/public/kernel declarations and necessary compatibility identifiers only; no function bodies",
+  "compiled_or_native_abi_assertions": false,
+  "entry_abi": {
+    "declaration": "DRIVER_INITIALIZE",
+    "return_type": "NTSTATUS",
+    "parameter_types": [
+      "DRIVER_OBJECT *",
+      "UNICODE_STRING *"
+    ],
+    "calling_convention": "NTAPI / __stdcall",
+    "source_ids": [
+      "B01",
+      "B21",
+      "B37",
+      "B38"
+    ]
+  },
+  "add_device_abi": {
+    "declaration": "DRIVER_ADD_DEVICE",
+    "return_type": "NTSTATUS",
+    "parameter_types": [
+      "DRIVER_OBJECT *",
+      "DEVICE_OBJECT *"
+    ],
+    "calling_convention": "NTAPI / __stdcall",
+    "source_ids": [
+      "B37"
+    ]
+  },
+  "folded_entries": [
+    {
+      "index": 0,
+      "name": "\\Driver\\Pci",
+      "entry_symbol": "PciDriverEntry"
+    },
+    {
+      "index": 1,
+      "name": "\\Driver\\pciide",
+      "entry_symbol": "PciideDriverEntry"
+    },
+    {
+      "index": 2,
+      "name": "\\Driver\\atapi",
+      "entry_symbol": "AtapiDriverEntry"
+    },
+    {
+      "index": 3,
+      "name": "\\Driver\\Disk",
+      "entry_symbol": "DiskDriverEntry"
+    },
+    {
+      "index": 4,
+      "name": "\\Driver\\Cdrom",
+      "entry_symbol": "CdromDriverEntry"
+    },
+    {
+      "index": 5,
+      "name": "\\Driver\\partmgr",
+      "entry_symbol": "PartmgrDriverEntry"
+    },
+    {
+      "index": 6,
+      "name": "\\Driver\\MountMgr",
+      "entry_symbol": "MountmgrDriverEntry"
+    },
+    {
+      "index": 7,
+      "name": "\\FileSystem\\Xdvdfs",
+      "entry_symbol": "XdvdfsDriverEntry"
+    },
+    {
+      "index": 8,
+      "name": "\\FileSystem\\Vfatfs",
+      "entry_symbol": "VfatfsDriverEntry"
+    }
+  ],
+  "registration": {
+    "folded_entry_count": 9,
+    "raw_created_before_folded_entries": true,
+    "classpnp_registered_as_separate_driver": false,
+    "driver_objects_created_before_fixed_tree": true,
+    "source_ids": [
+      "B01",
+      "B03",
+      "B23",
+      "B44"
+    ]
+  },
+  "fixed_tree": {
+    "entry_count": 11,
+    "driver_bound_entry_count": 3,
+    "driver_bound_indices_zero_based": [
+      0,
+      8,
+      9
+    ],
+    "ide_index_zero_based": 9,
+    "ide_resource_count": 7,
+    "static_declared_resource_count_all_entries": 13,
+    "hdd_optical_are_dynamic_children": true,
+    "source_ids": [
+      "B07",
+      "B16",
+      "B17"
+    ]
+  },
+  "initialization_seal": {
+    "driver_count": 7,
+    "names": [
+      "\\Driver\\Pci",
+      "\\Driver\\pciide",
+      "\\Driver\\atapi",
+      "\\Driver\\Disk",
+      "\\Driver\\Cdrom",
+      "\\Driver\\partmgr",
+      "\\Driver\\NxkBus"
+    ],
+    "clears_add_device_pointer": true,
+    "postseal_pnp_handler": "IopInvalidDeviceRequest",
+    "source_ids": [
+      "B02",
+      "B27"
+    ]
+  },
+  "clear_device_initialization": {
+    "lookup_name_count": 11,
+    "contains_cdfs_lookup": true,
+    "cdfs_in_folded_registry": false,
+    "source_ids": [
+      "B01",
+      "B17"
+    ]
+  },
+  "kernel_numeric_constants": {
+    "DO_DEVICE_INITIALIZING_XBOX": 16,
+    "DO_DIRECT_IO_XBOX": 2097152,
+    "DO_BUS_ENUMERATED_DEVICE": 4096,
+    "DO_POWER_PAGABLE": 8192,
+    "DNF_MADEUP": 1,
+    "DNF_ENUMERATED": 16,
+    "DNF_IDS_QUERIED": 32,
+    "DNF_NO_RESOURCE_REQUIRED": 256,
+    "DeviceNodeUninitialized": 769,
+    "DeviceNodeStarted": 776,
+    "DEVNODE_HISTORY_SIZE": 20,
+    "IRP_MJ_PNP": 27,
+    "IRP_MN_START_DEVICE": 0,
+    "IRP_MN_QUERY_DEVICE_RELATIONS": 7,
+    "IRP_MN_QUERY_ID": 19,
+    "BusRelations": 0,
+    "source_ids": [
+      "B34",
+      "B35",
+      "B36",
+      "B39",
+      "B40",
+      "B41"
+    ]
+  },
+  "active_xbox_source_composition": {
+    "desktop_power_source_in_kernel_source_list": false,
+    "desktop_deviface_source_in_kernel_source_list": false,
+    "desktop_pnpmgr_sources_in_kernel_source_list": false,
+    "xbox_devnode_source_in_kernel_source_list": true,
+    "phase_0_and_1_power_initialization_calls_active": false,
+    "root_node_creation_call_present": true,
+    "native_root_node_redundancy_proven": false,
+    "source_ids": [
+      "B20",
+      "B23",
+      "B25",
+      "B26",
+      "B28",
+      "B30",
+      "B31",
+      "B32",
+      "B33"
+    ]
+  },
+  "current_classes": {
+    "legacy_reference_archives": [
+      "classpnp",
+      "disk",
+      "nxcdrom"
+    ],
+    "partial_lab_prototype_archives": [
+      "nxstorage",
+      "classpnp",
+      "disk",
+      "nxcdrom"
+    ],
+    "complete_candidate_archives_declared": [
+      "nxstorage",
+      "nxcdrom"
+    ],
+    "complete_candidate_required_driver_source_present": false,
+    "optical_private_class_dependency_present": true,
+    "replacement_driver_registration_proven": false,
+    "source_ids": [
+      "B29",
+      "B43",
+      "B45",
+      "B46",
+      "B47",
+      "B48",
+      "B49",
+      "B51"
+    ]
+  },
+  "qualification": {
+    "native_boot_run_count": 0,
+    "build_run_count": 0,
+    "persistent_storage_bytes": null,
+    "peak_storage_bytes": null,
+    "combined_p0_footprint_gate_complete": false,
+    "source_ids": [
+      "B13",
+      "B17",
+      "B19",
+      "B20"
+    ]
+  }
+}

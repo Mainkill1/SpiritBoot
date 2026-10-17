@@ -1,0 +1,480 @@
+diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
+index f9dbe4b..02d3931 100644
+--- a/drivers/storage/class/nxstorage/CMakeLists.txt
++++ b/drivers/storage/class/nxstorage/CMakeLists.txt
+@@ -1,4 +1,4 @@
+ # Independently authored laboratory primitives; no FDO/IRP adapter yet.
+ # This target is linked only by the explicitly labeled partial prototype.
+-add_library(nxstorage STATIC request.c geometry_composer.c cache_query.c cache_property.c)
++add_library(nxstorage STATIC request.c geometry_composer.c cache_query.c cache_property.c nxdisk_owner.c)
+ target_include_directories(nxstorage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+diff --git a/drivers/storage/class/nxstorage/nxdisk_owner.c b/drivers/storage/class/nxstorage/nxdisk_owner.c
+new file mode 100644
+index 0000000..52f5501
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/nxdisk_owner.c
+@@ -0,0 +1,184 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "nxdisk_owner.h"
++
++enum { DEVICE_EMPTY, DEVICE_ATTACHED, DEVICE_STARTED, DEVICE_SEALED };
++static const char disk_name[]="\\Device\\Harddisk0\\Partition0";
++static const char cdrom_name[]="\\Device\\CdRom0";
++static const char cdrom_link[]="\\DosDevices\\CdRom0";
++
++static int power_two(uint32_t value) { return value && !(value & (value-1u)); }
++static void zero(void *p,size_t n) { uint8_t *b=p; while(n--) *b++=0; }
++static void word32(uint8_t *p,uint32_t v)
++{ p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);p[2]=(uint8_t)(v>>16);p[3]=(uint8_t)(v>>24); }
++static void word64(uint8_t *p,uint64_t v)
++{ word32(p,(uint32_t)v);word32(p+4,(uint32_t)(v>>32)); }
++
++static int complete_port(const nxd_owner_port *p)
++{
++    return p && p->register_class && p->adapter_create_class_device &&
++        p->adapter_seal_class_device &&
++        p->adapter_submit && p->adapter_forward;
++}
++
++static int valid_config(nxd_class_kind kind,const nxd_device_config *config)
++{
++    uint32_t sector;
++    if(!config)return 0;sector=config->geometry.bytes_per_sector;
++    if(!power_two(sector)||sector<128||config->alignment_mask>=sector||
++       (config->alignment_mask&(config->alignment_mask+1u)))return 0;
++    if(kind==NXD_DISK&&(!config->capacity_bytes||
++       (config->capacity_bytes&(sector-1u))||!config->geometry.cylinders||
++       !config->geometry.tracks_per_cylinder||!config->geometry.sectors_per_track))return 0;
++    return 1;
++}
++
++nxd_status nxd_driver_entry(nxd_driver *driver,nxd_class_kind kind,
++                            const nxd_owner_port *port)
++{
++    nxd_status status;
++    if (!driver || !complete_port(port) || kind>NXD_CDROM) return NXD_INVALID_PARAMETER;
++    if (driver->registered) return driver->kind==kind ? NXD_SUCCESS:NXD_INVALID_PARAMETER;
++    status=port->register_class(port->context,kind);
++    if (status!=NXD_SUCCESS) return status;
++    zero(driver,sizeof(*driver));driver->kind=kind;driver->port=*port;driver->registered=1;
++    return NXD_SUCCESS;
++}
++
++nxd_status nxd_add_device(nxd_driver *driver,nxd_device *device,void *lower,
++                          const nxd_device_config *initial)
++{
++    nxd_class_identity identity;void *created=0;nxd_status status;
++    if (!driver || !driver->registered || !device || device->state || !lower ||
++        !valid_config(driver->kind,initial))
++        return NXD_INVALID_PARAMETER;
++    identity.device_name=driver->kind==NXD_DISK ? disk_name:cdrom_name;
++    identity.dos_link=driver->kind==NXD_DISK ? NULL:cdrom_link;
++    identity.device_type=driver->kind==NXD_DISK ? NXD_DISK_DEVICE_TYPE:NXD_CDROM_DEVICE_TYPE;
++    identity.removable=driver->kind==NXD_CDROM;
++    status=driver->port.adapter_create_class_device(driver->port.context,driver->kind,
++        &identity,initial,lower,&created);
++    if (status!=NXD_SUCCESS || !created)
++        return status==NXD_SUCCESS ? NXD_IO_ERROR:status;
++    device->driver=driver;device->config=*initial;device->lower_device=lower;device->class_device=created;
++    device->state=DEVICE_ATTACHED;
++    return NXD_SUCCESS;
++}
++
++nxd_status nxd_start_device(nxd_device *device,const nxd_device_config *config)
++{
++
++    if (!device || !config || device->state!=DEVICE_ATTACHED || !device->driver)
++        return NXD_INVALID_PARAMETER;
++    if(!valid_config(device->driver->kind,config))return NXD_INVALID_PARAMETER;
++    device->config=*config;device->state=DEVICE_STARTED;
++    return NXD_SUCCESS;
++}
++
++static nxd_status response(nxd_result *result,void *buffer,uint32_t available,
++                           uint32_t required)
++{
++    if (available<required) { result->status=NXD_BUFFER_TOO_SMALL;return result->status; }
++    if (!buffer) { result->status=NXD_INVALID_PARAMETER;return result->status; }
++    zero(buffer,required);result->information=required;result->status=NXD_SUCCESS;
++    return NXD_SUCCESS;
++}
++
++static nxd_status geometry(nxd_device *device,const nxd_io *io,nxd_result *result,
++                           uint32_t extended)
++{
++    uint8_t *out=io->buffer;uint32_t required=extended ? 32u:24u;nxd_status status;
++    status=response(result,out,io->output_bytes,required);if(status!=NXD_SUCCESS)return status;
++    word64(out,device->config.geometry.cylinders);
++    word32(out+8,device->config.geometry.media_type);
++    word32(out+12,device->config.geometry.tracks_per_cylinder);
++    word32(out+16,device->config.geometry.sectors_per_track);
++    word32(out+20,device->config.geometry.bytes_per_sector);
++    if (extended) word64(out+24,device->config.capacity_bytes);
++    return NXD_SUCCESS;
++}
++
++static nxd_status control(nxd_device *device,const nxd_io *io,nxd_result *result)
++{
++    nxd_owner_port *port=&device->driver->port;uint8_t *out=io->buffer;nxd_status status;
++    switch(io->control_code) {
++    case NXD_IOCTL_STORAGE_GET_DEVICE_NUMBER:
++        if(device->driver->kind!=NXD_DISK) break;
++        status=response(result,out,io->output_bytes,12);if(status!=NXD_SUCCESS)return status;
++        word32(out,NXD_DISK_DEVICE_TYPE);word32(out+4,0);word32(out+8,0);return NXD_SUCCESS;
++    case NXD_IOCTL_DISK_GET_GEOMETRY:
++        if(device->driver->kind==NXD_DISK)return geometry(device,io,result,0);break;
++    case NXD_IOCTL_CDROM_GET_GEOMETRY:
++        if(device->driver->kind==NXD_CDROM)
++            return port->adapter_forward(port->context,device,NXD_FORWARD_CDROM_GEOMETRY,io,result);
++        break;
++    case NXD_IOCTL_DISK_GET_GEOMETRY_EX:
++        if(device->driver->kind==NXD_DISK)return geometry(device,io,result,1);break;
++    case NXD_IOCTL_DISK_GET_LENGTH:
++        if(device->driver->kind!=NXD_DISK)break;
++        status=response(result,out,io->output_bytes,8);if(status!=NXD_SUCCESS)return status;
++        word64(out,device->config.capacity_bytes);return NXD_SUCCESS;
++    case NXD_IOCTL_DISK_CHECK_VERIFY:
++        if(device->driver->kind!=NXD_DISK)break;
++        if(io->output_bytes && io->output_bytes<4) { result->status=NXD_BUFFER_TOO_SMALL;return result->status; }
++        return port->adapter_forward(port->context,device,NXD_FORWARD_VERIFY,io,result);
++    case NXD_IOCTL_CDROM_CHECK_VERIFY:
++        if(device->driver->kind!=NXD_CDROM)break;
++        if(io->output_bytes && io->output_bytes<4) { result->status=NXD_BUFFER_TOO_SMALL;return result->status; }
++        return port->adapter_forward(port->context,device,NXD_FORWARD_VERIFY,io,result);
++    case NXD_IOCTL_STORAGE_CHECK_VERIFY:
++        if(io->output_bytes && io->output_bytes<4) { result->status=NXD_BUFFER_TOO_SMALL;return result->status; }
++        return port->adapter_forward(port->context,device,NXD_FORWARD_VERIFY,io,result);
++    case NXD_IOCTL_CDROM_READ_TOC:
++        if(device->driver->kind!=NXD_CDROM)break;
++        if(io->output_bytes<NXD_TOC_BYTES) { result->status=NXD_BUFFER_TOO_SMALL;return result->status; }
++        if(!io->buffer) { result->status=NXD_INVALID_PARAMETER;return result->status; }
++        return port->adapter_forward(port->context,device,NXD_FORWARD_READ_TOC,io,result);
++    case NXD_IOCTL_CDROM_READ_TOC_EX:
++        if(device->driver->kind==NXD_CDROM)
++            return port->adapter_forward(port->context,device,NXD_FORWARD_READ_TOC_EX,io,result);
++        break;
++    case NXD_IOCTL_STORAGE_QUERY_PROPERTY:
++        return port->adapter_forward(port->context,device,NXD_FORWARD_PROPERTY,io,result);
++    }
++    result->status=NXD_INVALID_DEVICE_REQUEST;return result->status;
++}
++
++nxd_status nxd_dispatch(nxd_device *device,const nxd_io *io,nxd_result *result)
++{
++    nxd_owner_port *port;
++    if(!result)return NXD_INVALID_PARAMETER;
++    result->status=NXD_INVALID_PARAMETER;result->information=0;
++    if(!device || !io || device->state!=DEVICE_STARTED || !device->driver) {
++        result->status=NXD_NO_DEVICE;return result->status;
++    }
++    port=&device->driver->port;
++    switch(io->major) {
++    case NXD_CREATE: case NXD_CLOSE: result->status=NXD_SUCCESS;return result->status;
++    case NXD_READ: case NXD_WRITE:
++        if(io->major==NXD_WRITE && device->driver->kind==NXD_CDROM) {
++            result->status=NXD_WRITE_PROTECTED;return result->status;
++        }
++        if(io->offset<0 || ((uint64_t)io->offset & (device->config.geometry.bytes_per_sector-1u)) ||
++            (io->length & (device->config.geometry.bytes_per_sector-1u))) {
++            result->status=NXD_INVALID_PARAMETER;return result->status;
++        }
++        return port->adapter_submit(port->context,device,io,result);
++    case NXD_FLUSH: case NXD_SHUTDOWN:
++        if(device->driver->kind==NXD_CDROM) { result->status=NXD_SUCCESS;return result->status; }
++        return port->adapter_submit(port->context,device,io,result);
++    case NXD_DEVICE_CONTROL:return control(device,io,result);
++    case NXD_LATE_PNP:result->status=NXD_INVALID_DEVICE_REQUEST;return result->status;
++    }
++    result->status=NXD_INVALID_DEVICE_REQUEST;return result->status;
++}
++
++nxd_status nxd_stop_device(nxd_device *device)
++{
++    nxd_owner_port *port;
++    if(!device || !device->driver || device->state==DEVICE_EMPTY)return NXD_INVALID_PARAMETER;
++    if(device->state==DEVICE_SEALED)return NXD_SUCCESS;
++    port=&device->driver->port;device->state=DEVICE_SEALED;
++    if(device->class_device)
++        port->adapter_seal_class_device(port->context,device->class_device);
++    return NXD_SUCCESS;
++}
+diff --git a/drivers/storage/class/nxstorage/nxdisk_owner.h b/drivers/storage/class/nxstorage/nxdisk_owner.h
+new file mode 100644
+index 0000000..3a89e23
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/nxdisk_owner.h
+@@ -0,0 +1,121 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NXDISK_OWNER_H
++#define NXDISK_OWNER_H
++
++#include <stddef.h>
++#include <stdint.h>
++
++typedef enum nxd_status {
++    NXD_SUCCESS = 0,
++    NXD_PENDING = 1,
++    NXD_INVALID_PARAMETER = -1,
++    NXD_INVALID_DEVICE_REQUEST = -2,
++    NXD_BUFFER_TOO_SMALL = -3,
++    NXD_NO_MEMORY = -4,
++    NXD_NO_DEVICE = -5,
++    NXD_WRITE_PROTECTED = -6,
++    NXD_NOT_IMPLEMENTED = -7,
++    NXD_IO_ERROR = -8
++} nxd_status;
++
++typedef enum nxd_class_kind { NXD_DISK = 0, NXD_CDROM = 1 } nxd_class_kind;
++typedef enum nxd_major {
++    NXD_CREATE, NXD_CLOSE, NXD_READ, NXD_WRITE, NXD_FLUSH,
++    NXD_SHUTDOWN, NXD_DEVICE_CONTROL, NXD_LATE_PNP
++} nxd_major;
++typedef enum nxd_forward_operation {
++    NXD_FORWARD_VERIFY, NXD_FORWARD_CDROM_GEOMETRY,
++    NXD_FORWARD_READ_TOC, NXD_FORWARD_READ_TOC_EX, NXD_FORWARD_PROPERTY
++} nxd_forward_operation;
++
++enum {
++    NXD_IOCTL_DISK_GET_GEOMETRY = 0x00070000u,
++    NXD_IOCTL_DISK_GET_GEOMETRY_EX = 0x000700a0u,
++    NXD_IOCTL_DISK_GET_LENGTH = 0x0007405cu,
++    NXD_IOCTL_DISK_CHECK_VERIFY = 0x00074800u,
++    NXD_IOCTL_STORAGE_CHECK_VERIFY = 0x002d4800u,
++    NXD_IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x002d1080u,
++    NXD_IOCTL_STORAGE_QUERY_PROPERTY = 0x002d1400u,
++    NXD_IOCTL_CDROM_READ_TOC = 0x00024000u,
++    NXD_IOCTL_CDROM_GET_GEOMETRY = 0x0002404cu,
++    NXD_IOCTL_CDROM_READ_TOC_EX = 0x00024054u,
++    NXD_IOCTL_CDROM_CHECK_VERIFY = 0x00024800u,
++    NXD_DISK_DEVICE_TYPE = 7u,
++    NXD_CDROM_DEVICE_TYPE = 2u,
++    NXD_TOC_BYTES = 804u
++};
++
++typedef struct nxd_geometry {
++    uint64_t cylinders;
++    uint32_t media_type;
++    uint32_t tracks_per_cylinder;
++    uint32_t sectors_per_track;
++    uint32_t bytes_per_sector;
++} nxd_geometry;
++
++typedef struct nxd_device_config {
++    uint64_t capacity_bytes;
++    nxd_geometry geometry;
++    uint32_t alignment_mask;
++    uint32_t removable;
++} nxd_device_config;
++
++typedef struct nxd_io {
++    void *native_request;
++    nxd_major major;
++    int64_t offset;
++    uint64_t length;
++    uint32_t control_code;
++    void *buffer;
++    uint32_t input_bytes;
++    uint32_t output_bytes;
++} nxd_io;
++
++typedef struct nxd_result {
++    nxd_status status;
++    uint64_t information;
++} nxd_result;
++
++struct nxd_device;
++typedef struct nxd_class_identity {
++    const char *device_name;
++    const char *dos_link;
++    uint32_t device_type;
++    uint32_t removable;
++} nxd_class_identity;
++typedef struct nxd_owner_port {
++    void *context;
++    nxd_status (*register_class)(void *, nxd_class_kind);
++    nxd_status (*adapter_create_class_device)(void *, nxd_class_kind,
++        const nxd_class_identity *, const nxd_device_config *, void *, void **);
++    void (*adapter_seal_class_device)(void *, void *);
++    nxd_status (*adapter_submit)(void *, struct nxd_device *, const nxd_io *,
++                                 nxd_result *);
++    nxd_status (*adapter_forward)(void *, struct nxd_device *,
++                                  nxd_forward_operation, const nxd_io *,
++                                  nxd_result *);
++} nxd_owner_port;
++
++typedef struct nxd_driver {
++    nxd_class_kind kind;
++    nxd_owner_port port;
++    uint32_t registered;
++} nxd_driver;
++
++typedef struct nxd_device {
++    nxd_driver *driver;
++    nxd_device_config config;
++    void *lower_device;
++    void *class_device;
++    uint32_t state;
++} nxd_device;
++
++nxd_status nxd_driver_entry(nxd_driver *, nxd_class_kind,
++                            const nxd_owner_port *);
++nxd_status nxd_add_device(nxd_driver *, nxd_device *, void *lower_device,
++                          const nxd_device_config *initial_config);
++nxd_status nxd_start_device(nxd_device *, const nxd_device_config *);
++nxd_status nxd_dispatch(nxd_device *, const nxd_io *, nxd_result *);
++nxd_status nxd_stop_device(nxd_device *);
++
++#endif
+diff --git a/tests/host/nxstorage/check_owner.py b/tests/host/nxstorage/check_owner.py
+new file mode 100644
+index 0000000..f3ec6e4
+--- /dev/null
++++ b/tests/host/nxstorage/check_owner.py
+@@ -0,0 +1,28 @@
++#!/usr/bin/env python3
++"""Compile and run the independent Disk/Cdrom owner without legacy classes."""
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++
++root=Path(__file__).resolve().parents[3]
++source=root/'drivers/storage/class/nxstorage'
++tests=Path(__file__).resolve().parent
++output=Path(sys.argv[1]).resolve();output.mkdir(parents=True,exist_ok=True)
++cc=os.environ.get('CC','clang' if shutil.which('clang') else 'gcc')
++base=[cc,'-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-I'+str(source)]
++inputs=[str(source/'nxdisk_owner.c'),str(tests/'nxdisk_owner_test.c')]
++for name,flags in [('nxdisk-owner-plain',[]),('nxdisk-owner-sanitized',['-fsanitize=address,undefined','-fno-omit-frame-pointer'])]:
++    exe=output/name
++    subprocess.run(base+flags+inputs+['-o',str(exe)],check=True)
++    result=subprocess.run([str(exe)],check=True,text=True,capture_output=True,
++        env=dict(os.environ,ASAN_OPTIONS='detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1',UBSAN_OPTIONS='halt_on_error=1'))
++    (output/(name+'.log')).write_text(result.stdout+result.stderr)
++    print(name+': '+result.stdout.splitlines()[-1])
++target=['-target','i386-none-elf'] if Path(cc).name.startswith('clang') else ['-m32']
++obj=output/'nxdisk_owner.i386.o'
++subprocess.run([cc]+target+['-std=c11','-O2','-ffreestanding','-fno-pic','-fno-pie','-fno-builtin','-fno-stack-protector','-I'+str(source),'-c',str(source/'nxdisk_owner.c'),'-o',str(obj)],check=True)
++undefined=subprocess.check_output(['nm','-u',str(obj)],text=True).strip()
++if undefined:
++    raise SystemExit('unexpected freestanding dependency: '+undefined)
+diff --git a/tests/host/nxstorage/nxdisk_owner_test.c b/tests/host/nxstorage/nxdisk_owner_test.c
+new file mode 100644
+index 0000000..db8f4de
+--- /dev/null
++++ b/tests/host/nxstorage/nxdisk_owner_test.c
+@@ -0,0 +1,112 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "nxdisk_owner.h"
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#define CHECK(x) do { if(!(x)){fprintf(stderr,"%s:%d %s\n",__func__,__LINE__,#x);return 0;} } while(0)
++#define MUST(x) do { if(!(x)) abort(); } while(0)
++
++typedef struct fixture {
++    nxd_owner_port port;nxd_driver disk_driver,cdrom_driver;nxd_device disk,cdrom;
++    unsigned registrations[2],creates,seals,submits,forwards;
++    unsigned fail_step;char events[64];unsigned event_count;
++    nxd_io last_io;nxd_forward_operation last_forward;
++} fixture;
++
++static void event(fixture *f,char c){f->events[f->event_count++]=c;}
++static nxd_status reg(void *v,nxd_class_kind k){fixture*f=v;++f->registrations[k];event(f,k?'c':'d');return NXD_SUCCESS;}
++static nxd_status create(void *v,nxd_class_kind k,const nxd_class_identity*i,const nxd_device_config*c,void*l,void**out)
++{fixture*f=v;++f->creates;event(f,'C');CHECK(i&&((k==NXD_DISK&&i->device_type==7&&!i->dos_link)||
++ (k==NXD_CDROM&&i->device_type==2&&i->removable&&!strcmp(i->dos_link,"\\DosDevices\\CdRom0"))));
++ CHECK(c&&c->geometry.bytes_per_sector==(k==NXD_DISK?512u:2048u));
++ CHECK(l==(void*)0x300||l==(void*)0x400);if(f->fail_step==1)return NXD_NO_MEMORY;
++ *out=(void*)(uintptr_t)(k?0x200:0x100);return NXD_SUCCESS;}
++static void seal(void*v,void*h){fixture*f=v;MUST(h==(void*)0x100||h==(void*)0x200);++f->seals;event(f,'Z');}
++static nxd_status submit(void*v,nxd_device*d,const nxd_io*io,nxd_result*r){fixture*f=v;(void)d;++f->submits;f->last_io=*io;
++ r->status=NXD_SUCCESS;r->information=(io->major==NXD_READ||io->major==NXD_WRITE)?io->length:0;return r->status;}
++static nxd_status forward(void*v,nxd_device*d,nxd_forward_operation op,const nxd_io*io,nxd_result*r){fixture*f=v;(void)d;
++ ++f->forwards;f->last_forward=op;f->last_io=*io;
++ if(op==NXD_FORWARD_READ_TOC_EX){r->status=NXD_NOT_IMPLEMENTED;r->information=0;return r->status;}
++ r->status=NXD_SUCCESS;r->information=op==NXD_FORWARD_READ_TOC?12:
++  (op==NXD_FORWARD_VERIFY&&io->output_bytes?4:op==NXD_FORWARD_PROPERTY?8:
++   op==NXD_FORWARD_CDROM_GEOMETRY?24:0);return r->status;}
++static void init(fixture*f){memset(f,0,sizeof(*f));f->port=(nxd_owner_port){f,reg,create,seal,submit,forward};}
++static nxd_device_config config(nxd_class_kind kind){nxd_device_config c;
++ memset(&c,0,sizeof(c));c.capacity_bytes=kind==NXD_DISK?UINT64_C(1024)*1024*1024:0;
++ c.geometry.cylinders=kind==NXD_DISK?130:0;c.geometry.media_type=kind==NXD_DISK?12:0;
++ c.geometry.tracks_per_cylinder=kind==NXD_DISK?255:0;c.geometry.sectors_per_track=kind==NXD_DISK?63:0;
++ c.geometry.bytes_per_sector=kind==NXD_DISK?512:2048;c.alignment_mask=0;c.removable=kind==NXD_CDROM;return c;}
++static int start_both(fixture*f){nxd_device_config d=config(NXD_DISK),c=config(NXD_CDROM);
++ return nxd_driver_entry(&f->disk_driver,NXD_DISK,&f->port)==NXD_SUCCESS&&
++ nxd_driver_entry(&f->cdrom_driver,NXD_CDROM,&f->port)==NXD_SUCCESS&&
++ nxd_add_device(&f->disk_driver,&f->disk,(void*)0x300,&d)==NXD_SUCCESS&&
++ nxd_add_device(&f->cdrom_driver,&f->cdrom,(void*)0x400,&c)==NXD_SUCCESS&&
++ nxd_start_device(&f->disk,&d)==NXD_SUCCESS&&nxd_start_device(&f->cdrom,&c)==NXD_SUCCESS;}
++static uint32_t u32(const unsigned char*p){return p[0]|p[1]<<8|p[2]<<16|p[3]<<24;}
++static uint64_t u64(const unsigned char*p){return u32(p)|((uint64_t)u32(p+4)<<32);}
++
++static int registers_owned_disk_and_cdrom(void){fixture f;init(&f);CHECK(nxd_driver_entry(&f.disk_driver,NXD_DISK,&f.port)==NXD_SUCCESS);
++ CHECK(nxd_driver_entry(&f.cdrom_driver,NXD_CDROM,&f.port)==NXD_SUCCESS);CHECK(f.registrations[0]==1&&f.registrations[1]==1);
++ CHECK(nxd_driver_entry(&f.disk_driver,NXD_DISK,&f.port)==NXD_SUCCESS&&f.registrations[0]==1);
++ CHECK(nxd_driver_entry(&f.disk_driver,NXD_CDROM,&f.port)==NXD_INVALID_PARAMETER);return 1;}
++static int creates_namespaces_and_starts(void){fixture f;init(&f);CHECK(start_both(&f));
++ CHECK(f.creates==2);CHECK(f.event_count==4&&!memcmp(f.events,"dcCC",4));return 1;}
++static int unwinds_every_add_failure(void){fixture f;init(&f);f.fail_step=1;
++ CHECK(nxd_driver_entry(&f.cdrom_driver,NXD_CDROM,&f.port)==NXD_SUCCESS);
++ nxd_device_config c=config(NXD_CDROM);
++ CHECK(nxd_add_device(&f.cdrom_driver,&f.cdrom,(void*)0x400,&c)!=NXD_SUCCESS);
++ CHECK(!f.seals&&f.cdrom.state==0);return 1;}
++static int preserves_raw_offsets_and_read_policy(void){fixture f;init(&f);CHECK(start_both(&f));nxd_result r;
++ nxd_io io={.native_request=&f,.major=NXD_READ,.offset=0x123400,.length=512};
++ CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_SUCCESS&&r.information==512&&f.last_io.offset==0x123400);
++ io.offset=(int64_t)f.cdrom.config.capacity_bytes;io.length=4096;
++ CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_SUCCESS&&f.last_io.offset==io.offset);
++ io.offset=1;CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_INVALID_PARAMETER);
++ io.offset=0;io.major=NXD_WRITE;CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_WRITE_PROTECTED);
++ CHECK(f.submits==2);return 1;}
++static int returns_device_number_and_geometry(void){fixture f;init(&f);CHECK(start_both(&f));unsigned char b[40];nxd_result r;
++ memset(b,0xa5,sizeof(b));nxd_io io={.major=NXD_DEVICE_CONTROL,.control_code=NXD_IOCTL_STORAGE_GET_DEVICE_NUMBER,.buffer=b,.output_bytes=11};
++ CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_BUFFER_TOO_SMALL&&!r.information&&b[0]==0xa5);
++ io.output_bytes=12;CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_SUCCESS&&r.information==12);
++ CHECK(u32(b)==7&&!u32(b+4)&&!u32(b+8)&&b[12]==0xa5);
++ memset(b,0xa5,sizeof(b));io.control_code=NXD_IOCTL_DISK_GET_GEOMETRY;io.output_bytes=24;
++ CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_SUCCESS&&r.information==24);
++ CHECK(u64(b)==130&&u32(b+8)==12&&u32(b+12)==255&&u32(b+16)==63&&u32(b+20)==512&&b[24]==0xa5);return 1;}
++static int returns_extended_geometry_and_length(void){fixture f;init(&f);CHECK(start_both(&f));unsigned char b[48];nxd_result r;
++ memset(b,0xa5,sizeof(b));nxd_io io={.major=NXD_DEVICE_CONTROL,.control_code=NXD_IOCTL_DISK_GET_GEOMETRY_EX,.buffer=b,.output_bytes=31};
++ CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_BUFFER_TOO_SMALL&&b[0]==0xa5);
++ io.output_bytes=40;CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_SUCCESS&&r.information==32);
++ CHECK(u32(b+20)==512&&u64(b+24)==f.disk.config.capacity_bytes&&b[32]==0xa5);
++ memset(b,0xa5,sizeof(b));io.control_code=NXD_IOCTL_DISK_GET_LENGTH;io.output_bytes=8;
++ CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_SUCCESS&&r.information==8&&u64(b)==f.disk.config.capacity_bytes&&b[8]==0xa5);return 1;}
++static int routes_bounded_controls(void){fixture f;init(&f);CHECK(start_both(&f));unsigned char b[804];nxd_result r;
++ nxd_io io={.major=NXD_DEVICE_CONTROL,.control_code=NXD_IOCTL_CDROM_CHECK_VERIFY,.buffer=b,.output_bytes=3};
++ CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_INVALID_DEVICE_REQUEST&&!f.forwards);
++ CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_BUFFER_TOO_SMALL&&!f.forwards);
++ io.output_bytes=4;CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_SUCCESS&&f.last_forward==NXD_FORWARD_VERIFY&&r.information==4);
++ io.control_code=NXD_IOCTL_CDROM_READ_TOC;io.output_bytes=803;CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_BUFFER_TOO_SMALL);
++ io.output_bytes=804;CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_SUCCESS&&f.last_forward==NXD_FORWARD_READ_TOC&&r.information==12);
++ io.control_code=NXD_IOCTL_CDROM_GET_GEOMETRY;io.output_bytes=24;
++ CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_SUCCESS&&f.last_forward==NXD_FORWARD_CDROM_GEOMETRY&&r.information==24);
++ io.control_code=NXD_IOCTL_CDROM_READ_TOC_EX;CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_NOT_IMPLEMENTED&&
++  f.last_forward==NXD_FORWARD_READ_TOC_EX&&!r.information);
++ io.control_code=NXD_IOCTL_STORAGE_QUERY_PROPERTY;CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_SUCCESS&&f.last_forward==NXD_FORWARD_PROPERTY&&r.information==8);return 1;}
++static int flush_shutdown_and_seal_are_owned(void){fixture f;init(&f);CHECK(start_both(&f));nxd_result r;
++ nxd_io io={.major=NXD_FLUSH};CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_SUCCESS&&f.submits==1&&!r.information);
++ io.major=NXD_SHUTDOWN;CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_SUCCESS&&f.submits==2);
++ CHECK(nxd_stop_device(&f.disk)==NXD_SUCCESS&&f.seals==1&&f.disk.class_device==(void*)0x100);
++ io.major=NXD_READ;io.length=512;CHECK(nxd_dispatch(&f.disk,&io,&r)==NXD_NO_DEVICE&&!r.information);
++ CHECK(nxd_stop_device(&f.disk)==NXD_SUCCESS&&f.seals==1);return 1;}
++static int sealed_device_stays_resident(void){fixture f;init(&f);CHECK(start_both(&f));
++ CHECK(nxd_stop_device(&f.cdrom)==NXD_SUCCESS&&f.seals==1&&f.cdrom.class_device==(void*)0x200);
++ nxd_result r;nxd_io io={.major=NXD_READ,.length=2048};CHECK(nxd_dispatch(&f.cdrom,&io,&r)==NXD_NO_DEVICE);
++ CHECK(nxd_stop_device(&f.cdrom)==NXD_SUCCESS&&f.seals==1&&f.cdrom.lower_device==(void*)0x400);return 1;}
++
++int main(void){struct{const char*n;int(*run)(void);}cases[]={
++ {"registration",registers_owned_disk_and_cdrom},{"boot",creates_namespaces_and_starts},
++ {"unwind",unwinds_every_add_failure},{"raw_io",preserves_raw_offsets_and_read_policy},
++ {"geometry",returns_device_number_and_geometry},{"geometry_ex",returns_extended_geometry_and_length},
++ {"controls",routes_bounded_controls},{"flush_seal",flush_shutdown_and_seal_are_owned},
++ {"resident_seal",sealed_device_stays_resident}};unsigned failed=0;
++ for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i){int ok=cases[i].run();printf("%s %s\n",ok?"PASS":"FAIL",cases[i].n);failed+=!ok;}
++ printf("9 groups, %u failures\n",failed);return failed?1:0;}
+# end of patch

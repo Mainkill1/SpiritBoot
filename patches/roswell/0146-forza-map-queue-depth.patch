@@ -1,0 +1,91 @@
+diff --git a/drivers/storage/class/nxstorage/driver.c b/drivers/storage/class/nxstorage/driver.c
+index 25303b40e028c2810970ab690271c607279bdbf3..d956f7711dee080bac62ebb9387c8983f2360cc9 100644
+--- a/drivers/storage/class/nxstorage/driver.c
++++ b/drivers/storage/class/nxstorage/driver.c
+@@ -3,7 +3,7 @@
+ #include "nxdisk_owner.h"
+ #include "nxcdrom_profile.h"
+ 
+-enum { NX_NATIVE_DEFAULT_SLOTS = 8 };
++enum { NX_NATIVE_DISK_SLOTS = 16, NX_NATIVE_CDROM_SLOTS = 8 };
+ 
+ typedef struct NX_NATIVE_CLASS_CONTEXT {
+     PDRIVER_OBJECT driver;
+@@ -76,7 +76,7 @@ static nxd_status create_class(void *opaque,nxd_class_kind kind,
+         return NXD_INVALID_PARAMETER;
+     if(kind==NXD_CDROM) {
+         status=NxCdromBuildDeviceInit(&init,&cdrom_name,&cdrom_link,
+-                                      NX_NATIVE_DEFAULT_SLOTS);
++                                      NX_NATIVE_CDROM_SLOTS);
+         if(!NT_SUCCESS(status)) return owner_status(status);
+     } else {
+         status=ensure_disk_directory(context);
+@@ -88,7 +88,7 @@ static nxd_status create_class(void *opaque,nxd_class_kind kind,
+         init.Config.max_pages=33;init.Config.alignment_mask=config->alignment_mask;
+         init.Config.ata_max_blocks=256;init.Config.capacity_bytes=config->capacity_bytes;
+         init.Config.optical=0;init.Config.cache=NX_CACHE_UNQUALIFIED;
+-        init.SlotCount=NX_NATIVE_DEFAULT_SLOTS;
++        init.SlotCount=NX_NATIVE_DISK_SLOTS;
+     }
+     status=NxNativeCreateClassDevice(context->driver,(PDEVICE_OBJECT)lower,
+                                     &init,(PDEVICE_OBJECT *)created);
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 2d4533c1a6aee97bd95f8cf6401d4aa2a6d6fbf9..8577b83ee766978dc0b8de703d348e2f21ce8375 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -13,6 +13,8 @@
+ 
+ static PDEVICE_OBJECT created_device;
+ static PIRP active_child;
++static PIRP pending_children[16];
++static unsigned pending_child_count;
+ static unsigned lower_calls, cancel_calls, forward_calls;
+ static unsigned property_calls,free_irps,free_mdls,detaches,deletes;
+ static int fail_pool,fail_symbolic_link;
+@@ -88,7 +90,13 @@ static NTSTATUS complete_specific_child(PIRP child,NTSTATUS status,ULONG bytes,U
+ {
+     MUST(child);PIO_STACK_LOCATION s=child->Tail.Overlay.CurrentStackLocation-1;
+     child->IoStatus.Status=status;child->IoStatus.Information=bytes;s->Parameters.Scsi.Srb->SrbStatus=srb_status;
+-    if(active_child==child)active_child=NULL;return s->CompletionRoutine(created_device,child,s->Context);
++    if(active_child==child)active_child=NULL;
++    for(unsigned index=0;index<pending_child_count;++index) if(pending_children[index]==child) {
++        for(unsigned tail=index+1;tail<pending_child_count;++tail)
++            pending_children[tail-1]=pending_children[tail];
++        pending_children[--pending_child_count]=NULL;break;
++    }
++    return s->CompletionRoutine(created_device,child,s->Context);
+ }
+ static NTSTATUS complete_child(NTSTATUS status,ULONG bytes,UCHAR srb_status)
+ {
+@@ -137,7 +145,8 @@ NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT lower,PIRP child)
+         b[4]=(uint8_t)(read_capacity_sector>>24);b[5]=(uint8_t)(read_capacity_sector>>16);
+         b[6]=(uint8_t)(read_capacity_sector>>8);b[7]=(uint8_t)read_capacity_sector;}
+     if(s->Parameters.Scsi.Srb->Cdb[0]==0x43){uint8_t *b=s->Parameters.Scsi.Srb->DataBuffer;memset(b,0,804);b[1]=10;b[2]=1;b[3]=1;b[5]=0x14;}
+-    if(lower_pending){active_child=child;return STATUS_PENDING;}
++    if(lower_pending){active_child=child;MUST(pending_child_count<16);
++        pending_children[pending_child_count++]=child;return STATUS_PENDING;}
+     ULONG bytes=srb->Cdb[0]==0x43 ? 12:srb->DataTransferLength;
+     NTSTATUS status=srb->Cdb[0]==0x35 ? sync_command_status:STATUS_SUCCESS;
+     UCHAR srb_status=NT_SUCCESS(status)?1:2;
+@@ -670,6 +679,21 @@ static int production_cache_qualification_and_durability(void)
+     read_capacity_sector=512;read_capacity_last=2047;lower_calls=0;lower_pending=0;
+     CHECK(disk.MajorFunction[IRP_MJ_DEVICE_CONTROL](disk_device,&geometry)==STATUS_PENDING);
+     CHECK(geometry.host_completed&&geometry.IoStatus.Status==STATUS_SUCCESS&&lower_calls==1&&opcodes[0]==0x25);
++
++    /* Forza issues twelve concurrent async map reads through this production
++     * disk path.  Its fixed envelope pool must admit the whole burst. */
++    parent_fixture map_reads[12];lower_pending=1;lower_calls=0;pending_child_count=0;
++    for(unsigned index=0;index<12;++index) {
++        init_parent(&map_reads[index],IRP_MJ_READ,4096);
++        CHECK(disk.MajorFunction[IRP_MJ_READ](disk_device,&map_reads[index].irp)==STATUS_PENDING);
++        CHECK(!map_reads[index].irp.host_completed);
++    }
++    CHECK(lower_calls==12&&pending_child_count==12);
++    while(pending_child_count)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned index=0;index<12;++index)
++        CHECK(map_reads[index].irp.host_completed&&map_reads[index].irp.IoStatus.Status==STATUS_SUCCESS);
++    lower_pending=0;
+     unsigned pools_before=pool_allocations,irps_before=irp_allocations,mdls_before=mdl_allocations;
+ 
+     parent_fixture enabled;init_parent(&enabled,IRP_MJ_WRITE,512);enabled.stack.Flags=SL_WRITE_THROUGH;

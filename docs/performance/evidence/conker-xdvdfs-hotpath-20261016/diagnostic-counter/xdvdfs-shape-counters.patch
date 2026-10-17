@@ -1,0 +1,185 @@
+--- a/drivers/filesystems/xdvdfs/xdvdfs.c
++++ b/drivers/filesystems/xdvdfs/xdvdfs.c
+@@ -111,6 +111,37 @@
+ static XDVD_GLOBALS XdvdGlobals;
+ 
+ /*
++ * Diagnostic-only release build counters.  Index zero counts validated file
++ * read dispatches; indexes 1-15 are mutually exclusive terminal decisions in
++ * the frozen Rust model's order; index 16 is the noncached subset of eligible
++ * reads.  This patch is never part of the product series.
++ */
++enum XDVD_SHAPE_COUNTER
++{
++    XdvdShapeTotal = 0,
++    XdvdShapeCompleteZero,
++    XdvdShapeNegativeOffset,
++    XdvdShapeDiscRange,
++    XdvdShapeSectorShape,
++    XdvdShapePaging,
++    XdvdShapeAssociated,
++    XdvdShapeNoLowerStack,
++    XdvdShapeMissingMdl,
++    XdvdShapeChainedMdl,
++    XdvdShapeUnprovedResidency,
++    XdvdShapeInvalidPfnSpan,
++    XdvdShapeMdlTooShort,
++    XdvdShapeBufferRange,
++    XdvdShapeBufferAlignment,
++    XdvdShapeEligible,
++    XdvdShapeEligibleNoncached,
++    XdvdShapeCounterCount
++};
++
++DECLSPEC_ALIGN(64) volatile ULONG XdvdShapeCounters[XdvdShapeCounterCount];
++
++
++/*
+  * Volume control block.  Carried as DeviceExtension on the volume device
+  * object we publish when a disc is mounted.
+  */
+@@ -141,6 +172,135 @@
+     BOOLEAN            IsRoot;
+     UNICODE_STRING     Name;                   /* trailing buffer; basename   */
+ } XDVD_FCB, *PXDVD_FCB;
++
++static VOID
++XdvdRecordReadShape(_In_ PIRP Irp, _In_ PXDVD_FCB Fcb)
++{
++    PIO_STACK_LOCATION sp = IoGetCurrentIrpStackLocation(Irp);
++    LONGLONG signedOffset = sp->Parameters.Read.ByteOffset.QuadPart;
++    ULONGLONG fileOffset;
++    ULONGLONG requested = sp->Parameters.Read.Length;
++    ULONGLONG effective;
++    ULONGLONG fileBase;
++    ULONGLONG absoluteOffset;
++    ULONGLONG end;
++    PMDL mdl;
++    ULONGLONG described;
++    ULONGLONG pages;
++    ULONGLONG requiredSize;
++    ULONG_PTR dataAddress;
++    ULONG reason;
++
++    InterlockedIncrement((volatile LONG *)&XdvdShapeCounters[XdvdShapeTotal]);
++
++    if (signedOffset < 0)
++    {
++        reason = XdvdShapeNegativeOffset;
++        goto record;
++    }
++    fileOffset = (ULONGLONG)signedOffset;
++    if (requested == 0 || fileOffset >= Fcb->DataSize)
++    {
++        reason = XdvdShapeCompleteZero;
++        goto record;
++    }
++
++    effective = requested;
++    if (effective > (ULONGLONG)Fcb->DataSize - fileOffset)
++        effective = (ULONGLONG)Fcb->DataSize - fileOffset;
++
++    fileBase = (ULONGLONG)Fcb->DataSector << XDVD_SECTOR_SHIFT;
++    absoluteOffset = fileBase + fileOffset;
++    if (absoluteOffset < fileBase || effective > ~absoluteOffset)
++    {
++        reason = XdvdShapeDiscRange;
++        goto record;
++    }
++    end = absoluteOffset + effective;
++    if (end < absoluteOffset)
++    {
++        reason = XdvdShapeDiscRange;
++        goto record;
++    }
++    if ((absoluteOffset & (XDVD_SECTOR_SIZE - 1)) != 0 ||
++        (effective & (XDVD_SECTOR_SIZE - 1)) != 0)
++    {
++        reason = XdvdShapeSectorShape;
++        goto record;
++    }
++    if ((Irp->Flags & IRP_PAGING_IO) != 0)
++    {
++        reason = XdvdShapePaging;
++        goto record;
++    }
++    if ((Irp->Flags & IRP_ASSOCIATED_IRP) != 0)
++    {
++        reason = XdvdShapeAssociated;
++        goto record;
++    }
++    if (Irp->CurrentLocation <= 1)
++    {
++        reason = XdvdShapeNoLowerStack;
++        goto record;
++    }
++
++    mdl = Irp->MdlAddress;
++    if (mdl == NULL)
++    {
++        reason = XdvdShapeMissingMdl;
++        goto record;
++    }
++    if (mdl->Next != NULL)
++    {
++        reason = XdvdShapeChainedMdl;
++        goto record;
++    }
++    if ((mdl->MdlFlags &
++         (MDL_PAGES_LOCKED | MDL_SOURCE_IS_NONPAGED_POOL)) == 0)
++    {
++        reason = XdvdShapeUnprovedResidency;
++        goto record;
++    }
++
++    described = (ULONGLONG)mdl->ByteOffset + mdl->ByteCount;
++    pages = (described + PAGE_SIZE - 1) >> PAGE_SHIFT;
++    requiredSize = sizeof(MDL) + pages * sizeof(PFN_NUMBER);
++    if ((ULONGLONG)(USHORT)mdl->Size < requiredSize)
++    {
++        reason = XdvdShapeInvalidPfnSpan;
++        goto record;
++    }
++    if ((ULONGLONG)mdl->ByteCount < effective)
++    {
++        reason = XdvdShapeMdlTooShort;
++        goto record;
++    }
++
++    if ((mdl->MdlFlags &
++         (MDL_MAPPED_TO_SYSTEM_VA | MDL_SOURCE_IS_NONPAGED_POOL)) != 0)
++        dataAddress = (ULONG_PTR)mdl->MappedSystemVa;
++    else
++        dataAddress = (ULONG_PTR)mdl->StartVa + mdl->ByteOffset;
++
++    if ((ULONGLONG)dataAddress + effective < (ULONGLONG)dataAddress)
++    {
++        reason = XdvdShapeBufferRange;
++        goto record;
++    }
++    if ((dataAddress & Fcb->Vcb->TargetDevice->AlignmentRequirement) != 0)
++    {
++        reason = XdvdShapeBufferAlignment;
++        goto record;
++    }
++
++    reason = XdvdShapeEligible;
++    if ((Irp->Flags & IRP_NOCACHE) != 0)
++        InterlockedIncrement(
++            (volatile LONG *)&XdvdShapeCounters[XdvdShapeEligibleNoncached]);
++
++record:
++    InterlockedIncrement((volatile LONG *)&XdvdShapeCounters[reason]);
++}
+ 
+ /*
+  * Per-handle (context-control-block) state.  Sits in FILE_OBJECT::FsContext2.
+@@ -845,6 +1005,8 @@
+     fcb = (PXDVD_FCB)fo->FsContext;
+     if (fcb == NULL || fcb->Vcb == NULL || fcb->IsDirectory)
+         return XdvdCompleteRequest(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
++
++    XdvdRecordReadShape(Irp, fcb);
+ 
+     fileOff = (ULONGLONG)sp->Parameters.Read.ByteOffset.QuadPart;
+     userLen = sp->Parameters.Read.Length;

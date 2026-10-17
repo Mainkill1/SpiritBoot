@@ -21,10 +21,10 @@ git clone https://github.com/mborgerson/roswell.git .reference/roswell
 git -C .reference/roswell checkout 1569e2e89fb47cc72b9c704a8884f98200432bd4
 docker build -f tools/Dockerfile.firmware -t spiritboot-toolchain .
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-  spiritboot-toolchain python3 scripts/build-firmware.py \
+  spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend legacy-reference \
   --source .reference/roswell --output artifacts/firmware-release
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-  spiritboot-toolchain python3 scripts/build-firmware.py \
+  spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend legacy-reference \
   --source .reference/roswell --output artifacts/firmware-debug --variant debug
 ```
 
@@ -55,7 +55,7 @@ epoch. `source` identifies the supplied pristine checkout; `source_directory`
 is the actual source used by CMake and guest builds; `build_directory` and
 `output_directory` identify their outputs. `base_source_tree` is the pristine
 tree and `source_tree` is the patched Git index tree, including new guest tests.
-The current reviewed patched tree is `eee7de60ad3d2047efab3161491edb17768b5482`.
+The current reviewed patched tree is `319d81cfe9f6e1a524012cbab66d9bd8f5f929d4`.
 The base epoch is exported as `SOURCE_DATE_EPOCH` to avoid wall-clock PE linker
 timestamps. Each build uses a fresh configure tree so previous CMake cache flags,
 compiler selections, or timestamps cannot leak into a newly attributed image.
@@ -95,14 +95,15 @@ supplies its runtime dependencies, including host `libusb`. A native launch
 needs an X display, those runtime libraries, and the appropriate audio backend.
 For a desktop run, the AppImage can also run normally through FUSE.
 
-Build the API regression, 23-check targeted contract guest, and 5-check warm
-reboot guest using the recorded nxdk container. Obtain their source path from
-the manifest of the flash being tested, so the payloads use its patched tests:
+Build the API regression, 23-check targeted contract guest, 7-check warm reboot
+guest, and 2-check ordinary-reset lifetime guest using the recorded nxdk
+container. Obtain their source path from the manifest of the flash being tested,
+so the payloads use its patched tests:
 
 ```sh
 guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-release/build.json"))["source_directory"])')
 nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
-for guest in api-regression clean-room-contracts clean-room-warm-reboot; do
+for guest in api-regression clean-room-contracts clean-room-warm-reboot clean-room-ordinary-reset; do
   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
     -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     -w "$guest_source/tests/xbe/$guest" \
@@ -142,7 +143,7 @@ Run `clean-room-contracts/clean-room-contracts.iso` and
 `clean-room-warm-reboot/clean-room-warm-reboot.iso` under the same
 `$GUEST_SOURCE/tests/xbe/` path with new capture directories. The warm guest
 performs its own two-stage reset within one emulator run. CI builds and runs all
-three guests for each variant and checks targeted plans of 23 and 5 respectively.
+three guests for each variant and checks targeted plans of 23 and 7 respectively.
 `--expect-tap` requires one complete TAP v13/v14 stream, a matching numbered
 plan, no unexpected failures, and a clean emulator exit. TODO and SKIP cases are
 reported separately. A timeout or reset is a failure even if part of the suite

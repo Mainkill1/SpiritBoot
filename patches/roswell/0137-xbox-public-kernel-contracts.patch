@@ -1,0 +1,222 @@
+--- a/ntoskrnl/include/internal/nx-devtree.h
++++ b/ntoskrnl/include/internal/nx-devtree.h
+@@ -45,6 +45,9 @@ VOID   PciCfgWrite32(UCHAR bus, UCHAR dev, UCHAR fn, UCHAR offset, ULONG value);
+ USHORT PciCfgRead16(UCHAR bus, UCHAR dev, UCHAR fn, UCHAR offset);
+ VOID   PciCfgWrite16(UCHAR bus, UCHAR dev, UCHAR fn, UCHAR offset, USHORT value);
+ UCHAR  PciCfgRead8(UCHAR bus, UCHAR dev, UCHAR fn, UCHAR offset);
++VOID   PciCfgReadWriteBuffer(ULONG BusNumber, ULONG SlotNumber,
++                             ULONG RegisterNumber, PVOID Buffer,
++                             ULONG Length, BOOLEAN WritePCISpace);
+ 
+ /* Walk the device tree and drive AddDevice + IRP_MN_START_DEVICE for each
+  * driver-bound entry, then recursively enumerate child PDOs over the
+--- a/ntoskrnl/xb/interrupt.c
++++ b/ntoskrnl/xb/interrupt.c
+@@ -22,6 +22,18 @@ KeInitializeInterrupt(IN PKINTERRUPT Interrupt,
+ NTKERNELAPI BOOLEAN NTAPI KeConnectInterrupt(IN PKINTERRUPT Interrupt);
+ NTKERNELAPI BOOLEAN NTAPI KeDisconnectInterrupt(IN PKINTERRUPT Interrupt);
+ 
++/* Xbox ordinal 130 raises to the console synchronization level. Keep the
++ * native UP dispatcher policy separate: its internal SYNCH_LEVEL is 2. */
++KIRQL
++NTAPI
++XeKeRaiseIrqlToSynchLevel(VOID)
++{
++    KIRQL OldIrql;
++
++    KeRaiseIrql(CLOCK_LEVEL, &OldIrql);
++    return OldIrql;
++}
++
+ /* The public Xbox object has a different header from NT's KINTERRUPT.
+  * Keep that layout explicit even though the exported prototypes use the
+  * native pointer typedef. The dispatch-code tail belongs to the public ABI;
+--- a/ntoskrnl/xb/ordinals.map
++++ b/ntoskrnl/xb/ordinals.map
+@@ -175,7 +175,7 @@
+ 127  KeQueryPerformanceFrequency   # ULONGLONG
+ 128  KeQuerySystemTime
+ 129  KeRaiseIrqlToDpcLevel
+-130  KeRaiseIrqlToSynchLevel
++130  KeRaiseIrqlToSynchLevel XeKeRaiseIrqlToSynchLevel  # export-only Xbox level 28 adapter
+ 131  KeReleaseMutant
+ 132  KeReleaseSemaphore
+ 133  KeRemoveByKeyDeviceQueue
+--- a/ntoskrnl/xb/pci.c
++++ b/ntoskrnl/xb/pci.c
+@@ -21,6 +21,8 @@
+ #define PCI_CFG_ADDR    0xCF8
+ #define PCI_CFG_DATA    0xCFC
+ 
++extern KSPIN_LOCK HalpPCIConfigLock;
++
+ static ULONG
+ PciCfgAddress(UCHAR bus, UCHAR dev, UCHAR fn, UCHAR offset)
+ {
+@@ -69,4 +71,98 @@ PciCfgRead8(UCHAR bus, UCHAR dev, UCHAR fn, UCHAR offset)
+     return (UCHAR)(word >> ((offset & 3) * 8));
+ }
+ 
++static BOOLEAN
++PciCfgAccessBlocked(UCHAR BusNumber, PCI_SLOT_NUMBER Slot)
++{
++    return (BusNumber == 0 && Slot.u.bits.DeviceNumber == 0 &&
++            (Slot.u.bits.FunctionNumber == 1 ||
++             Slot.u.bits.FunctionNumber == 2)) ||
++           (BusNumber == 1 && Slot.u.bits.DeviceNumber != 0);
++}
++
++static ULONG
++PciCfgTransferWidth(ULONG RegisterNumber, ULONG Length)
++{
++    ULONG Remainder = Length & 3;
++
++    switch (RegisterNumber & 3)
++    {
++        case 0:
++            return Remainder == 0 ? 4 : Remainder == 1 ? 1 : 2;
++        case 2:
++            return Remainder == 1 ? 1 : 2;
++        default:
++            return 1;
++    }
++}
++
++VOID
++PciCfgReadWriteBuffer(ULONG BusNumber, ULONG SlotNumber,
++                      ULONG RegisterNumber, PVOID Buffer,
++                      ULONG Length, BOOLEAN WritePCISpace)
++{
++    PCI_SLOT_NUMBER Slot;
++    UCHAR Bus = (UCHAR)BusNumber;
++    PUCHAR Bytes = Buffer;
++    KIRQL OldIrql;
++
++    if (!Buffer || !Length)
++        return;
++
++    Slot.u.AsULONG = SlotNumber;
++    if (PciCfgAccessBlocked(Bus, Slot))
++    {
++        if (!WritePCISpace)
++            RtlFillMemory(Buffer, Length, 0xff);
++        return;
++    }
++
++    KeRaiseIrql(HIGH_LEVEL, &OldIrql);
++    KeAcquireSpinLockAtDpcLevel(&HalpPCIConfigLock);
++
++    while (Length)
++    {
++        ULONG Width = PciCfgTransferWidth(RegisterNumber, Length);
++        ULONG Value = 0;
++
++        WRITE_PORT_ULONG((PULONG)PCI_CFG_ADDR,
++                         PciCfgAddress(Bus,
++                                       (UCHAR)Slot.u.bits.DeviceNumber,
++                                       (UCHAR)Slot.u.bits.FunctionNumber,
++                                       (UCHAR)RegisterNumber));
++
++        if (WritePCISpace)
++        {
++            RtlCopyMemory(&Value, Bytes, Width);
++            if (Width == 4)
++                WRITE_PORT_ULONG((PULONG)PCI_CFG_DATA, Value);
++            else if (Width == 2)
++                WRITE_PORT_USHORT((PUSHORT)(PCI_CFG_DATA +
++                                  (RegisterNumber & 3)), (USHORT)Value);
++            else
++                WRITE_PORT_UCHAR((PUCHAR)(PCI_CFG_DATA +
++                                 (RegisterNumber & 3)), (UCHAR)Value);
++        }
++        else
++        {
++            if (Width == 4)
++                Value = READ_PORT_ULONG((PULONG)PCI_CFG_DATA);
++            else if (Width == 2)
++                Value = READ_PORT_USHORT((PUSHORT)(PCI_CFG_DATA +
++                                   (RegisterNumber & 3)));
++            else
++                Value = READ_PORT_UCHAR((PUCHAR)(PCI_CFG_DATA +
++                                  (RegisterNumber & 3)));
++            RtlCopyMemory(Bytes, &Value, Width);
++        }
++
++        RegisterNumber += Width;
++        Bytes += Width;
++        Length -= Width;
++    }
++
++    WRITE_PORT_ULONG((PULONG)PCI_CFG_ADDR, 0);
++    KeReleaseSpinLock(&HalpPCIConfigLock, OldIrql);
++}
++
+ #endif /* SARCH_XBOX */
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -26,6 +26,7 @@
+ #include <ndk/ketypes.h>
+ #include <ndk/pstypes.h> /* native StartAddress retains title identity at exit */
+ #include <internal/xbthread.h>
++#include <internal/nx-devtree.h>
+ 
+ #include "strace.h"
+ #include "object-types.h"
+@@ -870,7 +871,11 @@ NTSTATUS NTAPI
+ IoInvalidDeviceRequest(_In_ PVOID DeviceObject, _In_ PVOID Irp)
+ {
++    PIRP Request = (PIRP)Irp;
++
+     UNREFERENCED_PARAMETER(DeviceObject);
+-    UNREFERENCED_PARAMETER(Irp);
++    Request->IoStatus.Status = STATUS_INVALID_DEVICE_REQUEST;
++    IofCompleteRequest(Request, IO_NO_INCREMENT);
++
+     return STATUS_INVALID_DEVICE_REQUEST;
+ }
+ 
+@@ -2736,18 +2741,14 @@ NxHalEnableSystemInterrupt(ULONG BusInterruptLevel,
+                                  PASSIVE_LEVEL, InterruptMode);
+ }
+ 
+-/* Defer to the HAL's Type-1 PCI config driver; it handles arbitrary offset
+- * and length and serialises on HalpPCIConfigLock. */
++/* The Xbox static device tree does not publish HAL configuration-space bus
++ * handlers. Use its direct Type-1 adapter, serialized with the HAL. */
+ VOID NTAPI
+ HalReadWritePCISpace(ULONG BusNumber, ULONG SlotNumber, ULONG RegisterNumber,
+                          PVOID Buffer, ULONG Length, BOOLEAN WritePCISpace)
+ {
+-    if (WritePCISpace)
+-        HalSetBusDataByOffset(PCIConfiguration, BusNumber, SlotNumber,
+-                              Buffer, RegisterNumber, Length);
+-    else
+-        HalGetBusDataByOffset(PCIConfiguration, BusNumber, SlotNumber,
+-                              Buffer, RegisterNumber, Length);
++    PciCfgReadWriteBuffer(BusNumber, SlotNumber, RegisterNumber,
++                          Buffer, Length, WritePCISpace);
+ }
+ 
+ extern NTSTATUS NTAPI ros_NtOpenFile(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
+--- a/tests/host/interrupt-public-abi/shim.c
++++ b/tests/host/interrupt-public-abi/shim.c
+@@ -24,6 +24,7 @@
+ #define NTKERNELAPI
+ #define TRUE 1
+ #define FALSE 0
+ #define HIGH_LEVEL 31
++#define CLOCK_LEVEL 28
+ #define DISPATCH_LEVEL 2
+ #define IPI_LEVEL 29
+ #define MAXULONG UINT32_MAX
+--- a/tests/host/clean-room/include/ide/ntoskrnl.h
++++ b/tests/host/clean-room/include/ide/ntoskrnl.h
+@@ -23,6 +23,7 @@
+ #define _In_
+ #define _In_opt_
+ #define DISPATCH_LEVEL 2
+ #define HIGH_LEVEL 31
++#define CLOCK_LEVEL 28
+ #define UNREFERENCED_PARAMETER(x) (void)(x)
+ #define min(a,b) ((a)<(b)?(a):(b))
+ static KIRQL current_irql;

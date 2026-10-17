@@ -3,7 +3,7 @@
 SpiritBoot's build tool defaults to `emulator-file-media` for its xemu target:
 
 ```sh
-python3 scripts/build-firmware.py --source /path/to/pinned/roswell \
+python3 scripts/build-firmware.py --storage-backend legacy-reference --source /path/to/pinned/roswell \
   --output artifacts/firmware-release --media-policy emulator-file-media
 ```
 
@@ -11,7 +11,7 @@ This selects Roswell's `XBOX_EMULATOR_FILE_MEDIA` CMake option. Roswell itself
 leaves that option off by default. For the original certificate behavior:
 
 ```sh
-python3 scripts/build-firmware.py --source /path/to/pinned/roswell \
+python3 scripts/build-firmware.py --storage-backend legacy-reference --source /path/to/pinned/roswell \
   --output artifacts/firmware-strict --media-policy strict
 ```
 

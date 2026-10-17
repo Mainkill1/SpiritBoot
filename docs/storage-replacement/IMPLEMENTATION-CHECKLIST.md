@@ -1,0 +1,181 @@
+# Single-PR implementation checklist — SpiritBoot storage replacement
+
+> **Canonical task list for [PR #248](https://github.com/Mainkill1/SpiritBoot/pull/248).** All steps are internal checkpoints of the same PR, not separate implementation PRs. The PR description and this document are intended to be kept synchronized; when implementation updates require a change, update both. The complete candidate now boots and passes the four-profile API matrix; the unchecked performance, physical-hardware, corresponding-source, and final independent review gates remain unfinished.
+
+---
+
+Native rig correction (operator approved 2026-10-14): primary Steam Deck `10.0.0.42`; secondary Windows `10.0.7.1`, observed Ryzen 9 6900HX. Launch/control Windows graphics through the logged-in Codex PowerShell desktop pipe. Keep machines separate.
+
+See [current implementation evidence](IMPLEMENTATION-EVIDENCE.md) for completed work and remaining gates.
+
+Latest native status: [V352 stopped report](AA-V352-STOPPED.json) preserves 89 completed reference runs and a preflight disk-space failure before the next guest started. The first-cycle comparator also exposed a missing DVD media-hash field; the [reviewed importer correction](BENCHMARK-NATIVE-DVD-FIELDS-FIX.md) passes 18 tests and requires a newly frozen verifier contract. It does not promote the stopped cohort. Independent review confirmed that five pilot pairs cannot satisfy the frozen planning cap even in the best case. No calibration or P1 pass is claimed. The [host recovery](HOST-RECOVERY-20261014.md) reclaimed 14.24 GB on Deck and restored the original Windows desktop runner. The [full Windows36 result](WINDOWS-V362-RESULT.json) now qualifies all 36 functional cases: 36,864 operations / 188,416 assertions, zero failures. This closes the Windows functional matrix only; cache/timing/P1 and the installed replacement remain open. The same recovery writeup records a separately reproduced stopped-prelaunch runner defect, the deployed [runner PR #109](https://github.com/Mainkill1/Xemu-Test-Runner/pull/109), and its successful native pause/resume probe. The original allocation diagnostic stopped after 443 verified consumer pairs on an ambiguous duplicate observation. A bounded collector repair then completed a [fresh 1,024-pair diagnostic](WINDOWS-ALLOCATION-V4.json), preserving raw repeated-stop observations and owned cleanup. The [2026-10-15 I/O diagnostics](IO-PERFORMANCE-DIAGNOSTICS-20261015.md) add six V3 functional leaves, reject a forced worker-path fallback, locate a substantial gap below FATX, and expose unsupported whole-disk flush on SpiritBoot. These results remain diagnostic and do not close P1. Physical pool peak, authenticated ownership and full private-counter qualification remain open.
+
+## Full task contract
+
+**Status: DRAFT / IMPLEMENTATION REQUIRED.** This is **the one PR** for the complete replacement, its tests, migration tooling, benchmarks, and release verification. **Do not open follow-up implementation PRs.** Implement in focused commits and check off the tasks **here**, with evidence attached to this PR. Preserve today's product BIOS until the *complete candidate* passes; no partial builds marketed as a compliant release.
+
+**Goal:** independently authored GPLv2-compatible replacement for incorporated Microsoft-licensed ClassPnP/Disk storage implementation, **statically compiled into the existing `xboxkrnl.exe` within the single `flash.bin`**, including removal of `nxcdrom`'s ClassPnP dependencies. No external drivers, runtime downloads, new firmware formats, or unrelated filesystem/ATA rewrites.
+
+**Related:** existing unresolved compliance issue [#245](https://github.com/Mainkill1/SpiritBoot/issues/245), credits work [#246](https://github.com/Mainkill1/SpiritBoot/pull/246). This PR must **not** close #245 or claim final GPL compliance until exact compiled-source provenance and rights have been independently reviewed.
+
+## Verified baseline and scope
+
+- Audited v1.0 snapshot: SpiritBoot `b65a3f77d9887c9285e936996eb4d286a66f540c`, Roswell `1569e2e89fb47cc72b9c704a8884f98200432bd4`, compiled source tree `3c23ea01cf43c2979c4c3ef247236e03d079f465`, release64 SHA256 `c630d22f2353d3898024d510f0b402b64bccdb331781fe7885389f73d6200853`. Re-confirm *current composed* baseline before coding.
+- Audit identified 139 Microsoft sample/private-header **source function identities** with compiled native/inline representation, not 139 full files or a fraction of all BIOS bytes; additional 19 `srbhelper.h` and 3 `classpnp.h` helper identities require separate permission resolution.
+- **Preserve:** I/O manager, FATX/`vfatfs`, XDVDFS, cache, `partmgr`, `mountmgr`, `atapi`, `pciide`/`pciidex`, IRQ/DMA, XBE ABI/loader, original supported physical Xbox behavior, current asynchronous FATX fast path and write-through contracts.
+- **Replace:** incorporated `drivers/storage/class/{classpnp,disk}` implementations, including surviving inline/private helper bodies where required by rights review; make `nxcdrom` independent of ClassPnP.
+- **Implementation source:** use independently authored/public behavioral specifications and permitted source only. No translation, rename, or reformat of MS-PL driver bodies into GPL.
+- Current 64/128 debug/release CI builds the **old** driver and tests bounded independently authored primitives on the host. They do not qualify a replacement. PR remains draft.
+
+## Architecture to build (all components stay inside the BIOS)
+
+```text
+Titles / dashboard / XBE loader
+            |
+        Nt*File / I/O manager
+            |
+        FATX / XDVDFS / cache
+            |
+         partmgr / mountmgr
+            |
+     +----------------------+
+     | nxdisk | nxcdrom     |   independently implemented class layer
+     | nxstorage transport  |   SRBs, lifetime, geometry, retries
+     +----------------------+
+            |
+     existing atapi/PCI IDE
+            |
+        Xbox HDD / DVD
+```
+
+Maintain guest-visible names (`\Driver\Disk`, `\Driver\Cdrom`, `\Device\Harddisk0\PartitionN` and optical namespace), valid `IoCreateDriver` startup, kernel ordinals, PnP/AddDevice/start/attachment order, IOCTL/status semantics, and equivalent write durability.
+
+**Internal checkpoints P0–P5 below are phases/commits WITHIN THIS SAME PR, not separate PRs.** Only `complete-candidate` must completely exclude the old linked libraries; an internal `partial-lab-prototype` may be incomplete but must be clearly labeled and must not be published.
+
+## P0 — Correct integration map, clean-room inputs and deterministic gating (required before coding broadly)
+
+- [x] Select and reconfirm the exact published **reference64** baseline composition: the [composition receipt](CURRENT-REFERENCE64-COMPOSITION.md) verifies its 146-patch lock, matching assembled tree, actual PE/flash bytes, toolchain and full36 xemu/EEPROM/HDD/ISO/fixture identities. The active pre-extraction lock now has 151 patches through `0137`; its semaphore and public-kernel contract fixes are recorded separately. Final storage-candidate/profile qualification remains open.
+- [ ] Inspect the current *assembled* Roswell source and produce a caller→callee/device dependency matrix. Confirm class / disk / optical dependencies, lower SRB support, PnP, partition controls and persistent memory footprint by actual compiled attribution; the 139 count is **not** a size estimate.
+- [x] **Inspect the required boot file** `ntoskrnl/io/iomgr/driver.c`: review `IopFoldedInDrivers`, entry ABI, names/order, plus `ntoskrnl/xb/devtree.c`, `ntoskrnl/xb/devnode.c` and `ntoskrnl/include/internal/nx-devtree.h`. The independently reviewed [boot audit](boot-dependency-audit/README.md) binds 25 files and 62 ranges to the actual assembled tree. This closes inspection only; P3 replacement registration and native outcomes remain open.
+- [x] Define exact build states `legacy-reference`, `partial-lab-prototype`, `complete-candidate`. Add explicit backend option CLI → `tools/firmware.py` → CMake → actual linker graph → `build.json` → tests/CI; reject missing/unknown setting and **silent fallback**. Keep separate output directories.
+- [x] The starting lock contained `0121` and ran through `0125a`; this PR now adds ordered production patches through `0137`. Continue using the **next available** ordered Roswell filename(s); update `sources/firmware-lock.json` SHA256 without reordering/overwriting prior patches.
+- [x] Produce an approved clean-room inputs manifest identifying authorship/licensing/hashes and allowed public tests/standards. Separate implementer access from legacy-source review; **do not** hand the implementer the unfiltered assembled Roswell tree, patch history, old code, disassembly, private helpers or generated old-source tests. Record any prior exposure; an AI session boundary alone is not license proof.
+- [ ] Investigate/resolve rights for 19 `srbhelper.h` + 3 `classpnp.h` inlines **before** importing headers/functions, and enumerate other compiled copied/unknown helpers. Keep original notices and separate acceptable interface facts from protected implementations.
+- [x] Segregate the legacy `tests/host/storage-completion/check.py` test created by patch `0108`: it extracts **old** `TransferPktComplete` source. The actual CMake backend guard permits it only for `legacy-reference`; owned production tests verify locked patch hashes and apply only new production/test paths. Independent review checked rejection of partial, complete, missing and conflicting selections. Native candidate qualification remains open.
+- [x] **Fix the current migration preflight parser before promoting it to a release gate**. Regression tests must reject `-Wl,-lclasspnp`, `-l:libdisk.a`, grouped hidden `@response` files, non-nm garbage, `_TransferPktComplete.constprop.0` identity, stale/mismatched source/PE/flash evidence. Consume actual resolved linker inputs/map rather than a lenient guessed invocation; preserve `PRECHECK_ONLY_NOT_LICENSE_CERTIFICATION`.
+- [x] Record an approved functional contract matrix before implementation: status/bytes/IRP/MDL/lower CDB/IOCTL/error/namespace behavior, explicitly distinguishing observed vs inferred/unknown. Host and public-XBE probes must not copy MS-PL logic.
+
+### Completed bounded preparation, still outside candidate qualification
+
+- [x] Independently authored request core: 44 deterministic + 8 controlled real-thread ownership scenarios; sanitizer and i386 helper checks. Native IRP/MDL/cancel/rundown adapter remains open.
+- [x] Independently authored geometry composer: 13 scenarios / 6,001 checks; measured count-compatible initialized-prefix policy and remaining native parity gaps.
+- [x] Narrow geometry owner adapter: 16 scenarios / 61,973 checks, independently reviewed ownership/lock boundaries and actual Xbox target assertions; compiled and linked only for the explicitly selected lab/candidate route. Bounded Deck query parity is recorded; full native parity and caller lifetime/IRQL qualification remain open.
+- [x] Independently authored unlinked native packet preparation/result capture: seven production-function groups pass plain and ASan/UBSan, including zero-domain MDLs and copied completion/sense results. [Integration evidence](independent-implementation/native-packet/INTEGRATION.md) records review and target assertions. No submission, cancellation, rundown or installed driver is implemented by this primitive.
+- [x] Independently authored unlinked sense-header normalizer: exact copied/declared bounds, fixed/descriptor format facts and truncated-tail reporting. [Integration evidence](independent-implementation/sense-header/INTEGRATION.md) records plain/sanitizer and freestanding i386 checks. Retry/status policy and installed dispatch remain open.
+- [x] Localize the observed whole-disk flush incompatibility without importing legacy implementation: the [clean-room boundary review](independent-implementation/raw-flush-adapter/README.md) executes the independent request core's ordered real-sync, lower-error and unknown-cache paths. The installed dispatch/lifetime/lower-packet adapter and reset-durability qualification remain open.
+- [x] Independent normalized cache-property encoder: 20 sanitizer fixture groups and i386 helper/ABI checks. Native metadata capture and property dispatch remain open; the raw WORD84/WORD83 validity correction is documented.
+- [x] Independent cache-publication primitive: 32 sanitizer host groups, stale/duplicate/reset/generation rejection, raw-memory exclusion and linked i386 helper checks. Reviewed transaction/lifetime requirements are recorded; native producers, source guards, worker-result handoff and installed dispatch remain open.
+- [x] Fresh-author [native adapter integration plan](independent-implementation/native-adapter-plan/PLAN.md), with 43 opened-input hashes checked against the isolated approved export. Boot orchestration and repeated START obligations are resolved for planning; worker publication and required upper MDL profiles now have reviewed [bounded facts](native-seam-facts/WORKER-HANDOFF-FACTS.md) and a [next-task breakdown](independent-implementation/native-adapter-plan/NEXT-NATIVE-TASKS.md). This is planning only; P1, implementation, native qualification and final provenance remain open.
+- [x] Read-only baseline provenance/footprint audit: 22 SDK/DDK helpers plus five additional SCSI utilities and exact compiled occurrences are recorded. Grants/removal and native storage allocation high-water remain open.
+- [x] Actual CLI/CMake missing/unknown selection and absent complete adapter rejection; real reference64/reference128/reserved128 release ROMs reproduce published hashes. Final full profile matrix remains open.
+- [x] Protected PowerShell desktop pipe proof and first owned graphical guest on Windows Codex/session1; earlier direct launches remain provisional evidence.
+- [x] Source-only public-API fixtures and paired-run analysis toolkit: reviewed clean DVD metadata generation, isolated Windows wrapper mock build and strict JSON/serial evidence decoding; initial toolkit checks passed 250 host tests with three skips. Corrected Deck and [Windows V27](WINDOWS-NATIVE-QUALIFICATION.md) qualify bounded byte-fill/public-query/owned-deadline/post-deadline checks; the original Windows V23 failed deadline is retained. Full P1 recorder/control/clock/calibration/count gates and native full-class qualification remain open.
+
+- [x] Qualify the complete 36-case Deck functional matrix on the published reference64 BIOS: all 36,864 operations and 188,416 assertions passed, with raw evidence and cleanup retained in the [full36 receipt](FULL36-FUNCTIONAL-QUALIFICATION.md). This closes functional method coverage only; all rows remain performance-ineligible, Windows full36 subsequently passed as recorded in [its result](WINDOWS-V362-RESULT.json); P1 remains open.
+- [x] Qualify unchanged-fixture [post-END context collection](STORAGE-POST-END-CONTEXT.md) with the generic collector and owned final quit. The Deck pilot passes 1,024 reads/4,096 checks; its Btrfs file-identity fix and failed prior attempts are recorded. This qualifies the collection method, not A/A timing or P1.
+
+## P1 — Performance baseline and regression decision rules (must precede major driver work)
+
+- [x] Reconstruct and verify the current optimized reference64 product before benchmarking. The [current composition](CURRENT-REFERENCE64-COMPOSITION.md) reproduces the entire published ROM, preserving its IRP-owned FATX lease, eliminated completion context, conditional idle-clock sampling, direct-read mapping, gather-write and DMA bounce/interrupt behavior. Candidate preservation still requires its own P2–P4 evidence.
+- [ ] **Run A/A first**: current baseline against independent instances of itself. Determine normal run-to-run variance separately on Steam Deck (**primary**) and Windows Ryzen 9 6900HX at `10.0.7.1` (**secondary**); no cross-machine averaging. Pin xemu/Vulkan config, host SSD, CPU governor, power/thermal policy, guest/host caches, HDD base+independent overlays and test seeds.
+- [ ] Freeze *predeclared* primary workloads: aligned small HDD read QD1; both existing 1,024-read FATX sequences at QD1/4/12 and memory pressure; write+real cache flush; DVD/XISO reads; boundary split/fragmented SG. Add warm/cold-ish preparation as separate cases. Then expand to actual game streaming.
+- [ ] Implement/report deterministic automated A/A and paired A/B run harness (proposed `tools/storage_perf_compare.py` + host tests): pin manifest, record all attempts/timeouts, checksums, operations completed, cache preparation, run pairs, latency distribution/throughput/tail and run-level confidence intervals; emit `PASS` / `REGRESSION` / `INCONCLUSIVE`. **Do not invent baseline numbers.**
+- [ ] Use five independent pairs only as an initial noise pilot; freeze a sufficient independent confirmatory count from A/A (often more than five) **before candidate values are reviewed**. Alternate/randomize A/B, analyze pair as statistical unit; do not treat thousands of correlated operations within one run as independent samples.
+- [ ] Capture full **caller issue→consumer-ready** duration and data integrity; diagnostic timestamps distinguish queue/admission, SRB preparation, command start, lower completion and APC/event wakeup. These are elapsed intervals, not exclusive CPU timing. Acceptance binaries have per-I/O tracing and expensive guest clocks **disabled**.
+- [ ] Track allocations/frees, context switches/worker hops, SRB/`IoCallDriver`/IRQ counts, retries, bounce copies/bytes, queue high-water, MDL mappings, persistent/peak pool, ROM occupancy/padding and frame-time/asset-ready deadlines. No apparent speedup from fewer verified reads or flushes, skipped work or timing a shorter region.
+
+**Proposed initial numeric release gates, to freeze or revise *from A/A calibration before implementation***:
+
+| Gate | Candidate acceptance |
+| --- | --- |
+| Data/correctness/durability/lifetime | **Zero** unexplained corrupt bytes, wrong status/`Information`, missing APC, double completion, stuck I/O, leaked reference/pool or weaker flush ordering |
+| Healthy small/single-segment path | No unexplained extra upper worker trip, allocation, copy, lower command or interrupt |
+| Per-primary-case batch / request latency | One-sided upper 95% bound on candidate/baseline latency ratio `<= 1.02` |
+| Per-primary-case throughput | One-sided lower 95% bound on candidate/baseline throughput ratio `>= 0.98` |
+| Request p95/p99 latency | Upper bound on ratio `<= 1.05`, requiring enough independent run/tail samples |
+| Game streaming/frame tails | No additional missing/late assets/deadline misses; proposed p95/p99 frame-time upper bound `<= 1.03` plus absolute ms |
+| Memory / flash | Fit all shipped envelopes; no unapproved resident/peak RAM growth or sustained pool increase |
+
+A result whose confidence interval crosses a limit is **INCONCLUSIVE—not PASS**. A repeatable smaller loss still needs investigation. Thresholds are proposed measurement tolerances, not permission to spend performance. Do not stop on average FPS alone or bury single-workload losses in a mean.
+
+## P2 — Independently build the shared request engine and OWNED host tests
+
+**Required assembled-source targets** (final grouping may change only with documented reason):
+- `drivers/storage/class/nxstorage/{CMakeLists.txt,nxstorage.h,device.c,request.c,sense.c,control.c,disk.c}` (all NEW, independently authored).
+- `drivers/storage/class/nxcdrom/{nxcdrom.c,CMakeLists.txt}` (adapt to remove ClassPnP, preserving permitted original-owned functionality).
+- Later integrate via `drivers/storage/class/CMakeLists.txt`, `ntoskrnl/CMakeLists.txt`, `ntoskrnl/io/iomgr/driver.c` and `ntoskrnl/xb/devtree.c`.
+
+Tasks:
+- [ ] Implement small owned `nxstorage` device and SRB request context, with **explicit ownership table** per parent/child IRP, original/partial MDL, SRB, sense, buffer, lower-device ref, FATX lease, retry generation and completion state. Specify allocation, borrower, cleanup, IRQL and unwind.
+- [ ] Validate 64-bit offset/end arithmetic, zero-length/OOB/unaligned accesses, sector size, 28-/48-bit LBA/CDB constraints, max transfer, PRD/SG boundaries and MDL offsets **before hardware submission**.
+- [ ] Provide a simple single-SRB fast path where compatible; use **bounded iterative segmentation** for larger I/O. No unbounded recursive next-segment submissions from inline completion; avoid a heap allocation per pointer or global unbounded packet queue.
+- [ ] Handle lower inline success/failure *before* `IoCallDriver` returns, pending completion, partial bytes, parent`/`child result distinction, `STATUS_PENDING`, `IoStatus.Status`/`Information`, event/APC delivery, priority boost, thread exit/cancel/close/truncate/delete and allocation failures. Exactly one parent completion; no use-after-free or double-free.
+- [ ] Preserve lower `Srb->OriginalRequest`/MDL/DataBuffer alignment/lifetime, lower completion IRQL, lock/reentrancy rules. No upper class lock held over lower submission, synchronous wait or completion without proof.
+- [ ] Define class-vs-lower retry ownership and total deadlines, `SRB_STATUS_QUEUE_FROZEN` recovery, reserved bounded recovery resources, queue progress under exhaustion, autosense/status mapping, lower requeue generation. Do not blindly retry writes whose completion is unknown or serialize all queue depth to one.
+- [ ] Ensure real durability command chain: upper write/flush → required metadata/data ordering → cache-sync CDB → ATA hardware path/error propagation. **Pinned `SRB_FUNCTION_FLUSH` returns success without itself being the cache-sync path; Xbox/PATA FUA is cleared.** Recheck composed source and explicit test before selecting any shortcut.
+- [ ] Add independently authored `tests/host/nxstorage/*` compiling the **new production functions** against deterministic lower-device doubles/fault injectors. Demonstrate 1 read → 1 write + actual flush, then queue errors/inline completions/low memory; use sanitizers on supported host builds.
+- [ ] Measure new primitive path vs frozen baseline structurally and on Deck before expanding implementation. No hidden worker round trip, per-I/O clock sampling or lost existing FATX optimization.
+
+## P3 — Integrate the first real read/write and optical vertical slice, then complete behavior
+
+- [x] Register the public folded `DiskDriverEntry`/`CdromDriverEntry` entry points, owned dispatch, AddDevice attachment, `DO_DEVICE_INITIALIZING` publication, and PnP start forwarding. The [bring-up record](NATIVE-CUTOVER-BRINGUP-2026-10-15.md) captures the exact ABI and PnP failures found during cutover.
+- [x] HDD: own `\Device\Harddisk0`, expose `Partition0`, and provide the geometry/capacity/control contract that lets preserved PartMgr publish the FATX partitions. The four-profile API matrix verifies FATX-backed file, async, scatter/gather, and flush API behavior.
+- [x] DVD: replace the old `nxcdrom`/ClassPnP link with the owned optical class path, preserve `\Device\CdRom0`, and pass XDVDFS-backed API and broad-XISO reads on the exact candidate.
+- [ ] Verify lower ATA/ATAPI gets equivalent commands, queues and DMA/interrupt behavior; ensure HDD and DVD sharing the controller do not suffer new head-of-line blocking.
+- [x] Keep the hybrid labeled `partial-lab-prototype`; build the bootable `complete-candidate` with only `libnxstorage.a` at the class layer. The exact-build preflight excludes `libclasspnp.a`, `libdisk.a`, `libnxcdrom.a`, and identified legacy/helper symbols. This is a bounded machine check, not final legal certification.
+- [ ] Run open XBE boot/sector/TOC/partition/flush native probes and focused Deck sentinel performance before completing the remaining control/error matrix.
+
+## P4 — Existing/new compatibility, faults and real-world measurements
+
+- [x] Close the [public-kernel contract differential](KERNEL-PUBLIC-CONTRACT-FIXES.md): the completion-routine oracle and PCI boundary probes define the reference behavior; the final identical 119-check XISO passes 119/119 on SpiritBoot and Complex with byte-identical serial output, and the 31 registered fixtures pass 5,481/5,481 on final release64.
+- [x] Run the final pre-extraction release64 Windows matrix through the protected USER desktop pipe: SpiritBoot passes all 36 fixtures (6,197 OK and two declared TODOs of 6,199 checks); Complex passes 19, completes six with reference-oracle discrepancies and does not complete eleven. Two performance-fixture runs per BIOS reproduce SpiritBoot 72/72 plus 42/42 and Complex 72/72 plus 35/42. Preserve the [portable comparison and timing evidence](../provenance/evidence/pr248-final-windows-matrix/COMBINED-36-COMPARISON-RECEIPT.portable-v2.json); the shorter Complex support-discovery ceiling makes cross-BIOS timing non-comparable.
+- [x] Complete the frozen [144-leaf broad XISO ABBA comparison](BROAD-XISO-FINAL-COMPARISON.md) on the primary Linux host: all four runs complete and pass 149 applicable records, both SpiritBoot runs repeat exactly, and Complex B1 matches both. Preserve the frozen FAIL verdict because Complex B2 alone changes one eligible framebuffer hash. The two-run timing average is descriptive and does not close P1.
+- [ ] Exact candidate-facing host/native tests for single/multi-SRB, all allocation failure sites, inline/pending/cancel/teardown races, low memory, duplicate callback defense, partial transfer, queue freeze/unfreeze, timeout, failed media, HDD and DVD geometry/status/IOCTL buffer sizes, power/reset/flush ordering.
+- [ ] Preserve existing `storage-contract` 48 checks, `fatx-async-lifetime` 7,833 checks (documented QMP throttle **correctness only**), `save-path-separators` 34 checks, DMA/SG, cache/async/metadata/writeback, interrupt/APC and XDVDFS tests; ensure test source includes **new** candidate code rather than extracted old `TransferPktComplete`.
+- [ ] Run the remaining storage-contract/lifetime XISO variants and repeated reset/pool-stability campaigns against the exact candidate. Verify data byte-for-byte, status/event/APC order and stable memory/MDL pool after repeated reads/writes/resets.
+- [x] Run the exact complete-candidate API suite in 64/128 MiB release/debug profiles: each ran 639 checks with 637 passing, zero failures, and two existing xemu floating-point TODOs. Run the local broad-XISO diagnostic: all 144 leaves and five groups passed their 149 built-in records. See the [cutover record](NATIVE-CUTOVER-BRINGUP-2026-10-15.md); this does not replace the remaining paired native/performance runs.
+- [ ] Game probes: DOA Xtreme create/save/reset/reload; PGR2 boot/race/streaming; Forza Motorsport scenery-streaming and asset-ready; Halo/Halo 2 boot/load; Conker scene transitions. Captures need test/run image hashes and, for streaming, p95/p99 frame milliseconds not just mean FPS. No game content committed.
+- [ ] A/B on Steam Deck and Windows Ryzen independently, both with untraced release builds, identical binary/settings except class implementation, frozen run count, paired distributions, matched caches and sector bytes. Report **every** primary workload, confidence bound, errors and regression root cause.
+- [ ] Run 64/128 MiB release + checked/debug and supported upper-RAM-reserved profile. Measure compressed kernel bytes vs fixed `flash.bin` envelope, linker section/page hotness, INIT discard, resident RAM and per-device high-water. Physical console IDE/DMA/optical/cache tests when available; xemu pass is not hardware proof.
+
+## P5 — Static-license closure, final validation and merge gate
+
+- [ ] Candidate linker inputs (including expanded response/archive transitive closure) contain **no `libclasspnp.a`/`libdisk.a`**. The exact-build preflight now passes the archive, PE-symbol, and owned-source sentinels; optimized inline/code/data attribution and independent grant review remain open, so this combined gate stays unchecked.
+- [ ] Resolve or eliminate 22 SDK/DDK helper identities, five additional SCSI utilities and any other discovered uncertain source; verify GCC runtime exception, original notices and full corresponding source. Preserve old archive historical notices where required but do not ship incorporated incompatible code in final BIOS.
+- [ ] Validate `build.json` backend identity/source tree, patch SHA256, PE/flash hashes, no unauthorized backend fallback, deterministic clean builds and correct 64/128 firmware memory/size.
+- [ ] Run final host/native/XISO/save/game/performance matrix against the **exact** final candidate; external legal/provenance reviewer and technical code reviewer verify compiled firmware. Record any supported/unverified physical hardware scope.
+- [ ] Mark ready for review only when all correctness, provenance, performance and footprint gates are PASS; do not close #245 or publish a “GPL-clean” claim on partial evidence.
+
+## Documents and required evidence
+
+- [Implementation map](README.md)
+- [HDD/DVD/IRP/SRB contract](ABI-CONTRACT.md)
+- [Performance and compatibility qualification](TEST-PLAN.md)
+- [Provenance and clean-room process](PROVENANCE.md)
+- This document is the synchronized single-PR implementation checklist.
+- Current read-only non-certifying checker: `tools/storage_migration_gate.py` and its host regression tests.
+
+**Definition of done:** one self-contained original-Xbox BIOS with independently implemented and verified storage class functionality, preserved behavior and saved games, no identified incompatible implementation included, full source/licensing closure, and measured non-regression on the frozen Steam Deck + Windows Ryzen workloads. No follow-up implementation PR is required or requested. The **single PR remains draft until all tasks finish.**
+
+### Zero-domain descriptor admission correction
+
+Patch `0133` corrects a bounded owned request-core admission defect: a valid
+MDL may have original numeric domain zero. Explicit validated descriptor
+presence is now separate from that address. The [fix writeup](independent-implementation/zero-domain-mdl/FIX.md)
+records RED/GREEN evidence, 44 request scenarios, eight pthread scenarios and
+freestanding checks. This changes an unlinked primitive, not the published
+reference ROM. The 146-patch reference composition receipt remains a historical
+reference identity; the current lock now contains 151 patches through public-kernel
+contract correction patch `0137`. The replacement is now integrated by locked
+patches `0138`–`0140`; its current qualification and remaining gates are
+recorded in [the native cutover bring-up](NATIVE-CUTOVER-BRINGUP-2026-10-15.md).

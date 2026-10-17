@@ -1,0 +1,257 @@
+{
+  "schemaVersion": 1,
+  "experiment": "forza-map-stream-abba-20261015",
+  "purpose": "Replay public Forza world-stream request metadata at captured queue depth and memory pressure.",
+  "runner": {
+    "origin": "http://10.0.7.1:9368",
+    "targetOs": "windows",
+    "launchPath": "protected PowerShell user desktop via native-launch.exe",
+    "sourceJobId": "pr248-storage-pump-long16-baseline-4-20261015-v1"
+  },
+  "fixture": {
+    "path": "tests/xbe/forza-map-stream/forza-map-stream.iso",
+    "bytes": 720896,
+    "sha256": "d095682b8691b0c43deae66530a7ccd553d8bc828b4fe4537469b86c463b4b6b",
+    "passes": 16,
+    "operationsPerPass": 1024,
+    "queueDepth": 12,
+    "pressurePages": 900
+  },
+  "bios": {
+    "irq-known-good": {
+      "sha256": "913293b4a86eac808313555867aa3099aba40903cc17a63c3c424b89a5c5dd77",
+      "bytes": 524288
+    },
+    "current-pr248": {
+      "sha256": "d1404fe3d869df1c9cbce30f54db50f72e06e800bc6ccf8d5cd9f91ec7f9821d",
+      "bytes": 524288
+    }
+  },
+  "controlledInputs": {
+    "xemuSha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d",
+    "xemuConfigSha256": "45b3053a43958b07cf365ae8cc2c12c76da1c2dba504f351110494d0609968c1",
+    "eepromSha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5",
+    "privateHddAssetId": "pr256-clean-fatx-compat010-v1",
+    "privateHddAssetSha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+    "memoryMiB": 64,
+    "buildType": "release",
+    "debugger": false,
+    "operatorIntervention": false
+  },
+  "runs": [
+    {
+      "position": "A1",
+      "arm": "irq-known-good",
+      "jobId": "forza-map-stream-irq-a1-20261015-v1",
+      "runId": "20261016-051803000-25fc5eef70e14fcc848b6d7810a146e9",
+      "serialBytes": 6969547,
+      "serialSha256": "fc79dc3e05e7c2c77509cde10adf2055c13393ff6b9894032714608e0145b173",
+      "analysis": {
+        "status": "qualified",
+        "reasons": [],
+        "passes": 16,
+        "operations": 16384,
+        "queue_high_water_min": 12,
+        "pressure_pages": 900,
+        "reported_failures": 0,
+        "warmup_oracle_failures": 0,
+        "oracle_failure_records": 0,
+        "malformed_records": [],
+        "error_stages": [],
+        "apc_batch_ticks": [
+          39682500,
+          37877326,
+          40555973,
+          39685360,
+          40220107,
+          41826693,
+          41541500,
+          41564967,
+          41045547,
+          39976933,
+          41045547,
+          40563966,
+          40247166,
+          40505300,
+          40821440,
+          41047453
+        ],
+        "apc_batch_median_ticks": 40559969.5,
+        "timing_median_ticks": {
+          "apc_batch": 40559969.5,
+          "caller_batch": 40559969.5,
+          "submit_sum": 32439728.0,
+          "post_return_to_apc_sum": 239013263.5,
+          "return_after_apc_sum": 3263.5
+        }
+      }
+    },
+    {
+      "position": "B1",
+      "arm": "current-pr248",
+      "jobId": "forza-map-stream-current-b1-20261015-v1",
+      "runId": "20261016-052003679-1a5972e1cd0e4088b7a0f72d7ffbd735",
+      "serialBytes": 6330,
+      "serialSha256": "1790a77ccfa508d0b23664af51dc029df0ea06f887f6b62b906c6b68e988a6fb",
+      "analysis": {
+        "status": "rejected",
+        "reasons": [
+          "pass identity or order mismatch",
+          "fixture record count or order mismatch",
+          "requires exactly 16 complete measured passes",
+          "requires one I/O identity record per pass",
+          "missing per-pass cleanup record",
+          "fixture TAP result did not pass",
+          "fixture emitted an explicit error record",
+          "fixture warmup oracle failed",
+          "fixture emitted oracle failure records",
+          "pass 1 cleanup or submission record failed"
+        ],
+        "passes": 0,
+        "operations": 0,
+        "queue_high_water_min": 0,
+        "pressure_pages": 0,
+        "reported_failures": 339,
+        "warmup_oracle_failures": 339,
+        "oracle_failure_records": 16,
+        "malformed_records": [],
+        "error_stages": [
+          "warmup-oracle"
+        ],
+        "apc_batch_ticks": [],
+        "apc_batch_median_ticks": null,
+        "timing_median_ticks": {}
+      },
+      "warmupFailure": {
+        "stage": "warmup-oracle",
+        "count": 339,
+        "status": "STATUS_INSUFFICIENT_RESOURCES",
+        "statusHex": "0xC000009A",
+        "firstPrintedIndex": 38,
+        "lastPrintedIndex": 53,
+        "printedFailureRecords": 16,
+        "operationsSubmitted": 1024,
+        "cleanupComplete": true,
+        "tap": "not ok"
+      }
+    },
+    {
+      "position": "B2",
+      "arm": "current-pr248",
+      "jobId": "forza-map-stream-current-b2-20261015-v1",
+      "runId": "20261016-052017834-41cbe12e01fc483490f45679ff4e0a90",
+      "serialBytes": 6330,
+      "serialSha256": "8b25718c682c8b7bfc95ad32018dcafc74c8ce00aaf36109952a82430c9f3324",
+      "analysis": {
+        "status": "rejected",
+        "reasons": [
+          "pass identity or order mismatch",
+          "fixture record count or order mismatch",
+          "requires exactly 16 complete measured passes",
+          "requires one I/O identity record per pass",
+          "missing per-pass cleanup record",
+          "fixture TAP result did not pass",
+          "fixture emitted an explicit error record",
+          "fixture warmup oracle failed",
+          "fixture emitted oracle failure records",
+          "pass 1 cleanup or submission record failed"
+        ],
+        "passes": 0,
+        "operations": 0,
+        "queue_high_water_min": 0,
+        "pressure_pages": 0,
+        "reported_failures": 371,
+        "warmup_oracle_failures": 371,
+        "oracle_failure_records": 16,
+        "malformed_records": [],
+        "error_stages": [
+          "warmup-oracle"
+        ],
+        "apc_batch_ticks": [],
+        "apc_batch_median_ticks": null,
+        "timing_median_ticks": {}
+      },
+      "warmupFailure": {
+        "stage": "warmup-oracle",
+        "count": 371,
+        "status": "STATUS_INSUFFICIENT_RESOURCES",
+        "statusHex": "0xC000009A",
+        "firstPrintedIndex": 57,
+        "lastPrintedIndex": 87,
+        "printedFailureRecords": 16,
+        "operationsSubmitted": 1024,
+        "cleanupComplete": true,
+        "tap": "not ok"
+      }
+    },
+    {
+      "position": "A2",
+      "arm": "irq-known-good",
+      "jobId": "forza-map-stream-irq-a2-20261015-v1",
+      "runId": "20261016-052032125-0e1f0a3b71e749bfad441b8c6c942a46",
+      "serialBytes": 6968589,
+      "serialSha256": "9f1519622b092681feb917869b5333a0c53bf328aed6b5ac98d527bfa7e4e3eb",
+      "analysis": {
+        "status": "qualified",
+        "reasons": [],
+        "passes": 16,
+        "operations": 16384,
+        "queue_high_water_min": 12,
+        "pressure_pages": 900,
+        "reported_failures": 0,
+        "warmup_oracle_failures": 0,
+        "oracle_failure_records": 0,
+        "malformed_records": [],
+        "error_stages": [],
+        "apc_batch_ticks": [
+          38727406,
+          39897000,
+          37405060,
+          38507993,
+          39790300,
+          39293173,
+          39077207,
+          38918074,
+          38736867,
+          39450987,
+          40364207,
+          37224806,
+          39163300,
+          39081827,
+          39879326,
+          40008173
+        ],
+        "apc_batch_median_ticks": 39122563.5,
+        "timing_median_ticks": {
+          "apc_batch": 39122563.5,
+          "caller_batch": 39122563.5,
+          "submit_sum": 31959089.0,
+          "post_return_to_apc_sum": 227192710.0,
+          "return_after_apc_sum": 2126.5
+        }
+      }
+    }
+  ],
+  "controlComparison": {
+    "status": "qualified",
+    "candidate_over_reference": 0.9645609694060544,
+    "candidate_change_percent": -3.5439030593945597,
+    "reference_median_ticks": 40559969.5,
+    "candidate_median_ticks": 39122563.5,
+    "timing_change_percent": {
+      "apc_batch": -3.5439030593945597,
+      "caller_batch": -3.5439030593945597,
+      "post_return_to_apc_sum": -4.945563826419197,
+      "return_after_apc_sum": -34.839895817373986,
+      "submit_sum": -1.48163696070448
+    }
+  },
+  "result": {
+    "status": "current-bios-correctness-failure",
+    "knownGoodControlsQualified": 2,
+    "currentRunsQualified": 0,
+    "finding": "Both current-BIOS runs fail QD12 warm-up reads with STATUS_INSUFFICIENT_RESOURCES; both known-good controls complete all operations.",
+    "timingComparisonAvailable": false,
+    "timingComparisonReason": "Current BIOS fails the correctness gate before measured passes."
+  }
+}

@@ -1,0 +1,290 @@
+{
+  "id": "forza-map-stream-pump-v5-sg-h1-20261015-v1",
+  "job": {
+    "id": "forza-map-stream-pump-v5-sg-h1-20261015-v1",
+    "executable": "native-launch.exe",
+    "arguments": [
+      "-config_path",
+      "{packageDir}/xemu.toml",
+      "-m",
+      "64",
+      "-device",
+      "lpc47m157",
+      "-serial",
+      "file:{resultDir}/native-serial.log",
+      "-no-shutdown"
+    ],
+    "workingDirectory": ".",
+    "environment": {
+      "PR248_NATIVE_PACKAGE": "{packageDir}",
+      "PR248_NATIVE_EVIDENCE": "{resultDir}"
+    },
+    "timeoutSeconds": 1200,
+    "tags": [
+      "FORZA-MAP-STREAM-PUBLIC-REPLAY",
+      "USER-POWERSHELL-PIPE",
+      "PRIVATE-DISK-DESTRUCTIVE",
+      "RELEASE64",
+      "ABBA-FOLLOWUP:H1",
+      "BIOS-ARM:pump-v5-retained-pata-sg",
+      "SOURCE-TREE:7b4c6257746c010abc6f1c51cb7992ae7ec6fd00"
+    ],
+    "plan": [
+      {
+        "type": "wait_for_artifact",
+        "delayMs": 0,
+        "button": null,
+        "durationMs": 100,
+        "name": null,
+        "diagnosticId": null,
+        "condition": {
+          "name": "",
+          "scope": "result",
+          "path": "native-serial.log",
+          "mustExist": true,
+          "minimumBytes": 0,
+          "minimumNonBlackPixelRatio": null,
+          "nonBlackPixelThreshold": 0,
+          "imageRegion": null,
+          "expectedSha256": null,
+          "containsText": "\nok 1 - Forza map streaming public request replay",
+          "equalsText": null
+        },
+        "timeoutMs": 420000,
+        "pollIntervalMs": 100
+      },
+      {
+        "type": "wait",
+        "delayMs": 1000,
+        "button": null,
+        "durationMs": 100,
+        "name": null,
+        "diagnosticId": null,
+        "condition": null,
+        "timeoutMs": 10000,
+        "pollIntervalMs": 100
+      },
+      {
+        "type": "diagnostic",
+        "delayMs": 0,
+        "button": null,
+        "durationMs": 100,
+        "name": null,
+        "diagnosticId": "forza-status-post",
+        "condition": null,
+        "timeoutMs": 10000,
+        "pollIntervalMs": 100
+      },
+      {
+        "type": "quit",
+        "delayMs": 0,
+        "button": null,
+        "durationMs": 100,
+        "name": null,
+        "diagnosticId": null,
+        "condition": null,
+        "timeoutMs": 10000,
+        "pollIntervalMs": 100
+      }
+    ],
+    "targetOs": "windows",
+    "expectedExecutableSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+    "requiredFiles": [
+      "fixture.iso",
+      "flash.bin",
+      "native-launch.exe",
+      "state/eeprom.bin",
+      "xemu.exe",
+      "xemu.toml"
+    ],
+    "launchMode": "direct",
+    "snapshotName": null,
+    "startPaused": false,
+    "requireInput": false,
+    "diagnostics": [
+      {
+        "id": "forza-status-post",
+        "type": "qmp",
+        "durationMs": 30000,
+        "pauseBefore": false,
+        "resumeDuring": false,
+        "pauseAfter": false,
+        "outputName": null,
+        "reason": "Post-test guest state before owned process quit",
+        "profile": "GeneralProfile+GPU",
+        "frequency": 997,
+        "callGraph": "dwarf",
+        "clockId": null,
+        "frames": 1,
+        "tracePgraph": false,
+        "renderDocTrigger": "xemu-hotkey",
+        "analyzeCapture": true,
+        "address": 0,
+        "size": 0,
+        "debugFile": null,
+        "addresses": [],
+        "qmpCommand": "query-status",
+        "qmpArguments": {},
+        "monitorCommand": null,
+        "toolExecutable": null,
+        "toolArguments": []
+      }
+    ],
+    "runtimeState": {
+      "enabled": true,
+      "keepOnSuccess": false,
+      "keepOnFailure": true,
+      "files": [
+        {
+          "source": "state/eeprom.bin",
+          "destination": "eeprom.bin",
+          "expectedSha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5"
+        }
+      ],
+      "diskAssets": [
+        {
+          "assetId": "pr256-clean-fatx-compat010-v1",
+          "expectedSha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+          "destination": "hdd.qcow2",
+          "retention": "deleteAfterEvidence"
+        }
+      ],
+      "isolation": {
+        "cacheMode": "cold",
+        "cacheShaders": true,
+        "driverCache": "uncontrolled",
+        "allowUncontrolledDriverCache": true,
+        "seedDirectory": null,
+        "seedSha256": null,
+        "requirePrivateGuestState": true,
+        "maximumFiles": 4096,
+        "maximumBytes": 268435456,
+        "deadlineSeconds": 15,
+        "readOnlyAssets": [
+          {
+            "field": "bootrom_path",
+            "assetId": "devbox-mcpx10-readonly-v1",
+            "expectedSha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335"
+          }
+        ]
+      }
+    },
+    "inputs": [
+      {
+        "path": "fixture.iso",
+        "role": "diagnostic-input",
+        "hash": true,
+        "expectedSha256": "d095682b8691b0c43deae66530a7ccd553d8bc828b4fe4537469b86c463b4b6b"
+      },
+      {
+        "path": "flash.bin",
+        "role": "diagnostic-input",
+        "hash": true,
+        "expectedSha256": "f0d19cc9a657c7aef5efa61a67605f8c6997866c0b9b347b5e260030920bb77e"
+      },
+      {
+        "path": "native-launch.exe",
+        "role": "diagnostic-input",
+        "hash": true,
+        "expectedSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c"
+      },
+      {
+        "path": "state/eeprom.bin",
+        "role": "diagnostic-input",
+        "hash": true,
+        "expectedSha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5"
+      },
+      {
+        "path": "xemu.exe",
+        "role": "emulator",
+        "hash": true,
+        "expectedSha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d"
+      },
+      {
+        "path": "xemu.toml",
+        "role": "diagnostic-input",
+        "hash": true,
+        "expectedSha256": "45b3053a43958b07cf365ae8cc2c12c76da1c2dba504f351110494d0609968c1"
+      }
+    ],
+    "workload": {
+      "correctnessChecks": [],
+      "evidenceRequirements": [],
+      "reportedMetrics": [],
+      "minimumMetricSamples": 0,
+      "requirePlanCompletion": true
+    },
+    "experiment": {
+      "id": "forza-map-stream-pump-v5-sg-20261015",
+      "variant": "H",
+      "reference": "G",
+      "variedFactors": [
+        "bios"
+      ],
+      "controlledFactors": [
+        "fixture",
+        "xemu",
+        "config",
+        "eeprom",
+        "private-hdd-template",
+        "host",
+        "release-build"
+      ],
+      "requireCorrectnessPass": true,
+      "requireCompleteEvidence": true,
+      "allowOperatorIntervention": false,
+      "allowDiagnostics": false
+    },
+    "operations": {
+      "mode": "diagnostic",
+      "allowPreview": false,
+      "allowManualInput": false,
+      "allowPauseResume": false,
+      "allowDiagnostics": true,
+      "allowBulkTransfers": false,
+      "previewAllowed": false,
+      "manualInputAllowed": false,
+      "pauseResumeAllowed": false,
+      "diagnosticsAllowed": true,
+      "bulkTransfersAllowed": false
+    }
+  },
+  "files": [
+    {
+      "path": "fixture.iso",
+      "length": 720896,
+      "sha256": "d095682b8691b0c43deae66530a7ccd553d8bc828b4fe4537469b86c463b4b6b",
+      "executable": false
+    },
+    {
+      "path": "flash.bin",
+      "length": 524288,
+      "sha256": "f0d19cc9a657c7aef5efa61a67605f8c6997866c0b9b347b5e260030920bb77e",
+      "executable": false
+    },
+    {
+      "path": "native-launch.exe",
+      "length": 78848,
+      "sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "executable": true
+    },
+    {
+      "path": "state/eeprom.bin",
+      "length": 256,
+      "sha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5",
+      "executable": false
+    },
+    {
+      "path": "xemu.exe",
+      "length": 44688777,
+      "sha256": "14777b55740706608cdfde97349eefa3d5115ece4c889679c9c8b96641a85f2d",
+      "executable": true
+    },
+    {
+      "path": "xemu.toml",
+      "length": 523,
+      "sha256": "45b3053a43958b07cf365ae8cc2c12c76da1c2dba504f351110494d0609968c1",
+      "executable": false
+    }
+  ]
+}

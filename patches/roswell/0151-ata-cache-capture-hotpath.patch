@@ -1,0 +1,282 @@
+diff --git a/drivers/storage/class/nxstorage/native_capture.inc b/drivers/storage/class/nxstorage/native_capture.inc
+index 75698fa7..2724a077 100644
+--- a/drivers/storage/class/nxstorage/native_capture.inc
++++ b/drivers/storage/class/nxstorage/native_capture.inc
+@@ -18,14 +18,12 @@ NxAtapiCacheUnavailable(PATAPORT_DEVICE_EXTENSION device)
+ static inline void
+ NxAtapiCacheWriterReset(PATA_DEVICE_REQUEST request)
+ {
+-    nx_lcq_writer writer;
+-    nx_lcq_define(&writer, NX_LCQ_OTHER, 0, 0);
+-    request->NxCacheWriter.Stamp = writer.stamp;
+-    request->NxCacheWriter.RequestedBytes = writer.requested_bytes;
+-    request->NxCacheWriter.Destination = writer.destination;
+-    request->NxCacheWriter.Command = writer.command;
+-    request->NxCacheWriter.Proof = writer.proof;
+-    request->NxCacheWriter.Started = writer.started;
++    request->NxCacheWriter.Stamp = 0;
++    request->NxCacheWriter.RequestedBytes = 0;
++    request->NxCacheWriter.Destination = NX_LCQ_OTHER;
++    request->NxCacheWriter.Command = 0;
++    request->NxCacheWriter.Proof = NX_LCQ_UNPROVED;
++    request->NxCacheWriter.Started = 0;
+ }
+ 
+ static inline nx_lcq_writer
+@@ -85,12 +83,15 @@ NxAtapiCacheLoadResult(PATA_DEVICE_REQUEST request)
+ static inline void
+ NxAtapiCacheTrack(PATAPORT_DEVICE_EXTENSION device, PATA_DEVICE_REQUEST request)
+ {
++    uint8_t command = request->TaskFile.Command;
+     enum nx_lcq_destination destination = NX_LCQ_OTHER;
++    if (command != 0xec && command != 0xa1)
++        return;
+     if (request->Flags & NX_LCQ_LOCAL_FLAG) destination = NX_LCQ_LOCAL;
+     else if (request->DataBuffer == (void *)&device->IdentifyDeviceData)
+         destination = NX_LCQ_CACHED;
+     nx_lcq_writer writer;
+-    nx_lcq_define(&writer, destination, request->TaskFile.Command,
++    nx_lcq_define(&writer, destination, command,
+                   request->DataTransferLength);
+     NxAtapiCacheStoreWriter(request, writer);
+ }
+@@ -119,6 +120,19 @@ NxAtapiCacheRawResult(PATA_DEVICE_REQUEST request)
+                               request->SrbStatus, request->DataTransferLength);
+ }
+ 
++/* Ordinary requests have no cache-result consumer. Avoid constructing and
++ * copying their unused completion record. A callback/internal consumer still
++ * receives an explicit unstarted result so stale request storage cannot be
++ * mistaken for a current writer. */
++static inline int
++NxAtapiCacheCaptureResult(PATA_DEVICE_REQUEST request, int required)
++{
++    if (!required)
++        return 0;
++    NxAtapiCacheStoreResult(request, NxAtapiCacheRawResult(request));
++    return request->NxCacheResult.Started != 0;
++}
++
+ /* Caller excludes every source writer/flag mutation throughout this function.
+  * Runtime: after translation/addressing, before successor start. Worker:
+  * after successful full local identity copy plus profile/flag consistency.
+diff --git a/drivers/storage/ide/atapi/scsi.c b/drivers/storage/ide/atapi/scsi.c
+index 830ef4af..9c2159c2 100644
+--- a/drivers/storage/ide/atapi/scsi.c
++++ b/drivers/storage/ide/atapi/scsi.c
+@@ -271,9 +271,10 @@ AtaReqCompleteRequest(
+ 
+     ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
+     DevExt = CONTAINING_RECORD(Device, ATAPORT_DEVICE_EXTENSION, Device);
+-    NxAtapiCacheStoreResult(Request, NxAtapiCacheRawResult(Request));
+-    if ((Request->Flags & REQUEST_FLAG_INTERNAL) &&
+-        Request->NxCacheResult.Started)
++    if (NxAtapiCacheCaptureResult(Request,
++            Request->Complete != NULL ||
++            (Request->Flags & REQUEST_FLAG_INTERNAL)) &&
++        (Request->Flags & REQUEST_FLAG_INTERNAL))
+     {
+         DevExt->NxCacheWorkerResult = NxAtapiCacheLoadResult(Request);
+         InterlockedExchange(&DevExt->NxCacheWorkerResultReady, 1);
+diff --git a/tests/host/atapi-cache-hotpath/cache_hotpath_test.c b/tests/host/atapi-cache-hotpath/cache_hotpath_test.c
+new file mode 100644
+index 00000000..a22a8f84
+--- /dev/null
++++ b/tests/host/atapi-cache-hotpath/cache_hotpath_test.c
+@@ -0,0 +1,170 @@
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++#include "../../../drivers/storage/class/nxstorage/cache_property.h"
++
++typedef unsigned char UCHAR;
++typedef uint32_t ULONG;
++typedef int32_t LONG;
++typedef void *PVOID;
++
++#define NX_LCQ_LOCAL_FLAG 0x8000u
++#define NX_LCQ_PROGRAM_DMA_FLAG 0x00200000u
++
++typedef struct _ATA_DEVICE_REQUEST {
++    union {
++        UCHAR Cdb[16];
++        struct { UCHAR Command; UCHAR Padding[15]; } TaskFile;
++    };
++    PVOID DataBuffer;
++    ULONG DataTransferLength;
++    ULONG Flags;
++    UCHAR SrbStatus;
++    struct {
++        ULONG Stamp;
++        ULONG RequestedBytes;
++        UCHAR Destination, Command, Proof, Started;
++    } NxCacheWriter;
++    struct {
++        ULONG Stamp;
++        ULONG RequestedBytes;
++        UCHAR Destination, Command, Proof, Started;
++        ULONG RawBytes;
++        UCHAR RawStatus;
++        UCHAR Reserved[3];
++    } NxCacheResult;
++} ATA_DEVICE_REQUEST, *PATA_DEVICE_REQUEST;
++
++typedef struct _ATAPORT_DEVICE_EXTENSION {
++    struct {
++        ULONG TransportFlags;
++        ULONG DeviceFlags;
++    } Device;
++    UCHAR IdentifyDeviceData[512];
++    nx_lcq_state NxCacheQueryState;
++} ATAPORT_DEVICE_EXTENSION, *PATAPORT_DEVICE_EXTENSION;
++
++static unsigned define_calls, result_copy_calls;
++
++void nx_lcq_init(nx_lcq_state *state, enum nx_cache_profile profile)
++{ state->published = (uint32_t)profile; }
++void nx_lcq_revoke(nx_lcq_state *state) { ++state->published; }
++void nx_lcq_define(nx_lcq_writer *writer, enum nx_lcq_destination destination,
++                   uint32_t command, size_t requested_bytes)
++{
++    ++define_calls;
++    memset(writer, 0, sizeof(*writer));
++    if ((destination == NX_LCQ_CACHED || destination == NX_LCQ_LOCAL) &&
++        (command == 0xec || command == 0xa1)) {
++        writer->destination = (uint8_t)destination;
++        writer->command = (uint8_t)command;
++        writer->requested_bytes = requested_bytes == 512 ? 512 : 0;
++    }
++}
++int nx_lcq_start(nx_lcq_state *state, nx_lcq_writer *writer,
++                 uint32_t final_command, size_t final_bytes,
++                 enum nx_lcq_proof proof)
++{
++    (void)state;
++    if ((writer->command == 0xec || writer->command == 0xa1) &&
++        final_command == writer->command && final_bytes == 512) {
++        writer->stamp = 7; writer->started = 1; writer->proof = (uint8_t)proof;
++        return 1;
++    }
++    return 0;
++}
++nx_lcq_result nx_lcq_result_copy(const nx_lcq_writer *writer,
++                                 uint8_t raw_status, uint32_t raw_bytes)
++{
++    nx_lcq_result result = {*writer, raw_bytes, raw_status};
++    ++result_copy_calls;
++    return result;
++}
++int nx_lcq_current(const nx_lcq_state *state, nx_lcq_result result)
++{ (void)state; (void)result; return 0; }
++int nx_lcq_read_raw(nx_lcq_raw *raw, const void *identity, size_t identity_bytes,
++                    uint32_t transport_flags, uint32_t device_flags)
++{ (void)raw; (void)identity; (void)identity_bytes; (void)transport_flags; (void)device_flags; return 0; }
++int nx_lcq_publish(nx_lcq_state *state, nx_lcq_result result, nx_lcq_raw raw)
++{ (void)state; (void)result; (void)raw; return 0; }
++
++#include "../../../drivers/storage/class/nxstorage/native_capture.inc"
++
++static int writer_is_zero(const PATA_DEVICE_REQUEST request)
++{
++    const UCHAR *p = (const UCHAR *)&request->NxCacheWriter;
++    for (size_t i = 0; i < sizeof(request->NxCacheWriter); ++i)
++        if (p[i]) return 0;
++    return 1;
++}
++
++int main(void)
++{
++    ATA_DEVICE_REQUEST request;
++    ATAPORT_DEVICE_EXTENSION device;
++    memset(&request, 0xa5, sizeof(request));
++    memset(&device, 0, sizeof(device));
++
++    define_calls = 0;
++    NxAtapiCacheWriterReset(&request);
++    assert(writer_is_zero(&request));
++    assert(define_calls == 0);
++
++    request.TaskFile.Command = 0x25;
++    request.DataBuffer = (void *)(uintptr_t)0x1234;
++    request.DataTransferLength = 4096;
++    request.Flags = 0;
++    NxAtapiCacheTrack(&device, &request);
++    assert(writer_is_zero(&request));
++    assert(define_calls == 0);
++
++    request.TaskFile.Command = 0xec;
++    request.DataBuffer = &device.IdentifyDeviceData;
++    request.DataTransferLength = 512;
++    NxAtapiCacheTrack(&device, &request);
++    assert(define_calls == 1);
++    assert(request.NxCacheWriter.Destination == NX_LCQ_CACHED);
++    assert(request.NxCacheWriter.Command == 0xec);
++    assert(request.NxCacheWriter.RequestedBytes == 512);
++
++    memset(&request.NxCacheResult, 0x5a, sizeof(request.NxCacheResult));
++    result_copy_calls = 0;
++    request.NxCacheWriter.Started = 0;
++    assert(!NxAtapiCacheCaptureResult(&request, 0));
++    assert(result_copy_calls == 0);
++    for (size_t i = 0; i < sizeof(request.NxCacheResult); ++i)
++        assert(((const UCHAR *)&request.NxCacheResult)[i] == 0x5a);
++
++    assert(!NxAtapiCacheCaptureResult(&request, 1));
++    assert(result_copy_calls == 1);
++    assert(request.NxCacheResult.Started == 0);
++
++    request.NxCacheWriter.Stamp = 7;
++    request.NxCacheWriter.Started = 1;
++    request.NxCacheWriter.Proof = NX_LCQ_PIO_COUNTED;
++    request.SrbStatus = 1;
++    request.DataTransferLength = 512;
++    assert(NxAtapiCacheCaptureResult(&request, 1));
++    assert(result_copy_calls == 2);
++    assert(request.NxCacheResult.Stamp == 7);
++    assert(request.NxCacheResult.Started == 1);
++    assert(request.NxCacheResult.RawStatus == 1);
++    assert(request.NxCacheResult.RawBytes == 512);
++
++    NxAtapiCacheWriterReset(&request);
++    request.TaskFile.Command = 0xa1;
++    request.Flags = NX_LCQ_LOCAL_FLAG;
++    request.DataBuffer = (void *)(uintptr_t)0x5678;
++    request.DataTransferLength = 511;
++    NxAtapiCacheTrack(&device, &request);
++    assert(define_calls == 2);
++    assert(request.NxCacheWriter.Destination == NX_LCQ_LOCAL);
++    assert(request.NxCacheWriter.Command == 0xa1);
++    assert(request.NxCacheWriter.RequestedBytes == 0);
++
++    puts("PASS cache capture ordinary fast path and IDENTIFY qualification");
++    return 0;
++}
+diff --git a/tests/host/atapi-cache-hotpath/check.py b/tests/host/atapi-cache-hotpath/check.py
+new file mode 100644
+index 00000000..aee4448d
+--- /dev/null
++++ b/tests/host/atapi-cache-hotpath/check.py
+@@ -0,0 +1,20 @@
++#!/usr/bin/env python3
++from pathlib import Path
++import subprocess
++import sys
++
++source = Path(sys.argv[1]).resolve()
++out = Path(sys.argv[2]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++c = source / "tests/host/atapi-cache-hotpath/cache_hotpath_test.c"
++for name, flags in (
++    ("plain", ["-O2"]),
++    ("sanitized", ["-O1", "-fsanitize=address,undefined", "-fno-omit-frame-pointer"]),
++):
++    exe = out / name
++    subprocess.run([
++        "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", *flags,
++        "-I", str(source / "drivers/storage/class/nxstorage"),
++        str(c), "-o", str(exe),
++    ], check=True)
++    subprocess.run([str(exe)], check=True)

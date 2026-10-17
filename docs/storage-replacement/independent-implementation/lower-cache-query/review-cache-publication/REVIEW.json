@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "date": "2026-10-14",
+  "reviewer": "/root/pr248_cache_publication_review",
+  "scope": "INDEPENDENT_READ_ONLY_REVIEW_OF_FROZEN_BOUNDED_CACHE_PUBLICATION_AND_QUERY_LAYER",
+  "assessment": {
+    "Critical": 0,
+    "Important": 0,
+    "Minor": 1,
+    "open_Critical": 0,
+    "open_Important": 0,
+    "open_Minor": 0,
+    "conclusion": "No Critical or Important defect found in the frozen code within its documented serialized-producer and external residency/rundown preconditions. The original freeze has one Minor integration-document ambiguity, resolved by the separately reviewed supplementary documentation identities below. Native ownership, source guards and handoff remain unqualified. This assessment does not establish whole-PR readiness."
+  },
+  "reviewed_identities": {
+    "freeze.json": "b13d441f4676fa851aa688bebce3fa3b58e70d13076b76d857159fe193e6b1c5",
+    "cache_property.c": "8d6e452bc63f21ba88d33c769bbe364c735b2e9b969dff2f50eb147b43254852",
+    "native_capture.inc": "5b5af5e64c8f1bfe2b0b48f75718cd838b52c960b66761ded3960ef6e9177c4e",
+    "native_hook.inc": "02b556e8bfac60e7daa19fd2074144c666f3e49f0a45c14fcf43384bbbf06035",
+    "approved-manifest44.json": "2e0f4c9f682278199bd952e4e91c69fe4c9b07f85f16425747cc8b48e78758b6",
+    "checked_frozen_output_and_production_input_entries": 42,
+    "identity_mismatches": 0,
+    "corrected_cache_packet_identities_checked": 6,
+    "corrected_cache_packet_mismatches": 0,
+    "prior_23_identity_note": "The freeze's four prior production input identities were checked here. The earlier 23-entry freeze check is supplied evidence, not a separately rerun historical audit in this review."
+  },
+  "reviewed_documentation_amendment": {
+    "directory": "../amendments/transaction-lifetime-2026-10-14",
+    "INTEGRATION.md": "08c8103e1e3921fadabae2c5f95464f72e4835a3bb7ee44358da561e32178a02",
+    "REVIEW-RECORD.md": "60fcb3ce457734d9727b6e08a352ad8aa7eac6b3da46002ca311fb573bf8456f",
+    "assessment": "The amendment resolves M1 while retaining independent mutation revocation, obsolete-result rejection, external source exclusion and residency/rundown requirements. It explicitly states the persistent local-worker handoff and wake-ordering obligation and that no native handoff mechanism is implemented or qualified. No source or helper body change is required by this review."
+  },
+  "findings": [
+    {
+      "id": "M1",
+      "severity": "Minor",
+      "kind": "integration_document_ambiguity",
+      "location": "INTEGRATION.md:67",
+      "related_locations": ["INTEGRATION.md:64", "cache_property.c:95", "cache_property.c:116"],
+      "title": "Distinguish owning IDENTIFY transaction updates from mutations that revoke its result",
+      "detail": "The addressing/profile row says to invalidate/revoke before mutation, while the runtime terminal row publishes the saved pre-translation IDENTIFY result after addressing. Applying an unconditional second invalidation inside the successful owning IDENTIFY terminal transaction advances the epoch and revokes that saved result. NxAtapiCachePublish then correctly rejects it and the query remains Unknown. The actual READ CAPACITY translation calls the addressing updater, so the distinction matters when native wiring is added.",
+      "evidence": "boundary_fixture.c executes the actual frozen native helpers against logical types. Retaining the already-invalidated owning writer token through a guarded addressing update publishes E7. An extra nx_lcq_invalidate before that same update rejects the saved result, avoids poisoned raw source, and returns a 28-byte Unknown descriptor. boundary_fixture.log records both cases.",
+      "recommendation": "Document that actual start invalidates the owning IDENTIFY transaction, whose token remains current through its guarded accepted cache/profile/addressing updates. Unrelated mutation, reset, removal or reclassification must advance/revoke the epoch and prevent the old result from publishing. Such revocation requires a new qualified transaction; it must not be bypassed by altering the copied token. Keep source-writer and flag-mutation exclusion separate from current().",
+      "status": "Resolved by the separately reviewed documentation amendment identities in this report. Original reviewed frozen bytes remain unchanged. No installed native behavior or core source defect is claimed."
+    }
+  ],
+  "verified_observations": [
+    "One acquire load produces the query snapshot. Queries read no live IDENTIFY or negotiated-flag source, and the actual hook passes aliased SystemBuffer to the frozen bounded encoder.",
+    "Publication uses one four-byte atomic record. Begin/revoke advances a 23-bit generation and removes qualification. A matching strong CAS publishes the complete payload. Older, duplicate and restarted-writer results cannot restore newer or revoked state.",
+    "The maximum issued generation is 8388606; a reserved poison epoch prevents wrap. Mutation uses at most 16 CAS attempts and poison closes qualification. Constructor-only initialization cannot safely reset a live device with old tickets.",
+    "Writer classification retains Cached/Local, original IDENTIFY opcode and qualifying 512-byte extent before mapping. Actual-start engine selection uses PROGRAM_DMA after preparation/fallback. Copied raw status and extent precede translation and request reuse.",
+    "Raw pending, error, partial or unproved results cannot qualify publication. Counted PIO and controller-inferred DMA remain separate proof tags. PROGRAM_DMA absence produces PIO proof even when the retained ATA DMA request flag is present.",
+    "Retained cache and flush recognition uses word84 validity. Word83 support bits select regular/extended flush together with the already-negotiated LBA48 flag; public word83 validity is not silently substituted for the retained cache predicate. ATAPI comes from TransportFlags. FUA and no-command SYNC success give no credit.",
+    "The hook writes actual Information and maps all encoder statuses to native symbolic names. It neither completes nor forwards the parent. The prescribed candidate dispatch must clear forwarding for property4 and zero Information before the existing early short-input return.",
+    "snapshot() and snapshot_proof() are separate atomic observations. Their outputs are not promised to form one jointly coherent diagnostic record."
+  ],
+  "local_evidence": {
+    "frozen_host_groups": {
+      "passed": 32,
+      "failed": 0,
+      "asan": true,
+      "ubsan": true,
+      "leak_checks": true,
+      "stack_use_after_return": true,
+      "real_pthread": true,
+      "log": "frozen-host-groups.log",
+      "note": "Compiled and executed actual frozen production code and native helper text; original frozen test binaries and logs were not overwritten."
+    },
+    "independent_boundary_fixture": {
+      "passed": 3,
+      "failed": 0,
+      "asan": true,
+      "ubsan": true,
+      "source": "boundary_fixture.c",
+      "log": "boundary_fixture.log",
+      "coverage": ["Actual transfer engine versus ATA DMA flag", "Restarted identical request storage with copied old result and poisoned source", "Owning transaction versus extra addressing-update invalidation"],
+      "fixture_development_note": "An initial strict-warning compile of the review fixture reported an unused static query helper. The fixture was extended to execute the Unknown query result and then compiled and passed; this was not a frozen production failure."
+    },
+    "freestanding_i386": {
+      "publication_text": 1268,
+      "encoder_text": 442,
+      "combined_text": 1722,
+      "logical_helper_text": 429,
+      "logical_helper_combined_text": 2158,
+      "numeric_assertion_text": 0,
+      "data": 0,
+      "bss": 0,
+      "combined_undefined_symbols": [],
+      "logical_bridge_combined_undefined_symbols": [],
+      "log": "i386.log",
+      "note": "Logical native doubles and scalar assertions establish the owned code's build/dependency checks; they do not qualify actual opaque native declarations or call sites."
+    }
+  },
+  "scope_limits": [
+    "No installed native handler, producer wiring, candidate build gate or product patch was reviewed or created. Whole-PR readiness, boot and optical behavior are outside this review.",
+    "All source writers and flag mutations must remain excluded throughout character-byte capture and publication. current() only checks result/generation freshness; it does not lock hardware, mutable source, or object lifetime. The mutex/poison host test demonstrates the supplied contract, not native guard existence.",
+    "The guide requires a by-value local worker terminal result, but no native storage/handoff mechanism is implemented or qualified. The permitted generic completion path calls Complete(Request) and returns for REQUEST_FLAG_INTERNAL. A result held only in a generic-completion local cannot survive that return. Native qualification must prove an owned handoff that survives internal completion and request recycle/disposal through successful local cache copy and profile/addressing consistency.",
+    "Device, request and whole-call residency/rundown remain external requirements. Generation checks do not prevent access after destruction. The host owner frees its own objects after the helper returns; it does not qualify the retained device remove-lock epilogue or every native completion frame.",
+    "Actual target type/field/calling-convention assertions, appended member alignment and enlarged allocation sizes remain requirements. i386 logical doubles and approved numeric facts are not a replacement for compiling against actual candidate native declarations.",
+    "PIO success relies on the approved retained counted-transfer contract. DMA success is controller/descriptor-inferred with no independent actual-byte counter. Native hardware/controller-error evidence is absent.",
+    "No physical durability, write-through, FUA, power-loss persistence, hardware command execution, queue/IRQ behavior, final firmware licensing or personnel-independence certification is established."
+  ],
+  "review_exposure": {
+    "admitted": ["Frozen lower-cache-query source, specification, integration/provenance metadata and tests", "Previously frozen normalized cache_query.c/h", "Exact manifest44 metadata snapshot", "Permitted cache publication/ABI/status packets and related receipts", "Narrow permitted ioctl.c property/dispatch ranges, scsi.c start/generic-completion ranges, satl.c READ CAPACITY terminal range, and ata_shared.h flag declarations", "Supplementary transaction-lifetime INTEGRATION.md and REVIEW-RECORD.md created by the author during this review"],
+    "excluded": ["Unfiltered product/Roswell source", "Old class samples or private helpers", "Git or source history", "Disassembly or investigator audits", "Native VM or remote commands", "Network research", "Sub-agent creation"],
+    "mutations": "Only independent review artifacts under lower-cache-query/review-cache-publication were created. Frozen source, product and prior frozen outputs were not changed."
+  }
+}

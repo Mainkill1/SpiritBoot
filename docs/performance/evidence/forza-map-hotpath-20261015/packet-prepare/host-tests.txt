@@ -1,0 +1,34 @@
+Final assembled tree 63ce2832cea9bf6fe9fd7b93bc42a7c4d5a59674
+
+Clang runner:
+packet-plain: 10 groups, 0 failures
+packet-sanitized (ASan/UBSan): 10 groups, 0 failures
+packet-msan: 10 groups, 0 failures
+
+CC=gcc runner (MSan separately discovered as clang):
+packet-plain: 10 groups, 0 failures
+packet-sanitized (ASan/UBSan): 10 groups, 0 failures
+packet-msan: 10 groups, 0 failures
+
+Rejected superseded patch under final regression:
+release_queue_no_cdb_read: FAIL
+page_extent_reduction: FAIL
+10 groups, 2 failures; exit 1
+
+Native adapter:
+adapter-plain: 28 adapter groups, 0 failures
+adapter-sanitized: 28 adapter groups, 0 failures
+
+Request/core and production-owned suites:
+50 request tests, 0 failures
+8 pthread scenarios, 0 failures
+13 owner scenarios, 6001 checks, 0 failures
+20 cache-query tests, 0 failures
+16 geometry adapter scenarios, 61973 checks, 0 failures
+34 lower/native cache publication tests, 0 failures
+
+Patch check:
+git apply --check --whitespace=error-all: PASS against a8f3fc46e27bc8e0f51f23708a02a73237565b2e
+
+Release64 build: PASS
+BIOS SHA-256 c0eaf3a73f75c7a57865a62a3df47cbece1d1c5a3d43b19ed1fd2d0bef08e4ec

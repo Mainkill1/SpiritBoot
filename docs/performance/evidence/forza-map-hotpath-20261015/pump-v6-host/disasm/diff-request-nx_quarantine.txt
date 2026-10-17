@@ -1,0 +1,46 @@
+--- baseline
++++ v5
+@@ -1,19 +1,31 @@
+ 00000000 <FUNC>:
+    0:	55                   	push   ebp
+    1:	89 e5                	mov    ebp,esp
+-   3:	53                   	push   ebx
+-   4:	52                   	push   edx
++   3:	56                   	push   esi
++   4:	53                   	push   ebx
+    5:	8b 5d 08             	mov    ebx,DWORD PTR [ebp+0x8]
+    8:	85 db                	test   ebx,ebx
+-   a:	74 1c                	je     28 <FUNC+0x28>
++   a:	74 3c                	je     48 <FUNC+0x48>
+    c:	89 d8                	mov    eax,ebx
+    e:	e8 00 00 00 00       	call   13 <FUNC+0x13>	f: DISP32	.text$lock
+-  13:	c7 43 6c 01 00 00 00 	mov    DWORD PTR [ebx+0x6c],0x1
+-  1a:	89 d8                	mov    eax,ebx
+-  1c:	e8 00 00 00 00       	call   21 <FUNC+0x21>	1d: DISP32	.text$unlock
+-  21:	89 d8                	mov    eax,ebx
+-  23:	e8 00 00 00 00       	call   28 <FUNC+0x28>	24: DISP32	.text$pump
+-  28:	58                   	pop    eax
+-  29:	5b                   	pop    ebx
+-  2a:	5d                   	pop    ebp
+-  2b:	c3                   	ret
++  13:	8b 73 70             	mov    esi,DWORD PTR [ebx+0x70]
++  16:	c7 43 78 01 00 00 00 	mov    DWORD PTR [ebx+0x78],0x1
++  1d:	85 f6                	test   esi,esi
++  1f:	75 09                	jne    2a <FUNC+0x2a>
++  21:	c7 43 70 01 00 00 00 	mov    DWORD PTR [ebx+0x70],0x1
++  28:	eb 0c                	jmp    36 <FUNC+0x36>
++  2a:	8b 43 74             	mov    eax,DWORD PTR [ebx+0x74]
++  2d:	83 f8 ff             	cmp    eax,0xffffffff
++  30:	74 04                	je     36 <FUNC+0x36>
++  32:	40                   	inc    eax
++  33:	89 43 74             	mov    DWORD PTR [ebx+0x74],eax
++  36:	89 d8                	mov    eax,ebx
++  38:	e8 00 00 00 00       	call   3d <FUNC+0x3d>	39: DISP32	.text$unlock
++  3d:	85 f6                	test   esi,esi
++  3f:	75 07                	jne    48 <FUNC+0x48>
++  41:	89 d8                	mov    eax,ebx
++  43:	e8 00 00 00 00       	call   48 <FUNC+0x48>	44: DISP32	.text$run_pump
++  48:	5b                   	pop    ebx
++  49:	5e                   	pop    esi
++  4a:	5d                   	pop    ebp
++  4b:	c3                   	ret

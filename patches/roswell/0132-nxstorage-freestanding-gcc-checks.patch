@@ -1,0 +1,20 @@
+diff --git a/tests/host/nxstorage/check.py b/tests/host/nxstorage/check.py
+index a700726b..f6613512 100644
+--- a/tests/host/nxstorage/check.py
++++ b/tests/host/nxstorage/check.py
+@@ -31,7 +31,7 @@ subprocess.run([str(cache_publication_test)], check=True, env=dict(os.environ,
+ for production in ("request.c", "geometry_composer.c", "cache_query.c", "cache_property.c"):
+     obj = output / (production + ".i386.o")
+     target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
+-    subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-I" + str(source), "-c", str(source / production), "-o", str(obj)], check=True)
++    subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-fno-pic", "-fno-pie", "-fno-builtin", "-fno-stack-protector", "-I" + str(source), "-c", str(source / production), "-o", str(obj)], check=True)
+     undefined = subprocess.check_output(["nm", "-u", str(obj)], text=True)
+     expected = "U nx_cache_query_encode" if production == "cache_property.c" else ""
+     if undefined.strip() != expected:
+@@ -43,5 +43,5 @@ if subprocess.check_output(["nm", "-u", str(combined)], text=True).strip():
+     raise SystemExit("Unexpected linked i386 cache helpers")
+ abi_object = output / "cache-abi-assert.i386.o"
+ target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
+-subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-I" + str(source), "-I" + str(tests), "-c", str(tests / "cache_abi_assert.c"), "-o", str(abi_object)], check=True)
++subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-fno-pic", "-fno-pie", "-I" + str(source), "-I" + str(tests), "-c", str(tests / "cache_abi_assert.c"), "-o", str(abi_object)], check=True)
+ print("Owned nxstorage production checks passed; kernel adapter/native qualification remains open")

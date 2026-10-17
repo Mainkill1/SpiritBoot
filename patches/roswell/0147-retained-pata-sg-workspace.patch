@@ -1,0 +1,431 @@
+diff --git a/drivers/storage/ide/atapi/atapi.h b/drivers/storage/ide/atapi/atapi.h
+index 74faef0b..7021a1a9 100644
+--- a/drivers/storage/ide/atapi/atapi.h
++++ b/drivers/storage/ide/atapi/atapi.h
+@@ -402,6 +402,8 @@ typedef struct _ATAPORT_PORT_DATA
+     ULONG MaxSlotsBitmap;
+     PVOID LocalBuffer;
+     SCATTER_GATHER_LIST LocalSgList;
++    PVOID RetainedSgBuffer;
++    ULONG RetainedSgBufferLength;
+     ATA_WORKER_CONTEXT Worker;
+ } ATAPORT_PORT_DATA, *PATAPORT_PORT_DATA;
+ 
+diff --git a/drivers/storage/ide/atapi/fdo.c b/drivers/storage/ide/atapi/fdo.c
+index 29c629ff..90245374 100644
+--- a/drivers/storage/ide/atapi/fdo.c
++++ b/drivers/storage/ide/atapi/fdo.c
+@@ -123,6 +123,45 @@ AtaFdoAllocateLocalBuffer(
+     return STATUS_SUCCESS;
+ }
+ 
++static
++CODE_SEG("PAGE")
++VOID
++AtaFdoAllocateRetainedSgBuffer(
++    _In_ PATAPORT_PORT_DATA PortData)
++{
++    PDMA_OPERATIONS DmaOperations;
++    ULONG BufferLength;
++    NTSTATUS Status;
++
++    PAGED_CODE();
++
++    if (PortData->RetainedSgBuffer || PortData->QueueDepth != 1)
++        return;
++
++    DmaOperations = PortData->DmaAdapter->DmaOperations;
++    if (!DmaOperations->CalculateScatterGatherList ||
++        !DmaOperations->BuildScatterGatherList)
++    {
++        return;
++    }
++
++    Status = DmaOperations->CalculateScatterGatherList(
++        PortData->DmaAdapter,
++        NULL,
++        NULL,
++        PortData->MaximumTransferLength,
++        &BufferLength,
++        NULL);
++    if (!NT_SUCCESS(Status) || BufferLength == 0)
++        return;
++
++    PortData->RetainedSgBuffer = ExAllocatePoolWithTag(NonPagedPool,
++                                                       BufferLength,
++                                                       ATAPORT_TAG);
++    if (PortData->RetainedSgBuffer)
++        PortData->RetainedSgBufferLength = BufferLength;
++}
++
+ static
+ CODE_SEG("PAGE")
+ NTSTATUS
+@@ -318,6 +357,8 @@ AtaFdoStartDevice(
+         return Status;
+     }
+ 
++    AtaFdoAllocateRetainedSgBuffer(PortData);
++
+     InitializeListHead(&PortData->PortQueueList);
+     KeInitializeEvent(&PortData->QueueStoppedEvent, NotificationEvent, FALSE);
+ 
+@@ -510,6 +551,14 @@ AtaFdoRemoveDevice(
+             ChanExt->PortData.ReservedVaSpace = NULL;
+         }
+ 
++
++        if (ChanExt->PortData.RetainedSgBuffer)
++        {
++            ExFreePoolWithTag(ChanExt->PortData.RetainedSgBuffer, ATAPORT_TAG);
++            ChanExt->PortData.RetainedSgBuffer = NULL;
++            ChanExt->PortData.RetainedSgBufferLength = 0;
++        }
++
+         Irp->IoStatus.Status = STATUS_SUCCESS;
+         IoSkipCurrentIrpStackLocation(Irp);
+         Status = IoCallDriver(ChanExt->Common.LowerDeviceObject, Irp);
+diff --git a/drivers/storage/ide/atapi/scsi.c b/drivers/storage/ide/atapi/scsi.c
+index 19a431ed..830ef4af 100644
+--- a/drivers/storage/ide/atapi/scsi.c
++++ b/drivers/storage/ide/atapi/scsi.c
+@@ -640,14 +640,32 @@ AtaReqGetScatterGatherList(
+ 
+     ASSERT(Request->Mdl);
+ 
+-    Status = DmaOperations->GetScatterGatherList(DmaAdapter,
+-                                                 PortData->ChannelObject,
+-                                                 Request->Mdl,
+-                                                 Request->DataBuffer,
+-                                                 Request->DataTransferLength,
+-                                                 AtaReqPreparePrdTable,
+-                                                 Request,
+-                                                 !!(Request->Flags & REQUEST_FLAG_DATA_IN));
++    if (PortData->RetainedSgBuffer && DmaOperations->BuildScatterGatherList)
++    {
++        Status = DmaOperations->BuildScatterGatherList(
++            DmaAdapter,
++            PortData->ChannelObject,
++            Request->Mdl,
++            Request->DataBuffer,
++            Request->DataTransferLength,
++            AtaReqPreparePrdTable,
++            Request,
++            !!(Request->Flags & REQUEST_FLAG_DATA_IN),
++            PortData->RetainedSgBuffer,
++            PortData->RetainedSgBufferLength);
++    }
++    else
++    {
++        Status = DmaOperations->GetScatterGatherList(
++            DmaAdapter,
++            PortData->ChannelObject,
++            Request->Mdl,
++            Request->DataBuffer,
++            Request->DataTransferLength,
++            AtaReqPreparePrdTable,
++            Request,
++            !!(Request->Flags & REQUEST_FLAG_DATA_IN));
++    }
+     if (NT_SUCCESS(Status))
+         return TRUE;
+ 
+diff --git a/hal/halx86/generic/dma.c b/hal/halx86/generic/dma.c
+index e1242d0b..187fc479 100644
+--- a/hal/halx86/generic/dma.c
++++ b/hal/halx86/generic/dma.c
+@@ -152,12 +152,9 @@ static DMA_OPERATIONS HalpDmaOperations = {
+    (PBUILD_SCATTER_GATHER_LIST)HalBuildScatterGatherList,
+    (PBUILD_MDL_FROM_SCATTER_GATHER_LIST)HalBuildMdlFromScatterGatherList
+ #else
+-   /* Xbox storage stack only invokes PutDmaAdapter / Alloc/FreeCommonBuffer /
+-    * Get/PutScatterGatherList through this vtable.  The (E)ISA adapter channel
+-    * + MapTransfer + counter + alignment + IOmgr-style ScatterGatherList
+-    * builders are dead reachable -- NULL them so the linker can drop the
+-    * implementations (and the entire HalpInitDma overwrite chain, which would
+-    * otherwise re-anchor IoAllocate/Free/Flush/Map). */
++   /* Xbox storage uses the caller-buffer Calculate/Build pair to retain one
++    * scatter/gather workspace for its single active PATA command.  The (E)ISA
++    * adapter-channel entries remain unreachable through this vtable. */
+    NULL, /* AllocateAdapterChannel */
+    NULL, /* FlushAdapterBuffers */
+    NULL, /* FreeAdapterChannel */
+@@ -167,8 +164,8 @@ static DMA_OPERATIONS HalpDmaOperations = {
+    NULL, /* ReadDmaCounter */
+    (PGET_SCATTER_GATHER_LIST)HalGetScatterGatherList,
+    (PPUT_SCATTER_GATHER_LIST)HalPutScatterGatherList,
+-   NULL, /* CalculateScatterGatherListSize */
+-   NULL, /* BuildScatterGatherList */
++   (PCALCULATE_SCATTER_GATHER_LIST_SIZE)HalCalculateScatterGatherListSize,
++   (PBUILD_SCATTER_GATHER_LIST)HalBuildScatterGatherList,
+    NULL  /* BuildMdlFromScatterGatherList */
+ #endif
+ };
+diff --git a/tests/host/atapi-retained-sg/check-dma-ops.py b/tests/host/atapi-retained-sg/check-dma-ops.py
+new file mode 100644
+index 00000000..b16f0068
+--- /dev/null
++++ b/tests/host/atapi-retained-sg/check-dma-ops.py
+@@ -0,0 +1,13 @@
++#!/usr/bin/env python3
++"""Ensure Xbox exposes the DMA operations needed by retained SG storage."""
++from pathlib import Path
++
++root = Path(__file__).resolve().parents[3]
++text = (root / "hal/halx86/generic/dma.c").read_text()
++guard = text.index("#ifndef SARCH_XBOX", text.index("static DMA_OPERATIONS"))
++start = text.index("#else", guard)
++end = text.index("#endif\n};", start)
++xbox = text[start:end]
++assert "(PCALCULATE_SCATTER_GATHER_LIST_SIZE)HalCalculateScatterGatherListSize" in xbox
++assert "(PBUILD_SCATTER_GATHER_LIST)HalBuildScatterGatherList" in xbox
++print("PASS Xbox DMA operations expose calculate/build SG")
+diff --git a/tests/host/atapi-retained-sg/check-lifecycle.py b/tests/host/atapi-retained-sg/check-lifecycle.py
+new file mode 100644
+index 00000000..dd947481
+--- /dev/null
++++ b/tests/host/atapi-retained-sg/check-lifecycle.py
+@@ -0,0 +1,113 @@
++#!/usr/bin/env python3
++"""Exercise retained ATA SG buffer allocation from the production helper."""
++from pathlib import Path
++import re
++import subprocess
++import sys
++
++
++def function(text, name):
++    hit = re.search(r"\b" + name + r"\s*\([^;]*?\)\s*\{", text)
++    assert hit, name
++    start = text.rfind("\n\n", 0, hit.start()) + 2
++    brace = text.index("{", hit.start())
++    depth = 1
++    end = brace + 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[start:end] + "\n"
++
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++body = function((root / "drivers/storage/ide/atapi/fdo.c").read_text(),
++                "AtaFdoAllocateRetainedSgBuffer")
++unit = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++typedef int32_t NTSTATUS;
++typedef uint32_t ULONG, *PULONG;
++typedef void VOID, *PVOID;
++#define _In_
++#define NTAPI
++#define CODE_SEG(x)
++#define PAGED_CODE() ((void)0)
++#define NT_SUCCESS(s) ((s) >= 0)
++#define NonPagedPool 0
++#define ATAPORT_TAG 0x41544150u
++#define STATUS_SUCCESS 0
++#define MAXULONG UINT32_MAX
++typedef struct _MDL *PMDL;
++struct _DMA_ADAPTER;
++typedef NTSTATUS (NTAPI *PCALCULATE_SG)(struct _DMA_ADAPTER *, PMDL,
++                                        PVOID, ULONG, PULONG, PULONG);
++typedef NTSTATUS (NTAPI *PBUILD_SG)(VOID);
++typedef struct _DMA_OPERATIONS {
++    PCALCULATE_SG CalculateScatterGatherList;
++    PBUILD_SG BuildScatterGatherList;
++} DMA_OPERATIONS, *PDMA_OPERATIONS;
++typedef struct _DMA_ADAPTER { PDMA_OPERATIONS DmaOperations; } DMA_ADAPTER, *PDMA_ADAPTER;
++typedef struct _ATAPORT_PORT_DATA {
++    PDMA_ADAPTER DmaAdapter;
++    ULONG QueueDepth;
++    ULONG MaximumTransferLength;
++    PVOID RetainedSgBuffer;
++    ULONG RetainedSgBufferLength;
++} ATAPORT_PORT_DATA, *PATAPORT_PORT_DATA;
++static unsigned calculate_calls, alloc_calls, live_allocs;
++static NTSTATUS NTAPI calculate(PDMA_ADAPTER a, PMDL m, PVOID v, ULONG n,
++                                PULONG bytes, PULONG maps)
++{
++    (void)a; (void)m; (void)v; (void)maps;
++    ++calculate_calls;
++    assert(n == 0x20000);
++    *bytes = 864;
++    return STATUS_SUCCESS;
++}
++static PVOID ExAllocatePoolWithTag(ULONG pool, ULONG bytes, ULONG tag)
++{
++    (void)pool; (void)tag;
++    ++alloc_calls;
++    assert(bytes == 864);
++    ++live_allocs;
++    return malloc(bytes);
++}
++static VOID ExFreePoolWithTag(PVOID p, ULONG tag)
++{
++    (void)tag;
++    assert(p && live_allocs);
++    --live_allocs;
++    free(p);
++}
++''' + body + r'''
++int main(void)
++{
++    DMA_OPERATIONS ops = { calculate, (PBUILD_SG)(uintptr_t)1 };
++    DMA_ADAPTER adapter = { &ops };
++    ATAPORT_PORT_DATA port = { &adapter, 1, 0x20000, 0, 0 };
++
++    AtaFdoAllocateRetainedSgBuffer(&port);
++    assert(calculate_calls == 1 && alloc_calls == 1 && live_allocs == 1);
++    assert(port.RetainedSgBuffer && port.RetainedSgBufferLength == 864);
++    AtaFdoAllocateRetainedSgBuffer(&port);
++    assert(calculate_calls == 1 && alloc_calls == 1 && live_allocs == 1);
++    ExFreePoolWithTag(port.RetainedSgBuffer, ATAPORT_TAG);
++
++    port.RetainedSgBuffer = 0;
++    port.RetainedSgBufferLength = 0;
++    port.QueueDepth = 2;
++    AtaFdoAllocateRetainedSgBuffer(&port);
++    assert(calculate_calls == 1 && alloc_calls == 1 && live_allocs == 0);
++    assert(!port.RetainedSgBuffer);
++    puts("PASS retained SG buffer one-time allocation and queue-depth guard");
++    return 0;
++}
++'''
++(out / "actual.c").write_text(unit)
++subprocess.run(["cc", "-std=c11", "-O3", "-Wall", "-Wextra", "-Werror",
++                str(out / "actual.c"), "-o", str(out / "actual")], check=True)
++subprocess.run([str(out / "actual")], check=True)
+diff --git a/tests/host/atapi-retained-sg/check.py b/tests/host/atapi-retained-sg/check.py
+new file mode 100644
+index 00000000..9effeedb
+--- /dev/null
++++ b/tests/host/atapi-retained-sg/check.py
+@@ -0,0 +1,124 @@
++#!/usr/bin/env python3
++"""Compile the production ATA SG submission helper against a host boundary."""
++from pathlib import Path
++import re
++import subprocess
++import sys
++
++
++def function(text, name):
++    hit = re.search(r"\b" + name + r"\s*\([^;]*?\)\s*\{", text)
++    assert hit, name
++    start = text.rfind("\n\n", 0, hit.start()) + 2
++    brace = text.index("{", hit.start())
++    depth = 1
++    end = brace + 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[start:end] + "\n"
++
++
++root = Path(__file__).resolve().parents[3]
++out = Path(sys.argv[1]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++body = function((root / "drivers/storage/ide/atapi/scsi.c").read_text(),
++                "AtaReqGetScatterGatherList")
++unit = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++typedef int32_t NTSTATUS;
++typedef uint32_t ULONG;
++typedef uint8_t BOOLEAN;
++typedef void VOID, *PVOID;
++#define _In_
++#define NTAPI
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(s) ((s) >= 0)
++#define ASSERT assert
++#define WARN(...) ((void)0)
++#define REQUEST_FLAG_DATA_IN 1u
++typedef struct _MDL { ULONG Marker; } MDL, *PMDL;
++typedef struct _DEVICE_OBJECT { ULONG Marker; } DEVICE_OBJECT, *PDEVICE_OBJECT;
++typedef struct _SCATTER_GATHER_LIST { ULONG Marker; } SCATTER_GATHER_LIST, *PSCATTER_GATHER_LIST;
++typedef struct _IRP *PIRP;
++typedef VOID (NTAPI *PDRIVER_LIST_CONTROL)(PDEVICE_OBJECT, PIRP,
++                                           PSCATTER_GATHER_LIST, PVOID);
++struct _DMA_ADAPTER;
++typedef NTSTATUS (NTAPI *PGET_SG)(struct _DMA_ADAPTER *, PDEVICE_OBJECT,
++                                  PMDL, PVOID, ULONG, PDRIVER_LIST_CONTROL,
++                                  PVOID, BOOLEAN);
++typedef NTSTATUS (NTAPI *PBUILD_SG)(struct _DMA_ADAPTER *, PDEVICE_OBJECT,
++                                    PMDL, PVOID, ULONG, PDRIVER_LIST_CONTROL,
++                                    PVOID, BOOLEAN, PVOID, ULONG);
++typedef struct _DMA_OPERATIONS { PGET_SG GetScatterGatherList;
++                                 PBUILD_SG BuildScatterGatherList; } DMA_OPERATIONS, *PDMA_OPERATIONS;
++typedef struct _DMA_ADAPTER { PDMA_OPERATIONS DmaOperations; } DMA_ADAPTER, *PDMA_ADAPTER;
++typedef struct _ATAPORT_PORT_DATA {
++    PDMA_ADAPTER DmaAdapter;
++    PDEVICE_OBJECT ChannelObject;
++    PVOID RetainedSgBuffer;
++    ULONG RetainedSgBufferLength;
++} ATAPORT_PORT_DATA, *PATAPORT_PORT_DATA;
++typedef struct _ATA_DEVICE_REQUEST {
++    PMDL Mdl;
++    PVOID DataBuffer;
++    ULONG DataTransferLength;
++    ULONG Flags;
++} ATA_DEVICE_REQUEST, *PATA_DEVICE_REQUEST;
++static VOID NTAPI AtaReqPreparePrdTable(PDEVICE_OBJECT d, PIRP i,
++                                        PSCATTER_GATHER_LIST s, PVOID c)
++{ (void)d; (void)i; (void)s; (void)c; }
++static unsigned get_calls, build_calls;
++static PVOID expected_buffer;
++static ULONG expected_length;
++static NTSTATUS NTAPI get_sg(PDMA_ADAPTER a, PDEVICE_OBJECT d, PMDL m,
++                             PVOID v, ULONG n, PDRIVER_LIST_CONTROL cb,
++                             PVOID c, BOOLEAN w)
++{
++    (void)a; (void)d; (void)m; (void)v; (void)n; (void)cb; (void)c; (void)w;
++    ++get_calls;
++    return 0;
++}
++static NTSTATUS NTAPI build_sg(PDMA_ADAPTER a, PDEVICE_OBJECT d, PMDL m,
++                               PVOID v, ULONG n, PDRIVER_LIST_CONTROL cb,
++                               PVOID c, BOOLEAN w, PVOID buffer, ULONG length)
++{
++    (void)a; (void)d; (void)m; (void)v; (void)n; (void)cb; (void)c; (void)w;
++    ++build_calls;
++    assert(buffer == expected_buffer);
++    assert(length == expected_length);
++    return 0;
++}
++''' + body + r'''
++int main(void)
++{
++    DMA_OPERATIONS ops = { get_sg, build_sg };
++    DMA_ADAPTER adapter = { &ops };
++    DEVICE_OBJECT device = { 0 };
++    MDL mdl = { 0 };
++    unsigned char retained[128];
++    ATA_DEVICE_REQUEST request = { &mdl, (PVOID)0x2000, 0x8000,
++                                   REQUEST_FLAG_DATA_IN };
++    ATAPORT_PORT_DATA port = { &adapter, &device, retained, sizeof(retained) };
++
++    expected_buffer = retained;
++    expected_length = sizeof(retained);
++    assert(AtaReqGetScatterGatherList(&port, &request));
++    assert(build_calls == 1);
++    assert(get_calls == 0);
++
++    port.RetainedSgBuffer = 0;
++    assert(AtaReqGetScatterGatherList(&port, &request));
++    assert(build_calls == 1);
++    assert(get_calls == 1);
++    puts("PASS retained SG buffer selection and fallback");
++    return 0;
++}
++'''
++(out / "actual.c").write_text(unit)
++subprocess.run(["cc", "-std=c11", "-O3", "-Wall", "-Wextra", "-Werror",
++                str(out / "actual.c"), "-o", str(out / "actual")], check=True)
++subprocess.run([str(out / "actual")], check=True)

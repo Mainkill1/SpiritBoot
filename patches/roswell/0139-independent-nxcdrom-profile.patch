@@ -1,0 +1,381 @@
+/etc/profile.d/devtools.sh: line 1: claude: command not found
+diff --git a/drivers/storage/class/nxstorage/nxcdrom_profile.c b/drivers/storage/class/nxstorage/nxcdrom_profile.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..788c0e265028f228e2e6c0f9577a09ae59a6bd63
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/nxcdrom_profile.c
+@@ -0,0 +1,47 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "nxcdrom_profile.h"
++
++NTSTATUS
++NxCdromBuildDeviceInit(NX_NATIVE_DEVICE_INIT *init,
++                       PUNICODE_STRING device_name,
++                       PUNICODE_STRING symbolic_link_name,
++                       ULONG slot_count)
++{
++    NX_NATIVE_DEVICE_INIT clean = {0};
++
++    if (init == 0 || device_name == 0 || symbolic_link_name == 0 ||
++        device_name->Buffer == 0 || symbolic_link_name->Buffer == 0 ||
++        slot_count == 0)
++        return STATUS_INVALID_PARAMETER;
++
++    clean.DeviceName = device_name;
++    clean.SymbolicLinkName = symbolic_link_name;
++    clean.DeviceType = FILE_DEVICE_CD_ROM;
++    clean.DeviceCharacteristics = FILE_READ_ONLY_DEVICE | FILE_REMOVABLE_MEDIA;
++    clean.Config.sector_bytes = 2048;
++    clean.Config.page_bytes = 4096;
++    clean.Config.max_bytes = 0x20000;
++    clean.Config.max_pages = 33;
++    clean.Config.alignment_mask = 0;
++    clean.Config.ata_max_blocks = 0xffff;
++    clean.Config.capacity_bytes = 0;
++    clean.Config.optical = 1;
++    clean.Config.cache = NX_CACHE_DISABLED;
++    clean.SlotCount = slot_count;
++    *init = clean;
++    return STATUS_SUCCESS;
++}
++
++NTSTATUS
++NxCdromInstallRuntimeDispatch(PDRIVER_OBJECT driver_object)
++{
++    if (driver_object == 0)
++        return STATUS_INVALID_PARAMETER;
++
++    driver_object->MajorFunction[IRP_MJ_READ] = NxNativeDispatchReadWrite;
++    driver_object->MajorFunction[IRP_MJ_WRITE] = NxNativeDispatchReadWrite;
++    driver_object->MajorFunction[IRP_MJ_DEVICE_CONTROL] = NxNativeDispatchControl;
++    driver_object->MajorFunction[IRP_MJ_FLUSH_BUFFERS] = NxNativeDispatchFlush;
++    driver_object->MajorFunction[IRP_MJ_SHUTDOWN] = NxNativeDispatchFlush;
++    return STATUS_SUCCESS;
++}
+diff --git a/drivers/storage/class/nxstorage/nxcdrom_profile.h b/drivers/storage/class/nxstorage/nxcdrom_profile.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..5609ff43107ce6c84c758625832d06208489e950
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/nxcdrom_profile.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NXCDROM_PROFILE_H
++#define NXCDROM_PROFILE_H
++
++#include "native_adapter.h"
++
++/* Prepare the immutable optical creation profile.  Device creation and all
++ * resource ownership remain with NxNativeCreateClassDevice and its caller. */
++NTSTATUS NxCdromBuildDeviceInit(NX_NATIVE_DEVICE_INIT *init,
++                                PUNICODE_STRING device_name,
++                                PUNICODE_STRING symbolic_link_name,
++                                ULONG slot_count);
++
++/* Select only the resident runtime dispatch paths owned by the native
++ * adapter.  DriverEntry/AddDevice/PnP ownership stays in the class owner. */
++NTSTATUS NxCdromInstallRuntimeDispatch(PDRIVER_OBJECT driver_object);
++
++#endif
+diff --git a/tests/host/nxstorage-optical/check.py b/tests/host/nxstorage-optical/check.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..59924b2fdf9968d0703ebdca47b108ee47355b92
+--- /dev/null
++++ b/tests/host/nxstorage-optical/check.py
+@@ -0,0 +1,57 @@
++#!/usr/bin/env python3
++"""Compile the actual optical profile for host and i386 freestanding use."""
++
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++
++
++root = Path(__file__).resolve().parents[3]
++source = root / "drivers/storage/class/nxstorage"
++tests = Path(__file__).resolve().parent
++output = Path(sys.argv[1]).resolve()
++output.mkdir(parents=True, exist_ok=True)
++cc = os.environ.get("CC", "clang")
++common = [
++    cc, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
++    "-I" + str(tests), "-I" + str(source),
++    "-include", str(tests / "optical_host_platform.h"),
++    str(source / "nxcdrom_profile.c"), str(tests / "nxcdrom_profile_test.c"),
++]
++for name, flags in (
++    ("optical-profile-plain", []),
++    ("optical-profile-sanitized", [
++        "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
++    ]),
++):
++    executable = output / name
++    subprocess.run(common + flags + ["-o", str(executable)], check=True)
++    result = subprocess.run(
++        [str(executable)], check=True, text=True, capture_output=True,
++        env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1",
++                 UBSAN_OPTIONS="halt_on_error=1"),
++    )
++    (output / (name + ".log")).write_text(result.stdout + result.stderr)
++    print(name + ": " + result.stdout.splitlines()[-1])
++
++target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
++obj = output / "nxcdrom-profile.i386.o"
++subprocess.run([
++    cc, *target, "-std=c11", "-O2", "-ffreestanding", "-fno-pic", "-fno-pie",
++    "-fno-builtin", "-fno-stack-protector", "-Wall", "-Wextra", "-Werror",
++    "-I" + str(tests), "-I" + str(source),
++    "-include", str(tests / "optical_host_platform.h"),
++    "-c", str(source / "nxcdrom_profile.c"), "-o", str(obj),
++], check=True)
++undefined = {
++    line.split()[-1].lstrip("_")
++    for line in subprocess.check_output([shutil.which("nm") or "nm", "-u", str(obj)], text=True).splitlines()
++}
++expected = {
++    "NxNativeDispatchControl", "NxNativeDispatchFlush", "NxNativeDispatchReadWrite",
++}
++if undefined != expected:
++    raise SystemExit(f"unexpected i386 dependency closure: {sorted(undefined)}")
++print("optical-profile-i386: clean")
+diff --git a/tests/host/nxstorage-optical/native_adapter.h b/tests/host/nxstorage-optical/native_adapter.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..6551627955d1348ba6c7c032bc7c3e7125e4ef45
+--- /dev/null
++++ b/tests/host/nxstorage-optical/native_adapter.h
+@@ -0,0 +1,5 @@
++/* Host-only declaration redirect.  Production includes patch 0140's header. */
++#ifndef NX_OPTICAL_HOST_NATIVE_ADAPTER_REDIRECT_H
++#define NX_OPTICAL_HOST_NATIVE_ADAPTER_REDIRECT_H
++#include "optical_host_platform.h"
++#endif
+diff --git a/tests/host/nxstorage-optical/nxcdrom_profile_test.c b/tests/host/nxstorage-optical/nxcdrom_profile_test.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..a1ee02b7761994c06a6e20d7e08eba33466e399a
+--- /dev/null
++++ b/tests/host/nxstorage-optical/nxcdrom_profile_test.c
+@@ -0,0 +1,128 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "nxcdrom_profile.h"
++#include <stdio.h>
++#include <string.h>
++
++#define CHECK(x) do { if (!(x)) { \
++    fprintf(stderr, "%s:%d: %s\n", __func__, __LINE__, #x); return 0; \
++} } while (0)
++
++static unsigned reads, controls, flushes;
++static NTSTATUS NTAPI sentinel(PDEVICE_OBJECT device, PIRP request)
++{ (void)device; (void)request; return 41; }
++NTSTATUS NTAPI NxNativeDispatchReadWrite(PDEVICE_OBJECT device, PIRP request)
++{ (void)device; (void)request; ++reads; return 42; }
++NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device, PIRP request)
++{ (void)device; (void)request; ++controls; return 43; }
++NTSTATUS NTAPI NxNativeDispatchFlush(PDEVICE_OBJECT device, PIRP request)
++{ (void)device; (void)request; ++flushes; return 44; }
++
++static void names(UNICODE_STRING *device, UNICODE_STRING *link,
++                  WCHAR *device_buffer, WCHAR *link_buffer)
++{
++    *device = (UNICODE_STRING){28, 30, device_buffer};
++    *link = (UNICODE_STRING){38, 40, link_buffer};
++}
++
++static int builds_exact_unknown_media_profile(void)
++{
++    WCHAR db[15] = {0}, lb[20] = {0};
++    UNICODE_STRING device, link;
++    NX_NATIVE_DEVICE_INIT init;
++    names(&device, &link, db, lb);
++    memset(&init, 0xa5, sizeof(init));
++    CHECK(NxCdromBuildDeviceInit(&init, &device, &link, 5) == STATUS_SUCCESS);
++    CHECK(init.DeviceName == &device && init.SymbolicLinkName == &link);
++    CHECK(init.DeviceType == FILE_DEVICE_CD_ROM);
++    CHECK(init.DeviceCharacteristics ==
++          (FILE_READ_ONLY_DEVICE | FILE_REMOVABLE_MEDIA));
++    CHECK(init.Config.sector_bytes == 2048);
++    CHECK(init.Config.page_bytes == 4096);
++    CHECK(init.Config.max_bytes == 0x20000);
++    CHECK(init.Config.max_pages == 33);
++    CHECK(init.Config.alignment_mask == 0);
++    CHECK(init.Config.ata_max_blocks == 0xffff);
++    CHECK(init.Config.capacity_bytes == 0);
++    CHECK(init.Config.optical == 1);
++    CHECK(init.Config.cache == NX_CACHE_DISABLED);
++    CHECK(init.SlotCount == 5);
++    return 1;
++}
++
++static int rejects_invalid_profile_without_mutation(void)
++{
++    WCHAR db[15] = {0}, lb[20] = {0};
++    UNICODE_STRING device, link;
++    names(&device, &link, db, lb);
++    for (unsigned test = 0; test < 6; ++test) {
++        NX_NATIVE_DEVICE_INIT init, before;
++        UNICODE_STRING d = device, l = link;
++        NX_NATIVE_DEVICE_INIT *out = &init;
++        PUNICODE_STRING dp = &d, lp = &l;
++        ULONG slots = 1;
++        memset(&init, 0xa5, sizeof(init));
++        before = init;
++        if (test == 0) out = NULL;
++        if (test == 1) dp = NULL;
++        if (test == 2) lp = NULL;
++        if (test == 3) d.Buffer = NULL;
++        if (test == 4) l.Buffer = NULL;
++        if (test == 5) slots = 0;
++        CHECK(NxCdromBuildDeviceInit(out, dp, lp, slots) ==
++              STATUS_INVALID_PARAMETER);
++        CHECK(memcmp(&init, &before, sizeof(init)) == 0);
++    }
++    return 1;
++}
++
++static int installs_only_adapter_runtime_routes(void)
++{
++    DRIVER_OBJECT driver;
++    for (unsigned i = 0; i < 28; ++i)
++        driver.MajorFunction[i] = sentinel;
++    CHECK(NxCdromInstallRuntimeDispatch(&driver) == STATUS_SUCCESS);
++    CHECK(driver.MajorFunction[IRP_MJ_READ] == NxNativeDispatchReadWrite);
++    CHECK(driver.MajorFunction[IRP_MJ_WRITE] == NxNativeDispatchReadWrite);
++    CHECK(driver.MajorFunction[IRP_MJ_DEVICE_CONTROL] == NxNativeDispatchControl);
++    CHECK(driver.MajorFunction[IRP_MJ_FLUSH_BUFFERS] == NxNativeDispatchFlush);
++    CHECK(driver.MajorFunction[IRP_MJ_SHUTDOWN] == NxNativeDispatchFlush);
++    CHECK(driver.MajorFunction[0] == sentinel);
++    CHECK(driver.MajorFunction[27] == sentinel);
++    CHECK(NxCdromInstallRuntimeDispatch(NULL) == STATUS_INVALID_PARAMETER);
++    return 1;
++}
++
++static int routes_without_child_ownership(void)
++{
++    DRIVER_OBJECT driver;
++    PDEVICE_OBJECT device = (PDEVICE_OBJECT)(uintptr_t)1;
++    PIRP request = (PIRP)(uintptr_t)2;
++    reads = controls = flushes = 0;
++    memset(&driver, 0, sizeof(driver));
++    CHECK(NxCdromInstallRuntimeDispatch(&driver) == STATUS_SUCCESS);
++    CHECK(driver.MajorFunction[IRP_MJ_READ](device, request) == 42);
++    CHECK(driver.MajorFunction[IRP_MJ_WRITE](device, request) == 42);
++    CHECK(driver.MajorFunction[IRP_MJ_DEVICE_CONTROL](device, request) == 43);
++    CHECK(driver.MajorFunction[IRP_MJ_FLUSH_BUFFERS](device, request) == 44);
++    CHECK(driver.MajorFunction[IRP_MJ_SHUTDOWN](device, request) == 44);
++    CHECK(reads == 2 && controls == 1 && flushes == 2);
++    return 1;
++}
++
++int main(void)
++{
++    struct { const char *name; int (*run)(void); } groups[] = {
++        {"unknown_media_profile", builds_exact_unknown_media_profile},
++        {"invalid_profile", rejects_invalid_profile_without_mutation},
++        {"runtime_routes", installs_only_adapter_runtime_routes},
++        {"no_child_ownership", routes_without_child_ownership},
++    };
++    unsigned failures = 0;
++    for (unsigned i = 0; i < sizeof(groups) / sizeof(groups[0]); ++i) {
++        int passed = groups[i].run();
++        printf("%s %s\n", passed ? "PASS" : "FAIL", groups[i].name);
++        failures += !passed;
++    }
++    printf("4 groups, %u failures\n", failures);
++    return failures ? 1 : 0;
++}
+diff --git a/tests/host/nxstorage-optical/optical_host_platform.h b/tests/host/nxstorage-optical/optical_host_platform.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..6ee80eb4c1fb0f1f4452dd1ffe295a4ba43926f8
+--- /dev/null
++++ b/tests/host/nxstorage-optical/optical_host_platform.h
+@@ -0,0 +1,60 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_OPTICAL_HOST_PLATFORM_H
++#define NX_OPTICAL_HOST_PLATFORM_H
++
++#include <stdint.h>
++
++#define NX_NATIVE_ADAPTER_H
++#define NTAPI
++typedef int32_t NTSTATUS;
++typedef uint32_t ULONG;
++typedef void VOID;
++typedef uint16_t WCHAR;
++typedef struct _UNICODE_STRING {
++    uint16_t Length, MaximumLength;
++    WCHAR *Buffer;
++} UNICODE_STRING, *PUNICODE_STRING;
++typedef void *PDEVICE_OBJECT;
++typedef void *PIRP;
++typedef NTSTATUS (NTAPI *PDRIVER_DISPATCH)(PDEVICE_OBJECT, PIRP);
++typedef struct _DRIVER_OBJECT {
++    PDRIVER_DISPATCH MajorFunction[28];
++} DRIVER_OBJECT, *PDRIVER_OBJECT;
++
++typedef enum nx_cache {
++    NX_CACHE_DISABLED,
++    NX_CACHE_ENABLED,
++    NX_CACHE_UNQUALIFIED
++} nx_cache;
++typedef struct nx_config {
++    uint32_t sector_bytes, page_bytes, max_bytes, max_pages, alignment_mask;
++    uint32_t ata_max_blocks;
++    uint64_t capacity_bytes;
++    int optical;
++    nx_cache cache;
++} nx_config;
++typedef struct NX_NATIVE_DEVICE_INIT {
++    PUNICODE_STRING DeviceName;
++    PUNICODE_STRING SymbolicLinkName;
++    ULONG DeviceType;
++    ULONG DeviceCharacteristics;
++    nx_config Config;
++    ULONG SlotCount;
++} NX_NATIVE_DEVICE_INIT;
++
++#define STATUS_SUCCESS ((NTSTATUS)0)
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)(int32_t)0xc000000dU)
++#define FILE_DEVICE_CD_ROM 2U
++#define FILE_REMOVABLE_MEDIA 1U
++#define FILE_READ_ONLY_DEVICE 2U
++#define IRP_MJ_READ 2U
++#define IRP_MJ_WRITE 3U
++#define IRP_MJ_FLUSH_BUFFERS 6U
++#define IRP_MJ_DEVICE_CONTROL 14U
++#define IRP_MJ_SHUTDOWN 16U
++
++NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT, PIRP);
++NTSTATUS NTAPI NxNativeDispatchReadWrite(PDEVICE_OBJECT, PIRP);
++NTSTATUS NTAPI NxNativeDispatchFlush(PDEVICE_OBJECT, PIRP);
++
++#endif
+diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
+--- a/drivers/storage/class/nxstorage/CMakeLists.txt
++++ b/drivers/storage/class/nxstorage/CMakeLists.txt
+@@ -4 +4,2 @@ add_library(nxstorage STATIC request.c geometry_composer.c cache_query.c cache_pr
+ target_include_directories(nxstorage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
++target_sources(nxstorage PRIVATE nxcdrom_profile.c)
+diff --git a/drivers/storage/class/CMakeLists.txt b/drivers/storage/class/CMakeLists.txt
+--- a/drivers/storage/class/CMakeLists.txt
++++ b/drivers/storage/class/CMakeLists.txt
+@@ -22,7 +22,6 @@ elseif(NXK_STORAGE_BACKEND STREQUAL "complete-candidate")
+         message(FATAL_ERROR "Complete backend has no implemented independent kernel adapter")
+     endif()
+     add_subdirectory(nxstorage)
+-    add_subdirectory(nxcdrom)
+ else()
+     message(FATAL_ERROR "Missing/unknown storage backend; refusing implicit legacy fallback")
+ endif()
+diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
+--- a/ntoskrnl/CMakeLists.txt
++++ b/ntoskrnl/CMakeLists.txt
+@@ -423,6 +423,6 @@ elseif(NXK_STORAGE_BACKEND STREQUAL "partial-lab-prototype")
+     set(_nx_storage_classes nxstorage classpnp disk nxcdrom)
+ elseif(NXK_STORAGE_BACKEND STREQUAL "complete-candidate")
+-    set(_nx_storage_classes nxstorage nxcdrom)
++    set(_nx_storage_classes nxstorage)
+ else()
+     message(FATAL_ERROR "Unknown storage backend in kernel link")
+ endif()
+# end of patch

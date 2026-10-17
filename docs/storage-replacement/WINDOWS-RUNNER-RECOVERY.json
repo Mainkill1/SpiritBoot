@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-14T23:11:03.571824+00:00",
+  "authorization": "User explicitly requested old xemu test cleanup and desktop runner repair.",
+  "host": "10.0.7.1",
+  "before": {
+    "http_port": 9368,
+    "http_reachable": false,
+    "ssh_reachable": true,
+    "runner_process_present": false,
+    "scheduled_task": "XemuTestRunnerBoundary3aa5e059",
+    "task_last_result": 267014,
+    "execution_time_limit": "PT72H",
+    "last_log_state": "idle",
+    "queue_pending_jobs": 0,
+    "queue_testing_jobs": 0
+  },
+  "diagnosis": "Stopped desktop task, not DNS. Task termination result and 72-hour limit are consistent with timeout; task event log did not provide an independent cause record.",
+  "changes": [
+    "Backed up task XML and runner log to existing runner/recovery-20261014",
+    "Changed only task ExecutionTimeLimit to PT0S",
+    "Started same existing interactive Codex task; runner binary/config unchanged"
+  ],
+  "after": {
+    "direct_http_reachable": true,
+    "version": "0.2.0+3aa5e059d52339bf4b14725260e124322c30beca",
+    "phase_at_recovery": "idle",
+    "runner_pid": 26692,
+    "runner_session": 1,
+    "desktop": "Default",
+    "native_case": "pr248-native-win-v362-functional-c00",
+    "native_run": "20261014-230955972-c0cf976357734c35ab1c8a0eed086e8c",
+    "native_case_status": "qualified_for_declared_scope",
+    "checks": 4096,
+    "failed_checks": 0,
+    "operations": 1024,
+    "performance_eligible": false
+  },
+  "local_evidence_sha256": {
+    "windows-repair.txt": "c2b92377f688f050aab99aa41a197ea02a95bd5429743dfd7bfdff3ec7176b7a",
+    "windows-runner-detail.txt": "1ccd08d4c1bf466d8b848258736624429b89271f35e1e8be83bc2b52f29f79fb",
+    "windows-after.txt": "43ea6f9ceb96cdbea0665a706d98232b57edb2c719fd7179f93355c7fb88f9f0",
+    "windows-before.txt": "cf2cde3144dc49bab2fde750efbdd66ad4dda3efa9c71255a323d790c09ff9d4",
+    "windows-task-cause.txt": "b1f2be6dbe0785615ede8f7893669ad71cfb17664b13722098792310c6125cc4"
+  },
+  "limits": [
+    "No benchmark/performance acceptance from functional tests",
+    "No firmware candidate or licensing closure"
+  ]
+}

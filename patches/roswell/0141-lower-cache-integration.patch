@@ -1,0 +1,1699 @@
+diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
+index ff8fc7289eaabd82d12900f35e691453687970e9..0c4c2e4ce523002625a2af98eb6c73a7bd5be727 100644
+--- a/drivers/storage/class/nxstorage/CMakeLists.txt
++++ b/drivers/storage/class/nxstorage/CMakeLists.txt
+@@ -1,7 +1,10 @@
+ # Independent native class drivers and their bounded request engine.
++add_library(nxcache STATIC cache_query.c cache_property.c)
++target_include_directories(nxcache PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+ add_library(nxstorage STATIC request.c native_packet.c native_adapter.c driver.c
+-    geometry_composer.c cache_query.c cache_property.c nxdisk_owner.c)
++    geometry_composer.c nxdisk_owner.c)
+ target_include_directories(nxstorage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
++target_link_libraries(nxstorage PUBLIC nxcache)
+ target_compile_definitions(nxstorage PRIVATE NX_NATIVE_TARGET=1)
+ add_dependencies(nxstorage psdk xdk bugcodes)
+ target_sources(nxstorage PRIVATE nxcdrom_profile.c)
+diff --git a/drivers/storage/class/nxstorage/cache_property.c b/drivers/storage/class/nxstorage/cache_property.c
+index dea5a2d5b77682246c0bed98feca9ef9a9247c41..822b5a89073c4b2b8f494668dd373284841b6bb7 100644
+--- a/drivers/storage/class/nxstorage/cache_property.c
++++ b/drivers/storage/class/nxstorage/cache_property.c
+@@ -137,9 +137,8 @@ int nx_lcq_read_raw(nx_lcq_raw *raw, const void *identity, size_t identity_bytes
+     return 1;
+ }
+ 
+-nx_cache_snapshot nx_lcq_snapshot(const nx_lcq_state *state)
++static nx_cache_snapshot decode_snapshot(uint32_t value)
+ {
+-    uint32_t value = __atomic_load_n(&state->published, __ATOMIC_ACQUIRE);
+     uint32_t select = (value >> SELECT_SHIFT) & 3u;
+     nx_cache_snapshot s;
+     s.profile = value & PROFILE_MASK;
+@@ -151,11 +150,34 @@ nx_cache_snapshot nx_lcq_snapshot(const nx_lcq_state *state)
+     return s;
+ }
+ 
++nx_lcq_observation nx_lcq_observe(const nx_lcq_state *state)
++{
++    nx_lcq_observation observation;
++    observation.ticket=__atomic_load_n(&state->published,__ATOMIC_ACQUIRE);
++    observation.snapshot=decode_snapshot(observation.ticket);
++    {
++        uint32_t proof=(observation.ticket>>PROOF_SHIFT)&3u;
++        observation.proof=proof==1 ? NX_LCQ_PIO_COUNTED :
++            proof==2 ? NX_LCQ_DMA_CONTROLLER:NX_LCQ_UNPROVED;
++    }
++    return observation;
++}
++
++int nx_lcq_observation_current(const nx_lcq_state *state,
++                               nx_lcq_observation observation)
++{
++    return __atomic_load_n(&state->published, __ATOMIC_ACQUIRE) ==
++           observation.ticket;
++}
++
++nx_cache_snapshot nx_lcq_snapshot(const nx_lcq_state *state)
++{
++    return nx_lcq_observe(state).snapshot;
++}
++
+ enum nx_lcq_proof nx_lcq_snapshot_proof(const nx_lcq_state *state)
+ {
+-    uint32_t value = __atomic_load_n(&state->published, __ATOMIC_ACQUIRE);
+-    uint32_t proof = (value >> PROOF_SHIFT) & 3u;
+-    return proof == 1 ? NX_LCQ_PIO_COUNTED : proof == 2 ? NX_LCQ_DMA_CONTROLLER : NX_LCQ_UNPROVED;
++    return nx_lcq_observe(state).proof;
+ }
+ 
+ nx_cache_reply nx_lcq_query(const nx_lcq_state *state, void *system_buffer,
+diff --git a/drivers/storage/class/nxstorage/cache_property.h b/drivers/storage/class/nxstorage/cache_property.h
+index d05faaa009ecbb994e928a1b6dbbab10d317c9aa..42c88486d875c7c7432ca5fa19e63a6a715fa7ea 100644
+--- a/drivers/storage/class/nxstorage/cache_property.h
++++ b/drivers/storage/class/nxstorage/cache_property.h
+@@ -43,6 +43,12 @@ typedef struct nx_lcq_raw {
+     uint32_t device_flags;
+ } nx_lcq_raw;
+ 
++typedef struct nx_lcq_observation {
++    uint32_t ticket;
++    nx_cache_snapshot snapshot;
++    enum nx_lcq_proof proof;
++} nx_lcq_observation;
++
+ void nx_lcq_init(nx_lcq_state *state, enum nx_cache_profile profile);
+ void nx_lcq_invalidate(nx_lcq_state *state);
+ void nx_lcq_revoke(nx_lcq_state *state);
+@@ -57,6 +63,9 @@ int nx_lcq_publish(nx_lcq_state *state, nx_lcq_result result, nx_lcq_raw raw);
+ int nx_lcq_read_raw(nx_lcq_raw *raw, const void *identity, size_t identity_bytes,
+                     uint32_t transport_flags, uint32_t device_flags);
+ nx_cache_snapshot nx_lcq_snapshot(const nx_lcq_state *state);
++nx_lcq_observation nx_lcq_observe(const nx_lcq_state *state);
++int nx_lcq_observation_current(const nx_lcq_state *state,
++                               nx_lcq_observation observation);
+ enum nx_lcq_proof nx_lcq_snapshot_proof(const nx_lcq_state *state);
+ nx_cache_reply nx_lcq_query(const nx_lcq_state *state, void *system_buffer,
+                             size_t input_bytes, size_t output_bytes);
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index a09120e0cfd973c8b6a3121f851668a3831f44ec..12144d5fe9b5ff82b620cd1f4748f5a603ddb35b 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -1,12 +1,11 @@
+ /* SPDX-License-Identifier: GPL-2.0-or-later */
+ #include "native_adapter.h"
+-#include "cache_query.h"
++#include "cache_property.h"
+ 
+ enum { NX_NATIVE_SENSE_BYTES=32, NX_NATIVE_TIMEOUT_SECONDS=30,
+        NX_NATIVE_TIMEOUT_LIMIT_SECONDS=120, NX_SRB_SUCCESS=1,
+        NX_CONTROL_BYTES=804, NX_MEDIA_UNKNOWN, NX_MEDIA_ABSENT,
+-       NX_MEDIA_PRESENT, NX_PROPERTY_CACHE_DISABLED=1,
+-       NX_PROPERTY_CACHE_ENABLED=2 };
++       NX_MEDIA_PRESENT };
+ 
+ 
+ typedef struct NX_NATIVE_ENVELOPE {
+@@ -22,6 +21,7 @@ typedef struct NX_NATIVE_ENVELOPE {
+     nx_packet_status control_capture;
+     nx_handle handle;
+     nx_status terminal_status;
++    NTSTATUS dispatch_status;
+     uint64_t terminal_bytes;
+     unsigned active, dispatch_active, cancel_active, cancel_latched;
+     unsigned handle_valid, terminal_ready, completed;
+@@ -30,9 +30,9 @@ typedef struct NX_NATIVE_ENVELOPE {
+     ULONG control_code, control_output;
+     uint64_t media_epoch;
+     UCHAR control_data[NX_CONTROL_BYTES];
+-    KEVENT cache_event, cache_release_event;
++    nx_lcq_observation cache_observation;
++    unsigned cache_guard;
+     unsigned control_active, control_recovery, control_recovery_failed;
+-    unsigned cache_query_active;
+ 
+ } NX_NATIVE_ENVELOPE;
+ 
+@@ -40,12 +40,13 @@ struct NX_NATIVE_ADAPTER {
+     KSPIN_LOCK lock;
+     KIRQL saved_irql;
+     PDEVICE_OBJECT lower;
++    const nx_lcq_state *lower_cache;
+     nx_device core;
+     nx_slot *slots;
+     NX_NATIVE_ENVELOPE *envelopes;
+     ULONG count;
+     unsigned sealed, quarantined;
+-    ULONG cache_epoch;
++    KEVENT drain_event;
+ 
+     uint64_t media_capacity;
+     ULONG media_sector, media_generation;
+@@ -53,6 +54,18 @@ struct NX_NATIVE_ADAPTER {
+     unsigned media_state, media_capacity_valid;
+ };
+ 
++#ifdef NX_NATIVE_ADAPTER_HOST
++const nx_lcq_state *NxNativeHostCacheState(PDEVICE_OBJECT lower);
++static NTSTATUS NxAtapiCacheBind(PDEVICE_OBJECT lower,const nx_lcq_state **state)
++{
++    const nx_lcq_state *published=NxNativeHostCacheState(lower);
++    if(!state||!published) return STATUS_NOT_SUPPORTED;
++    *state=published;return STATUS_SUCCESS;
++}
++#else
++NTSTATUS NxAtapiCacheBind(PDEVICE_OBJECT,const nx_lcq_state **);
++#endif
++
+ typedef struct NX_NATIVE_DEVICE_EXTENSION {
+     NX_NATIVE_ADAPTER adapter;
+     PDEVICE_OBJECT self;
+@@ -77,11 +90,6 @@ static uint32_t read_be32(const UCHAR *p)
+     return (uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3];
+ }
+ 
+-static uint32_t read_le32(const UCHAR *p)
+-{
+-    return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
+-}
+-
+ static void write_le32(UCHAR *p,uint32_t value)
+ {
+     p[0]=(UCHAR)value;p[1]=(UCHAR)(value>>8);p[2]=(UCHAR)(value>>16);p[3]=(UCHAR)(value>>24);
+@@ -204,139 +212,24 @@ static void port_leave(void *context)
+     KfReleaseSpinLock(&adapter->lock,adapter->saved_irql);
+ }
+ 
+-static nx_cache classify_cache_descriptor(const UCHAR *descriptor,
+-                                          ULONG_PTR information)
+-{
+-    uint32_t enabled;
+-    if(information!=NX_CACHE_DESCRIPTOR_BYTES ||
+-       read_le32(descriptor+NX_CACHE_OFF_VERSION)!=NX_CACHE_DESCRIPTOR_BYTES ||
+-       read_le32(descriptor+NX_CACHE_OFF_SIZE)!=NX_CACHE_DESCRIPTOR_BYTES ||
+-       read_le32(descriptor+NX_CACHE_OFF_TYPE)>3 ||
+-       read_le32(descriptor+NX_CACHE_OFF_ENABLED)>2 ||
+-       read_le32(descriptor+NX_CACHE_OFF_CHANGEABLE)>2 ||
+-       read_le32(descriptor+NX_CACHE_OFF_WRITE_THROUGH)>2 ||
+-       descriptor[NX_CACHE_OFF_FLUSH]>1 || descriptor[NX_CACHE_OFF_POWER]>1 ||
+-       descriptor[NX_CACHE_OFF_NV]>1 || descriptor[NX_CACHE_OFF_PADDING])
+-        return NX_CACHE_UNQUALIFIED;
+-    enabled=read_le32(descriptor+NX_CACHE_OFF_ENABLED);
+-    if(enabled==NX_PROPERTY_CACHE_DISABLED) return NX_CACHE_DISABLED;
+-    if(enabled==NX_PROPERTY_CACHE_ENABLED && descriptor[NX_CACHE_OFF_FLUSH])
+-        return NX_CACHE_ENABLED;
+-    return NX_CACHE_UNQUALIFIED;
+-}
+-
+-static NTSTATUS NTAPI cache_query_complete(PDEVICE_OBJECT device,PIRP child,
+-                                           PVOID context)
+-{
+-    NX_NATIVE_ENVELOPE *envelope=context;
+-    (void)device;
+-    if(envelope && child==envelope->child)
+-        (void)KeSetEvent(&envelope->cache_event,IO_NO_INCREMENT,FALSE);
+-    return STATUS_MORE_PROCESSING_REQUIRED;
+-}
+-
+-static void refresh_cache_qualification(NX_NATIVE_ADAPTER *adapter)
+-{
+-    NX_NATIVE_ENVELOPE *envelope=NULL;
+-    PIO_STACK_LOCATION next;
+-    NTSTATUS status;
+-    ULONG epoch,index;
+-    nx_cache state=NX_CACHE_UNQUALIFIED;
+-    if(adapter->core.config.optical) return;
+-    /* Revoke before querying; an older overlapping result cannot publish over
+-     * a newer refresh. Query failure therefore never preserves stale credit. */
+-    port_enter(adapter);
+-    epoch=++adapter->cache_epoch;
+-    adapter->core.config.cache=NX_CACHE_UNQUALIFIED;
+-    if(!adapter->sealed) for(index=0;index<adapter->count;++index)
+-        if(!adapter->envelopes[index].active) {
+-            envelope=&adapter->envelopes[index];
+-            envelope->active=1;envelope->cache_query_active=1;
+-            KeInitializeEvent(&envelope->cache_event,NotificationEvent,FALSE);
+-            KeInitializeEvent(&envelope->cache_release_event,NotificationEvent,FALSE);
+-            break;
+-        }
+-    port_leave(adapter);
+-    if(!envelope) return;
+-    IoReuseIrp(envelope->child,STATUS_PENDING);
+-    zero_bytes(envelope->control_data,NX_CACHE_DESCRIPTOR_BYTES);
+-    write_le32(envelope->control_data+NX_CACHE_OFF_PROPERTY,NX_CACHE_PROPERTY_ID);
+-    write_le32(envelope->control_data+NX_CACHE_OFF_QUERY_TYPE,NX_CACHE_STANDARD_QUERY);
+-    envelope->child->AssociatedIrp.SystemBuffer=envelope->control_data;
+-    envelope->child->MdlAddress=NULL;
+-    next=envelope->child->Tail.Overlay.CurrentStackLocation-1;
+-    zero_bytes(next,sizeof(*next));next->MajorFunction=IRP_MJ_DEVICE_CONTROL;
+-    next->Parameters.DeviceIoControl.InputBufferLength=NX_CACHE_QUERY_BYTES;
+-    next->Parameters.DeviceIoControl.OutputBufferLength=NX_CACHE_DESCRIPTOR_BYTES;
+-    next->Parameters.DeviceIoControl.IoControlCode=IOCTL_STORAGE_QUERY_PROPERTY;
+-    next->CompletionRoutine=cache_query_complete;next->Context=envelope;
+-    next->Control=SL_INVOKE_ON_SUCCESS|SL_INVOKE_ON_ERROR|SL_INVOKE_ON_CANCEL;
+-    status=IofCallDriver(adapter->lower,envelope->child);
+-    if(status==STATUS_PENDING) {
+-        status=KeWaitForSingleObject(&envelope->cache_event,Executive,KernelMode,
+-                                     FALSE,NULL);
+-        if(NT_SUCCESS(status)) status=envelope->child->IoStatus.Status;
+-    } else if(NT_SUCCESS(status)) status=envelope->child->IoStatus.Status;
+-    if(NT_SUCCESS(status) && status!=STATUS_PENDING)
+-        state=classify_cache_descriptor(envelope->control_data,
+-                                        envelope->child->IoStatus.Information);
+-    port_enter(adapter);
+-    if(adapter->cache_epoch==epoch) adapter->core.config.cache=state;
+-    envelope->cache_query_active=0;envelope->active=0;
+-    port_leave(adapter);
+-    (void)KeSetEvent(&envelope->cache_release_event,IO_NO_INCREMENT,FALSE);
+-}
+-
+-static void revoke_cache_qualification(NX_NATIVE_ADAPTER *adapter)
++static nx_cache classify_lower_cache(nx_lcq_observation observation)
+ {
+-    if(adapter->core.config.optical) return;
+-    port_enter(adapter);
+-    ++adapter->cache_epoch;
+-    adapter->core.config.cache=NX_CACHE_UNQUALIFIED;
+-    port_leave(adapter);
++    nx_cache_snapshot s=observation.snapshot;
++    if(observation.proof!=NX_LCQ_PIO_COUNTED &&
++       observation.proof!=NX_LCQ_DMA_CONTROLLER) return NX_CACHE_UNQUALIFIED;
++    if(s.profile!=NX_CACHE_PROFILE_ATA || !s.command_sets_known ||
++       !s.cache_supported) return NX_CACHE_UNQUALIFIED;
++    if(!s.cache_active) return NX_CACHE_DISABLED;
++    return s.selected_flush ? NX_CACHE_ENABLED:NX_CACHE_UNQUALIFIED;
+ }
+ 
+-static void drain_cache_queries(NX_NATIVE_ADAPTER *adapter)
++static nx_lcq_observation observe_lower_cache(NX_NATIVE_ADAPTER *adapter)
+ {
+-    ULONG index;
+-    for(index=0;index<adapter->count;++index) {
+-        PKEVENT event=NULL;
+-        port_enter(adapter);
+-        if(adapter->envelopes[index].active &&
+-           adapter->envelopes[index].cache_query_active)
+-            event=&adapter->envelopes[index].cache_release_event;
+-        port_leave(adapter);
+-        if(event)
+-            (void)KeWaitForSingleObject(event,Executive,KernelMode,FALSE,NULL);
+-    }
+-}
+-
+-static NTSTATUS NTAPI pnp_start_complete(PDEVICE_OBJECT device,PIRP irp,
+-                                         PVOID context)
+-{
+-    (void)device;(void)irp;
+-    (void)KeSetEvent((PKEVENT)context,IO_NO_INCREMENT,FALSE);
+-    return STATUS_MORE_PROCESSING_REQUIRED;
+-}
+-
+-static NTSTATUS forward_start_and_requalify(NX_NATIVE_DEVICE_EXTENSION *extension,
+-                                            PIRP irp)
+-{
+-    PIO_STACK_LOCATION current=irp->Tail.Overlay.CurrentStackLocation;
+-    PIO_STACK_LOCATION next=current-1;
+-    KEVENT event;
+-    NTSTATUS status;
+-    *next=*current;
+-    next->CompletionRoutine=pnp_start_complete;next->Context=&event;
+-    next->Control=SL_INVOKE_ON_SUCCESS|SL_INVOKE_ON_ERROR|SL_INVOKE_ON_CANCEL;
+-    KeInitializeEvent(&event,NotificationEvent,FALSE);
+-    status=IofCallDriver(extension->lower,irp);
+-    if(status==STATUS_PENDING)
+-        (void)KeWaitForSingleObject(&event,Executive,KernelMode,FALSE,NULL);
+-    status=irp->IoStatus.Status;
+-    if(NT_SUCCESS(status)) refresh_cache_qualification(&extension->adapter);
+-    IofCompleteRequest(irp,NT_SUCCESS(status)?IO_DISK_INCREMENT:IO_NO_INCREMENT);
+-    return status;
++    nx_lcq_observation observation={0};
++    observation.snapshot.profile=NX_CACHE_PROFILE_UNKNOWN;
++    if(adapter->lower_cache&&!adapter->core.config.optical)
++        observation=nx_lcq_observe(adapter->lower_cache);
++    return observation;
+ }
+ 
+ static NX_NATIVE_ENVELOPE *find_parent(NX_NATIVE_ADAPTER *adapter,PIRP parent)
+@@ -463,6 +356,7 @@ static void release_envelope_locked(NX_NATIVE_ENVELOPE *envelope)
+         envelope->parent=NULL;
+         envelope->handle_valid=0;
+         envelope->terminal_ready=0;
++        (void)KeSetEvent(&envelope->adapter->drain_event,IO_NO_INCREMENT,FALSE);
+     }
+ }
+ 
+@@ -470,9 +364,15 @@ static void finish_parent(NX_NATIVE_ENVELOPE *envelope)
+ {
+     PIRP parent=envelope->parent;
+     NTSTATUS status=native_status(envelope->terminal_status);
++    unsigned revoked=0;
++    if(envelope->cache_guard && envelope->adapter->lower_cache &&
++       !nx_lcq_observation_current(envelope->adapter->lower_cache,
++                                   envelope->cache_observation) &&
++       NT_SUCCESS(status)) { status=STATUS_NOT_SUPPORTED;revoked=1; }
++    envelope->dispatch_status=status;
+     parent->Tail.Overlay.DriverContext[0]=NULL;
+     parent->IoStatus.Status=status;
+-    parent->IoStatus.Information=(ULONG_PTR)envelope->terminal_bytes;
++    parent->IoStatus.Information=revoked ? 0:(ULONG_PTR)envelope->terminal_bytes;
+     envelope->completed=1;
+     IofCompleteRequest(parent,status==STATUS_SUCCESS ? IO_DISK_INCREMENT:IO_NO_INCREMENT);
+ }
+@@ -776,6 +676,7 @@ NTSTATUS NxNativeAdapterInitialize(NX_NATIVE_ADAPTER *adapter,PDEVICE_OBJECT low
+         zero_bytes(adapter->envelopes,(size_t)slot_count*sizeof(*adapter->envelopes));
+     if(!adapter->slots || !adapter->envelopes) goto no_memory;
+     adapter->lower=lower;adapter->count=slot_count;KeInitializeSpinLock(&adapter->lock);
++    KeInitializeEvent(&adapter->drain_event,SynchronizationEvent,FALSE);
+     adapter->media_capacity=config->capacity_bytes;adapter->media_sector=config->sector_bytes;
+     adapter->media_capacity_valid=config->capacity_bytes!=0;
+     adapter->media_state=adapter->media_capacity_valid ? NX_MEDIA_PRESENT:NX_MEDIA_UNKNOWN;
+@@ -793,7 +694,6 @@ NTSTATUS NxNativeAdapterInitialize(NX_NATIVE_ADAPTER *adapter,PDEVICE_OBJECT low
+     if(nx_device_init(&adapter->core,config,&port,adapter->slots,slot_count,
+                       (size_t)slot_count*sizeof(*adapter->slots))!=NX_OK)
+         goto invalid;
+-    refresh_cache_qualification(adapter);
+     return STATUS_SUCCESS;
+ invalid:
+     for(index=0;index<slot_count;++index) { if(adapter->envelopes[index].child) IoFreeIrp(adapter->envelopes[index].child);if(adapter->envelopes[index].control_mdl) IoFreeMdl(adapter->envelopes[index].control_mdl); }
+@@ -814,12 +714,26 @@ void NxNativeAdapterSeal(NX_NATIVE_ADAPTER *adapter)
+ {
+     if(!adapter) return;
+     port_enter(adapter);adapter->sealed=1;
+-    if(!adapter->core.config.optical) {
+-        ++adapter->cache_epoch;
+-        adapter->core.config.cache=NX_CACHE_UNQUALIFIED;
+-    }
+     port_leave(adapter);
+-    drain_cache_queries(adapter);
++}
++
++static void unbind_cache_publication(NX_NATIVE_ADAPTER *adapter)
++{
++    ULONG index;
++    for(;;) {
++        unsigned active=0;
++        port_enter(adapter);
++        for(index=0;index<adapter->count;++index)
++            if(adapter->envelopes[index].active) { active=1;break; }
++        if(!active) {
++            adapter->lower_cache=NULL;
++            port_leave(adapter);
++            return;
++        }
++        port_leave(adapter);
++        (void)KeWaitForSingleObject(&adapter->drain_event,Executive,KernelMode,
++                                    FALSE,NULL);
++    }
+ }
+ 
+ static void destroy_unpublished_adapter(NX_NATIVE_ADAPTER *adapter)
+@@ -849,6 +763,7 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     ULONG index;
+     KIRQL cancel_irql;
+     unsigned cancel_after=0;
++    nx_lcq_observation cache_observation={0};
+     if(!adapter || !parent) return STATUS_INVALID_PARAMETER;
+     port_enter(adapter);
+     if(adapter->quarantined) {
+@@ -872,6 +787,13 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+         envelope->cancel_active=envelope->cancel_latched=envelope->handle_valid=0;
+         envelope->terminal_ready=envelope->completed=envelope->submit_active=0;
+         envelope->result_deferred=envelope->packet_live=0;
++        envelope->dispatch_status=STATUS_PENDING;
++        envelope->cache_guard=!adapter->core.config.optical&&
++            ((operation==NX_FLUSH)||
++             (operation==NX_WRITE&&(flags&NX_WRITE_THROUGH)));
++        if(envelope->cache_guard)
++            cache_observation=observe_lower_cache(adapter);
++        envelope->cache_observation=cache_observation;
+     }
+     port_leave(adapter);
+     if(!envelope) {
+@@ -886,6 +808,10 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     zero_bytes(&request,sizeof(request));
+     request.parent=parent;request.operation=operation;request.offset=byte_offset;
+     request.bytes=byte_count;request.flags=flags;
++    if(envelope->cache_guard) {
++        request.cache_override=1;
++        request.cache=classify_lower_cache(cache_observation);
++    }
+     if(byte_count && parent->MdlAddress) {
+         PMDL mdl=parent->MdlAddress;
+         if((uintptr_t)mdl->StartVa<=UINTPTR_MAX-mdl->ByteOffset) {
+@@ -896,6 +822,9 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     port_enter(adapter);request.cancelled=envelope->cancel_latched;port_leave(adapter);
+     result=nx_start(&adapter->core,&request,&handle);
+     port_enter(adapter);
++    if(envelope->completed && envelope->dispatch_status!=STATUS_PENDING)
++        result=envelope->dispatch_status==STATUS_NOT_SUPPORTED ?
++            NX_DURABILITY_UNSUPPORTED:result;
+     if(envelope->active && !envelope->completed) {
+         envelope->handle=handle;
+         envelope->handle_valid=handle.slot!=UINT32_MAX;
+@@ -927,6 +856,7 @@ NTSTATUS NxNativeCreateClassDevice(PDRIVER_OBJECT driver,PDEVICE_OBJECT lower,
+     if(device->StackSize<=attached->StackSize) device->StackSize=attached->StackSize+1;
+     status=NxNativeAdapterInitialize(&extension->adapter,attached,init->SlotCount,&init->Config);
+     if(!NT_SUCCESS(status)) { IoDetachDevice(attached);IoDeleteDevice(device);return status; }
++    (void)NxAtapiCacheBind(lower,&extension->adapter.lower_cache);
+     if(init->SymbolicLinkName) {
+         status=IoCreateSymbolicLink(init->SymbolicLinkName,init->DeviceName);
+         if(!NT_SUCCESS(status)) { destroy_unpublished_adapter(&extension->adapter);
+@@ -979,12 +909,15 @@ NTSTATUS NTAPI NxNativeDispatchPnp(PDEVICE_OBJECT device,PIRP irp)
+     if(!extension || !extension->lower || !irp ||
+        !irp->Tail.Overlay.CurrentStackLocation) return STATUS_INVALID_PARAMETER;
+     minor=irp->Tail.Overlay.CurrentStackLocation->MinorFunction;
+-    if(minor==IRP_MN_START_DEVICE)
+-        return forward_start_and_requalify(extension,irp);
+-    if(minor==IRP_MN_REMOVE_DEVICE)
++    if(minor==IRP_MN_START_DEVICE) {
++        ++irp->CurrentLocation;
++        ++irp->Tail.Overlay.CurrentStackLocation;
++        return IofCallDriver(extension->lower,irp);
++    }
++    if(minor==IRP_MN_REMOVE_DEVICE) {
+         NxNativeAdapterSeal(&extension->adapter);
+-    else if(minor==IRP_MN_STOP_DEVICE || minor==IRP_MN_SURPRISE_REMOVAL)
+-        revoke_cache_qualification(&extension->adapter);
++        unbind_cache_publication(&extension->adapter);
++    }
+     ++irp->CurrentLocation;
+     ++irp->Tail.Overlay.CurrentStackLocation;
+     return IofCallDriver(extension->lower,irp);
+diff --git a/drivers/storage/class/nxstorage/native_capture.inc b/drivers/storage/class/nxstorage/native_capture.inc
+index 49cc6883311ee5b0caeeb7b35d329c2b3a2cc8b1..75698fa79ffa6e65a3bbabe3fe9959953c9b5526 100644
+--- a/drivers/storage/class/nxstorage/native_capture.inc
++++ b/drivers/storage/class/nxstorage/native_capture.inc
+@@ -18,7 +18,66 @@ NxAtapiCacheUnavailable(PATAPORT_DEVICE_EXTENSION device)
+ static inline void
+ NxAtapiCacheWriterReset(PATA_DEVICE_REQUEST request)
+ {
+-    nx_lcq_define(&request->NxCacheWriter, NX_LCQ_OTHER, 0, 0);
++    nx_lcq_writer writer;
++    nx_lcq_define(&writer, NX_LCQ_OTHER, 0, 0);
++    request->NxCacheWriter.Stamp = writer.stamp;
++    request->NxCacheWriter.RequestedBytes = writer.requested_bytes;
++    request->NxCacheWriter.Destination = writer.destination;
++    request->NxCacheWriter.Command = writer.command;
++    request->NxCacheWriter.Proof = writer.proof;
++    request->NxCacheWriter.Started = writer.started;
++}
++
++static inline nx_lcq_writer
++NxAtapiCacheLoadWriter(PATA_DEVICE_REQUEST request)
++{
++    nx_lcq_writer writer;
++    writer.stamp = request->NxCacheWriter.Stamp;
++    writer.requested_bytes = request->NxCacheWriter.RequestedBytes;
++    writer.destination = request->NxCacheWriter.Destination;
++    writer.command = request->NxCacheWriter.Command;
++    writer.proof = request->NxCacheWriter.Proof;
++    writer.started = request->NxCacheWriter.Started;
++    return writer;
++}
++
++static inline void
++NxAtapiCacheStoreWriter(PATA_DEVICE_REQUEST request, nx_lcq_writer writer)
++{
++    request->NxCacheWriter.Stamp = writer.stamp;
++    request->NxCacheWriter.RequestedBytes = writer.requested_bytes;
++    request->NxCacheWriter.Destination = writer.destination;
++    request->NxCacheWriter.Command = writer.command;
++    request->NxCacheWriter.Proof = writer.proof;
++    request->NxCacheWriter.Started = writer.started;
++}
++
++static inline void
++NxAtapiCacheStoreResult(PATA_DEVICE_REQUEST request, nx_lcq_result result)
++{
++    request->NxCacheResult.Stamp = result.writer.stamp;
++    request->NxCacheResult.RequestedBytes = result.writer.requested_bytes;
++    request->NxCacheResult.Destination = result.writer.destination;
++    request->NxCacheResult.Command = result.writer.command;
++    request->NxCacheResult.Proof = result.writer.proof;
++    request->NxCacheResult.Started = result.writer.started;
++    request->NxCacheResult.RawBytes = result.raw_bytes;
++    request->NxCacheResult.RawStatus = result.raw_status;
++}
++
++static inline nx_lcq_result
++NxAtapiCacheLoadResult(PATA_DEVICE_REQUEST request)
++{
++    nx_lcq_result result;
++    result.writer.stamp = request->NxCacheResult.Stamp;
++    result.writer.requested_bytes = request->NxCacheResult.RequestedBytes;
++    result.writer.destination = request->NxCacheResult.Destination;
++    result.writer.command = request->NxCacheResult.Command;
++    result.writer.proof = request->NxCacheResult.Proof;
++    result.writer.started = request->NxCacheResult.Started;
++    result.raw_bytes = request->NxCacheResult.RawBytes;
++    result.raw_status = request->NxCacheResult.RawStatus;
++    return result;
+ }
+ 
+ /* Invoke once on constructed identity, before any DataBuffer mapping. Keep
+@@ -30,8 +89,10 @@ NxAtapiCacheTrack(PATAPORT_DEVICE_EXTENSION device, PATA_DEVICE_REQUEST request)
+     if (request->Flags & NX_LCQ_LOCAL_FLAG) destination = NX_LCQ_LOCAL;
+     else if (request->DataBuffer == (void *)&device->IdentifyDeviceData)
+         destination = NX_LCQ_CACHED;
+-    nx_lcq_define(&request->NxCacheWriter, destination,
+-                  request->TaskFile.Command, request->DataTransferLength);
++    nx_lcq_writer writer;
++    nx_lcq_define(&writer, destination, request->TaskFile.Command,
++                  request->DataTransferLength);
++    NxAtapiCacheStoreWriter(request, writer);
+ }
+ 
+ /* Invoke after mappings/PrepareIo, immediately before external real start.
+@@ -42,8 +103,10 @@ NxAtapiCacheStart(PATAPORT_DEVICE_EXTENSION device, PATA_DEVICE_REQUEST request)
+ {
+     enum nx_lcq_proof proof = (request->Flags & NX_LCQ_PROGRAM_DMA_FLAG) ?
+         NX_LCQ_DMA_CONTROLLER : NX_LCQ_PIO_COUNTED;
+-    (void)nx_lcq_start(&device->NxCacheQueryState, &request->NxCacheWriter,
++    nx_lcq_writer writer = NxAtapiCacheLoadWriter(request);
++    (void)nx_lcq_start(&device->NxCacheQueryState, &writer,
+                       request->TaskFile.Command, request->DataTransferLength, proof);
++    NxAtapiCacheStoreWriter(request, writer);
+ }
+ 
+ /* Invoke before translation rewrites status/count/pointers and before request
+@@ -51,7 +114,8 @@ NxAtapiCacheStart(PATAPORT_DEVICE_EXTENSION device, PATA_DEVICE_REQUEST request)
+ static inline nx_lcq_result
+ NxAtapiCacheRawResult(PATA_DEVICE_REQUEST request)
+ {
+-    return nx_lcq_result_copy(&request->NxCacheWriter,
++    nx_lcq_writer writer = NxAtapiCacheLoadWriter(request);
++    return nx_lcq_result_copy(&writer,
+                               request->SrbStatus, request->DataTransferLength);
+ }
+ 
+diff --git a/drivers/storage/class/nxstorage/native_hook.inc b/drivers/storage/class/nxstorage/native_hook.inc
+index 26c8c700753dcd8f3ddf8a72dbc95dd6d9b58fd3..71512056e14ec15f5e86ebde6803180862232b9d 100644
+--- a/drivers/storage/class/nxstorage/native_hook.inc
++++ b/drivers/storage/class/nxstorage/native_hook.inc
+@@ -21,3 +21,12 @@ NxAtapiQueryWriteCache(PATAPORT_DEVICE_EXTENSION device, PIRP irp,
+     }
+     return STATUS_INVALID_PARAMETER;
+ }
++
++/* This is the exact StorageDeviceWriteCacheProperty PDO endpoint used by
++ * AtaPdoHandleStorageQueryProperty and by the native route test. */
++static NTSTATUS
++NxAtapiWriteCachePropertyEndpoint(PATAPORT_DEVICE_EXTENSION device, PIRP irp,
++                                  PIO_STACK_LOCATION stack)
++{
++    return NxAtapiQueryWriteCache(device, irp, stack);
++}
+diff --git a/drivers/storage/class/nxstorage/request.c b/drivers/storage/class/nxstorage/request.c
+index 574045c6e91d0d8a36060e754dbb177accec22cc..0e2ae3201814e81e410a8e62f2a632172ad8a551 100644
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -22,13 +22,16 @@ static void pending(nx_device *d, nx_slot *s)
+ static nx_status validate(const nx_device *d, const nx_request *r)
+ {
+     const nx_config *c=&d->config;
++    nx_cache cache=r->cache_override ? r->cache:c->cache;
+     if (!r->parent || r->operation>NX_FLUSH || r->operation<NX_READ) return NX_INVALID;
+     if ((r->flags & ~(uint32_t)NX_WRITE_THROUGH) ||
+         (r->flags && r->operation!=NX_WRITE)) return NX_INVALID;
+     if (r->cancelled) return NX_CANCELLED;
+     if (r->operation==NX_FLUSH) return r->bytes ? NX_INVALID:NX_OK;
+     if (r->operation==NX_WRITE && c->optical) return NX_WRITE_PROTECTED;
+-    if ((r->flags & NX_WRITE_THROUGH) && c->cache==NX_CACHE_UNQUALIFIED)
++    if (r->cache_override && (r->cache<NX_CACHE_DISABLED ||
++        r->cache>NX_CACHE_UNQUALIFIED)) return NX_INVALID;
++    if ((r->flags & NX_WRITE_THROUGH) && cache==NX_CACHE_UNQUALIFIED)
+         return NX_DURABILITY_UNSUPPORTED;
+     if (r->offset<0 || ((uint64_t)r->offset & d->sector_mask) || (r->bytes & d->sector_mask))
+         return NX_INVALID;
+@@ -74,6 +77,10 @@ static int cache_sync(const nx_slot *s)
+ {
+     return s->request.operation==NX_FLUSH || s->syncing;
+ }
++static nx_cache request_cache(const nx_device *d,const nx_slot *s)
++{
++    return s->request.cache_override ? s->request.cache:d->config.cache;
++}
+ static int barrier_clear(const nx_device *d, const nx_slot *s)
+ {
+     if (s->recovery || s->request.operation==NX_READ) return 1;
+@@ -193,9 +200,10 @@ static void pump(nx_device *d)
+             }
+             if (!s->terminal && !barrier_clear(d,s)) { pending(d,s); continue; }
+             if (!s->terminal && cache_sync(s) && !s->recovery &&
+-                d->config.cache!=NX_CACHE_ENABLED) {
++                request_cache(d,s)!=NX_CACHE_ENABLED) {
+                 s->terminal=1;
+-                if (d->config.cache==NX_CACHE_UNQUALIFIED) s->final_status=NX_DURABILITY_UNSUPPORTED;
++                if (request_cache(d,s)==NX_CACHE_UNQUALIFIED)
++                    s->final_status=NX_DURABILITY_UNSUPPORTED;
+             }
+             if (s->terminal && !s->recovery) {
+                 action=COMPLETE; parent=s->request.parent; final=s->final_status; bytes=s->transferred;
+diff --git a/drivers/storage/class/nxstorage/request.h b/drivers/storage/class/nxstorage/request.h
+index 49a87529109d9bd796ac4a55e911039ff76c415b..b3783dc9c15752ce8e5ae3d4e35660d68aa0d38e 100644
+--- a/drivers/storage/class/nxstorage/request.h
++++ b/drivers/storage/class/nxstorage/request.h
+@@ -40,6 +40,8 @@ typedef struct nx_request {
+      * The core checks byte ranges, never dereferences the domain or PFNs.
+      * Descriptor/pages/lease stay borrowed until lower ownership ends. */
+     int mdl_present;
++    nx_cache cache;
++    int cache_override;
+ } nx_request;
+ typedef struct nx_command {
+     nx_token token;
+diff --git a/drivers/storage/ide/atapi/CMakeLists.txt b/drivers/storage/ide/atapi/CMakeLists.txt
+index 23acc1c2de214734278b85ec420230e567944d53..6f8deceda18397eceb2955d34eae8a4aebc43ce2 100644
+--- a/drivers/storage/ide/atapi/CMakeLists.txt
++++ b/drivers/storage/ide/atapi/CMakeLists.txt
+@@ -14,6 +14,7 @@ list(APPEND SOURCE
+     enum.c
+     fdo.c
+     ioctl.c
++    nxcache_bridge.c
+     pdo.c
+     portstate.c
+     satl.c
+@@ -36,7 +37,8 @@ endif()
+ # sptilib are folded in alongside.  The kernel already links gcc_ssp_nt, so
+ # atapi does not pull its own copy.
+ add_library(atapi ${SOURCE})
+-target_link_libraries(atapi memcmp sptilib ${PSEH_LIB})
++target_include_directories(atapi PRIVATE ${REACTOS_SOURCE_DIR}/drivers/storage/class/nxstorage)
++target_link_libraries(atapi memcmp sptilib nxcache ${PSEH_LIB})
+ add_pch(atapi atapi.h SOURCE)
+ target_compile_definitions(atapi PRIVATE DriverEntry=AtapiDriverEntry)
+ add_dependencies(atapi psdk xdk bugcodes)
+diff --git a/drivers/storage/ide/atapi/atapi.h b/drivers/storage/ide/atapi/atapi.h
+index 603bd9963fe8c95060f2345ef2c158ffaf77c93f..74faef0ba43dc5633e4e3ef57900205838bcafb2 100644
+--- a/drivers/storage/ide/atapi/atapi.h
++++ b/drivers/storage/ide/atapi/atapi.h
+@@ -6,6 +6,7 @@
+  */
+ 
+ #pragma once
++#include "cache_property.h"
+ 
+ #include <ntddk.h>
+ #include <ntstrsafe.h>
+@@ -329,6 +330,10 @@ C_ASSERT(sizeof(REQUEST_QUEUE_ENTRY) <= 4 * sizeof(PVOID));
+ C_ASSERT(REQUEST_FLAG_DATA_IN == SRB_FLAGS_DATA_IN);
+ C_ASSERT(REQUEST_FLAG_DATA_OUT == SRB_FLAGS_DATA_OUT);
+ C_ASSERT(REQUEST_FLAG_NO_KEEP_AWAKE == SRB_FLAGS_NO_KEEP_AWAKE);
++C_ASSERT(sizeof(((PATA_DEVICE_REQUEST)0)->NxCacheWriter) == sizeof(nx_lcq_writer));
++C_ASSERT(sizeof(((PATA_DEVICE_REQUEST)0)->NxCacheResult) == sizeof(nx_lcq_result));
++C_ASSERT(FIELD_OFFSET(ATA_DEVICE_REQUEST, NxCacheResult) ==
++         FIELD_OFFSET(ATA_DEVICE_REQUEST, NxCacheWriter) + sizeof(nx_lcq_writer));
+ 
+ typedef struct _ATAPORT_PORT_DATA
+ {
+@@ -553,8 +558,16 @@ typedef struct _ATAPORT_DEVICE_EXTENSION
+ 
+     /** WMI data provider interface. */
+     WMILIB_CONTEXT WmiLibInfo;
++    nx_lcq_state NxCacheQueryState;
++    nx_lcq_result NxCacheWorkerResult;
++    volatile LONG NxCacheWorkerResultReady;
+ } ATAPORT_DEVICE_EXTENSION, *PATAPORT_DEVICE_EXTENSION;
+ 
++#include "native_capture.inc"
++
++NTSTATUS NxAtapiCacheBind(PDEVICE_OBJECT DeviceObject,
++                          const nx_lcq_state **State);
++
+ C_ASSERT(QUEUE_FLAG_FROZEN_QUEUE_FREEZE == SRB_FLAGS_BYPASS_FROZEN_QUEUE);
+ C_ASSERT(QUEUE_FLAG_FROZEN_QUEUE_LOCK == SRB_FLAGS_BYPASS_LOCKED_QUEUE);
+ 
+@@ -745,7 +758,8 @@ NTSTATUS
+ AtaDeviceSendIdentify(
+     _In_ PATAPORT_PORT_DATA PortData,
+     _In_ PATAPORT_DEVICE_EXTENSION DevExt,
+-    _In_ UCHAR Command);
++    _In_ UCHAR Command,
++    _Out_ nx_lcq_result *Result);
+ 
+ ATA_DEVICE_STATUS
+ AtaPortIdentifyDevice(
+diff --git a/drivers/storage/ide/atapi/dev_config.c b/drivers/storage/ide/atapi/dev_config.c
+index 57621ba3719f3c11c40fda5db041313abd99563b..cab27cb392d99d9300568f48428c90f8001dbaff 100644
+--- a/drivers/storage/ide/atapi/dev_config.c
++++ b/drivers/storage/ide/atapi/dev_config.c
+@@ -345,6 +345,9 @@ AtaPortDeviceProcessConfig(
+     _In_ PATAPORT_DEVICE_EXTENSION DevExt)
+ {
+     NTSTATUS Status;
++    nx_lcq_result IdentityResult = {0};
++
++    NxAtapiCacheUnavailable(DevExt);
+ 
+     DevExt->Device.DeviceFlags |= DEVICE_PIO_ONLY;
+     DevExt->Device.DeviceFlags &= ~(DEVICE_HAS_MEDIA_STATUS | DEVICE_SENSE_DATA_REPORTING);
+@@ -389,12 +392,16 @@ AtaPortDeviceProcessConfig(
+     Status = AtaDeviceSendIdentify(PortData,
+                                    DevExt,
+                                    IS_ATAPI(&DevExt->Device) ?
+-                                   IDE_COMMAND_ATAPI_IDENTIFY : IDE_COMMAND_IDENTIFY);
++                                   IDE_COMMAND_ATAPI_IDENTIFY : IDE_COMMAND_IDENTIFY,
++                                   &IdentityResult);
+     if (NT_SUCCESS(Status))
+     {
+         RtlCopyMemory(&DevExt->IdentifyDeviceData,
+                       DevExt->Device.LocalBuffer,
+                       sizeof(DevExt->IdentifyDeviceData));
++        if (!IS_ATAPI(&DevExt->Device))
++            AtaDeviceSetAddressingMode(DevExt);
++        (void)NxAtapiCachePublish(DevExt, IdentityResult);
+     }
+ 
+     return Status;
+diff --git a/drivers/storage/ide/atapi/dev_identify.c b/drivers/storage/ide/atapi/dev_identify.c
+index a12c039980c2de3819474f402ac99f7401fc91a7..9ff347e80c1db2f3b3408259deb1f8dadb5013c3 100644
+--- a/drivers/storage/ide/atapi/dev_identify.c
++++ b/drivers/storage/ide/atapi/dev_identify.c
+@@ -45,9 +45,11 @@ NTSTATUS
+ AtaDeviceSendIdentify(
+     _In_ PATAPORT_PORT_DATA PortData,
+     _In_ PATAPORT_DEVICE_EXTENSION DevExt,
+-    _In_ UCHAR Command)
++    _In_ UCHAR Command,
++    _Out_ nx_lcq_result *Result)
+ {
+     PATA_DEVICE_REQUEST Request = &PortData->Worker.InternalRequest;
++    NTSTATUS Status;
+ 
+     TRACE("CH %lu: Send %s identify device %u\n",
+           PortData->PortNumber,
+@@ -72,7 +74,13 @@ AtaDeviceSendIdentify(
+     RtlZeroMemory(&Request->TaskFile, sizeof(Request->TaskFile));
+     Request->TaskFile.Command = Command;
+ 
+-    return AtaPortSendRequest(PortData, DevExt);
++    InterlockedExchange(&DevExt->NxCacheWorkerResultReady, 0);
++    Status = AtaPortSendRequest(PortData, DevExt);
++    if (InterlockedCompareExchange(&DevExt->NxCacheWorkerResultReady, 0, 1) == 1)
++        *Result = DevExt->NxCacheWorkerResult;
++    else
++        RtlZeroMemory(Result, sizeof(*Result));
++    return Status;
+ }
+ 
+ static
+@@ -220,6 +228,9 @@ AtaPortIdentifyDevice(
+     BOOLEAN StartFromAtapi, IsSameDevice;
+     ULONG Attempt, RetryCount;
+     ATA_DEVICE_TYPE DeviceType;
++    nx_lcq_result IdentityResult = {0};
++
++    NxAtapiCacheUnavailable(DevExt);
+ 
+     _InterlockedOr(&PortData->InterruptFlags, PORT_INT_FLAG_IGNORE_LINK_IRQ);
+ 
+@@ -268,7 +279,8 @@ AtaPortIdentifyDevice(
+             Status = AtaDeviceSendIdentify(PortData,
+                                            DevExt,
+                                            DeviceType == DEV_ATAPI ?
+-                                           IDE_COMMAND_ATAPI_IDENTIFY : IDE_COMMAND_IDENTIFY);
++                                           IDE_COMMAND_ATAPI_IDENTIFY : IDE_COMMAND_IDENTIFY,
++                                           &IdentityResult);
+             if (Status == STATUS_ADAPTER_HARDWARE_ERROR)
+                 return DEV_STATUS_FAILED;
+ 
+@@ -319,8 +331,10 @@ AtaPortIdentifyDevice(
+                   sizeof(DevExt->IdentifyDeviceData));
+     DevExt->DeviceType = DeviceType;
+ 
+-    if (IsSameDevice)
++    if (IsSameDevice) {
++        (void)NxAtapiCachePublish(DevExt, IdentityResult);
+         return DEV_STATUS_SAME_DEVICE;
++    }
+ 
+     DevExt->Device.TransportFlags &= ~(DEVICE_IS_ATAPI |
+                                        DEVICE_HAS_CDB_INTERRUPT |
+@@ -365,5 +379,6 @@ AtaPortIdentifyDevice(
+                       sizeof(DevExt->InquiryData));
+     }
+ 
++    DevExt->NxCacheWorkerResult = IdentityResult;
+     return DEV_STATUS_NEW_DEVICE;
+ }
+diff --git a/drivers/storage/ide/atapi/enum.c b/drivers/storage/ide/atapi/enum.c
+index 26e81e15f96ce5ab78d0da272f90a96d28a7e336..68b3740eacce342b3de736c6a87a347f0b99fbd2 100644
+--- a/drivers/storage/ide/atapi/enum.c
++++ b/drivers/storage/ide/atapi/enum.c
+@@ -367,6 +367,7 @@ AtaPdoInit(
+         /* Distinguish between fixed and removable drives (e.g. CFA media) */
+         DevExt->Common.Self->Characteristics |= FILE_REMOVABLE_MEDIA;
+     }
++    (void)NxAtapiCachePublish(DevExt, DevExt->NxCacheWorkerResult);
+     DevExt->Common.Self->Flags &= ~DO_DEVICE_INITIALIZING;
+ 
+     DevExt->Device.DeviceFlags &= ~DEVICE_UNINITIALIZED;
+diff --git a/drivers/storage/ide/atapi/ioctl.c b/drivers/storage/ide/atapi/ioctl.c
+index b4069e5bc9bd8e6d2636cc7728c07ef5163f27e0..b65289aae8214ca5c0801df876dd8a5e1e382ab8 100644
+--- a/drivers/storage/ide/atapi/ioctl.c
++++ b/drivers/storage/ide/atapi/ioctl.c
+@@ -8,6 +8,7 @@
+ /* INCLUDES *******************************************************************/
+ 
+ #include "atapi.h"
++#include "native_hook.inc"
+ 
+ /* GLOBALS ********************************************************************/
+ 
+@@ -280,12 +281,16 @@ AtaPdoHandleStorageQueryProperty(
+             Status = AtaPdoQueryStorageDeviceTrimProperty(DevExt, Irp);
+             break;
+ 
++        case StorageDeviceWriteCacheProperty:
++            Status = NxAtapiWriteCachePropertyEndpoint(DevExt, Irp, IoStack);
++            break;
++
+         default:
+             *ForwardToFdo = TRUE;
+             return STATUS_MORE_PROCESSING_REQUIRED;
+     }
+ 
+-    *ForwardToFdo = FALSE;
++    *ForwardToFdo = FALSE; /* This PDO owns local endpoint completion. */
+     return Status;
+ }
+ 
+@@ -523,6 +528,7 @@ AtaPdoDeviceControl(
+     }
+ 
+     IoStack = IoGetCurrentIrpStackLocation(Irp);
++    Irp->IoStatus.Information = 0;
+     switch (IoStack->Parameters.DeviceIoControl.IoControlCode)
+     {
+         case IOCTL_STORAGE_QUERY_PROPERTY:
+@@ -574,11 +580,13 @@ AtaPdoDeviceControl(
+     }
+     else
+     {
++        /* PDO dispatch remains the sole completion owner; its common epilogue
++         * releases the remove lock after every locally handled cache query. */
+         Irp->IoStatus.Status = Status;
+         IoCompleteRequest(Irp, IO_NO_INCREMENT);
+     }
+ 
+-    IoReleaseRemoveLock(&DevExt->Common.RemoveLock, Irp);
++    IoReleaseRemoveLock(&DevExt->Common.RemoveLock, Irp); /* Common epilogue. */
+ 
+     return Status;
+ }
+diff --git a/drivers/storage/ide/atapi/nxcache_bridge.c b/drivers/storage/ide/atapi/nxcache_bridge.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..8d052a314b1391c01e1d3d0d5c7b574615bb39ae
+--- /dev/null
++++ b/drivers/storage/ide/atapi/nxcache_bridge.c
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "atapi.h"
++
++NTSTATUS NxAtapiCacheBind(PDEVICE_OBJECT device,const nx_lcq_state **state)
++{
++    PATAPORT_DEVICE_EXTENSION d;
++    if(!device||!state||!device->DeviceExtension||IS_FDO(device->DeviceExtension))
++        return STATUS_INVALID_PARAMETER;
++    d=device->DeviceExtension;*state=&d->NxCacheQueryState;return STATUS_SUCCESS;
++}
+diff --git a/drivers/storage/ide/atapi/pdo.c b/drivers/storage/ide/atapi/pdo.c
+index 2faf2e5834cbb4a4e53f84f48d05990690adf060..4b5f8b4158ccd6032b1c2c0ff7c253f113d57818 100644
+--- a/drivers/storage/ide/atapi/pdo.c
++++ b/drivers/storage/ide/atapi/pdo.c
+@@ -72,6 +72,7 @@ AtaPdoStopDevice(
+     _In_ PIRP Irp)
+ {
+     PAGED_CODE();
++    NxAtapiCacheUnavailable(DevExt);
+ 
+     AtaReqFreezeQueue(DevExt, QUEUE_FLAG_FROZEN_PNP);
+     AtaReqWaitForOutstandingIoToComplete(&DevExt->Device, NULL);
+@@ -92,6 +93,7 @@ AtaPdoRemoveDevice(
+     BOOLEAN WasRemoved = FALSE;
+ 
+     PAGED_CODE();
++    NxAtapiCacheUnavailable(DevExt);
+ 
+     AtaReqFreezeQueue(DevExt, QUEUE_FLAG_FROZEN_REMOVED);
+     AtaReqFlushDeviceQueue(&DevExt->Device);
+@@ -676,6 +678,7 @@ AtaPdoFreeDevice(
+     _In_ PATAPORT_DEVICE_EXTENSION DevExt)
+ {
+     PAGED_CODE();
++    NxAtapiCacheUnavailable(DevExt);
+ 
+ #ifndef SARCH_XBOX
+     if (DevExt->Device.PowerIdleCounter)
+@@ -751,6 +754,7 @@ AtaPdoCreateDevice(
+     DevExt = Pdo->DeviceExtension;
+ 
+     RtlZeroMemory(DevExt, sizeof(*DevExt));
++    NxAtapiCacheInitialize(DevExt);
+     AtaPnpInitializeCommonExtension(&DevExt->Common, Pdo, ChanExt->Common.Flags & ~DO_IS_FDO);
+     DevExt->Common.FdoExt = ChanExt;
+     DevExt->TransferModeAllowedMask = MAXULONG;
+diff --git a/drivers/storage/ide/atapi/portstate.c b/drivers/storage/ide/atapi/portstate.c
+index 741fe5fc883d844bc37c50778ce9dbfafd085392..7d9dae4b596ad28acfacf5cd04f75a2da1a8a38c 100644
+--- a/drivers/storage/ide/atapi/portstate.c
++++ b/drivers/storage/ide/atapi/portstate.c
+@@ -160,6 +160,28 @@ AtaPortOnAsyncNotification(
+     KeInsertQueueDpc(&PortData->Worker.NotificationDpc, UlongToPtr(DeviceBitmap), NULL);
+ }
+ 
++static
++VOID
++AtaPortRevokeCachePublication(
++    _In_ PATAPORT_PORT_DATA PortData,
++    _In_ ULONG DeviceBitmap)
++{
++    PATAPORT_CHANNEL_EXTENSION ChanExt;
++    ATA_SCSI_ADDRESS AtaScsiAddress;
++    PATAPORT_DEVICE_EXTENSION DevExt;
++
++    ChanExt = CONTAINING_RECORD(PortData, ATAPORT_CHANNEL_EXTENSION, PortData);
++    AtaScsiAddress.AsULONG = 0;
++    while (TRUE)
++    {
++        DevExt = AtaFdoFindNextDeviceByPath(ChanExt, &AtaScsiAddress, FALSE, NULL);
++        if (!DevExt)
++            break;
++        if (DeviceBitmap & (1 << (ULONG)AtaScsiAddress.TargetId))
++            NxAtapiCacheUnavailable(DevExt);
++    }
++}
++
+ static
+ VOID
+ AtaPortOnResetNotification(
+@@ -170,6 +192,8 @@ AtaPortOnResetNotification(
+     ATA_SCSI_ADDRESS AtaScsiAddress;
+     PATAPORT_DEVICE_EXTENSION DevExt;
+ 
++    AtaPortRevokeCachePublication(PortData, DeviceBitmap);
++
+     /*
+      * We are about to reset the channel which will in turn
+      * cause the affected devices to lose their software settings.
+@@ -298,6 +322,7 @@ NTSTATUS
+ AtaPortResetPort(
+     _In_ PATAPORT_PORT_DATA PortData)
+ {
++    AtaPortRevokeCachePublication(PortData, MAXULONG);
+     _InterlockedOr(&PortData->InterruptFlags, PORT_INT_FLAG_IGNORE_LINK_IRQ);
+     PortData->ResetChannel(PortData->ChannelContext);
+ #ifdef SARCH_XBOX
+@@ -851,6 +876,9 @@ AtaPortSendRequest(
+ {
+     PATA_DEVICE_REQUEST Request = &PortData->Worker.InternalRequest;
+     KIRQL OldIrql;
++    NxAtapiCacheWriterReset(Request);
++    RtlZeroMemory(&Request->NxCacheResult, sizeof(Request->NxCacheResult));
++    NxAtapiCacheTrack(DevExt, Request);
+ 
+     if (Request->Flags & REQUEST_FLAG_PACKET_COMMAND)
+     {
+diff --git a/drivers/storage/ide/atapi/satl.c b/drivers/storage/ide/atapi/satl.c
+index 967c323e03c8708610c952e9eb829ed28ed59ba5..a99ae2f4491dd52121aff2eb7d903ad4238ee173 100644
+--- a/drivers/storage/ide/atapi/satl.c
++++ b/drivers/storage/ide/atapi/satl.c
+@@ -766,6 +766,7 @@ AtaReqCompleteReadCapacity(
+     DevExt = CONTAINING_RECORD(Request->Device, ATAPORT_DEVICE_EXTENSION, Device);
+ 
+     AtaDeviceSetAddressingMode(DevExt);
++    (void)NxAtapiCachePublish(DevExt, NxAtapiCacheLoadResult(Request));
+ 
+     if (DevExt->Device.TotalSectors == 1)
+     {
+@@ -988,6 +989,9 @@ AtaReqCompleteModeSense(
+ 
+     DevExt = CONTAINING_RECORD(Request->Device, ATAPORT_DEVICE_EXTENSION, Device);
+ 
++    AtaDeviceSetAddressingMode(DevExt);
++    (void)NxAtapiCachePublish(DevExt, NxAtapiCacheLoadResult(Request));
++
+     // TODO: Handle MSN
+ #if 0
+     /* Determine the media status */
+diff --git a/drivers/storage/ide/atapi/scsi.c b/drivers/storage/ide/atapi/scsi.c
+index 4093b51690e6b23c8560cdc1dee19012fc4492ea..19a431ed8c67212374f6f4f121c1ff42891972c9 100644
+--- a/drivers/storage/ide/atapi/scsi.c
++++ b/drivers/storage/ide/atapi/scsi.c
+@@ -267,8 +267,17 @@ AtaReqCompleteRequest(
+     PIRP Irp;
+     UCHAR SrbStatus;
+     ATA_COMPLETION_ACTION CompletionAction = COMPLETE_IRP;
++    PATAPORT_DEVICE_EXTENSION DevExt;
+ 
+     ASSERT(KeGetCurrentIrql() == DISPATCH_LEVEL);
++    DevExt = CONTAINING_RECORD(Device, ATAPORT_DEVICE_EXTENSION, Device);
++    NxAtapiCacheStoreResult(Request, NxAtapiCacheRawResult(Request));
++    if ((Request->Flags & REQUEST_FLAG_INTERNAL) &&
++        Request->NxCacheResult.Started)
++    {
++        DevExt->NxCacheWorkerResult = NxAtapiCacheLoadResult(Request);
++        InterlockedExchange(&DevExt->NxCacheWorkerResultReady, 1);
++    }
+ 
+     if (Request->InternalState != REQUEST_STATE_NOT_STARTED)
+     {
+@@ -517,6 +526,8 @@ AtaReqStartIo(
+         (Request->Flags & REQUEST_FLAG_INTERNAL))
+     {
+         PortData->ActiveSlotsBitmap |= 1 << Request->Slot;
++        NxAtapiCacheStart(CONTAINING_RECORD(Device, ATAPORT_DEVICE_EXTENSION, Device),
++                          Request);
+ 
+ #ifdef SARCH_XBOX
+         if (!NxkIdeStartRequest(PortData->ChannelContext, Request,
+@@ -982,6 +993,7 @@ AtaReqTranslateRequest(
+     Request->Complete = NULL;
+     Request->Flags = 0;
+     Request->State = 0;
++    NxAtapiCacheWriterReset(Request);
+ 
+     switch (Srb->Function)
+     {
+@@ -1029,6 +1041,8 @@ AtaReqStartRequest(
+     DevExt = CONTAINING_RECORD(Device, ATAPORT_DEVICE_EXTENSION, Device);
+ 
+     SrbStatus = AtaReqTranslateRequest(DevExt, Request, Srb);
++    if (SrbStatus == SRB_STATUS_PENDING)
++        NxAtapiCacheTrack(DevExt, Request);
+ 
+     if (SrbStatus != SRB_STATUS_PENDING)
+     {
+diff --git a/drivers/storage/ide/pciidex/pciidex.h b/drivers/storage/ide/pciidex/pciidex.h
+index f94f90a90f5653852b30cd6697d804f7e0cb95d8..89cd7b4bab820c0d174c303f318fcf94c7c034ef 100644
+--- a/drivers/storage/ide/pciidex/pciidex.h
++++ b/drivers/storage/ide/pciidex/pciidex.h
+@@ -31,6 +31,12 @@ typedef struct _PCIIDE_PRD_TABLE_ENTRY     PCIIDE_PRD_TABLE_ENTRY, *PPCIIDE_PRD_
+ 
+ #define TAG_PCIIDEX    'XedI'
+ 
++/* The request ABI is consumed independently by the miniport and atapi port. */
++C_ASSERT(sizeof(((PATA_DEVICE_REQUEST)0)->NxCacheWriter) == 12);
++C_ASSERT(sizeof(((PATA_DEVICE_REQUEST)0)->NxCacheResult) == 20);
++C_ASSERT(FIELD_OFFSET(ATA_DEVICE_REQUEST, NxCacheResult) ==
++         FIELD_OFFSET(ATA_DEVICE_REQUEST, NxCacheWriter) + 12);
++
+ #define ASSUME(cond) \
+     do { \
+         ASSERT(cond); \
+diff --git a/sdk/include/reactos/drivers/ata/ata_shared.h b/sdk/include/reactos/drivers/ata/ata_shared.h
+index 0ab014210934a916c73926dbf3c3f3087fd25caf..d2f119d0a4952c7df40d4e1b9c0a82d179207469 100644
+--- a/sdk/include/reactos/drivers/ata/ata_shared.h
++++ b/sdk/include/reactos/drivers/ata/ata_shared.h
+@@ -254,6 +254,31 @@ typedef struct _ATA_DEVICE_REQUEST
+      */
+     ATA_TASKFILE Output;
+ 
++    /* Layout-stable transaction facts shared by the port and miniport.  The
++     * consumer-specific cache publication code converts these neutral fields
++     * by value; no private class-driver type enters this shared ABI. */
++    struct
++    {
++        ULONG Stamp;
++        ULONG RequestedBytes;
++        UCHAR Destination;
++        UCHAR Command;
++        UCHAR Proof;
++        UCHAR Started;
++    } NxCacheWriter;
++    struct
++    {
++        ULONG Stamp;
++        ULONG RequestedBytes;
++        UCHAR Destination;
++        UCHAR Command;
++        UCHAR Proof;
++        UCHAR Started;
++        ULONG RawBytes;
++        UCHAR RawStatus;
++        UCHAR Reserved[3];
++    } NxCacheResult;
++
+ #if DBG
+     ULONG Signature;
+ #define ATA_DEVICE_REQUEST_SIGNATURE   'rATA'
+diff --git a/tests/host/nxstorage/check_adapter.py b/tests/host/nxstorage/check_adapter.py
+index 136adfdf0068879141111026ab3b13f805e874a0..d68c2f80869e2415ceeacafc64b321d7840c43ba 100644
+--- a/tests/host/nxstorage/check_adapter.py
++++ b/tests/host/nxstorage/check_adapter.py
+@@ -9,6 +9,7 @@ cc=os.environ.get('CC','clang')
+ base=[cc,'-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DNX_NATIVE_ADAPTER_HOST',
+       '-pthread','-I'+str(source),'-I'+str(tests),'-include',str(tests/'native_adapter_host_platform.h')]
+ inputs=[str(source/'request.c'),str(source/'native_packet.c'),str(source/'native_adapter.c'),
++        str(source/'cache_query.c'),str(source/'cache_property.c'),
+         str(source/'nxdisk_owner.c'),str(source/'nxcdrom_profile.c'),str(source/'driver.c'),
+         str(tests/'native_adapter_test.c')]
+ for name,flags in [('adapter-plain',[]),('adapter-sanitized',['-fsanitize=address,undefined','-fno-omit-frame-pointer'])]:
+diff --git a/tests/host/nxstorage/lower_query_test.c b/tests/host/nxstorage/lower_query_test.c
+index 1792a000cfdfe1689aa0a2d650541804b1b74b35..93136f202915ccc392980881341cd277e812157d 100644
+--- a/tests/host/nxstorage/lower_query_test.c
++++ b/tests/host/nxstorage/lower_query_test.c
+@@ -499,6 +499,23 @@ static int native_negotiation_and_error_information(void)
+     }
+     return 1;
+ }
++static int actual_pdo_write_cache_endpoint(void)
++{
++    ATAPORT_DEVICE_EXTENSION device;
++    uint8_t b[28];
++    nx_lcq_init(&device.NxCacheQueryState,NX_CACHE_PROFILE_ATA);
++    CHECK(publish_full(&device.NxCacheQueryState,raw_enabled()));
++    memcpy(b,query,12);
++    IRP irp={{b},{123,999}};
++    IO_STACK_LOCATION stack={{{12,28}}};
++    CHECK(NxAtapiWriteCachePropertyEndpoint(&device,&irp,&stack)==STATUS_SUCCESS);
++    CHECK(irp.IoStatus.Information==28&&memcmp(b,enabled_flush,28)==0);
++    memcpy(b,query,12);stack.Parameters.DeviceIoControl.InputBufferLength=11;
++    irp.IoStatus.Information=999;
++    CHECK(NxAtapiWriteCachePropertyEndpoint(&device,&irp,&stack)==STATUS_BUFFER_TOO_SMALL);
++    CHECK(irp.IoStatus.Information==0);
++    return 1;
++}
+ static int exists_unsupported_type_and_null(void)
+ {
+     ATAPORT_DEVICE_EXTENSION device; uint8_t b[28]; IRP irp={{b},{123,999}};
+@@ -542,6 +559,29 @@ static int coherent_concurrent_publication(void)
+     return 1;
+ }
+ 
++static int observation_carries_its_exact_epoch(void)
++{
++    nx_lcq_state state; nx_lcq_init(&state,NX_CACHE_PROFILE_ATA);
++    CHECK(publish_full(&state,raw_enabled()));
++    nx_lcq_observation enabled=nx_lcq_observe(&state);
++    CHECK(enabled.snapshot.profile==NX_CACHE_PROFILE_ATA);
++    CHECK(enabled.snapshot.command_sets_known && enabled.snapshot.cache_supported);
++    CHECK(enabled.snapshot.cache_active && enabled.snapshot.selected_flush==0xe7);
++    CHECK(enabled.proof==NX_LCQ_PIO_COUNTED);
++    CHECK(enabled.ticket==atomic_load_explicit((_Atomic uint32_t *)&state.published,
++                                               memory_order_acquire));
++    CHECK(nx_lcq_observation_current(&state,enabled));
++    nx_lcq_revoke(&state);
++    nx_lcq_observation revoked=nx_lcq_observe(&state);
++    CHECK(revoked.ticket!=enabled.ticket);
++    CHECK(revoked.snapshot.profile==NX_CACHE_PROFILE_UNKNOWN);
++    CHECK(revoked.proof==NX_LCQ_UNPROVED);
++    CHECK(!revoked.snapshot.command_sets_known && !revoked.snapshot.cache_active);
++    CHECK(!nx_lcq_observation_current(&state,enabled));
++    CHECK(nx_lcq_observation_current(&state,revoked));
++    return 1;
++}
++
+ static void owner_complete(IRP *irp, ATAPORT_DEVICE_EXTENSION *device, uint8_t *buffer,
+                            unsigned *completions, NTSTATUS *seen, size_t *information)
+ {
+@@ -601,7 +641,9 @@ int main(void)
+     RUN(native_query_never_reads_inflight_raw_source);
+     RUN(queued_successor_is_unknown_before_old_parent_completes);
+     RUN(optical_profile); RUN(native_negotiation_and_error_information);
++    RUN(actual_pdo_write_cache_endpoint);
+     RUN(exists_unsupported_type_and_null); RUN(coherent_concurrent_publication);
++    RUN(observation_carries_its_exact_epoch);
+     RUN(sole_owner_completion_and_reclamation);
+     printf("%u passed; %u failed\n",passed,failed);
+     return failed?EXIT_FAILURE:EXIT_SUCCESS;
+diff --git a/tests/host/nxstorage/native_adapter_host_platform.h b/tests/host/nxstorage/native_adapter_host_platform.h
+index ab0481b243d47a903375f9946bf08e57e57b69c6..176332afff620e1656114dc6ed7711e208436c69 100644
+--- a/tests/host/nxstorage/native_adapter_host_platform.h
++++ b/tests/host/nxstorage/native_adapter_host_platform.h
+@@ -109,7 +109,7 @@ enum {
+     FILE_REMOVABLE_MEDIA=1, FILE_READ_ONLY_DEVICE=2,
+     OBJ_CASE_INSENSITIVE=0x40, OBJ_PERMANENT=0x10, OBJ_KERNEL_HANDLE=0x200,
+     DIRECTORY_ALL_ACCESS=0x000f000f,
+-    NotificationEvent=0, Executive=0, KernelMode=0
++    NotificationEvent=0, SynchronizationEvent=1, Executive=0, KernelMode=0
+ };
+ VOID KeInitializeEvent(PKEVENT, int, BOOLEAN);
+ LONG KeSetEvent(PKEVENT, LONG, BOOLEAN);
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 7b98bb5c890232c1fb87e809eb542d50197c5535..78b63c483a09a65de5a3bf45f59054c427ca4b91 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -2,6 +2,7 @@
+ #include "native_adapter_host_platform.h"
+ #include "native_adapter.h"
+ #include "native_driver.h"
++#include "cache_property.h"
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -26,14 +27,14 @@ static int lower_pending;
+ static NTSTATUS sync_command_status;
+ static uint32_t read_capacity_last=15,read_capacity_sector=2048;
+ static int freeze_next,release_failure,next_sense_key,next_sense_asc,next_sense_descriptor;
+-static NTSTATUS cache_query_status;
+-static ULONG_PTR cache_query_information;
+ static uint8_t cache_query_descriptor[28];
+-static int cache_query_requires_started,lower_started=1;
+-static volatile PIRP pending_cache_query;
+-static int hold_next_cache_query,cache_query_barrier;
+-static unsigned query_barrier_arrivals;
++static nx_lcq_state host_lower_cache;
++const nx_lcq_state *NxNativeHostCacheState(PDEVICE_OBJECT lower)
++{ (void)lower; return &host_lower_cache; }
++static int lower_started=1;
+ static unsigned pool_allocations,irp_allocations,mdl_allocations;
++static int revoke_cache_during_submit;
++static void publish_host_cache_from_descriptor(void);
+ 
+ static void remember(void **live,void *pointer){for(unsigned i=0;i<128;++i)if(!live[i]){live[i]=pointer;return;}abort();}
+ static int forget(void **live,void *pointer){for(unsigned i=0;i<128;++i)if(live[i]==pointer){live[i]=NULL;return 1;}return 0;}
+@@ -87,48 +88,21 @@ static NTSTATUS complete_child(NTSTATUS status,ULONG bytes,UCHAR srb_status)
+ {
+     return complete_specific_child(active_child,status,bytes,srb_status);
+ }
+-static NTSTATUS complete_cache_query(PIRP child,const uint8_t *descriptor,
+-                                     NTSTATUS status,ULONG_PTR information)
+-{
+-    PIO_STACK_LOCATION s=child->Tail.Overlay.CurrentStackLocation-1;
+-    if(NT_SUCCESS(status)&&information<=sizeof(cache_query_descriptor))
+-        memcpy(child->AssociatedIrp.SystemBuffer,descriptor,(size_t)information);
+-    child->IoStatus.Status=status;child->IoStatus.Information=information;
+-    return s->CompletionRoutine(created_device,child,s->Context);
+-}
+ NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT lower,PIRP child)
+ {
+     PIO_STACK_LOCATION s=child->Tail.Overlay.CurrentStackLocation-1;
+-    if(s->MajorFunction==IRP_MJ_DEVICE_CONTROL &&
+-       s->Parameters.DeviceIoControl.IoControlCode==IOCTL_STORAGE_QUERY_PROPERTY) {
+-        const uint8_t *query=child->AssociatedIrp.SystemBuffer;
+-        NTSTATUS query_status=cache_query_requires_started&&!lower_started ?
+-            STATUS_IO_DEVICE_ERROR:cache_query_status;
+-        ULONG_PTR query_information=NT_SUCCESS(query_status)?cache_query_information:0;
+-        (void)lower;__atomic_add_fetch(&property_calls,1,__ATOMIC_RELAXED);
+-        MUST(s->Parameters.DeviceIoControl.InputBufferLength==12);
+-        MUST(s->Parameters.DeviceIoControl.OutputBufferLength==28);
+-        MUST(query[0]==4&&query[1]==0&&query[2]==0&&query[3]==0);
+-        MUST(query[4]==0&&query[5]==0&&query[6]==0&&query[7]==0);
+-        if(__atomic_load_n(&cache_query_barrier,__ATOMIC_ACQUIRE)) {
+-            __atomic_add_fetch(&query_barrier_arrivals,1,__ATOMIC_ACQ_REL);
+-            while(__atomic_load_n(&query_barrier_arrivals,__ATOMIC_ACQUIRE)<2)
+-                sched_yield();
+-        }
+-        if(__atomic_exchange_n(&hold_next_cache_query,0,__ATOMIC_ACQ_REL)) {
+-            __atomic_store_n(&pending_cache_query,child,__ATOMIC_RELEASE);
+-            return STATUS_PENDING;
+-        }
+-        MUST(complete_cache_query(child,cache_query_descriptor,query_status,
+-                                  query_information)==STATUS_MORE_PROCESSING_REQUIRED);
+-        return query_status;
+-    }
+     if(s->MajorFunction==IRP_MJ_PNP) {
+         (void)lower;++forward_calls;
+-        if(s->MinorFunction==IRP_MN_START_DEVICE) lower_started=1;
++        if(s->MinorFunction==IRP_MN_START_DEVICE) {
++            lower_started=1;
++            publish_host_cache_from_descriptor();
++        }
+         else if(s->MinorFunction==IRP_MN_STOP_DEVICE ||
+                 s->MinorFunction==IRP_MN_SURPRISE_REMOVAL ||
+-                s->MinorFunction==IRP_MN_REMOVE_DEVICE) lower_started=0;
++                s->MinorFunction==IRP_MN_REMOVE_DEVICE) {
++            lower_started=0;
++            nx_lcq_revoke(&host_lower_cache);
++        }
+         child->IoStatus.Status=STATUS_SUCCESS;
+         if(s->CompletionRoutine) {
+             MUST(s->CompletionRoutine(created_device,child,s->Context)==STATUS_MORE_PROCESSING_REQUIRED);
+@@ -144,6 +118,10 @@ NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT lower,PIRP child)
+     (void)lower;
+     MUST(lower_calls<64 && s->Parameters.Scsi.Srb);PSCSI_REQUEST_BLOCK srb=s->Parameters.Scsi.Srb;
+     opcodes[lower_calls]=srb->Cdb[0];functions[lower_calls]=srb->Function;++lower_calls;
++    if(revoke_cache_during_submit) {
++        revoke_cache_during_submit=0;
++        nx_lcq_revoke(&host_lower_cache);
++    }
+     active_child=child;
+     if(cancel_during_submit){cancel_during_submit=0;cancel_now();}
+ 
+@@ -534,8 +512,26 @@ static void cache_property(uint32_t enabled,uint8_t flush)
+     memset(cache_query_descriptor,0,sizeof(cache_query_descriptor));
+     cache_query_descriptor[0]=cache_query_descriptor[4]=28;
+     cache_query_descriptor[12]=(uint8_t)enabled;cache_query_descriptor[24]=flush;
+-    cache_query_status=STATUS_SUCCESS;cache_query_information=sizeof(cache_query_descriptor);
+-
++    publish_host_cache_from_descriptor();
++}
++static void publish_host_cache_from_descriptor(void)
++{
++    uint32_t enabled=cache_query_descriptor[12];
++    uint8_t flush=cache_query_descriptor[24];
++    nx_lcq_init(&host_lower_cache,NX_CACHE_PROFILE_ATA);
++    if(!lower_started) {
++        nx_lcq_revoke(&host_lower_cache);
++        return;
++    }
++    if(enabled) {
++        nx_lcq_raw raw={0x20,(uint16_t)(0x4000u|(flush?0x1000u:0)),
++                        0x4000,(uint16_t)(enabled==2?0x20u:0),0,0};
++        nx_lcq_writer writer;
++        nx_lcq_define(&writer,NX_LCQ_CACHED,0xec,512);
++        (void)nx_lcq_start(&host_lower_cache,&writer,0xec,512,NX_LCQ_PIO_COUNTED);
++        (void)nx_lcq_publish(&host_lower_cache,
++            nx_lcq_result_copy(&writer,1,512),raw);
++    }
+ }
+ static int capacity_control_publishes_geometry(void)
+ {
+@@ -628,7 +624,7 @@ static int production_cache_qualification_and_durability(void)
+     PDEVICE_OBJECT disk_device;IRP geometry;IO_STACK_LOCATION geometry_stack;uint8_t geometry_data[24];
+     disk.DriverExtension=&disk_extension;cdrom.DriverExtension=&cdrom_extension;
+     disk_lower.StackSize=2;cdrom_lower.StackSize=2;
+-    cache_property(2,1);property_calls=0;cache_query_requires_started=1;lower_started=0;
++    property_calls=0;lower_started=0;cache_property(2,1);
+     CHECK(DiskDriverEntry(&disk,NULL)==STATUS_SUCCESS);
+     CHECK(CdromDriverEntry(&cdrom,NULL)==STATUS_SUCCESS);
+     CHECK(disk.DriverExtension->AddDevice&&cdrom.DriverExtension->AddDevice);
+@@ -637,13 +633,15 @@ static int production_cache_qualification_and_durability(void)
+     CHECK(disk.MajorFunction[IRP_MJ_PNP]==NxNativeDispatchPnp);
+     CHECK(disk.DriverExtension->AddDevice(&disk,&disk_lower)==STATUS_SUCCESS);
+     CHECK(created_device&&created_device->DeviceType==FILE_DEVICE_DISK);
+-    disk_device=created_device;CHECK(property_calls==1);
++    disk_device=created_device;CHECK(property_calls==0);
++
+     parent_fixture before_start;init_parent(&before_start,IRP_MJ_FLUSH_BUFFERS,0);
+     CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&before_start.irp)==STATUS_NOT_SUPPORTED);
+     CHECK(before_start.irp.host_completed&&before_start.irp.IoStatus.Status==STATUS_NOT_SUPPORTED);
+-    CHECK(property_calls==1&&!lower_started);
++    CHECK(before_start.irp.IoStatus.Information==0&&!lower_started);
+     CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
+-    CHECK(property_calls==2&&lower_started);
++    CHECK(property_calls==0&&lower_started);
++
+     memset(&geometry,0,sizeof(geometry));memset(&geometry_stack,0,sizeof(geometry_stack));
+     geometry.Tail.Overlay.CurrentStackLocation=&geometry_stack;geometry.AssociatedIrp.SystemBuffer=geometry_data;
+     geometry_stack.Parameters.DeviceIoControl.IoControlCode=IOCTL_DISK_GET_DRIVE_GEOMETRY;
+@@ -656,55 +654,60 @@ static int production_cache_qualification_and_durability(void)
+     parent_fixture enabled;init_parent(&enabled,IRP_MJ_WRITE,512);enabled.stack.Flags=SL_WRITE_THROUGH;
+     lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&enabled.irp)==STATUS_SUCCESS);
+     CHECK(enabled.irp.host_completed&&enabled.irp.IoStatus.Status==STATUS_SUCCESS);
+-    CHECK(lower_calls==2&&opcodes[0]==0x2a&&opcodes[1]==0x35);
+-    CHECK(property_calls==2);
++    CHECK(lower_calls==2&&opcodes[0]==0x2a&&opcodes[1]==0x35&&property_calls==0);
+ 
+-    /* A changed lower snapshot has no effect until a lifecycle revocation. */
+-    cache_property(1,1);parent_fixture retained;init_parent(&retained,IRP_MJ_WRITE,512);retained.stack.Flags=SL_WRITE_THROUGH;
+-    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&retained.irp)==STATUS_SUCCESS);
+-    CHECK(retained.irp.host_completed&&lower_calls==2&&opcodes[0]==0x2a&&opcodes[1]==0x35);
+-    CHECK(property_calls==2);
++    /* Inline completion observes the exact admission token. */
++    cache_property(2,1);
++    parent_fixture raced;init_parent(&raced,IRP_MJ_WRITE,512);
++    raced.stack.Flags=SL_WRITE_THROUGH;revoke_cache_during_submit=1;lower_calls=0;
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&raced.irp)==STATUS_NOT_SUPPORTED);
++    CHECK(raced.irp.host_completed&&raced.irp.IoStatus.Status==STATUS_NOT_SUPPORTED);
++    CHECK(raced.irp.IoStatus.Information==0&&lower_calls==2);
+ 
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
+-    parent_fixture revoked;init_parent(&revoked,IRP_MJ_WRITE,512);revoked.stack.Flags=SL_WRITE_THROUGH;
+-    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&revoked.irp)==STATUS_NOT_SUPPORTED);
+-    CHECK(revoked.irp.host_completed&&!lower_calls&&property_calls==2);
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
+-    CHECK(property_calls==3);
+-    parent_fixture disabled;init_parent(&disabled,IRP_MJ_WRITE,512);disabled.stack.Flags=SL_WRITE_THROUGH;
+-    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&disabled.irp)==STATUS_SUCCESS);
++    /* Pending completion uses the same token and clears bytes on revocation. */
++    cache_property(2,1);lower_pending=1;lower_calls=0;
++    parent_fixture pending_race;init_parent(&pending_race,IRP_MJ_WRITE,512);
++    pending_race.stack.Flags=SL_WRITE_THROUGH;
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&pending_race.irp)==STATUS_PENDING);
++    CHECK(lower_calls==1&&!pending_race.irp.host_completed);
++    nx_lcq_revoke(&host_lower_cache);
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(lower_calls==2&&!pending_race.irp.host_completed);
++    CHECK(complete_child(STATUS_SUCCESS,0,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(pending_race.irp.host_completed&&pending_race.irp.IoStatus.Status==STATUS_NOT_SUPPORTED);
++    CHECK(pending_race.irp.IoStatus.Information==0);lower_pending=0;
++
++    /* Known, supported and inactive needs no synchronization command. */
++    cache_property(1,1);parent_fixture disabled;init_parent(&disabled,IRP_MJ_WRITE,512);
++    disabled.stack.Flags=SL_WRITE_THROUGH;lower_calls=0;
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&disabled.irp)==STATUS_SUCCESS);
+     CHECK(disabled.irp.host_completed&&lower_calls==1&&opcodes[0]==0x2a);
+ 
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
+-    cache_property(0,0);CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    /* Every unknown, unsupported, malformed or failed publication fails closed. */
++    nx_lcq_revoke(&host_lower_cache);
+     parent_fixture unknown;init_parent(&unknown,IRP_MJ_WRITE,512);unknown.stack.Flags=SL_WRITE_THROUGH;
+     lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&unknown.irp)==STATUS_NOT_SUPPORTED);
+-    CHECK(unknown.irp.host_completed&&unknown.irp.IoStatus.Status==STATUS_NOT_SUPPORTED&&!lower_calls);
+-
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
+-    cache_property(2,0);CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    CHECK(unknown.irp.host_completed&&unknown.irp.IoStatus.Information==0&&!lower_calls);
++    cache_property(2,0);
+     parent_fixture unsupported;init_parent(&unsupported,IRP_MJ_WRITE,512);unsupported.stack.Flags=SL_WRITE_THROUGH;
+-    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&unsupported.irp)==STATUS_NOT_SUPPORTED);
+-    CHECK(unsupported.irp.host_completed&&unsupported.irp.IoStatus.Status==STATUS_NOT_SUPPORTED&&!lower_calls);
+-
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
+-    cache_property(2,1);cache_query_descriptor[4]=27;
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&unsupported.irp)==STATUS_NOT_SUPPORTED&&!lower_calls);
++    cache_property(2,1);
++    __atomic_fetch_and(&host_lower_cache.published,~(3u<<7),__ATOMIC_ACQ_REL);
++    parent_fixture unproved;init_parent(&unproved,IRP_MJ_WRITE,512);unproved.stack.Flags=SL_WRITE_THROUGH;
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&unproved.irp)==STATUS_NOT_SUPPORTED&&!lower_calls);
++    nx_lcq_revoke(&host_lower_cache);
+     parent_fixture malformed;init_parent(&malformed,IRP_MJ_WRITE,512);malformed.stack.Flags=SL_WRITE_THROUGH;
+-    lower_calls=0;
+-    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&malformed.irp)==STATUS_NOT_SUPPORTED);
+-    CHECK(malformed.irp.host_completed&&malformed.irp.IoStatus.Status==STATUS_NOT_SUPPORTED&&!lower_calls);
+-
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
+-    cache_query_status=STATUS_IO_DEVICE_ERROR;cache_query_information=0;
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&malformed.irp)==STATUS_NOT_SUPPORTED&&!lower_calls);
++    nx_lcq_revoke(&host_lower_cache);
+     parent_fixture failed;init_parent(&failed,IRP_MJ_WRITE,512);failed.stack.Flags=SL_WRITE_THROUGH;
+-    lower_calls=0;
+-    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&failed.irp)==STATUS_NOT_SUPPORTED);
+-    CHECK(failed.irp.host_completed&&failed.irp.IoStatus.Status==STATUS_NOT_SUPPORTED&&!lower_calls);
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&failed.irp)==STATUS_NOT_SUPPORTED&&!lower_calls);
+ 
++    /* Lower reset/stop revokes, then successful START republishes. */
+     CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
+-    cache_property(2,1);CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    parent_fixture revoked;init_parent(&revoked,IRP_MJ_FLUSH_BUFFERS,0);lower_calls=0;
++    CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&revoked.irp)==STATUS_NOT_SUPPORTED&&!lower_calls);
++    cache_property(2,1);
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
+ 
+     parent_fixture write,flush;init_parent(&write,IRP_MJ_WRITE,512);init_parent(&flush,IRP_MJ_FLUSH_BUFFERS,0);
+     lower_pending=1;lower_calls=0;
+@@ -717,80 +720,50 @@ static int production_cache_qualification_and_durability(void)
+     CHECK(complete_child(STATUS_IO_DEVICE_ERROR,0,2)==STATUS_MORE_PROCESSING_REQUIRED);
+     CHECK(flush.irp.host_completed&&flush.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
+     lower_pending=0;sync_command_status=STATUS_IO_DEVICE_ERROR;
++    parent_fixture sync_error;init_parent(&sync_error,IRP_MJ_WRITE,512);
++    sync_error.stack.Flags=SL_WRITE_THROUGH;lower_calls=0;
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&sync_error.irp)==STATUS_IO_DEVICE_ERROR);
++    CHECK(sync_error.irp.host_completed&&sync_error.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    CHECK(sync_error.irp.IoStatus.Information==512&&lower_calls==2);
+     parent_fixture shutdown;init_parent(&shutdown,IRP_MJ_SHUTDOWN,0);lower_calls=0;
+     CHECK(disk.MajorFunction[IRP_MJ_SHUTDOWN](disk_device,&shutdown.irp)==STATUS_IO_DEVICE_ERROR);
+     CHECK(shutdown.irp.host_completed&&shutdown.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR&&lower_calls==1&&opcodes[0]==0x35);
+     sync_command_status=STATUS_SUCCESS;
+ 
+-    /* Concurrent START requalification owns distinct preallocated envelopes.
+-     * Both calls must reach the lower edge before either is released. */
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
+-    cache_property(1,1);cache_query_barrier=1;query_barrier_arrivals=0;lower_calls=0;
+-    pnp_thread parallel[2];
++    /* START forwarding has no hidden query allocation, wait or shared barrier. */
++    pnp_thread parallel[2];pthread_t parallel_ids[2];
+     init_pnp(&parallel[0],disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE);
+     init_pnp(&parallel[1],disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE);
+-    pthread_t parallel_ids[2];
+     CHECK(!pthread_create(&parallel_ids[0],NULL,run_pnp,&parallel[0]));
+     CHECK(!pthread_create(&parallel_ids[1],NULL,run_pnp,&parallel[1]));
+     CHECK(!pthread_join(parallel_ids[0],NULL)&&!pthread_join(parallel_ids[1],NULL));
+-    cache_query_barrier=0;
+-    for(unsigned i=0;i<2;++i) {
+-        CHECK(parallel[i].irp.host_completed&&parallel[i].status==STATUS_SUCCESS);
+-    }
+-    CHECK(query_barrier_arrivals==2&&!lower_calls);
+-    unsigned queries_after_parallel=property_calls;
+-    parent_fixture parallel_flush;init_parent(&parallel_flush,IRP_MJ_FLUSH_BUFFERS,0);
+-    CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&parallel_flush.irp)==STATUS_SUCCESS);
+-    CHECK(parallel_flush.irp.host_completed&&!lower_calls&&property_calls==queries_after_parallel);
+-
+-    /* A held older START result cannot overwrite a newer disabled result. */
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
+-    uint8_t stale_enabled[sizeof(cache_query_descriptor)];cache_property(2,1);
+-    memcpy(stale_enabled,cache_query_descriptor,sizeof(stale_enabled));
+-    pending_cache_query=NULL;hold_next_cache_query=1;lower_calls=0;
+-    pnp_thread stale;init_pnp(&stale,disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE);
+-    pthread_t stale_id;CHECK(!pthread_create(&stale_id,NULL,run_pnp,&stale));
+-    unsigned spins=0;
+-    while(!__atomic_load_n(&pending_cache_query,__ATOMIC_ACQUIRE)&&++spins<1000000)
+-        sched_yield();
+-    PIRP held=__atomic_load_n(&pending_cache_query,__ATOMIC_ACQUIRE);CHECK(held);
+-    cache_property(1,1);
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
+-    CHECK(complete_cache_query(held,stale_enabled,STATUS_SUCCESS,sizeof(stale_enabled))==STATUS_MORE_PROCESSING_REQUIRED);
+-    CHECK(!pthread_join(stale_id,NULL));
+-    CHECK(stale.status==STATUS_SUCCESS&&stale.irp.host_completed&&!lower_calls);
+-    parent_fixture stale_flush;init_parent(&stale_flush,IRP_MJ_FLUSH_BUFFERS,0);
+-    CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&stale_flush.irp)==STATUS_SUCCESS);
+-    CHECK(stale_flush.irp.host_completed&&!lower_calls);
++    CHECK(parallel[0].returned&&parallel[1].returned&&property_calls==0);
++    CHECK(pool_allocations==pools_before&&irp_allocations==irps_before&&mdl_allocations==mdls_before);
+ 
+-    /* REMOVE seals the adapter but retains an in-flight preallocated query
+-     * envelope until its lower completion; its result remains revoked. */
+-    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
+-    cache_property(2,1);pending_cache_query=NULL;hold_next_cache_query=1;
+-    pnp_thread removing;init_pnp(&removing,disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE);
+-    pthread_t removing_id;CHECK(!pthread_create(&removing_id,NULL,run_pnp,&removing));
+-    spins=0;
+-    while(!__atomic_load_n(&pending_cache_query,__ATOMIC_ACQUIRE)&&++spins<1000000)
+-        sched_yield();
+-    held=__atomic_load_n(&pending_cache_query,__ATOMIC_ACQUIRE);CHECK(held);
+-    pnp_thread removal;init_pnp(&removal,disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_REMOVE_DEVICE);
++    lower_started=1;
++    CHECK(cdrom.DriverExtension->AddDevice(&cdrom,&cdrom_lower)==STATUS_SUCCESS);
++    CHECK(created_device&&created_device->DeviceType==FILE_DEVICE_CD_ROM);
++    return 1;
++}
++static int removal_drains_bound_cache_readers(void)
++{
++    cache_property(2,1);
++    PDEVICE_OBJECT device=make_device(2);
++    CHECK(dispatch_pnp(NxNativeDispatchPnp,device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    parent_fixture write;init_parent(&write,IRP_MJ_WRITE,512);
++    write.stack.Flags=SL_WRITE_THROUGH;lower_pending=1;lower_calls=0;
++    CHECK(NxNativeDispatchReadWrite(device,&write.irp)==STATUS_PENDING);
++    pnp_thread removal;init_pnp(&removal,NxNativeDispatchPnp,device,IRP_MN_REMOVE_DEVICE);
+     pthread_t removal_id;CHECK(!pthread_create(&removal_id,NULL,run_pnp,&removal));
+     while(!__atomic_load_n(&removal.entered,__ATOMIC_ACQUIRE)) sched_yield();
+     for(unsigned i=0;i<1000;++i) sched_yield();
+     CHECK(!__atomic_load_n(&removal.returned,__ATOMIC_ACQUIRE));
+-    CHECK(complete_cache_query(held,cache_query_descriptor,STATUS_SUCCESS,
+-                               sizeof(cache_query_descriptor))==STATUS_MORE_PROCESSING_REQUIRED);
+-    CHECK(!pthread_join(removing_id,NULL)&&removing.irp.host_completed);
+-    CHECK(!pthread_join(removal_id,NULL)&&removal.irp.host_completed&&removal.status==STATUS_SUCCESS);
+-    parent_fixture after_remove;init_parent(&after_remove,IRP_MJ_FLUSH_BUFFERS,0);
+-    CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&after_remove.irp)==STATUS_INSUFFICIENT_RESOURCES);
+-    CHECK(after_remove.irp.host_completed&&!lower_calls);
+-
+-    CHECK(pool_allocations==pools_before&&irp_allocations==irps_before&&mdl_allocations==mdls_before);
+-
+-    cache_query_requires_started=0;lower_started=1;
+-    CHECK(cdrom.DriverExtension->AddDevice(&cdrom,&cdrom_lower)==STATUS_SUCCESS);
+-    CHECK(created_device&&created_device->DeviceType==FILE_DEVICE_CD_ROM);
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(!write.irp.host_completed&&active_child);
++    CHECK(complete_child(STATUS_SUCCESS,0,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(write.irp.host_completed&&write.irp.IoStatus.Status==STATUS_SUCCESS);
++    CHECK(!pthread_join(removal_id,NULL)&&removal.returned&&removal.status==STATUS_SUCCESS);
++    lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();printf("25 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();printf("26 adapter groups, %u failures\n",f);return f?1:0;}
+diff --git a/tests/host/nxstorage/native_doubles.h b/tests/host/nxstorage/native_doubles.h
+index a32e0a5c162bf5d9ed6863bd9eb96c2e4380cb49..0e59ffdb2f669fd8d98aeebeb2384972184dd191 100644
+--- a/tests/host/nxstorage/native_doubles.h
++++ b/tests/host/nxstorage/native_doubles.h
+@@ -19,7 +19,16 @@ typedef struct {
+     unsigned hardware_commands, cache_changes, queue_changes, irq_changes;
+ } ATAPORT_DEVICE_EXTENSION, *PATAPORT_DEVICE_EXTENSION;
+ typedef struct {
+-    nx_lcq_writer NxCacheWriter;
++    struct {
++        uint32_t Stamp,RequestedBytes;
++        uint8_t Destination,Command,Proof,Started;
++    } NxCacheWriter;
++    struct {
++        uint32_t Stamp,RequestedBytes;
++        uint8_t Destination,Command,Proof,Started;
++        uint32_t RawBytes;
++        uint8_t RawStatus,Reserved[3];
++    } NxCacheResult;
+     struct { uint8_t Command; } TaskFile;
+     void *DataBuffer;
+     uint32_t Flags,DataTransferLength;
+diff --git a/tests/host/nxstorage/pthread_ownership_test.c b/tests/host/nxstorage/pthread_ownership_test.c
+index 6b008a5e58f12116fa8a7e93e94ffee825c5de53..18ca69afb6a39442695d865b096d3a880cf8f2ec 100644
+--- a/tests/host/nxstorage/pthread_ownership_test.c
++++ b/tests/host/nxstorage/pthread_ownership_test.c
+@@ -172,7 +172,8 @@ static void destroy(fixture *f)
+ static parent fresh(void) { parent p={0,0,NX_PROTOCOL_ERROR,0,1,0}; return p; }
+ static nx_request request(fixture *f,parent *p,nx_operation op)
+ {
+-    nx_request r={p,op,0,op==NX_FLUSH ? 0u:512u,(uintptr_t)f->buffer,sizeof(f->buffer),0,p,0,0,1}; return r;
++    nx_request r={p,op,0,op==NX_FLUSH ? 0u:512u,(uintptr_t)f->buffer,sizeof(f->buffer),0,p,0,0,1,0,0};
++    return r;
+ }
+ static void *start_worker(void *p)
+ {
+diff --git a/tests/host/nxstorage/request_test.c b/tests/host/nxstorage/request_test.c
+index 3b095e6a9f91845a68eb59158d1d57128f97dd01..96388f1b6d650184879d93b01e2ff950842e1378 100644
+--- a/tests/host/nxstorage/request_test.c
++++ b/tests/host/nxstorage/request_test.c
+@@ -125,7 +125,8 @@ static nx_config config(void)
+ static parent fresh(void) { parent p={0,0,NX_PROTOCOL_ERROR,0,1}; return p; }
+ static nx_request request(fixture *f, parent *p, nx_operation op, int64_t offset, uint64_t bytes)
+ {
+-    nx_request r={p,op,offset,bytes,(uintptr_t)f->buffer,f->buffer_size,0,p,0,0,1}; return r;
++    nx_request r={p,op,offset,bytes,(uintptr_t)f->buffer,f->buffer_size,0,p,0,0,1,0,0};
++    return r;
+ }
+ static void finish_held(fixture *f, unsigned i, nx_status s, uint32_t bytes, uint32_t flags)
+ {
+@@ -186,7 +187,7 @@ static int zero_domain_write_through(void)
+ static int zero_domain_guards(void)
+ {
+     fixture f; nx_config cfg=config(); cfg.alignment_mask=511;
+-    CHECK(init(&f,&cfg));
++    CHECK(init(&f,&cfg)); f.delayed=1;
+     struct { uintptr_t base; uint64_t extent, offset; int present; } cases[]={
+         {0,8192,0,0}, {4096,8192,0,0}, {0,8192,0,2},
+         {0,8192,8192,1}, {0,8192,8193,1}, {0,8192,1,1},
+@@ -755,6 +756,32 @@ static int impossible_slot_count_rejects_before_any_clear(void)
+     cleanup(&f); return 1;
+ }
+ 
++/* Break: one admission reads another request's cache capability through the
++ * shared device configuration. */
++static int durability_snapshot_is_request_owned(void)
++{
++    fixture f={0}; nx_config cfg=config(); cfg.cache=NX_CACHE_DISABLED;
++    CHECK(init(&f,&cfg)); f.delayed=1;
++    parent qualified=fresh(), revoked=fresh();
++    nx_handle qualified_handle, revoked_handle;
++    nx_request first=request(&f,&qualified,NX_WRITE,0,512);
++    nx_request second=request(&f,&revoked,NX_WRITE,512,512);
++    first.flags=NX_WRITE_THROUGH;
++    first.cache_override=1;
++    first.cache=NX_CACHE_ENABLED;
++    second.flags=NX_WRITE_THROUGH;
++    second.cache_override=1;
++    second.cache=NX_CACHE_UNQUALIFIED;
++    CHECK(nx_start(&f.dev,&first,&qualified_handle)==NX_PENDING);
++    CHECK(nx_start(&f.dev,&second,&revoked_handle)==NX_DURABILITY_UNSUPPORTED);
++    CHECK(revoked.completions==1 && revoked.status==NX_DURABILITY_UNSUPPORTED);
++    finish_held(&f,qualified_handle.slot,NX_OK,512,0);
++    CHECK(f.commands==2 && f.held[qualified_handle.slot].cdb[0]==0x35);
++    finish_held(&f,qualified_handle.slot,NX_OK,0,0);
++    CHECK(qualified.completions==1 && qualified.status==NX_OK);
++    cleanup(&f); return 1;
++}
++
+ int main(void)
+ {
+     struct {const char *name; int (*run)(void);} tests[]={
+@@ -801,6 +828,7 @@ int main(void)
+         {"write_through_zero_and_invalid_flags",write_through_zero_and_invalid_flags},
+         {"write_through_sync_prepare_failure_preserves_data",write_through_sync_prepare_failure_preserves_data},
+         {"impossible_slot_count_rejects_before_any_clear",impossible_slot_count_rejects_before_any_clear}
++        ,{"durability_snapshot_is_request_owned",durability_snapshot_is_request_owned}
+     };
+     unsigned failed=0;
+     for (unsigned i=0;i<sizeof(tests)/sizeof(tests[0]);++i) {

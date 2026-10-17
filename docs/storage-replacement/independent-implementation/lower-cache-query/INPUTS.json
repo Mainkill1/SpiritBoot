@@ -1,0 +1,181 @@
+{
+  "schema": 1,
+  "author": "/root/pr248_independent_engine",
+  "status": "FROZEN_BOUNDED_HOST_VERIFIED_NATIVE_UNQUALIFIED",
+  "inputs": [
+    {
+      "path": "approved-inputs.json",
+      "sha256": "62b4867490b195585cd2034a048d522fc159257eaf18d9fc5e83443cd69df64c"
+    },
+    {
+      "path": "SHA256SUMS",
+      "sha256": "846dfcf924ddd4958b60625c05a8850cfdcf61edeaacc73109ab87ce8a9d640e"
+    },
+    {
+      "path": "LOWER-CACHE-QUERY-PROPOSAL.md",
+      "sha256": "ee7a787d0214a53d0dbc629ac498f4b6a6f67555b03c6ae26c47ca9fbb3a4169"
+    },
+    {
+      "path": "CACHE-CAPABILITIES.md",
+      "sha256": "3ec851eb9f492df664690d661cdd5b7214140a85803f1aa0f377b6b3c1198a40"
+    },
+    {
+      "path": "COMPLETION-OWNERSHIP.md",
+      "sha256": "c074d61fbc50079dd0e5b38d81f808a6f23742c5477c677aeb38fca92fe94d6f"
+    },
+    {
+      "path": "CACHE-ABI-FACTS.md",
+      "sha256": "62bc52dd83250de3b69221751d00f00baa36bb0eeb1943fdecef6f87fa88de46"
+    },
+    {
+      "path": "cache-abi-facts.h",
+      "sha256": "19b20d0ffbc993fa6120702d6f6559a7efa4364e5bc6dc24df97d74d0e6ed816"
+    },
+    {
+      "path": "native-abi-facts.h",
+      "sha256": "cede9c2da88bbd9f896444ce6699391aee1c9b432984bc36e8b876439b2b484d"
+    },
+    {
+      "path": "status-facts.h",
+      "sha256": "0edd6a009339f24c7253e6240500e354a5699885ed08112577d179df656d02af"
+    },
+    {
+      "path": "STATUS-PROBE-RECEIPT.json",
+      "sha256": "98e52cdfc3a8768de1725db3e7c1756d7a6fa24249a8a7ffd3269c1bb8f12178"
+    },
+    {
+      "path": "source/drivers/storage/ide/atapi/atapi.h",
+      "sha256": "41c0247503a61e4eb7fb9a96259d79ffc7e03c74659e35ebc26f72ddf870b09c"
+    },
+    {
+      "path": "source/drivers/storage/ide/atapi/ioctl.c",
+      "sha256": "0c8c4965e22cb2eb10a0cbe7ac9d3bf0ac83418736a72a5943dc6e23ffb73b1a"
+    },
+    {
+      "path": "source/drivers/storage/ide/atapi/satl.c",
+      "sha256": "641f89f2235afe67183d930f51b3dcf7f473025175b64282a472cffac620c0a3"
+    },
+    {
+      "path": "source/drivers/storage/ide/atapi/scsi.c",
+      "sha256": "b18ef1d17f99e4b6fdd9cff5f466ef825498682f28601973f6498d12faff5c9a"
+    },
+    {
+      "path": "source/drivers/storage/ide/atapi/dev_error.c",
+      "sha256": "5994e624775d2697b27710b0a4c8338d788ff471bb89013460349ad79352dff9"
+    },
+    {
+      "path": "source/sdk/include/reactos/drivers/ata/ata_shared.h",
+      "sha256": "00c40648428b257cbacc01b062638be5baea84db8c8ed330edf01910dc5868da"
+    }
+  ],
+  "source_exposure": "Narrow own rg/sed searches and declarations/body ranges from listed permitted MIT exports only; no transitive includes opened. Initial combined rg/cat output truncated; subsequent narrow reads establish observations. scsi/dev_error were searched for mutation/locks, no entire implementation copied. Existing public cache/complete packets reread or reused from prior approved reading. Numeric native packet reused as field facts only.",
+  "public_documentation": [
+    "https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ata/ns-ata-_identify_device_data",
+    "https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ns-winioctl-storage_write_cache_property"
+  ],
+  "public_exposure": "Primary IDENTIFY declaration/semantic page viewed. It did not establish native type layout or validity-marker semantics; no implementation sample used.",
+  "exclusions": "No old class/disk/nxcdrom/private helpers, product/tree/history/disassembly/probe artifacts or unknown SDK bodies.",
+  "additional_source_ranges": {
+    "atapi.h": [
+      "1..115",
+      "410..510",
+      "748..776"
+    ],
+    "ioctl.c": [
+      "1..83",
+      "240..294",
+      "495..584"
+    ],
+    "satl.c": [
+      "356..405",
+      "670..710",
+      "751..816",
+      "815..880",
+      "1080..1172",
+      "1928..2016"
+    ],
+    "scsi.c": [
+      "252..413",
+      "912..964",
+      "487..528",
+      "663..752"
+    ],
+    "ata_shared.h": [
+      "115..180",
+      "206..244",
+      "277..285",
+      "327..370"
+    ],
+    "dev_error.c": [
+      "rg mutation/lock references only"
+    ]
+  },
+  "preliminary_behavior_message": {
+    "origin": "/root/pr248_contract_investigator",
+    "facts": "READ CAPACITY10/16 reach cached IDENTIFY DMA. Translation terminal callback under Device.QueueLock; successor may start before old parent completion. Invalidate at actual writer start, publish terminal before successor. Exact declarations/mutator proof pending approved packet."
+  },
+  "initial_manifest_entries": 39,
+  "input_history_note": "Initial manifest39 and input identities retained as historical readings; functional capture used explicitly approved manifest44 packet. Current manifest45 adds unrelated geometry material not studied. Root exported exact44 metadata under permitted manifest-history; no product history accessed.",
+  "functional_capture_manifest": {
+    "entries": 44,
+    "path": "approved-manifest44.json",
+    "sha256": "2e0f4c9f682278199bd952e4e91c69fe4c9b07f85f16425747cc8b48e78758b6",
+    "bytes": 48748,
+    "original_checksums_sha256": "8cdca466bc3893bcbc463859a0080110ab31fb75d073ed9b3af741c9d962c609"
+  },
+  "corrected_inputs": [
+    {
+      "path": "LOWER-CACHE-QUERY-PROPOSAL.md",
+      "sha256": "1eec36fef3c8bf04df0d743643f8171330b16821d703cec736f18dcfa5704fb3",
+      "manifest": 44,
+      "identity_basis": "recorded corrected approved packet read"
+    },
+    {
+      "path": "CACHE-CAPABILITIES.md",
+      "sha256": "4fb6db8854437377402bea4d8d06ae362439e3154e8a055d7716543103f11c3a",
+      "manifest": 44,
+      "identity_basis": "recorded corrected approved packet read"
+    },
+    {
+      "path": "ATA-CACHE-GLUE-FACTS.md",
+      "sha256": "82b15f3aa8c1b491df4531d3b32a39ae473d9da74d42e2efdd0a7e1583175ca6",
+      "manifest": 44,
+      "identity_basis": "manifest file row"
+    },
+    {
+      "path": "ata-cache-abi-facts.json",
+      "sha256": "debcd14a7712a1783a7456a1bfaaedeb222b756d4e59c14967448da8241c03ea",
+      "manifest": 44,
+      "identity_basis": "manifest file row"
+    },
+    {
+      "path": "ata-cache-abi-facts.h",
+      "sha256": "b98e616b91a9aa1032013c1658912cae24be7032141e4823d6ff22926081c4d0",
+      "manifest": 44,
+      "identity_basis": "manifest file row"
+    },
+    {
+      "path": "ATA-CACHE-ABI-RECEIPT.json",
+      "sha256": "802d7f6b02ae616d4c01e1b1b5b5107db11b0e0757cf279e61032e1f036259f1",
+      "manifest": 44,
+      "identity_basis": "manifest file row"
+    }
+  ],
+  "additional_numeric_reads": [
+    "native-abi-facts.h first180 lines for assertion design; no SDK declarations/body opened",
+    "ata-cache-abi-facts.json and receipt read with combined output partly truncated; header and behavior prose read fully; bitfield proof accessed as scalar metadata only",
+    "cache-abi-facts.h scalar constants reread for final assertion design"
+  ],
+  "final_packet_behavior": "Corrected WORD84 retained validity vs WORD83 LBA48; pre-translation raw result, real hardware start, local/cached mutators, PIO counted vs controller-inferred DMA, source capture exclusion and rundown. No body/type closure grant.",
+  "prior_frozen_production_inputs": [
+    {
+      "path": "../nxstorage/cache_query.c",
+      "sha256": "6fbf2d5d76a9cb62eb2d81b3945c5f1d057c7119ab2a54e647cd5b4f64ecfcbf"
+    },
+    {
+      "path": "../nxstorage/cache_query.h",
+      "sha256": "9bffbd5d2bd64cc946fe725af0663938e43557d56200217fe6c96642b9b55590"
+    }
+  ],
+  "public_contract_reuse": "Version=28/Size=28 clarification supplied in permitted CACHE-ABI-FACTS and investigator message, citing Microsoft Win32 property page. No implementation sample used."
+}

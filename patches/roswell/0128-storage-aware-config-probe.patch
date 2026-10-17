@@ -1,0 +1,46 @@
+diff --git a/tests/host/upper-ram-reservation/check-config.py b/tests/host/upper-ram-reservation/check-config.py
+index 8f3c9e86..38f0088b 100644
+--- a/tests/host/upper-ram-reservation/check-config.py
++++ b/tests/host/upper-ram-reservation/check-config.py
+@@ -1,16 +1,27 @@
+ #!/usr/bin/env python3
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ """Check the real CMake contract with the production cross toolchain installed."""
++import argparse
+ from pathlib import Path
+ import subprocess
+-import sys
+ 
+ root = Path(__file__).resolve().parents[3]
+-out = Path(sys.argv[1]).resolve()
++parser = argparse.ArgumentParser(description=__doc__)
++parser.add_argument("output", type=Path)
++parser.add_argument("--storage-backend", required=True, choices=("legacy-reference", "partial-lab-prototype", "complete-candidate"))
++parser.add_argument("--source-tree", required=True)
++parser.add_argument("--link-recorder", required=True, type=Path)
++parser.add_argument("--artifact-recorder", required=True, type=Path)
++args = parser.parse_args()
++out = args.output.resolve()
+ out.mkdir(parents=True, exist_ok=True)
+ base = ["cmake", "-G", "Ninja", "-S", str(root),
+         f"-DCMAKE_TOOLCHAIN_FILE={root / 'toolchain-gcc.cmake'}",
+-        "-DCMAKE_BUILD_TYPE=Release", "-DDBG=0", "-DKDBG=FALSE"]
++        "-DCMAKE_BUILD_TYPE=Release", "-DDBG=0", "-DKDBG=FALSE",
++        f"-DNXK_STORAGE_BACKEND={args.storage_backend}",
++        f"-DNXK_STORAGE_SOURCE_TREE={args.source_tree}",
++        f"-DNXK_LINK_RECORDER={args.link_recorder.resolve()}",
++        f"-DNXK_ARTIFACT_RECORDER={args.artifact_recorder.resolve()}"]
+ backends = ("NXK_MM_PHYS", "NXK_MM_POOL", "NXK_MM_POOLPAGES", "NXK_MM_VM")
+ for name in backends:
+     result = subprocess.run(base + ["-B", str(out / name), "-DXBOX_RAM_MIB=128",
+@@ -18,7 +29,9 @@ for name in backends:
+         [f"-D{option}={'OFF' if option == name else 'ON'}" for option in backends],
+         capture_output=True, text=True)
+     (out / (name + ".log")).write_text(result.stdout + result.stderr)
+-    assert result.returncode != 0 and "requires" in result.stderr, name
++    expected_error = ("NXK_MM_PHYS requires NXK_MM_POOLPAGES" if name == "NXK_MM_POOLPAGES" else
++                      "XBOX_RESERVE_UPPER_RAM requires NXK_MM_PHYS, NXK_MM_POOL, NXK_MM_POOLPAGES and NXK_MM_VM")
++    assert result.returncode != 0 and expected_error in " ".join(result.stderr.split()), name
+ for name, ram, profile, success in (("supported",128,"ON",True),
+                                    ("wrong-capacity",64,"ON",False),
+                                    ("default-fallback",128,"OFF",True)):

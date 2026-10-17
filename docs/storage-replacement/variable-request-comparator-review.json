@@ -1,0 +1,43 @@
+{
+  "files": [
+    {
+      "bytes": 36822,
+      "path": "tools/storage_perf_compare.py",
+      "sha256": "7b1869d3a607fe3701927fb99f1d8efe5657616134b809149556c53d8e9e5ddc"
+    },
+    {
+      "bytes": 34673,
+      "path": "tests/host/test_storage_perf_compare.py",
+      "sha256": "4e258fc9215b161b0044a1b3ac05ebeda86146f38df319035413011f1108e664"
+    },
+    {
+      "bytes": 20030,
+      "path": "docs/storage-replacement/PERFORMANCE-HARNESS.md",
+      "sha256": "d60c66df7dba2bc455867bea52d19199bec1c8fcd1effdffad67cae59ea7e7c3"
+    },
+    {
+      "bytes": 1651,
+      "path": "docs/storage-replacement/BENCHMARK-VARIABLE-REQUESTS-FIX.md",
+      "sha256": "314274279142f07baa7509772e6e62161f0b377dbcb5d4d5ed3a287e62487be2"
+    }
+  ],
+  "full_replacement_acceptance": false,
+  "historical_freezes_or_native_records_rewritten_by_reviewer": false,
+  "important_finding_closed": "Previously ignored supplied operation_bytes on uniform cases now validates against the expanded frozen uniform request list.",
+  "independent_host_probe_summary": "Variable non-divisible totals accepted; same-total changed lengths reject; missing/ambiguous declarations reject; supplied uniform zero/oversize and positive swapped vectors reject; explicit null/empty vectors reject; correct vector with wrong total rejects; invalid frozen boolean/zero/negative/float lengths reject; small-HDD request size contradictions reject; legacy uniform absent-vector360-row AA remains valid.",
+  "independently_run_new_regressions": 4,
+  "measured_performance_evidence": false,
+  "native_operations_performed_by_reviewer": 0,
+  "performance_acceptance": false,
+  "recorded_utc": "2026-10-14T16:30:04.557829+00:00",
+  "reported_full_host_suite": {
+    "rerun_by_reviewer": false,
+    "seconds": 36.896,
+    "status": "pass",
+    "tests": 28
+  },
+  "review_scope": "Exact ordered variable request lengths in preparatory recorded-performance schema, supplied uniform IOSB vectors, tests and scoped documentation; confidence/sample-count/durability requirements remain unchanged.",
+  "reviewer": "/root/pr248_frozen_preparation_review",
+  "schema_version": 1,
+  "status": "reviewed_no_critical_or_important_findings"
+}

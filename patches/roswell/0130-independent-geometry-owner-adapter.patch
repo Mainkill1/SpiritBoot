@@ -1,0 +1,925 @@
+diff --git a/drivers/storage/class/nxstorage/geometry_kernel_api.h b/drivers/storage/class/nxstorage/geometry_kernel_api.h
+new file mode 100644
+index 00000000..4ee5716b
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/geometry_kernel_api.h
+@@ -0,0 +1,17 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Required public declarations from the approved signature packets only.
++ * Approved platform types/calling conventions must already be declared.
++ */
++#ifndef INDEPENDENT_GEOMETRY_KERNEL_API_H
++#define INDEPENDENT_GEOMETRY_KERNEL_API_H
++
++PIRP NTAPI IoBuildDeviceIoControlRequest(ULONG code, PDEVICE_OBJECT device,
++    PVOID input, ULONG input_bytes, PVOID output, ULONG output_bytes,
++    BOOLEAN internal, PKEVENT event, PIO_STATUS_BLOCK status);
++VOID NTAPI KeInitializeEvent(PKEVENT event, EVENT_TYPE type, BOOLEAN signaled);
++LONG NTAPI KeSetEvent(PKEVENT event, KPRIORITY increment, BOOLEAN wait);
++NTSTATUS NTAPI KeWaitForSingleObject(PVOID object, KWAIT_REASON reason,
++    KPROCESSOR_MODE mode, BOOLEAN alertable, PLARGE_INTEGER timeout);
++NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT device, PIRP child);
++
++#endif
+diff --git a/drivers/storage/class/nxstorage/geometry_owner_adapter.c b/drivers/storage/class/nxstorage/geometry_owner_adapter.c
+new file mode 100644
+index 00000000..b5c91bb7
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/geometry_owner_adapter.c
+@@ -0,0 +1,120 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "geometry_owner_adapter.h"
++#include "geometry_composer.h"
++#include "geometry_kernel_api.h"
++#ifndef INDEPENDENT_GEOMETRY_HOST_PLATFORM_H
++#include "geometry_target_assertions.h"
++#endif
++
++_Static_assert(sizeof(DISK_GEOMETRY) == 24, "sized lower query output");
++_Static_assert(sizeof(NTSTATUS) == 4 && (NTSTATUS)-1 < 0, "signed target status ABI");
++_Static_assert(sizeof(GUID) == 16, "public GUID memory image");
++_Static_assert(_Generic(&NxPartComposeExtendedGeometry,
++                       NTSTATUS (*)(PFDO_EXTENSION, PIRP): 1, default: 0),
++               "ordinary C retained entrypoint convention");
++
++static NTSTATUS query_basic_geometry(PDEVICE_OBJECT device, DISK_GEOMETRY *geometry)
++{
++    KEVENT completion;
++    IO_STATUS_BLOCK terminal;
++    PIRP child;
++    NTSTATUS submitted, waited;
++    size_t index;
++
++    for (index = 0; index < sizeof(*geometry); ++index)
++        ((ig_u8 *)geometry)[index] = 0;
++    terminal.Status = STATUS_PENDING;
++    terminal.Information = 0;
++    KeInitializeEvent(&completion, NotificationEvent, 0);
++    child = IoBuildDeviceIoControlRequest(IOCTL_DISK_GET_DRIVE_GEOMETRY,
++        device, NULL, 0, geometry, sizeof(*geometry), 0, &completion, &terminal);
++    if (!child) return STATUS_INSUFFICIENT_RESOURCES;
++    submitted = IofCallDriver(device, child);
++    /* No child access or free: synchronous completion disposes it, including
++     * inline completion before IofCallDriver returns. Stack outputs stay live. */
++    if (submitted == STATUS_PENDING) {
++        do {
++            waited = KeWaitForSingleObject(&completion, Executive, KernelMode, 0, NULL);
++        } while (waited != STATUS_SUCCESS);
++    }
++    if (terminal.Status < 0) return terminal.Status;
++    if (submitted < 0) return submitted;
++    if (terminal.Status != STATUS_SUCCESS ||
++        (submitted != STATUS_SUCCESS && submitted != STATUS_PENDING))
++        return STATUS_INVALID_DEVICE_REQUEST;
++    if (terminal.Information != sizeof(*geometry)) return STATUS_INFO_LENGTH_MISMATCH;
++    return STATUS_SUCCESS;
++}
++
++/* boot-fixed caller contract: owner and its attached LowerDevice stay alive
++ * throughout this function. This does not add hot-remove reference protection. */
++NTSTATUS NxPartComposeExtendedGeometry(PFDO_EXTENSION owner, PIRP upper)
++{
++    struct ig_owner_snapshot snapshot = { 0 };
++    struct ig_lower_response base_input;
++    struct ig_result composed;
++    DISK_GEOMETRY geometry;
++    PDEVICE_OBJECT device = NULL;
++    ig_u64 capacity = 0;
++    ig_u32 sector_bytes = 0;
++    ig_u8 base[IG_BASE_BYTES];
++    PVOID output;
++    ULONG output_bytes;
++    NTSTATUS status;
++    size_t index;
++
++    if (!upper) return STATUS_INVALID_PARAMETER;
++    upper->IoStatus.Information = 0;
++    if (!owner || !upper->Tail.Overlay.CurrentStackLocation) return STATUS_INVALID_PARAMETER;
++    output_bytes = upper->Tail.Overlay.CurrentStackLocation->Parameters.DeviceIoControl.OutputBufferLength;
++    if (output_bytes < IG_BASE_BYTES) return STATUS_BUFFER_TOO_SMALL;
++    output = upper->AssociatedIrp.SystemBuffer;
++    if (!output) return STATUS_INVALID_PARAMETER;
++
++    status = KeWaitForSingleObject(&owner->SyncEvent, Executive, KernelMode, 0, NULL);
++    if (status != STATUS_SUCCESS)
++        return status < 0 ? status : STATUS_INVALID_DEVICE_REQUEST;
++    status = STATUS_INVALID_DEVICE_REQUEST;
++    if (owner->LayoutValid && owner->LayoutCache && owner->LowerDevice) {
++        device = owner->LowerDevice;
++        capacity = owner->DiskData.DiskSize;
++        sector_bytes = owner->DiskData.BytesPerSector;
++        snapshot.partition_style = owner->DiskData.PartitionStyle;
++        if (snapshot.partition_style == IG_PARTITION_MBR) {
++            snapshot.identity_available = 1;
++            snapshot.mbr_signature = owner->DiskData.Mbr.Signature;
++        } else if (snapshot.partition_style == IG_PARTITION_GPT) {
++            snapshot.identity_available = 1;
++            for (index = 0; index < sizeof(snapshot.gpt_disk_id); ++index)
++                snapshot.gpt_disk_id[index] = ((const ig_u8 *)&owner->DiskData.Gpt.DiskId)[index];
++        }
++        /* No owner checksum exists. Zero-initialized unavailable is policy. */
++        if (capacity != 0 && (capacity >> 63) == 0 && sector_bytes >= 128 &&
++            sector_bytes <= 65536 && (sector_bytes & (sector_bytes - 1)) == 0 &&
++            (capacity & (sector_bytes - 1)) == 0 &&
++            (snapshot.partition_style <= IG_PARTITION_RAW ||
++             snapshot.partition_style == IG_PARTITION_BRFR))
++            status = STATUS_SUCCESS;
++    }
++    KeSetEvent(&owner->SyncEvent, 0, 0);
++    if (status != STATUS_SUCCESS) return status;
++
++    status = query_basic_geometry(device, &geometry);
++    if (status != STATUS_SUCCESS) return status;
++    if (geometry.BytesPerSector != sector_bytes) return STATUS_UNRECOGNIZED_MEDIA;
++    for (index = 0; index < sizeof(geometry); ++index)
++        base[index] = ((const ig_u8 *)&geometry)[index];
++    for (index = 0; index < 8; ++index)
++        base[sizeof(geometry) + index] = (ig_u8)(capacity >> (index * 8));
++    base_input.status = 0;
++    base_input.buffer = base;
++    base_input.buffer_bytes = sizeof(base);
++    base_input.returned_bytes = sizeof(base);
++    composed = ig_compose_geometry(&base_input, &snapshot, output, output_bytes);
++    if (composed.outcome == IG_SUCCESS) {
++        upper->IoStatus.Information = composed.initialized_bytes;
++        return STATUS_SUCCESS;
++    }
++    if (composed.outcome == IG_INVALID_LOWER) return STATUS_UNRECOGNIZED_MEDIA;
++    return STATUS_INVALID_DEVICE_REQUEST;
++}
+diff --git a/drivers/storage/class/nxstorage/geometry_owner_adapter.h b/drivers/storage/class/nxstorage/geometry_owner_adapter.h
+new file mode 100644
+index 00000000..3f481eeb
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/geometry_owner_adapter.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef INDEPENDENT_GEOMETRY_OWNER_ADAPTER_H
++#define INDEPENDENT_GEOMETRY_OWNER_ADAPTER_H
++
++/* Approved platform types/calling conventions must precede this header. */
++NTSTATUS NxPartComposeExtendedGeometry(PFDO_EXTENSION owner, PIRP upper);
++
++#endif
+diff --git a/drivers/storage/class/nxstorage/geometry_target_assertions.h b/drivers/storage/class/nxstorage/geometry_target_assertions.h
+new file mode 100644
+index 00000000..e0d2e970
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/geometry_target_assertions.h
+@@ -0,0 +1,54 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Mandatory integration checks against approved actual target declarations.
++ * Host semantic types deliberately do not satisfy the target IRP layout.
++ */
++#ifndef INDEPENDENT_GEOMETRY_TARGET_ASSERTIONS_H
++#define INDEPENDENT_GEOMETRY_TARGET_ASSERTIONS_H
++
++#include <stddef.h>
++_Static_assert(sizeof(void *) == 4 && sizeof(NTSTATUS) == 4, "target scalar ABI");
++_Static_assert(sizeof(IRP) == 128 && _Alignof(IRP) == 8, "target IRP ABI");
++_Static_assert(offsetof(IRP, IoStatus) == 16, "target IOSB offset");
++_Static_assert(offsetof(IRP, AssociatedIrp.SystemBuffer) == 112, "target buffer offset");
++_Static_assert(offsetof(IRP, Tail.Overlay.CurrentStackLocation) == 92, "target stack offset");
++_Static_assert(sizeof(IO_STACK_LOCATION) == 36, "target stack ABI");
++_Static_assert(offsetof(IO_STACK_LOCATION, Parameters.DeviceIoControl.OutputBufferLength) == 4,
++               "target output-capacity offset");
++_Static_assert(sizeof(IO_STATUS_BLOCK) == 8 && offsetof(IO_STATUS_BLOCK, Information) == 4,
++               "target IOSB ABI");
++_Static_assert(sizeof(KEVENT) == 16 && _Alignof(KEVENT) == 4, "target event ABI");
++_Static_assert(sizeof(DISK_GEOMETRY) == 24 && _Alignof(DISK_GEOMETRY) == 8,
++               "target basic geometry ABI");
++_Static_assert(offsetof(DISK_GEOMETRY, BytesPerSector) == 20, "target sector offset");
++_Static_assert(offsetof(DISK_GEOMETRY_EX, DiskSize) == 24 &&
++               offsetof(DISK_GEOMETRY_EX, Data) == 32, "target extended geometry ABI");
++_Static_assert(sizeof(DISK_PARTITION_INFO) == 24 && sizeof(DISK_DETECTION_INFO) == 56,
++               "target optional records ABI");
++_Static_assert(sizeof(DISK_INT13_INFO) == 16 && sizeof(DISK_EX_INT13_INFO) == 32,
++               "target nested BIOS record sizes");
++_Static_assert(offsetof(DISK_EX_INT13_INFO, ExSectorsPerDrive) == 16,
++               "target extended BIOS 64-bit offset");
++_Static_assert(offsetof(DISK_DETECTION_INFO, Int13) == 8 &&
++               offsetof(DISK_DETECTION_INFO, ExInt13) == 24,
++               "target nested detection record offsets");
++_Static_assert(offsetof(DISK_PARTITION_INFO, Mbr.Signature) == 8 &&
++               offsetof(DISK_PARTITION_INFO, Mbr.CheckSum) == 12 &&
++               offsetof(DISK_PARTITION_INFO, Gpt.DiskId) == 8, "target identity offsets");
++_Static_assert(sizeof(((PFDO_EXTENSION)0)->DiskData.DiskSize) == 8 &&
++               sizeof(((PFDO_EXTENSION)0)->DiskData.BytesPerSector) == 4 &&
++               sizeof(((PFDO_EXTENSION)0)->DiskData.PartitionStyle) == 4 &&
++               sizeof(((PFDO_EXTENSION)0)->DiskData.Mbr.Signature) == 4 &&
++               sizeof(((PFDO_EXTENSION)0)->DiskData.Gpt.DiskId) == 16,
++               "retained owner field widths");
++_Static_assert((unsigned)STATUS_SUCCESS == 0 && (unsigned)STATUS_PENDING == 0x103u &&
++               (unsigned)STATUS_BUFFER_TOO_SMALL == 0xc0000023u &&
++               (unsigned)STATUS_INSUFFICIENT_RESOURCES == 0xc000009au &&
++               (unsigned)STATUS_INVALID_PARAMETER == 0xc000000du &&
++               (unsigned)STATUS_INVALID_DEVICE_REQUEST == 0xc0000010u &&
++               (unsigned)STATUS_INFO_LENGTH_MISMATCH == 0xc0000004u &&
++               (unsigned)STATUS_UNRECOGNIZED_MEDIA == 0xc0000014u,
++               "approved target status constants");
++_Static_assert(IOCTL_DISK_GET_DRIVE_GEOMETRY == 458752u && Executive == 0 &&
++               KernelMode == 0 && NotificationEvent == 0, "approved query constants");
++
++#endif
+diff --git a/drivers/storage/partmgr/CMakeLists.txt b/drivers/storage/partmgr/CMakeLists.txt
+index c8509649..4b633da3 100644
+--- a/drivers/storage/partmgr/CMakeLists.txt
++++ b/drivers/storage/partmgr/CMakeLists.txt
+@@ -4,6 +4,16 @@ list(APPEND SOURCE
+     partmgr.c
+     utils.c)
+ 
++# The laboratory/candidate geometry route uses independently authored code.
++# Legacy reference composition retains its original route and exact image.
++if(NXK_STORAGE_BACKEND STREQUAL "partial-lab-prototype" OR
++   NXK_STORAGE_BACKEND STREQUAL "complete-candidate")
++    list(APPEND SOURCE ../class/nxstorage/geometry_owner_adapter.c)
++    set_property(SOURCE ../class/nxstorage/geometry_owner_adapter.c APPEND
++        PROPERTY COMPILE_OPTIONS -include "${CMAKE_CURRENT_SOURCE_DIR}/partmgr.h")
++    add_compile_definitions(SPIRITBOOT_NXSTORAGE_GEOMETRY=1)
++endif()
++
+ list(APPEND PCH_SKIP_SOURCE
+     guid.c)
+ 
+diff --git a/drivers/storage/partmgr/partmgr.c b/drivers/storage/partmgr/partmgr.c
+index 5fef6f35..77b396d2 100644
+--- a/drivers/storage/partmgr/partmgr.c
++++ b/drivers/storage/partmgr/partmgr.c
+@@ -12,6 +12,9 @@
+  */
+ 
+ #include "partmgr.h"
++#ifdef SPIRITBOOT_NXSTORAGE_GEOMETRY
++#include "../class/nxstorage/geometry_owner_adapter.h"
++#endif
+ 
+ 
+ static
+@@ -459,6 +462,7 @@ PartMgrGetDriveLayout(
+     return status;
+ }
+ 
++#ifndef SPIRITBOOT_NXSTORAGE_GEOMETRY
+ static
+ CODE_SEG("PAGE")
+ NTSTATUS
+@@ -521,6 +525,8 @@ FdoIoctlDiskGetDriveGeometryEx(
+ 
+     return status;
+ }
++#endif
++
+ 
+ static
+ CODE_SEG("PAGE")
+@@ -1270,7 +1276,11 @@ PartMgrDeviceControl(
+     switch (ioStack->Parameters.DeviceIoControl.IoControlCode)
+     {
+         case IOCTL_DISK_GET_DRIVE_GEOMETRY_EX:
++#ifdef SPIRITBOOT_NXSTORAGE_GEOMETRY
++            status = NxPartComposeExtendedGeometry(fdoExtension, Irp);
++#else
+             status = FdoIoctlDiskGetDriveGeometryEx(fdoExtension, Irp);
++#endif
+             break;
+ 
+         case IOCTL_DISK_GET_PARTITION_INFO:
+diff --git a/drivers/storage/partmgr/partmgr.h b/drivers/storage/partmgr/partmgr.h
+index 11ded88a..cf23b3dc 100644
+--- a/drivers/storage/partmgr/partmgr.h
++++ b/drivers/storage/partmgr/partmgr.h
+@@ -22,6 +22,7 @@
+ 
+ #define TAG_PARTMGR 'MtrP'
+ 
++#ifndef SPIRITBOOT_NXSTORAGE_GEOMETRY
+ // from disk.sys
+ typedef struct _DISK_GEOMETRY_EX_INTERNAL
+ {
+@@ -30,6 +31,8 @@ typedef struct _DISK_GEOMETRY_EX_INTERNAL
+     DISK_PARTITION_INFO Partition;
+     DISK_DETECTION_INFO Detection;
+ } DISK_GEOMETRY_EX_INTERNAL, *PDISK_GEOMETRY_EX_INTERNAL;
++#endif
++
+ 
+ // Unique ID data for basic (disk partition-based) volumes.
+ // It is stored in the MOUNTDEV_UNIQUE_ID::UniqueId member
+diff --git a/tests/host/nxstorage/check.py b/tests/host/nxstorage/check.py
+index 49075f9a..221e1718 100644
+--- a/tests/host/nxstorage/check.py
++++ b/tests/host/nxstorage/check.py
+@@ -17,6 +17,12 @@ for case, production in (("request_test", "request.c"), ("pthread_ownership_test
+     executable = output / case
+     subprocess.run([cc] + flags + ["-pthread", str(source / production), str(tests / (case + ".c")), "-o", str(executable)], check=True)
+     subprocess.run([str(executable)], check=True, env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1", UBSAN_OPTIONS="halt_on_error=1"))
++adapter_executable = output / "geometry_owner_adapter_test"
++subprocess.run([cc] + flags + ["-I" + str(tests), "-include", str(tests / "geometry_host_platform.h"),
++    str(source / "geometry_owner_adapter.c"), str(source / "geometry_composer.c"),
++    str(tests / "test_geometry_owner_adapter.c"), "-o", str(adapter_executable)], check=True)
++subprocess.run([str(adapter_executable)], check=True, env=dict(os.environ,
++    ASAN_OPTIONS="detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1", UBSAN_OPTIONS="halt_on_error=1"))
+ for production in ("request.c", "geometry_composer.c", "cache_query.c"):
+     obj = output / (production + ".i386.o")
+     target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
+diff --git a/tests/host/nxstorage/geometry_host_platform.h b/tests/host/nxstorage/geometry_host_platform.h
+new file mode 100644
+index 00000000..597246aa
+--- /dev/null
++++ b/tests/host/nxstorage/geometry_host_platform.h
+@@ -0,0 +1,86 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Original semantic host test preamble. This is not a native owner ABI.
++ * Numeric protocol values are required public/approved fact convergence.
++ */
++#ifndef INDEPENDENT_GEOMETRY_HOST_PLATFORM_H
++#define INDEPENDENT_GEOMETRY_HOST_PLATFORM_H
++
++#include <stddef.h>
++#if defined(__i386__)
++#define NTAPI __attribute__((stdcall))
++#define FASTCALL __attribute__((fastcall))
++#else
++#define NTAPI
++#define FASTCALL
++#endif
++
++typedef int NTSTATUS;
++typedef unsigned int ULONG;
++typedef int LONG;
++typedef int KPRIORITY;
++typedef unsigned char BOOLEAN;
++typedef void VOID;
++typedef void *PVOID;
++typedef struct { _Alignas(8) long long QuadPart; } LARGE_INTEGER, *PLARGE_INTEGER;
++typedef enum { NotificationEvent=0, SynchronizationEvent=1 } EVENT_TYPE;
++typedef enum { Executive=0 } KWAIT_REASON;
++typedef enum { KernelMode=0 } KPROCESSOR_MODE;
++typedef struct { unsigned int opaque[4]; } KEVENT, *PKEVENT;
++typedef struct { NTSTATUS Status; size_t Information; } IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
++typedef struct _DEVICE_OBJECT { unsigned char host_identity; } DEVICE_OBJECT, *PDEVICE_OBJECT;
++typedef struct {
++    unsigned int Data1;
++    unsigned short Data2, Data3;
++    unsigned char Data4[8];
++} GUID;
++typedef unsigned int PARTITION_STYLE;
++#define PARTITION_STYLE_MBR 0u
++#define PARTITION_STYLE_GPT 1u
++#define PARTITION_STYLE_RAW 2u
++#define PARTITION_STYLE_BRFR 128u
++typedef struct {
++    LARGE_INTEGER Cylinders;
++    unsigned int MediaType;
++    unsigned int TracksPerCylinder;
++    unsigned int SectorsPerTrack;
++    unsigned int BytesPerSector;
++} DISK_GEOMETRY;
++typedef struct _IO_STACK_LOCATION {
++    struct {
++        struct { ULONG OutputBufferLength, InputBufferLength, IoControlCode; } DeviceIoControl;
++    } Parameters;
++} IO_STACK_LOCATION, *PIO_STACK_LOCATION;
++typedef struct _IRP {
++    IO_STATUS_BLOCK IoStatus;
++    struct { void *SystemBuffer; } AssociatedIrp;
++    struct { struct { PIO_STACK_LOCATION CurrentStackLocation; } Overlay; } Tail;
++} IRP, *PIRP;
++typedef struct _HOST_LAYOUT { unsigned int identity; } HOST_LAYOUT;
++typedef struct _FDO_EXTENSION {
++    PDEVICE_OBJECT LowerDevice;
++    KEVENT SyncEvent;
++    BOOLEAN LayoutValid;
++    HOST_LAYOUT *LayoutCache;
++    struct {
++        _Alignas(8) unsigned long long DiskSize;
++        unsigned int BytesPerSector;
++        PARTITION_STYLE PartitionStyle;
++        union {
++            struct { unsigned int Signature; } Mbr;
++            struct { GUID DiskId; } Gpt;
++        };
++    } DiskData;
++} FDO_EXTENSION, *PFDO_EXTENSION;
++
++#define IOCTL_DISK_GET_DRIVE_GEOMETRY 458752u
++#define IOCTL_DISK_GET_DRIVE_GEOMETRY_EX 458912u
++#define STATUS_SUCCESS ((NTSTATUS)0x00000000u)
++#define STATUS_PENDING ((NTSTATUS)0x00000103u)
++#define STATUS_BUFFER_TOO_SMALL ((NTSTATUS)0xc0000023u)
++#define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xc000009au)
++#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000du)
++#define STATUS_INVALID_DEVICE_REQUEST ((NTSTATUS)0xc0000010u)
++#define STATUS_INFO_LENGTH_MISMATCH ((NTSTATUS)0xc0000004u)
++#define STATUS_UNRECOGNIZED_MEDIA ((NTSTATUS)0xc0000014u)
++
++#endif
+diff --git a/tests/host/nxstorage/test_geometry_owner_adapter.c b/tests/host/nxstorage/test_geometry_owner_adapter.c
+new file mode 100644
+index 00000000..d62a1f29
+--- /dev/null
++++ b/tests/host/nxstorage/test_geometry_owner_adapter.c
+@@ -0,0 +1,502 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "geometry_owner_adapter.h"
++#include "geometry_kernel_api.h"
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++static unsigned checks, failures;
++#define CHECK(expr) do { ++checks; if (!(expr)) { \
++    fprintf(stderr, "FAIL %s:%d: %s\n", __func__, __LINE__, #expr); ++failures; \
++} } while (0)
++
++static const unsigned char basic[24] = {
++    7,0,0,0,0,0,0,0, 12,0,0,0,3,0,0,0, 11,0,0,0,0,2,0,0
++};
++static const unsigned char expected_full[112] = {
++    7,0,0,0,0,0,0,0, 12,0,0,0,3,0,0,0, 11,0,0,0,0,2,0,0,
++    0,0,16,0,0,0,0,0,
++    24,0,0,0,0,0,0,0, 0x58,0x42,0x4f,0x58,0,0,0,0, 0,0,0,0,0,0,0,0,
++    56
++};
++
++struct fixture {
++    FDO_EXTENSION owner;
++    PFDO_EXTENSION queried_owner;
++    DEVICE_OBJECT lower;
++    HOST_LAYOUT *owned_cache;
++    IRP upper;
++    PIRP active_upper;
++    IO_STACK_LOCATION stack;
++    unsigned char storage[258];
++    NTSTATUS submission, terminal, owner_wait_status;
++    size_t returned;
++    int allocation_failure, write_status, write_geometry, poison_geometry;
++    int mutate_owner, inline_pending, transient_wait_fault, free_upper;
++    unsigned builds, calls, owner_waits, releases, lower_waits;
++    unsigned allocations, disposals, illegal_frees, completions;
++    int layout_held, lower_finished;
++    void *lower_output;
++    PKEVENT lower_event;
++    PIO_STATUS_BLOCK lower_iosb;
++    PIRP child;
++    NTSTATUS completed_status;
++    size_t completed_information;
++};
++static struct fixture *active;
++
++static void setup(struct fixture *f, ULONG output_bytes)
++{
++    memset(f, 0, sizeof(*f));
++    memset(f->storage, 0xa5, sizeof(f->storage));
++    f->owned_cache = malloc(sizeof(*f->owned_cache));
++    CHECK(f->owned_cache != NULL);
++    f->owner.LowerDevice = &f->lower;
++    f->owner.LayoutValid = 1;
++    f->owner.LayoutCache = f->owned_cache;
++    f->owner.DiskData.DiskSize = 1048576;
++    f->owner.DiskData.BytesPerSector = 512;
++    f->owner.DiskData.PartitionStyle = PARTITION_STYLE_MBR;
++    f->owner.DiskData.Mbr.Signature = 0x584f4258u;
++    f->queried_owner = &f->owner;
++    f->upper.IoStatus.Status = STATUS_PENDING;
++    f->upper.IoStatus.Information = 999;
++    f->upper.AssociatedIrp.SystemBuffer = f->storage + 1;
++    f->upper.Tail.Overlay.CurrentStackLocation = &f->stack;
++    f->active_upper = &f->upper;
++    f->stack.Parameters.DeviceIoControl.OutputBufferLength = output_bytes;
++    f->stack.Parameters.DeviceIoControl.IoControlCode = IOCTL_DISK_GET_DRIVE_GEOMETRY_EX;
++    f->returned = 24;
++    f->write_status = f->write_geometry = 1;
++    active = f;
++}
++
++static void cleanup(struct fixture *f)
++{
++    CHECK(f->layout_held == 0);
++    CHECK(f->allocations == f->disposals);
++    CHECK(f->illegal_frees == 0);
++    CHECK(f->child == NULL);
++    free(f->owned_cache);
++}
++
++static void complete_lower(void)
++{
++    unsigned char *output = active->lower_output;
++    CHECK(active->layout_held == 0);
++    if (active->mutate_owner) {
++        /* Legitimate owner cache replacement occurs while the query is unlocked.
++         * The adapter must have retained only scalar values, never this pointer. */
++        free(active->owned_cache);
++        active->owned_cache = NULL;
++        active->queried_owner->LayoutCache = NULL;
++        active->queried_owner->LayoutValid = 0;
++        active->queried_owner->DiskData.DiskSize = 2097152;
++        active->queried_owner->DiskData.BytesPerSector = 4096;
++        active->queried_owner->DiskData.PartitionStyle = PARTITION_STYLE_GPT;
++        memset(&active->queried_owner->DiskData.Gpt.DiskId, 0xe3, sizeof(GUID));
++    }
++    if (active->poison_geometry) memset(output, 0xa5, 24);
++    else if (active->write_geometry) memcpy(output, basic, 24);
++    if (active->write_status) active->lower_iosb->Status = active->terminal;
++    active->lower_iosb->Information = active->returned;
++    active->lower_finished = 1;
++    /* Synchronous builder completion disposes its own child. No adapter
++     * pointer access after dispatch/completion can rely on this allocation. */
++    free(active->child);
++    active->child = NULL;
++    ++active->disposals;
++}
++
++PIRP NTAPI IoBuildDeviceIoControlRequest(ULONG code, PDEVICE_OBJECT device,
++    PVOID input, ULONG input_bytes, PVOID output, ULONG output_bytes,
++    BOOLEAN internal, PKEVENT event, PIO_STATUS_BLOCK status)
++{
++    unsigned index;
++    ++active->builds;
++    CHECK(code == 458752u);
++    CHECK(device == &active->lower);
++    CHECK(input == NULL && input_bytes == 0 && internal == 0);
++    CHECK(output != NULL && output_bytes == 24);
++    CHECK(output != active->active_upper->AssociatedIrp.SystemBuffer);
++    CHECK(event == active->lower_event);
++    CHECK(status->Status == STATUS_PENDING && status->Information == 0);
++    CHECK(active->layout_held == 0);
++    for (index = 0; index < 24; ++index) CHECK(((unsigned char *)output)[index] == 0);
++    if (active->allocation_failure) return NULL;
++    active->lower_output = output;
++    active->lower_iosb = status;
++    active->child = malloc(sizeof(IRP));
++    CHECK(active->child != NULL);
++    ++active->allocations;
++    return active->child;
++}
++
++VOID NTAPI KeInitializeEvent(PKEVENT event, EVENT_TYPE type, BOOLEAN signaled)
++{
++    CHECK(type == NotificationEvent && signaled == 0);
++    CHECK(event != &active->queried_owner->SyncEvent);
++    active->lower_event = event;
++}
++
++LONG NTAPI KeSetEvent(PKEVENT event, KPRIORITY increment, BOOLEAN wait)
++{
++    CHECK(event == &active->queried_owner->SyncEvent);
++    CHECK(increment == 0 && wait == 0);
++    CHECK(active->layout_held == 1);
++    active->layout_held = 0;
++    ++active->releases;
++    return 0;
++}
++
++NTSTATUS NTAPI KeWaitForSingleObject(PVOID object, KWAIT_REASON reason,
++    KPROCESSOR_MODE mode, BOOLEAN alertable, PLARGE_INTEGER timeout)
++{
++    CHECK(reason == Executive && mode == KernelMode && alertable == 0 && timeout == NULL);
++    if (object == &active->queried_owner->SyncEvent) {
++        ++active->owner_waits;
++        CHECK(active->layout_held == 0);
++        if (active->owner_wait_status != STATUS_SUCCESS) return active->owner_wait_status;
++        active->layout_held = 1;
++        return STATUS_SUCCESS;
++    }
++    CHECK(object == active->lower_event);
++    CHECK(active->layout_held == 0);
++    ++active->lower_waits;
++    if (active->transient_wait_fault && active->lower_waits == 1) return STATUS_INVALID_PARAMETER;
++    if (!active->lower_finished) complete_lower();
++    return STATUS_SUCCESS;
++}
++
++NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT device, PIRP child)
++{
++    ++active->calls;
++    CHECK(device == &active->lower && child == active->child);
++    CHECK(active->layout_held == 0);
++    if (active->submission != STATUS_PENDING || active->inline_pending) complete_lower();
++    return active->submission;
++}
++
++/* Ownership spies: a completed synchronous child is already freed above.
++ * These forbidden API calls must never be made by the actual adapter. */
++VOID NTAPI IoFreeIrp(PIRP packet)
++{
++    (void)packet;
++    ++active->illegal_frees;
++}
++
++VOID FASTCALL IofCompleteRequest(PIRP packet, signed char increment)
++{
++    CHECK(packet == active->active_upper && increment == 0);
++    ++active->completions;
++    active->completed_status = packet->IoStatus.Status;
++    active->completed_information = packet->IoStatus.Information;
++    if (active->free_upper) free(packet);
++}
++
++static NTSTATUS enclosing_dispatch(struct fixture *f, PFDO_EXTENSION owner)
++{
++    if (owner) f->queried_owner = owner;
++    NTSTATUS status = NxPartComposeExtendedGeometry(owner, f->active_upper);
++    CHECK(f->active_upper->IoStatus.Status == STATUS_PENDING);
++    CHECK(f->completions == 0); /* Return precedes enclosing completion. */
++    f->active_upper->IoStatus.Status = status;
++    IofCompleteRequest(f->active_upper, 0);
++    CHECK(f->completions == 1);
++    return status; /* No upper access: the completion may have freed it. */
++}
++
++static void expect_failure(struct fixture *f, NTSTATUS expected)
++{
++    unsigned char prior[258];
++    memcpy(prior, f->storage, sizeof(prior));
++    CHECK(enclosing_dispatch(f, &f->owner) == expected);
++    CHECK(f->completed_information == 0);
++    CHECK(memcmp(prior, f->storage, sizeof(prior)) == 0);
++    cleanup(f);
++}
++
++/* Catch wrong byte counts/partial identities, stale padding and overruns. */
++static void test_every_output_capacity(void)
++{
++    ULONG length;
++    for (length = 0; length <= 256; ++length) {
++        struct fixture f;
++        size_t byte, count;
++        setup(&f, length);
++        CHECK(enclosing_dispatch(&f, &f.owner) ==
++              (length < 32 ? STATUS_BUFFER_TOO_SMALL : STATUS_SUCCESS));
++        count = f.completed_information;
++        if (length < 32) CHECK(count == 0);
++        else if (length < 112) CHECK(count == length);
++        else CHECK(count == 112);
++        CHECK(count <= length);
++        CHECK(f.storage[0] == 0xa5 && f.storage[257] == 0xa5);
++        if (length >= 32) CHECK(memcmp(f.storage + 1, expected_full, 32) == 0);
++        if (length >= 56) CHECK(memcmp(f.storage + 33, expected_full + 32, 24) == 0);
++        if (length >= 112) CHECK(memcmp(f.storage + 57, expected_full + 56, 56) == 0);
++        if (length >= 32 && length < 56)
++            for (byte = 32; byte < length; ++byte) CHECK(f.storage[byte + 1] == 0);
++        if (length >= 56 && length < 112)
++            for (byte = 56; byte < length; ++byte) CHECK(f.storage[byte + 1] == 0);
++        for (byte = count; byte < 256; ++byte) CHECK(f.storage[byte + 1] == 0xa5);
++        CHECK(f.builds == (length < 32 ? 0u : 1u));
++        CHECK(f.calls == f.builds);
++        CHECK(f.owner_waits == f.builds && f.releases == f.builds);
++        CHECK(f.lower_waits == 0);
++        cleanup(&f);
++    }
++}
++
++/* Catch lost pending completion, terminal-vs-submission failure and reuse
++ * of disposed synchronous children. */
++static void test_submission_and_terminal_status(void)
++{
++    const NTSTATUS submissions[] = {
++        STATUS_SUCCESS, STATUS_PENDING, STATUS_INVALID_PARAMETER, STATUS_PENDING,
++        STATUS_SUCCESS, STATUS_INVALID_PARAMETER, STATUS_SUCCESS, STATUS_SUCCESS
++    };
++    const NTSTATUS terminals[] = {
++        STATUS_SUCCESS, STATUS_SUCCESS, STATUS_UNRECOGNIZED_MEDIA,
++        STATUS_UNRECOGNIZED_MEDIA, STATUS_INVALID_PARAMETER, STATUS_SUCCESS,
++        STATUS_PENDING, (NTSTATUS)1
++    };
++    const NTSTATUS expected[] = {
++        STATUS_SUCCESS, STATUS_SUCCESS, STATUS_UNRECOGNIZED_MEDIA,
++        STATUS_UNRECOGNIZED_MEDIA, STATUS_INVALID_PARAMETER, STATUS_INVALID_PARAMETER,
++        STATUS_INVALID_DEVICE_REQUEST, STATUS_INVALID_DEVICE_REQUEST
++    };
++    unsigned index;
++    for (index = 0; index < 8; ++index) {
++        struct fixture f;
++        setup(&f, 112);
++        f.submission = submissions[index];
++        f.terminal = terminals[index];
++        CHECK(enclosing_dispatch(&f, &f.owner) == expected[index]);
++        CHECK(f.completed_information == (expected[index] == STATUS_SUCCESS ? 112u : 0u));
++        CHECK(f.lower_waits == (submissions[index] == STATUS_PENDING ? 1u : 0u));
++        if (expected[index] != STATUS_SUCCESS) CHECK(f.storage[1] == 0xa5);
++        cleanup(&f);
++    }
++}
++
++/* Catch accepting stale IOSB status or successful dispatch as terminal proof. */
++static void test_unwritten_terminal_status(void)
++{
++    struct fixture f;
++    setup(&f, 112);
++    f.write_status = 0;
++    expect_failure(&f, STATUS_INVALID_DEVICE_REQUEST);
++}
++
++/* Catch short/overreported lower output even if geometry looks valid. */
++static void test_lower_count_faults(void)
++{
++    const size_t counts[] = { 0, 1, 23, 25, (size_t)-1 };
++    unsigned index;
++    for (index = 0; index < 5; ++index) {
++        struct fixture f;
++        setup(&f, 112);
++        f.returned = counts[index];
++        expect_failure(&f, STATUS_INFO_LENGTH_MISMATCH);
++    }
++}
++
++/* Catch synthesizing lower geometry from cache or reading old stack bytes. */
++static void test_no_write_and_poison_geometry(void)
++{
++    struct fixture f;
++    setup(&f, 112);
++    f.write_geometry = 0;
++    expect_failure(&f, STATUS_UNRECOGNIZED_MEDIA);
++    setup(&f, 112);
++    f.poison_geometry = 1;
++    expect_failure(&f, STATUS_UNRECOGNIZED_MEDIA);
++}
++
++/* Catch accepting invalid owner state or submitting while ownership is held. */
++static void test_invalid_owner_snapshots(void)
++{
++    unsigned index;
++    for (index = 0; index < 8; ++index) {
++        struct fixture f;
++        setup(&f, 112);
++        switch (index) {
++        case 0: f.owner.LayoutValid = 0; break;
++        case 1: f.owner.LayoutCache = NULL; break;
++        case 2: f.owner.LowerDevice = NULL; break;
++        case 3: f.owner.DiskData.DiskSize = 0; break;
++        case 4: f.owner.DiskData.DiskSize = 0xffffffffffffffffull; break;
++        case 5: f.owner.DiskData.DiskSize = 1048577; break;
++        case 6: f.owner.DiskData.BytesPerSector = 0; break;
++        case 7: f.owner.DiskData.PartitionStyle = 99; break;
++        }
++        expect_failure(&f, STATUS_INVALID_DEVICE_REQUEST);
++        CHECK(f.builds == 0 && f.calls == 0);
++        CHECK(f.owner_waits == 1 && f.releases == 1);
++    }
++}
++
++/* Catch losing the signature/checksum policy or wrong union interpretation. */
++static void test_gpt_raw_and_brfr(void)
++{
++    const unsigned styles[] = { 1, 2, 128 };
++    const unsigned char partitions[3][24] = {
++        {24,0,0,0,1,0,0,0, 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16},
++        {24,0,0,0,2}, {24,0,0,0,128}
++    };
++    unsigned index;
++    for (index = 0; index < 3; ++index) {
++        struct fixture f;
++        setup(&f, 112);
++        f.owner.DiskData.PartitionStyle = styles[index];
++        memcpy(&f.owner.DiskData.Gpt.DiskId, partitions[0] + 8, 16);
++        CHECK(enclosing_dispatch(&f, &f.owner) == STATUS_SUCCESS);
++        CHECK(memcmp(f.storage + 33, partitions[index], 24) == 0);
++        cleanup(&f);
++    }
++}
++
++/* Catch silently accepting a disagreement in refreshed sector metadata. */
++static void test_owner_sector_mismatch(void)
++{
++    struct fixture f;
++    setup(&f, 112);
++    f.owner.DiskData.BytesPerSector = 4096;
++    expect_failure(&f, STATUS_UNRECOGNIZED_MEDIA);
++}
++
++/* Catch lock/cache-pointer borrowing or rereading changed owner metadata. */
++static void test_snapshot_mutation_during_query(void)
++{
++    unsigned pending;
++    for (pending = 0; pending < 2; ++pending) {
++        struct fixture f;
++        setup(&f, 112);
++        f.submission = pending ? STATUS_PENDING : STATUS_SUCCESS;
++        f.mutate_owner = 1;
++        CHECK(enclosing_dispatch(&f, &f.owner) == STATUS_SUCCESS);
++        CHECK(memcmp(f.storage + 1, expected_full, 112) == 0);
++        CHECK(f.owner.LayoutValid == 0 && f.owner.LayoutCache == NULL);
++        cleanup(&f);
++    }
++}
++
++/* Catch output mutation before copying aliased owner scalars. */
++static void test_owner_output_alias(void)
++{
++    union { FDO_EXTENSION owner; unsigned char writable[256]; } shared;
++    struct fixture f;
++    setup(&f, 112);
++    shared.owner = f.owner;
++    f.active_upper->AssociatedIrp.SystemBuffer = shared.writable;
++    CHECK(enclosing_dispatch(&f, &shared.owner) == STATUS_SUCCESS);
++    CHECK(memcmp(shared.writable, expected_full, 112) == 0);
++    cleanup(&f);
++}
++
++/* Catch null-argument dereferences and upper completion inside the adapter. */
++static void test_missing_arguments(void)
++{
++    struct fixture f;
++    setup(&f, 112);
++    CHECK(enclosing_dispatch(&f, NULL) == STATUS_INVALID_PARAMETER);
++    CHECK(f.completed_information == 0 && f.builds == 0);
++    cleanup(&f);
++    setup(&f, 112);
++    f.upper.AssociatedIrp.SystemBuffer = NULL;
++    expect_failure(&f, STATUS_INVALID_PARAMETER);
++    setup(&f, 112);
++    f.upper.Tail.Overlay.CurrentStackLocation = NULL;
++    expect_failure(&f, STATUS_INVALID_PARAMETER);
++    setup(&f, 112);
++    CHECK(NxPartComposeExtendedGeometry(&f.owner, NULL) == STATUS_INVALID_PARAMETER);
++    CHECK(f.completions == 0 && f.builds == 0);
++    cleanup(&f);
++}
++
++/* Catch allocation failure becoming successful stale data or leaking a lock. */
++static void test_builder_allocation_failure(void)
++{
++    struct fixture f;
++    setup(&f, 112);
++    f.allocation_failure = 1;
++    expect_failure(&f, STATUS_INSUFFICIENT_RESOURCES);
++    CHECK(f.builds == 1 && f.calls == 0 && f.allocations == 0);
++}
++
++/* Catch releasing an unacquired owner event or ignoring a failed wait. */
++static void test_owner_wait_failure(void)
++{
++    struct fixture f;
++    setup(&f, 112);
++    f.owner_wait_status = STATUS_INVALID_PARAMETER;
++    expect_failure(&f, STATUS_INVALID_PARAMETER);
++    CHECK(f.owner_waits == 1 && f.releases == 0 && f.builds == 0);
++}
++
++/* Catch abandoning stack-resident child output/IOSB on a transient wait fault. */
++static void test_completion_wait_retry(void)
++{
++    struct fixture f;
++    setup(&f, 112);
++    f.submission = STATUS_PENDING;
++    f.transient_wait_fault = 1;
++    CHECK(enclosing_dispatch(&f, &f.owner) == STATUS_SUCCESS);
++    CHECK(f.lower_waits == 2 && f.disposals == 1);
++    CHECK(memcmp(f.storage + 1, expected_full, 112) == 0);
++    cleanup(&f);
++}
++
++/* Catch dereferencing a child disposed inline before a pending return. */
++static void test_inline_completion_with_pending_return(void)
++{
++    struct fixture f;
++    setup(&f, 112);
++    f.submission = STATUS_PENDING;
++    f.inline_pending = 1;
++    CHECK(enclosing_dispatch(&f, &f.owner) == STATUS_SUCCESS);
++    CHECK(f.lower_waits == 1 && f.disposals == 1);
++    cleanup(&f);
++}
++
++/* Catch adapter-side parent completion/freeing; enclosing completion may
++ * release the upper allocation immediately after the adapter returns. */
++static void test_enclosing_completion_frees_upper(void)
++{
++    struct fixture f;
++    setup(&f, 112);
++    f.active_upper = malloc(sizeof(IRP));
++    CHECK(f.active_upper != NULL);
++    *f.active_upper = f.upper;
++    f.free_upper = 1;
++    CHECK(enclosing_dispatch(&f, &f.owner) == STATUS_SUCCESS);
++    CHECK(f.completed_information == 112 && f.completions == 1);
++    cleanup(&f);
++}
++
++int main(void)
++{
++    test_every_output_capacity();
++    test_submission_and_terminal_status();
++    test_unwritten_terminal_status();
++    test_lower_count_faults();
++    test_no_write_and_poison_geometry();
++    test_invalid_owner_snapshots();
++    test_gpt_raw_and_brfr();
++    test_owner_sector_mismatch();
++    test_snapshot_mutation_during_query();
++    test_owner_output_alias();
++    test_missing_arguments();
++    test_builder_allocation_failure();
++    test_owner_wait_failure();
++    test_completion_wait_retry();
++    test_inline_completion_with_pending_return();
++    test_enclosing_completion_frees_upper();
++    if (failures) {
++        fprintf(stderr, "%u failed assertions / %u checks\n", failures, checks);
++        return EXIT_FAILURE;
++    }
++    printf("PASS: 16 adapter scenarios, %u checks\n", checks);
++    return EXIT_SUCCESS;
++}

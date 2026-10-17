@@ -1,0 +1,783 @@
+diff --git a/drivers/filesystems/xdvdfs/xdvdfs.c b/drivers/filesystems/xdvdfs/xdvdfs.c
+index 94da5e7bba..855d5e1018 100644
+--- a/drivers/filesystems/xdvdfs/xdvdfs.c
++++ b/drivers/filesystems/xdvdfs/xdvdfs.c
+@@ -125,6 +125,9 @@ typedef struct _XDVD_VCB
+     PVPB               Vpb;
+     ULONG              RootSector;
+     ULONG              RootSize;               /* bytes                       */
++    ULONGLONG          VolumeFiletime;          /* parsed mounted identity     */
++    ULONGLONG          DescriptorFingerprint;   /* full-sector identity fingerprint */
++    ULONG              MediaChangeCount;       /* lower device generation     */
+     LONG               OpenCount;
+     BOOLEAN            Mounted;
+ } XDVD_VCB, *PXDVD_VCB;
+@@ -410,6 +413,125 @@ XdvdTargetRead(_In_ PDEVICE_OBJECT Target,
+     return status;
+ }
+ 
++/* Ask the lower optical stack to refresh its media generation.  The native
++ * adapter completes this from TEST UNIT READY and returns its generation in
++ * the optional ULONG output. */
++static NTSTATUS
++XdvdTargetControl(_In_ PDEVICE_OBJECT Target,
++                  _In_ ULONG Code,
++                  _Out_writes_bytes_(OutputLength) PVOID Output,
++                  _In_ ULONG OutputLength,
++                  _Out_opt_ PULONG BytesReturned)
++{
++    KEVENT event;
++    PIRP irp;
++    PIO_STACK_LOCATION next;
++    IO_STATUS_BLOCK iosb;
++    NTSTATUS status;
++
++    KeInitializeEvent(&event, NotificationEvent, FALSE);
++    irp = IoBuildDeviceIoControlRequest(Code, Target, NULL, 0, Output,
++                                        OutputLength, FALSE, &event, &iosb);
++    if (irp == NULL)
++        return STATUS_INSUFFICIENT_RESOURCES;
++    next = IoGetNextIrpStackLocation(irp);
++    next->Flags |= SL_OVERRIDE_VERIFY_VOLUME;
++    status = IoCallDriver(Target, irp);
++    if (status == STATUS_PENDING)
++    {
++        KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
++        status = iosb.Status;
++    }
++    if (BytesReturned != NULL)
++        *BytesReturned = (ULONG)iosb.Information;
++    return status;
++}
++
++static ULONGLONG
++XdvdFingerprintDescriptor(_In_ PXDVD_VOLUME_DESCRIPTOR Descriptor)
++{
++    const UCHAR *bytes = (const UCHAR *)Descriptor;
++    ULONGLONG hash = 14695981039346656037ULL;
++    ULONG index;
++
++    for (index = 0; index < XDVD_SECTOR_SIZE; ++index)
++    {
++        hash ^= bytes[index];
++        hash *= 1099511628211ULL;
++    }
++    return hash;
++}
++
++static BOOLEAN
++XdvdDescriptorMatches(_In_ PXDVD_VCB Vcb,
++                      _In_ PXDVD_VOLUME_DESCRIPTOR Descriptor)
++{
++    return RtlCompareMemory(Descriptor->Magic0, XDVD_VOLUME_MAGIC,
++                            XDVD_VOLUME_MAGIC_LEN) == XDVD_VOLUME_MAGIC_LEN &&
++           RtlCompareMemory(Descriptor->Magic1, XDVD_VOLUME_MAGIC,
++                            XDVD_VOLUME_MAGIC_LEN) == XDVD_VOLUME_MAGIC_LEN &&
++           Descriptor->RootTableSector == Vcb->RootSector &&
++           Descriptor->RootTableSize == Vcb->RootSize &&
++           Descriptor->Filetime == Vcb->VolumeFiletime &&
++           XdvdFingerprintDescriptor(Descriptor) == Vcb->DescriptorFingerprint;
++}
++
++static NTSTATUS
++XdvdVerifyVolume(_In_ PDEVICE_OBJECT DeviceObject,
++                 _In_ PIO_STACK_LOCATION IrpSp)
++{
++    PXDVD_VCB vcb = (PXDVD_VCB)DeviceObject->DeviceExtension;
++    PXDVD_VOLUME_DESCRIPTOR descriptor;
++    NTSTATUS status;
++    ULONG mediaChange = 0, returned = 0, got = 0;
++    BOOLEAN same;
++
++    if (vcb == NULL || !vcb->Mounted || vcb->TargetDevice == NULL ||
++        IrpSp->Parameters.VerifyVolume.Vpb != vcb->Vpb)
++        return STATUS_WRONG_VOLUME;
++
++    status = XdvdTargetControl(vcb->TargetDevice, IOCTL_CDROM_CHECK_VERIFY,
++                               &mediaChange, sizeof(mediaChange), &returned);
++    if (!NT_SUCCESS(status) && status != STATUS_VERIFY_REQUIRED)
++    {
++        if (status == STATUS_INSUFFICIENT_RESOURCES)
++            return status;
++        vcb->Mounted = FALSE;
++        return STATUS_WRONG_VOLUME;
++    }
++
++    /* A nonzero unchanged generation proves that the lower stack still owns
++     * the mounted medium; avoid an otherwise unnecessary descriptor read. */
++    if (returned >= sizeof(mediaChange) && mediaChange != 0 &&
++        mediaChange == vcb->MediaChangeCount)
++    {
++        if (vcb->Vpb != NULL && vcb->Vpb->RealDevice != NULL)
++            vcb->Vpb->RealDevice->Flags &= ~DO_VERIFY_VOLUME;
++        return STATUS_SUCCESS;
++    }
++
++    descriptor = ExAllocatePoolWithTag(NonPagedPool, XDVD_SECTOR_SIZE, XDVD_TAG);
++    if (descriptor == NULL)
++        return STATUS_INSUFFICIENT_RESOURCES;
++    status = XdvdTargetRead(vcb->TargetDevice,
++                           (ULONGLONG)XDVD_VOLUME_DESCRIPTOR_LBA << XDVD_SECTOR_SHIFT,
++                           XDVD_SECTOR_SIZE, descriptor, &got);
++    same = NT_SUCCESS(status) && got == XDVD_SECTOR_SIZE &&
++           XdvdDescriptorMatches(vcb, descriptor);
++    ExFreePoolWithTag(descriptor, XDVD_TAG);
++
++    if (!same)
++    {
++        vcb->Mounted = FALSE;
++        return status == STATUS_INSUFFICIENT_RESOURCES ? status : STATUS_WRONG_VOLUME;
++    }
++    if (returned >= sizeof(mediaChange))
++        vcb->MediaChangeCount = mediaChange;
++    if (vcb->Vpb != NULL && vcb->Vpb->RealDevice != NULL)
++        vcb->Vpb->RealDevice->Flags &= ~DO_VERIFY_VOLUME;
++    return STATUS_SUCCESS;
++}
++
+ /* --- dirent walk --------------------------------------------------------- */
+ 
+ /*
+@@ -726,6 +848,12 @@ XdvdMountVolume(_In_ PIO_STACK_LOCATION IrpSp)
+     vcb->Vpb = vpb;
+     vcb->RootSector = vd->RootTableSector;
+     vcb->RootSize = vd->RootTableSize;
++    vcb->VolumeFiletime = vd->Filetime;
++    vcb->DescriptorFingerprint = XdvdFingerprintDescriptor(vd);
++    /* Establish the generation lazily on the first verify.  Issuing TEST UNIT
++     * READY here perturbs the title's cold-load command stream before its
++     * first descriptor read; descriptor identity already proves this mount. */
++    vcb->MediaChangeCount = 0;
+     vcb->Mounted = TRUE;
+ 
+     /* Link the volume device through the VPB.  IopMountInitializeVpb (the
+@@ -995,6 +1123,8 @@ XdvdDispatchRead(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp)
+     fcb = (PXDVD_FCB)fo->FsContext;
+     if (fcb == NULL || fcb->Vcb == NULL || fcb->IsDirectory)
+         return XdvdCompleteRequest(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
++    if (!fcb->Vcb->Mounted)
++        return XdvdCompleteRequest(Irp, STATUS_VOLUME_DISMOUNTED, 0);
+ 
+     if (NxkExperimentalFlags & NXK_EXPERIMENT_XDVDFS_ASYNC)
+     {
+@@ -1048,7 +1178,9 @@ XdvdDispatchRead(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp)
+ static NTSTATUS NTAPI
+ XdvdDispatchWrite(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp)
+ {
+-    UNREFERENCED_PARAMETER(DeviceObject);
++    PXDVD_VCB vcb = (PXDVD_VCB)DeviceObject->DeviceExtension;
++    if (vcb == NULL || !vcb->Mounted)
++        return XdvdCompleteRequest(Irp, STATUS_VOLUME_DISMOUNTED, 0);
+     return XdvdCompleteRequest(Irp, STATUS_MEDIA_WRITE_PROTECTED, 0);
+ }
+ 
+@@ -1071,6 +1203,8 @@ XdvdDispatchQueryInformation(_In_ PDEVICE_OBJECT DeviceObject,
+ 
+     if (fcb == NULL)
+         return XdvdCompleteRequest(Irp, STATUS_INVALID_PARAMETER, 0);
++    if (fcb->Vcb == NULL || !fcb->Vcb->Mounted)
++        return XdvdCompleteRequest(Irp, STATUS_VOLUME_DISMOUNTED, 0);
+ 
+     RtlZeroMemory(buf, bufLen);
+ 
+@@ -1156,10 +1290,14 @@ XdvdDispatchSetInformation(_In_ PDEVICE_OBJECT DeviceObject,
+ {
+     PIO_STACK_LOCATION sp = IoGetCurrentIrpStackLocation(Irp);
+     PFILE_OBJECT fo = sp->FileObject;
++    PXDVD_FCB fcb = (PXDVD_FCB)fo->FsContext;
+     ULONG cls = sp->Parameters.SetFile.FileInformationClass;
+ 
+     UNREFERENCED_PARAMETER(DeviceObject);
+ 
++    if (fcb == NULL || fcb->Vcb == NULL || !fcb->Vcb->Mounted)
++        return XdvdCompleteRequest(Irp, STATUS_VOLUME_DISMOUNTED, 0);
++
+     /* Allow position updates -- they don't mutate the volume. */
+     if (cls == FilePositionInformation)
+     {
+@@ -1393,6 +1531,8 @@ XdvdDispatchDirectoryControl(_In_ PDEVICE_OBJECT DeviceObject,
+ 
+     if (fcb == NULL || !fcb->IsDirectory)
+         return XdvdCompleteRequest(Irp, STATUS_INVALID_PARAMETER, 0);
++    if (fcb->Vcb == NULL || !fcb->Vcb->Mounted)
++        return XdvdCompleteRequest(Irp, STATUS_VOLUME_DISMOUNTED, 0);
+ 
+     cls = sp->Parameters.QueryDirectory.FileInformationClass;
+     flags = sp->Flags;
+@@ -1606,8 +1746,6 @@ XdvdDispatchFileSystemControl(_In_ PDEVICE_OBJECT DeviceObject,
+     PIO_STACK_LOCATION sp = IoGetCurrentIrpStackLocation(Irp);
+     NTSTATUS status;
+ 
+-    UNREFERENCED_PARAMETER(DeviceObject);
+-
+     if (sp->MinorFunction == IRP_MN_MOUNT_VOLUME)
+     {
+         status = XdvdMountVolume(sp);
+@@ -1616,8 +1754,8 @@ XdvdDispatchFileSystemControl(_In_ PDEVICE_OBJECT DeviceObject,
+ 
+     if (sp->MinorFunction == IRP_MN_VERIFY_VOLUME)
+     {
+-        /* No media-change tracking yet; report the disc is still valid. */
+-        return XdvdCompleteRequest(Irp, STATUS_SUCCESS, 0);
++        status = XdvdVerifyVolume(DeviceObject, sp);
++        return XdvdCompleteRequest(Irp, status, 0);
+     }
+ 
+     return XdvdCompleteRequest(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index 19415b681e..94282b9b2d 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -940,7 +940,7 @@ NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device,PIRP irp)
+     NX_NATIVE_ADAPTER *adapter;
+     NX_NATIVE_ENVELOPE *envelope=NULL;
+     PIO_STACK_LOCATION stack;
+-    ULONG code,index;
++    ULONG code;
+     KIRQL cancel_irql;
+     nx_packet_command command;
+     NTSTATUS dispatched;
+@@ -985,8 +985,13 @@ NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device,PIRP irp)
+         IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_BUFFER_TOO_SMALL;
+     }
+     port_enter(adapter);
+-    if(!adapter->sealed) for(index=0;index<adapter->count;++index)
+-        if(!adapter->envelopes[index].active){envelope=&adapter->envelopes[index];break;}
++    /* Control and data requests share the child-IRP/envelope pool.  Acquire
++     * both through its single free list so a pending media check cannot leave
++     * the same child visible to a data request or enqueue it twice later. */
++    if(!adapter->sealed && adapter->free_envelopes) {
++        envelope=adapter->free_envelopes;
++        adapter->free_envelopes=envelope->next_free;
++    }
+     if(envelope) {
+         envelope->active=1;envelope->dispatch_active=1;envelope->control_active=1;
+         envelope->parent=irp;envelope->completed=envelope->terminal_ready=0;
+diff --git a/hal/halx86/xbox/reboot.c b/hal/halx86/xbox/reboot.c
+index 5745b73921..4d18424602 100644
+--- a/hal/halx86/xbox/reboot.c
++++ b/hal/halx86/xbox/reboot.c
+@@ -29,6 +29,7 @@ HalpXboxPowerAction(
+     extern VOID NTAPI NxkShutdownNotifications(VOID);
+     extern DECLSPEC_NORETURN VOID NTAPI NxkShutdownAbortPowerRequest(VOID);
+     extern VOID NTAPI NxkMmPublishPersistence(BOOLEAN WarmReset);
++    extern BOOLEAN NTAPI NxkMmTakePersistenceRequest(VOID);
+     /* Normal callbacks may wait/use IO. Bugcheck/debugger/high-IRQL reset
+      * must never acquire their locks: discard the RAM handoff lock-free. */
+     if (KeGetCurrentIrql() != PASSIVE_LEVEL ||
+@@ -47,8 +48,13 @@ HalpXboxPowerAction(
+             KeLeaveCriticalRegion();
+             NxkShutdownAbortPowerRequest();
+         }
++        BOOLEAN preserve;
+         NxkShutdownNotifications();
+-        NxkMmPublishPersistence(Action == SMC_REG_POWER_RESET);
++        /* A hardware reset preserves DRAM, but only an explicitly armed
++         * quick title launch preserves allocator ownership.  Ordinary reboot
++         * and crash recovery invalidate all prior-title persistence. */
++        preserve = NxkMmTakePersistenceRequest();
++        NxkMmPublishPersistence(Action == SMC_REG_POWER_RESET && preserve);
+     }
+ #endif
+     /* Disable interrupts */
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index 7f28325034..e5f6ecde30 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -230,6 +230,8 @@ VOID NxkMmFinishWarmRestore(VOID);
+ VOID NxkMmRetireBootWorkspace(VOID);
+ VOID NxkMmRetireRomPages(VOID);
+ VOID NTAPI NxkMmPublishPersistence(BOOLEAN WarmReset);
++VOID NTAPI NxkMmArmPersistence(VOID);
++BOOLEAN NTAPI NxkMmTakePersistenceRequest(VOID);
+ VOID NxkMmSetPersistentPages(ULONG_PTR Pa, SIZE_T Size, BOOLEAN Persist);
+ VOID NxkMmClearPersistence(ULONG_PTR Pa, ULONG_PTR End);
+ SIZE_T NxkMmQueryRestored(PVOID Alias);
+diff --git a/ntoskrnl/xb/mm/persistence.c b/ntoskrnl/xb/mm/persistence.c
+index 3bbadf50bf..21493743b6 100644
+--- a/ntoskrnl/xb/mm/persistence.c
++++ b/ntoskrnl/xb/mm/persistence.c
+@@ -14,6 +14,20 @@
+ #define PM_LAUNCH_VA (NXK_KSEG0_BASE | 0xE000)
+ static UCHAR PmSelected[PM_BYTES];
+ static UCHAR PmRestored[PM_BYTES];
++/* MmPersistContiguousMemory describes what may cross a title chainload.  It
++ * must not turn every SMC reset into a title-state handoff: ordinary reboot,
++ * crash recovery and media replacement start a new allocation lifetime. */
++static volatile LONG PmPersistenceRequested;
++
++VOID NTAPI NxkMmArmPersistence(VOID)
++{
++    InterlockedExchange(&PmPersistenceRequested, 1);
++}
++
++BOOLEAN NTAPI NxkMmTakePersistenceRequest(VOID)
++{
++    return InterlockedExchange(&PmPersistenceRequested, 0) != 0;
++}
+ 
+ #if XBOX_RAM_MIB == 64
+ static BOOLEAN PmBootCollision(PFN_NUMBER First, PFN_NUMBER Last)
+diff --git a/ntoskrnl/xb/xbe.c b/ntoskrnl/xb/xbe.c
+index e2e12c602b..9cd0aa2edd 100644
+--- a/ntoskrnl/xb/xbe.c
++++ b/ntoskrnl/xb/xbe.c
+@@ -749,6 +749,15 @@ XeHalReturnToFirmware(_In_ XBE_FIRMWARE_REENTRY Routine)
+     if (Routine != XeFwFatalErrorReboot)
+         IoShutdownSystem(1);
+ 
++    /* Arm allocator-state transfer only after a successful quick-launch
++     * flush.  The HAL consumes this one-shot request after shutdown callbacks;
++     * all other reset flavours discard title persistence. */
++    if (Routine == XeFwQuickReboot)
++    {
++        extern VOID NTAPI NxkMmArmPersistence(VOID);
++        NxkMmArmPersistence();
++    }
++
+     HalReturnToFirmware(Action);
+ }
+ 
+diff --git a/tests/host/clean-room/include/ntoskrnl.h b/tests/host/clean-room/include/ntoskrnl.h
+index f80c9abedc..1c566705e4 100644
+--- a/tests/host/clean-room/include/ntoskrnl.h
++++ b/tests/host/clean-room/include/ntoskrnl.h
+@@ -27,6 +27,8 @@ typedef ULONG *PULONG;
+ #define RtlCopyMemory memcpy
+ #define RtlZeroMemory(p,n) memset(p,0,n)
+ #define KeMemoryBarrier() __sync_synchronize()
++static inline LONG InterlockedExchange(volatile LONG *target, LONG value)
++{ return __atomic_exchange_n(target, value, __ATOMIC_SEQ_CST); }
+ typedef struct _LIST_ENTRY { struct _LIST_ENTRY *Flink, *Blink; } LIST_ENTRY, *PLIST_ENTRY;
+ typedef enum { LoaderFree, LoaderFirmwarePermanent, LoaderMemoryData, LoaderSystemCode } TYPE_OF_MEMORY;
+ typedef struct { LIST_ENTRY ListEntry; TYPE_OF_MEMORY MemoryType; PFN_NUMBER BasePage, PageCount; } MEMORY_ALLOCATION_DESCRIPTOR, *PMEMORY_ALLOCATION_DESCRIPTOR;
+diff --git a/tests/host/clean-room/persistence.c b/tests/host/clean-room/persistence.c
+index 9180a2bc40..5008956b7a 100644
+--- a/tests/host/clean-room/persistence.c
++++ b/tests/host/clean-room/persistence.c
+@@ -46,6 +46,10 @@ int main(void)
+     d.MemoryType = LoaderFree; d.BasePage = 0x200; d.PageCount = 0x3C00 - 0x200;
+     PM_HANDOFF *slot = (PM_HANDOFF *)PM_VA;
+     PVOID alias = (void *)(NXK_KSEG0_BASE | 0x2001000);
++    CHECK(!NxkMmTakePersistenceRequest());
++    NxkMmArmPersistence();
++    CHECK(NxkMmTakePersistenceRequest());
++    CHECK(!NxkMmTakePersistenceRequest());
+     reset(); reboot_read(&lb); CHECK(!NxkMmPersistentPage(0x2001));
+     NxkMmSetPersistentPages(0x2001011, 20, TRUE);
+     CHECK(PmBit(PmSelected, 0x2001) && !PmBit(PmSelected, 0x2000));
+diff --git a/tests/host/clean-room/power.c b/tests/host/clean-room/power.c
+index 162596c6f4..00830f2ecc 100644
+--- a/tests/host/clean-room/power.c
++++ b/tests/host/clean-room/power.c
+@@ -18,6 +18,7 @@
+ typedef enum { HalHaltRoutine,HalPowerDownRoutine,HalRestartRoutine,HalRebootRoutine } FIRMWARE_REENTRY;
+ static KIRQL test_irql;
+ static ULONG test_flags, hardware_calls, publish_calls, invalidations, callbacks, sequence[4], emitted_action;
++static BOOLEAN persistence_armed;
+ static jmp_buf halted, parked;
+ static ULONG parks;
+ static BOOLEAN other_thread_test;
+@@ -38,6 +39,8 @@ static void HalpXboxSmBusWriteByte(UCHAR dev,UCHAR reg,UCHAR action)
+ VOID NTAPI NxkMmPublishPersistence(BOOLEAN warm)
+ { HostSchedulingHook(200);if(warm) { assert(test_irql==0&&(test_flags&EFLAGS_INTERRUPT_MASK));++publish_calls; }
+   else ++invalidations; }
++BOOLEAN NTAPI NxkMmTakePersistenceRequest(VOID)
++{ BOOLEAN armed=persistence_armed;persistence_armed=FALSE;return armed; }
+ NTSTATUS KeWaitForSingleObject(PVOID p,ULONG reason,ULONG mode,BOOLEAN alert,PVOID timeout)
+ { (void)p;(void)reason;(void)mode;(void)alert;(void)timeout;++parks;longjmp(parked,1); }
+ DECLSPEC_NORETURN VOID NTAPI HalReturnToFirmware(FIRMWARE_REENTRY);
+@@ -82,6 +85,7 @@ static VOID reset_test(void)
+     HalpPowerActionStarted=0;NxShuttingDown=FALSE;NxCallbackThread=NULL;
+     NxShutdownGateReady=FALSE;HostCurrentThread=(PVOID)1;HostExceptionFrame=NULL;
+     parks=HostUnwinds=0;other_thread_test=callback_after_reset=expect_emergency=FALSE;
++    persistence_armed=FALSE;
+     memset(HostCriticalDepth,0,sizeof(HostCriticalDepth));
+     cas_unprotected=publication_unprotected=hardware_unprotected=0;
+     owner_gap_unprotected=owner_suppressed=special_deliveries=phases_seen=0;
+@@ -97,7 +101,7 @@ int main(void)
+     if(!setjmp(halted)) HalReturnToFirmware(HalRebootRoutine);
+     CHECK(callbacks==2&&sequence[0]==0&&sequence[1]==1);
+     CHECK(hardware_calls==1&&emitted_action==SMC_REG_POWER_RESET);
+-    CHECK(publish_calls==1&&!invalidations);
++    CHECK(publish_calls==0&&invalidations==1);
+     CHECK(!(test_flags&EFLAGS_INTERRUPT_MASK));
+     CHECK(HostUnwinds==1&&!callback_after_reset&&!parks);
+     CHECK(!cas_unprotected&&!publication_unprotected&&!hardware_unprotected);
+@@ -108,7 +112,11 @@ int main(void)
+     test_flags=EFLAGS_INTERRUPT_MASK;
+     if(!setjmp(parked)) HalReturnToFirmware(HalRestartRoutine);
+     CHECK(parks==1&&HostUnwinds==1);
+-    CHECK(hardware_calls==1&&publish_calls==1);
++    CHECK(hardware_calls==1&&publish_calls==0&&invalidations==1);
++    reset_test();persistence_armed=TRUE;
++    if(!setjmp(halted)) HalReturnToFirmware(HalRebootRoutine);
++    CHECK(callbacks==2&&hardware_calls==1&&emitted_action==SMC_REG_POWER_RESET);
++    CHECK(publish_calls==1&&!invalidations&&!persistence_armed);
+     reset_test();other_thread_test=TRUE;
+     if(!setjmp(halted)) HalReturnToFirmware(HalRebootRoutine);
+     CHECK(callbacks==2&&hardware_calls==1&&emitted_action==SMC_REG_POWER_RESET);
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index b451ce739c..56f499d7ff 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -881,4 +881,23 @@ static int removal_drains_bound_cache_readers(void)
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();printf("28 adapter groups, %u failures\n",f);return f?1:0;}
++static int control_lease_is_removed_from_free_list(void)
++{
++    PDEVICE_OBJECT d=make_optical();
++    control_fixture verify;parent_fixture first,second;
++    lower_pending=1;pending_child_count=0;active_child=NULL;lower_calls=0;
++    init_control(&verify,IOCTL_CDROM_CHECK_VERIFY,4);
++    CHECK(NxNativeDispatchControl(d,&verify.irp)==STATUS_PENDING);
++    CHECK(!verify.irp.host_completed&&pending_child_count==1);
++    init_parent(&first,IRP_MJ_READ,2048);
++    CHECK(NxNativeDispatchReadWrite(d,&first.irp)==STATUS_PENDING);
++    CHECK(!first.irp.host_completed&&pending_child_count==2);
++    init_parent(&second,IRP_MJ_READ,2048);
++    CHECK(NxNativeDispatchReadWrite(d,&second.irp)==STATUS_INSUFFICIENT_RESOURCES);
++    CHECK(second.irp.host_completed&&second.irp.IoStatus.Status==STATUS_INSUFFICIENT_RESOURCES);
++    while(pending_child_count)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,2048,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    lower_pending=0;
++    return 1;
++}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!control_lease_is_removed_from_free_list();printf("29 adapter groups, %u failures\n",f);return f?1:0;}
+diff --git a/tests/host/quick-launch-ui/check.py b/tests/host/quick-launch-ui/check.py
+index a6b7f1c123..ed04e020d9 100644
+--- a/tests/host/quick-launch-ui/check.py
++++ b/tests/host/quick-launch-ui/check.py
+@@ -38,6 +38,11 @@ xbe = (root / "ntoskrnl/xb/xbe.c").read_text()
+ init = (root / "ntoskrnl/ex/init.c").read_text()
+ 
+ query = function(xbe, "NxkQuickLaunchPending")
++reentry = function(xbe, "XeHalReturnToFirmware")
++arm = reentry.index("NxkMmArmPersistence()")
++flush = reentry.index("IoShutdownSystem(1)")
++handoff = reentry.rindex("HalReturnToFirmware(Action)")
++assert flush < arm < handoff
+ source = out / "quick-launch-query.c"
+ source.write_text(
+     """
+diff --git a/tests/host/xdvdfs/check-verify.py b/tests/host/xdvdfs/check-verify.py
+new file mode 100644
+index 0000000000..166cb3211f
+--- /dev/null
++++ b/tests/host/xdvdfs/check-verify.py
+@@ -0,0 +1,77 @@
++#!/usr/bin/env python3
++"""Pin XDVDFS media identity and lower verification behavior."""
++from pathlib import Path
++import re
++import subprocess
++import sys
++
++
++def function(text: str, name: str) -> str:
++    match = re.search(r"\n(?:static\s+)?(?:BOOLEAN|NTSTATUS|ULONGLONG)\s*(?:NTAPI\s*)?\n?" +
++                      re.escape(name) + r"\s*\([^;]*?\)\s*\n\{", text, re.S)
++    if not match:
++        raise AssertionError(f"missing production function {name}")
++    start = text.index("{", match.start())
++    end, depth = start + 1, 1
++    while depth:
++        depth += (text[end] == "{") - (text[end] == "}")
++        end += 1
++    return text[match.start():end]
++
++
++root = Path(sys.argv[1]).resolve()
++out = Path(sys.argv[2]).resolve()
++out.mkdir(parents=True, exist_ok=True)
++source = (root / "drivers/filesystems/xdvdfs/xdvdfs.c").read_text()
++fingerprint = function(source, "XdvdFingerprintDescriptor")
++same = function(source, "XdvdDescriptorMatches")
++verify = function(source, "XdvdVerifyVolume")
++mount = function(source, "XdvdMountVolume")
++assert "IOCTL_CDROM_CHECK_VERIFY" in verify
++assert "XdvdTargetRead" in verify
++assert "Mounted = FALSE" in verify or "Mounted=FALSE" in verify
++assert "XdvdTargetControl" not in mount, "mount must not perturb the cold-load command stream"
++for dispatch in ("XdvdDispatchRead", "XdvdDispatchWrite",
++                 "XdvdDispatchQueryInformation", "XdvdDispatchSetInformation",
++                 "XdvdDispatchDirectoryControl"):
++    assert "Mounted" in function(source, dispatch), f"{dispatch} accepts a stale VCB"
++
++unit = r'''
++#include <assert.h>
++#include <stdint.h>
++#include <string.h>
++typedef uint8_t UCHAR; typedef uint32_t ULONG; typedef uint64_t ULONGLONG;
++typedef int BOOLEAN;
++#define _In_
++#define TRUE 1
++#define FALSE 0
++#define XDVD_VOLUME_MAGIC "MICROSOFT*XBOX*MEDIA"
++#define XDVD_VOLUME_MAGIC_LEN 20u
++#define XDVD_SECTOR_SIZE 2048u
++#define RtlCompareMemory(a,b,n) same_bytes((a),(b),(n))
++static unsigned long same_bytes(const void *a,const void *b,unsigned long n)
++{ unsigned long i=0;while(i<n&&((const unsigned char*)a)[i]==((const unsigned char*)b)[i])++i;return i; }
++typedef struct { UCHAR Magic0[20]; ULONG RootTableSector,RootTableSize; ULONGLONG Filetime; UCHAR Unused[0x7c8]; UCHAR Magic1[20]; } XDVD_VOLUME_DESCRIPTOR,*PXDVD_VOLUME_DESCRIPTOR;
++typedef struct { ULONG RootSector,RootSize; ULONGLONG VolumeFiletime,DescriptorFingerprint; } XDVD_VCB,*PXDVD_VCB;
++''' + fingerprint + same + r'''
++int main(void)
++{
++ XDVD_VCB v={37,8192,0x1122334455667788ULL,0};XDVD_VOLUME_DESCRIPTOR d;
++ memset(&d,0,sizeof(d));memcpy(d.Magic0,XDVD_VOLUME_MAGIC,20);memcpy(d.Magic1,XDVD_VOLUME_MAGIC,20);
++ d.RootTableSector=v.RootSector;d.RootTableSize=v.RootSize;d.Filetime=v.VolumeFiletime;
++ v.DescriptorFingerprint=XdvdFingerprintDescriptor(&d);
++ assert(XdvdDescriptorMatches(&v,&d));
++ d.RootTableSector++;assert(!XdvdDescriptorMatches(&v,&d));d.RootTableSector=v.RootSector;
++ d.RootTableSize++;assert(!XdvdDescriptorMatches(&v,&d));d.RootTableSize=v.RootSize;
++ d.Filetime++;assert(!XdvdDescriptorMatches(&v,&d));d.Filetime=v.VolumeFiletime;
++ d.Magic1[0]^=1;assert(!XdvdDescriptorMatches(&v,&d));d.Magic1[0]^=1;
++ d.Unused[0]^=1;assert(!XdvdDescriptorMatches(&v,&d));
++ return 0;
++}
++'''
++path = out / "verify.c"
++path.write_text(unit)
++binary = out / "verify"
++subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", str(path), "-o", str(binary)], check=True)
++subprocess.run([str(binary)], check=True)
++print("PASS: XDVDFS checks lower media and fingerprints the complete descriptor")
+diff --git a/tests/xbe/clean-room-ordinary-reset/Makefile b/tests/xbe/clean-room-ordinary-reset/Makefile
+new file mode 100644
+index 0000000000..56f870fdc6
+--- /dev/null
++++ b/tests/xbe/clean-room-ordinary-reset/Makefile
+@@ -0,0 +1,5 @@
++XBE_TITLE = clean-room-ordinary-reset
++GEN_XISO = $(XBE_TITLE).iso
++NXDK_DIR ?= /usr/src/nxdk
++SRCS = $(CURDIR)/main.c $(CURDIR)/../api-regression/tap.c
++include $(NXDK_DIR)/Makefile
+diff --git a/tests/xbe/clean-room-ordinary-reset/main.c b/tests/xbe/clean-room-ordinary-reset/main.c
+new file mode 100644
+index 0000000000..0cb4892a5e
+--- /dev/null
++++ b/tests/xbe/clean-room-ordinary-reset/main.c
+@@ -0,0 +1,150 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later
++ * Two-boot public-API probe for ordinary-reset allocation cleanup.
++ */
++#include <xboxkrnl/xboxkrnl.h>
++#include "../api-regression/tap.h"
++#include <string.h>
++
++#define TEST_PA 0x02010000UL
++#define TEST_PAGES 8UL
++#define TEST_BYTES (TEST_PAGES * PAGE_SIZE)
++#define TEST_MARKER 0x7c
++#define STAGE_MAGIC 0x4f52534dUL
++#define STAGE_PATH "\\Device\\Harddisk0\\Partition3\\ordinary-reset-stage.tmp"
++
++static VOID stop(VOID)
++{
++    tap_drain();
++    HalWriteSMBusValue(0x20, 0x02, FALSE, 0x80);
++    for (;;) __asm__ __volatile__("hlt");
++}
++
++static NTSTATUS open_stage(ACCESS_MASK Access,
++                           ULONG Disposition,
++                           ULONG Options,
++                           PHANDLE Handle)
++{
++    ANSI_STRING name;
++    OBJECT_ATTRIBUTES attributes;
++    IO_STATUS_BLOCK iosb;
++
++    RtlInitAnsiString(&name, STAGE_PATH);
++    InitializeObjectAttributes(&attributes, &name, OBJ_CASE_INSENSITIVE,
++                               NULL, NULL);
++    return NtCreateFile(Handle, Access | SYNCHRONIZE, &attributes, &iosb,
++                        NULL, FILE_ATTRIBUTE_NORMAL,
++                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++                        Disposition,
++                        Options | FILE_NON_DIRECTORY_FILE |
++                            FILE_SYNCHRONOUS_IO_NONALERT);
++}
++
++static BOOLEAN read_stage(VOID)
++{
++    HANDLE handle;
++    IO_STATUS_BLOCK iosb;
++    LARGE_INTEGER offset;
++    ULONG magic = 0;
++    NTSTATUS status;
++
++    offset.QuadPart = 0;
++    status = open_stage(GENERIC_READ | DELETE, FILE_OPEN,
++                        FILE_DELETE_ON_CLOSE, &handle);
++    if (!NT_SUCCESS(status)) return FALSE;
++    status = NtReadFile(handle, NULL, NULL, NULL, &iosb, &magic,
++                        sizeof(magic), &offset);
++    NtClose(handle);
++    return NT_SUCCESS(status) && iosb.Information == sizeof(magic) &&
++           magic == STAGE_MAGIC;
++}
++
++static BOOLEAN write_stage(VOID)
++{
++    HANDLE handle;
++    IO_STATUS_BLOCK iosb;
++    LARGE_INTEGER offset;
++    ULONG magic = STAGE_MAGIC;
++    NTSTATUS status;
++
++    offset.QuadPart = 0;
++    status = open_stage(GENERIC_WRITE, FILE_OVERWRITE_IF, 0, &handle);
++    if (!NT_SUCCESS(status)) return FALSE;
++    status = NtWriteFile(handle, NULL, NULL, NULL, &iosb, &magic,
++                         sizeof(magic), &offset);
++    if (NT_SUCCESS(status) && iosb.Information == sizeof(magic))
++        status = NtFlushBuffersFile(handle, &iosb);
++    NtClose(handle);
++    return NT_SUCCESS(status);
++}
++
++int main(void)
++{
++    PVOID allocation;
++
++    if (read_stage())
++    {
++        PVOID former_alias = (PVOID)(0x80000000UL | TEST_PA);
++        ULONG marker_bytes = 0;
++        ULONG zero_bytes = 0;
++        ULONG index;
++        BOOLEAN ownership_cleared;
++        BOOLEAN range_reused;
++
++        ownership_cleared = MmQueryAllocationSize(former_alias) == 0;
++        allocation = MmAllocateContiguousMemoryEx(
++            TEST_BYTES, TEST_PA, TEST_PA + TEST_BYTES - 1,
++            PAGE_SIZE, PAGE_READWRITE);
++        range_reused = allocation != NULL &&
++            MmGetPhysicalAddress(allocation) == TEST_PA;
++        if (range_reused)
++            for (index = 0; index < TEST_BYTES; ++index)
++            {
++                marker_bytes += ((PUCHAR)allocation)[index] == TEST_MARKER;
++                zero_bytes += ((PUCHAR)allocation)[index] == 0;
++            }
++
++        tap_puts("== clean-room-ordinary-reset stage 2 ==\n");
++        tap_version(14);
++        tap_plan(2);
++        if (ownership_cleared)
++            tap_ok(1, "ordinary reset discards selected allocation ownership");
++        else
++            tap_not_ok(1, "ordinary reset discards selected allocation ownership");
++        if (range_reused)
++            tap_ok(2, "former physical range is available to the next title");
++        else
++            tap_not_ok(2, "former physical range is available to the next title");
++        tap_diag_begin();
++        tap_diag_kv("physical_address", "0x%08lx", TEST_PA);
++        tap_diag_kv("marker_bytes_after_allocation", "%lu", marker_bytes);
++        tap_diag_kv("zero_bytes_after_allocation", "%lu", zero_bytes);
++        tap_diag_end();
++        if (allocation != NULL) MmFreeContiguousMemory(allocation);
++        tap_puts(ownership_cleared && range_reused
++                     ? "== clean-room-ordinary-reset end PASS ==\n"
++                     : "== clean-room-ordinary-reset end FAIL ==\n");
++        stop();
++    }
++
++    allocation = MmAllocateContiguousMemoryEx(
++        TEST_BYTES, TEST_PA, TEST_PA + TEST_BYTES - 1,
++        PAGE_SIZE, PAGE_READWRITE);
++    if (allocation == NULL)
++    {
++        tap_puts("== clean-room-ordinary-reset stage 1 allocation FAIL ==\n");
++        stop();
++    }
++    memset(allocation, TEST_MARKER, TEST_BYTES);
++    MmPersistContiguousMemory(allocation, TEST_BYTES, TRUE);
++    if (!write_stage())
++    {
++        tap_puts("== clean-room-ordinary-reset stage 1 file FAIL ==\n");
++        stop();
++    }
++    tap_puts("== clean-room-ordinary-reset stage 1 rebooting ==\n");
++    tap_drain();
++    HalReturnToFirmware(HalRebootRoutine);
++    tap_puts("== clean-room-ordinary-reset reset returned FAIL ==\n");
++    stop();
++    return 1;
++}
+diff --git a/tests/host/reset-frame/cases.c b/tests/host/reset-frame/cases.c
+index 4213499d17..857cc763e4 100644
+--- a/tests/host/reset-frame/cases.c
++++ b/tests/host/reset-frame/cases.c
+@@ -3,7 +3,7 @@ int main(int argc, char **argv) {
+     assert(argc == 2);
+     int test = atoi(argv[1]);
+     static XBE_FIRMWARE_REENTRY routine = XeFwQuickReboot;
+-    static const char *expected = "SFH";
++    static const char *expected = "SFPH";
+     static int action = HalRebootRoutine;
+     poison_frame[0] = UINTPTR_MAX;
+     poison_frame[1] = 0;
+diff --git a/tests/host/reset-frame/shim.h b/tests/host/reset-frame/shim.h
+index ef3db4dae4..aa4078b681 100644
+--- a/tests/host/reset-frame/shim.h
++++ b/tests/host/reset-frame/shim.h
+@@ -40,6 +40,7 @@ _Noreturn VOID NTAPI NxkShutdownAbortPowerRequest(void) {
+ }
+ static void XeStashRebootIntent(void) { record('S'); }
+ static void IoShutdownSystem(int phase) { assert(phase == 1); record('F'); }
++static void NxkMmArmPersistence(void) { record('P'); }
+ static void HalReturnToFirmware(int action) { reset_action = action; record('H'); }
+ #if DBG
+ static void diagnostic(const char *format, ...) { (void)format; }
+diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
+index 313c828a6d..de35d3e206 100644
+--- a/tests/host/boot-layout/check.py
++++ b/tests/host/boot-layout/check.py
+@@ -88,6 +88,9 @@ typedef uint8_t UCHAR; typedef UCHAR *PUCHAR;
+ typedef unsigned short USHORT; typedef unsigned long SIZE_T;
+ typedef int BOOLEAN, KIRQL; typedef void VOID; typedef void *PVOID;
+ typedef int32_t LONG;
++static LONG InterlockedExchange(volatile LONG *target, LONG value) {
++ LONG old=*target;*target=value;return old;
++}
+ #define IN
+ #define CODE_SEG(x)
+ #define DATA_SEG(x)
+diff --git a/tests/host/xdvdfs-read-completion/check.py b/tests/host/xdvdfs-read-completion/check.py
+index 2f040af179..54aba55f90 100755
+--- a/tests/host/xdvdfs-read-completion/check.py
++++ b/tests/host/xdvdfs-read-completion/check.py
+@@ -20,6 +20,7 @@ shim=r'''
+ #define STATUS_INVALID_DEVICE_REQUEST ((int32_t)0xc0000010)
+ #define STATUS_INSUFFICIENT_RESOURCES ((int32_t)0xc000009a)
+ #define STATUS_END_OF_FILE ((int32_t)0xc0000011)
++#define STATUS_VOLUME_DISMOUNTED ((int32_t)0xc000026e)
+ #define NT_SUCCESS(s) ((s)>=0)
+ #define IO_NO_INCREMENT 0
+ #define NormalPagePriority 0
+@@ -30,7 +31,7 @@ shim=r'''
+ typedef uint64_t ULONGLONG;typedef uint32_t ULONG;typedef uintptr_t ULONG_PTR;
+ typedef int32_t NTSTATUS;typedef void *PVOID,*PDEVICE_OBJECT;
+ typedef struct {int64_t QuadPart;} LARGE_INTEGER;
+-typedef struct {PDEVICE_OBJECT TargetDevice;} VCB;
++typedef struct {PDEVICE_OBJECT TargetDevice;int Mounted;} VCB;
+ typedef struct {VCB *Vcb;int IsDirectory;ULONG DataSize,DataSector;} FCB,*PXDVD_FCB;
+ typedef struct {void *FsContext;LARGE_INTEGER CurrentByteOffset;ULONG Flags;} FO,*PFILE_OBJECT;
+ typedef struct {PFILE_OBJECT FileObject;struct {struct {LARGE_INTEGER ByteOffset;ULONG Length;} Read;} Parameters;} STACK,*PIO_STACK_LOCATION;
+@@ -49,7 +50,7 @@ func=e.function(legacy,'XdvdCompleteRequest')+e.function(legacy[legacy.rfind('\n
+ tests=r'''
+ static unsigned cases,failures;
+ static void run(int sync,ULONG len,ULONG offset,NTSTATUS backend,ULONG got,NTSTATUS expected,int pending){
+- VCB v={0};FCB f={&v,0,4096,100};FO fo={&f,{0},sync?FO_SYNCHRONOUS_IO:0};
++ VCB v={.Mounted=1};FCB f={&v,0,4096,100};FO fo={&f,{0},sync?FO_SYNCHRONOUS_IO:0};
+  IRP irp={0};irp.Stack.FileObject=&fo;irp.Stack.Parameters.Read.Length=len;irp.Stack.Parameters.Read.ByteOffset.QuadPart=offset;irp.MdlAddress=buffer;
+  completions=pendingCalls=0;readStatus=backend;supplied=got;
+  NTSTATUS status=XdvdDispatchRead(NULL,&irp);

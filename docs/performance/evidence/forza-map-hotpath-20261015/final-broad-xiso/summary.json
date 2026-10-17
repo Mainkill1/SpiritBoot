@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "status": "PASS-SAME-HOST-TWO-RUN",
+  "host": "Steam Deck",
+  "biosSha256": "00aa2536dbda14ee851665be98e903c32c9705996832b335bbab72ab81c8ead6",
+  "sourceTree": "d79d23a68f97e58e2f0182062d291884289e2f08",
+  "xemuSha256": "95bf0ae6c73e19c3696807fb1810e4f3e8ce8929397f14da286e5973a342e459",
+  "xisoSha256": "10ca07f227ae4e1d03510fcc1d3237304ff4291741d4c552ab33991e71de1738",
+  "runs": [
+    "20261016-080549306-5a7c575c21754b4597858a0993e6d735",
+    "20261016-081234694-b3b609e48f9c40c6ba579eb5e08b245e"
+  ],
+  "recordsPerRun": 149,
+  "passRecordsPerRun": 149,
+  "leaves": 144,
+  "groups": 5,
+  "fixedFieldMismatches": 0,
+  "applicableOracleFailures": 0,
+  "metadataExcludedPerRun": 2,
+  "windowsFramebufferMismatchesPerRun": 55,
+  "functionalHashDifferencesBetweenCurrentRuns": 0,
+  "functionalHashDifferencesVersusPriorCandidate": 0,
+  "sumPriorTwoRunLeafMeansUs": 31544807.3725,
+  "sumCurrentTwoRunLeafMeansUs": 28992555.945,
+  "aggregateRatioCurrentPrior": 0.9190912343397287,
+  "aggregateDeltaPercent": -8.090876566027127,
+  "leavesOver20PercentSlower": [
+    {
+      "leaf": "report_query.dma_target_switch",
+      "prior_r1_us": 684.25,
+      "prior_r2_us": 565.75,
+      "prior_mean_us": 625.0,
+      "current_r1_us": 843.25,
+      "current_r2_us": 889.5,
+      "current_mean_us": 866.375,
+      "ratio_current_prior": 1.3862,
+      "delta_percent": 38.62000000000001,
+      "current_pair_spread_percent": 5.338335016592122
+    }
+  ],
+  "note": "The aggregate is descriptive because unrelated emulator scheduling noise affects individual leaves. The >20% dma_target_switch outlier is followed by a 4096x targeted ABBA experiment.",
+  "leavesOver20PercentSlowerDisposition": {
+    "leaf": "report_query.dma_target_switch",
+    "status": "CLOSED-AS-SHORT-SAMPLE-NOISE",
+    "longWorkMultiplier": 4096,
+    "warmupIterations": 64,
+    "iterationsPerRun": 16384,
+    "sampleCountPerRun": 4,
+    "priorTwoRunMeanUs": 948.875,
+    "currentTwoRunMeanUs": 967.375,
+    "ratioCurrentPrior": 1.0194967724937425,
+    "deltaPercent": 1.9496772493742487,
+    "totalMeasuredUsByRun": [
+      15715746,
+      16051125,
+      15658365,
+      15391711
+    ],
+    "outcomes": [
+      "PASS",
+      "PASS",
+      "PASS",
+      "PASS"
+    ]
+  },
+  "leavesOver20PercentSlowerAfterLongRun": []
+}

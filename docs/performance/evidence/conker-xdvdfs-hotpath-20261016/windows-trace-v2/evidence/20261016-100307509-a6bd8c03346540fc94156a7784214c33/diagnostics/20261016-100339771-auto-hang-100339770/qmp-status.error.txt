@@ -1,0 +1,6 @@
+System.Net.Sockets.SocketException (10061): No connection could be made because the target machine actively refused it.
+   at System.Net.Sockets.Socket.AwaitableSocketAsyncEventArgs.System.Threading.Tasks.Sources.IValueTaskSource.GetResult(Int16 token)
+   at System.Net.Sockets.TcpClient.CompleteConnectAsync(ValueTask task)
+   at XemuTestRunner.Control.XemuQmpClient.ExecuteAsync(String command, Object arguments, TimeSpan timeout, CancellationToken cancellationToken) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Control/XemuQmpClient.cs:line 25
+   at XemuTestRunner.Control.XemuControlManager.QueryStatusAsync(CancellationToken cancellationToken) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Control/XemuControlManager.cs:line 147
+   at XemuTestRunner.Diagnostics.DiagnosticHub.CaptureHangBundleAsync(ActiveContext context, DiagnosticRecipe recipe, String directory, CancellationToken ct) in /home/codex/xemu-shader-workbench-handoff/.scratch/pr248-runner-startpaused-fix/worktree/src/XemuTestRunner/Diagnostics/DiagnosticHub.cs:line 556

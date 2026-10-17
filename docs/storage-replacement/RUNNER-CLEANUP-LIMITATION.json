@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "status": "reviewed_no_supported_completed_payload_prune_endpoint_in_inspected_source",
+  "scope": "Read-only local runner source/docs review; no live endpoint probe or deployed-binary identity claim",
+  "sources": [
+    {
+      "path": "src/XemuTestRunner/Networking/AgentApiCatalog.cs",
+      "sha256": "1cc00c2086234a6d447dbbd17fd008dbfe7b6e76c7d56066ff06611b107cd488",
+      "bytes": 14020,
+      "lines": [
+        16
+      ]
+    },
+    {
+      "path": "src/XemuTestRunner/Networking/EmbeddedHttpServer.Agent.cs",
+      "sha256": "c67fea6112f1abfec5474d9d78d832f371689f376fb227e5abc39b913bc5ae86",
+      "bytes": 13787,
+      "lines": [
+        82,
+        84
+      ]
+    },
+    {
+      "path": "src/XemuTestRunner/Networking/EmbeddedHttpServer.AgentExtensions.cs",
+      "sha256": "dbf948f1a18a631e9b7376553840e84962b1e575a4a6f573e6f03bd3c7d8e039",
+      "bytes": 3804,
+      "lines": [
+        7
+      ]
+    },
+    {
+      "path": "src/XemuTestRunner/Networking/AgentJobStore.cs",
+      "sha256": "65d2e99af118f07e3566f20214d74f3a42f5f988dacfce6f2c7536ca733d88d8",
+      "bytes": 20023,
+      "lines": [
+        210,
+        216,
+        218
+      ]
+    },
+    {
+      "path": "src/XemuTestRunner/Queue/JobQueue.cs",
+      "sha256": "317f152cf48ca38766ecaa3f59d1074d41f18e10b330a8f4040c60acb3a8bea2",
+      "bytes": 25814,
+      "lines": [
+        378,
+        385,
+        389
+      ]
+    },
+    {
+      "path": "src/XemuTestRunner/Networking/AgentJobStore.Reuse.cs",
+      "sha256": "d3bdf06aa9c9b3cb3152ef5b071ccc42e27421dd5d887e96bae13580c892e080",
+      "bytes": 3997,
+      "lines": [
+        8,
+        40
+      ]
+    },
+    {
+      "path": "src/XemuTestRunner/Runtime/RuntimeStateManager.cs",
+      "sha256": "ca3603c221ff81c253cdc3bd120854a9a10b87a4b51f39f9f8550ca9aa86652d",
+      "bytes": 15740,
+      "lines": [
+        118,
+        144,
+        165
+      ]
+    },
+    {
+      "path": "src/XemuTestRunner/Networking/EmbeddedHttpServer.DiskAssets.cs",
+      "sha256": "5e87e9687bfdb89fdc6083b782975262cd59ffcb449f295772b3a8ae9a1f0e3e",
+      "bytes": 18781,
+      "lines": [
+        156,
+        161,
+        163,
+        166
+      ]
+    },
+    {
+      "path": "docs/AGENT-API.md",
+      "sha256": "6d5a3000bdd7afd2fc31d2dd7db8c63bb8b4ac8f706d0e8be943fdd2581910b7",
+      "bytes": 10055,
+      "lines": [
+        5,
+        140,
+        144
+      ]
+    },
+    {
+      "path": "docs/DISK-ASSETS.md",
+      "sha256": "6070fe03b8b7702d675c4789e8d671772da83ba0fb8e6233d7e23a82f5289d99",
+      "bytes": 8489,
+      "lines": [
+        57,
+        65,
+        87
+      ]
+    }
+  ],
+  "findings": [
+    "DELETE /api/v1/jobs/{id} only cancels unstarted draft/queued work; it retains files and rejects active/completed attempts.",
+    "Queue archival moves the complete package into Tested and does not free payload bytes.",
+    "Additive agent routing exposes no selective completed-payload prune, result deletion, archive export-and-remove, or maintenance-cleanup endpoint.",
+    "Runtime cleanup deletes only authorized transient Runtime/RUN disk paths after targetStopped/evidenceFinalized; pending recovery is startup-only, not HTTP pruning.",
+    "DELETE /api/v1/disk-assets/{id} is catalog deletion for unreferenced assets; it is not completed-package cleanup and must not delete required seed or other users assets.",
+    "Payload reuse reads physical source-package files and copies them into new drafts; collecting results does not end those dependencies."
+  ],
+  "protected_dependencies": {
+    "reuse_source_job_id": "pr329-deck-gl-main-dcc536-v3",
+    "hdd_seed_id": "pr256-clean-fatx-compat010-v1",
+    "hdd_seed_sha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+    "preserve": [
+      "all Results and original native evidence",
+      "all runner packages and mutable guest inputs",
+      "original V352 a089 preflight failure and completed attempts",
+      "all unrelated user jobs/assets"
+    ]
+  },
+  "preflight_failure": {
+    "path": "/home/codex/xemu-shader-workbench-handoff/.scratch/pr248-native-baseline/v352-a089-preflight-failure.json",
+    "sha256": "21f773c5bcef59ddfdc115af3f909c854875ab8d3874591a2aa185d3c6838467",
+    "reported_available_bytes": 984801280,
+    "reported_required_bytes": 1073741824,
+    "shortfall_bytes": 88940544,
+    "guest_started": false
+  },
+  "supported_remedy": "Capacity recovery is an operator task. Root requested the user free space outside runner packages/results/seeds; keep the failed attempt and current frozen rules unchanged. There is no safe normal-HTTP completed-payload cleanup operation to invoke.",
+  "actions": {
+    "http_requests": 0,
+    "native_dispatches": 0,
+    "queue_edits": 0,
+    "cleanup_or_prune": 0,
+    "ssh": 0,
+    "runner_source_edits": 0
+  },
+  "unchanged_previous_conclusions": [
+    "Packet0134 integration is bounded/unlinked; product extraction passed.",
+    "Five pilot pairs cannot produce confirmation count<=2000 under frozen family144/power.8/confidence.95; full P1 remains open."
+  ]
+}

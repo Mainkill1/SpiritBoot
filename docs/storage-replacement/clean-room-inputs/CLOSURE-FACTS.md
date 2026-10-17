@@ -1,0 +1,15 @@
+# Candidate closure facts and remaining inputs
+
+2026-10-14, investigator facts only. This document adds no source approval and supplies no implementation body or old private-helper design. All unlisted inputs remain excluded.
+
+The currently inspected firmware artifacts are retained baseline/partial builds. There is no complete independently linked candidate in that evidence set. A new adapter/core, host tests and design packet do not establish firmware substitution until the exact completed source, resolved link inputs, final kernel and flash all agree.
+
+The replacement must use callable public target APIs through approved declarations and independently express any required header-only operation from approved field/atomic facts. Whole generated kernel headers and unknown SDK helper source are not approved merely because a compiler can process them. The cache, native and geometry ABI packets provide numeric interoperability facts and checked declarations; further needed declarations require a narrowly scoped investigator export. Existing compatible lower source can retain its proven hardware behavior and notices; adding a bounded read-only cache-capability query remains a proposal until implemented and qualified.
+
+The geometry adapter packet identifies the retained owner's fields and query/completion contract. Exact lower byte counts are necessary: the existing status-only query interface cannot establish initialized output extent. The actual baseline owner uses MBR style 0 for its synthesized FATX layout, while BRFR is the separate declared value128. The parent approves any native-measured prefix policy using its exact measurement artifacts.
+
+Final provenance review must cover surviving implementation from all actual compilation/header/generated/data/assembly contributors, including tiny inlines; a direct archive/symbol search cannot establish elimination or a compatible grant. Public constants/structure declarations and real implementation bodies have distinct evidence. Keep existing component source/grants/notices and record the new authors' actual exposure; no blanket license reassignment or personnel-independence claim is supplied here.
+
+Existing flash artifacts support exact total payload accounting. A candidate comparison must use the same profile, packer/image preparation and compression settings, and count the 12-byte header plus compressed prepared image plus any raw immutable ROM spans. Fixed padded flash size is not actual kernel payload cost. Nested native/inline source ranges cannot be summed as exclusive code bytes.
+
+Native storage resident/peak RAM remains unmeasured in the inspected artifacts. Static image arithmetic, host structure sizes, emulator process memory and whole-kernel free pages cannot establish that metric. A later matched baseline/candidate accounting stream must include retained device/request objects, all concurrent allocation lifetimes and cached transport storage, and must report its measurement scope. No numeric peak is authorized by this packet.

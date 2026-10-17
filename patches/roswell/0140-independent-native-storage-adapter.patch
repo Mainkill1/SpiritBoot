@@ -1,0 +1,2447 @@
+diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
+index 62d4fd4a24605f7f0ca090586016639ff6e053ec..ff8fc7289eaabd82d12900f35e691453687970e9 100644
+--- a/drivers/storage/class/nxstorage/CMakeLists.txt
++++ b/drivers/storage/class/nxstorage/CMakeLists.txt
+@@ -1,5 +1,7 @@
+-# Independently authored laboratory primitives; no FDO/IRP adapter yet.
+-# This target is linked only by the explicitly labeled partial prototype.
+-add_library(nxstorage STATIC request.c geometry_composer.c cache_query.c cache_property.c nxdisk_owner.c)
++# Independent native class drivers and their bounded request engine.
++add_library(nxstorage STATIC request.c native_packet.c native_adapter.c driver.c
++    geometry_composer.c cache_query.c cache_property.c nxdisk_owner.c)
+ target_include_directories(nxstorage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
++target_compile_definitions(nxstorage PRIVATE NX_NATIVE_TARGET=1)
++add_dependencies(nxstorage psdk xdk bugcodes)
+ target_sources(nxstorage PRIVATE nxcdrom_profile.c)
+diff --git a/drivers/storage/class/nxstorage/driver.c b/drivers/storage/class/nxstorage/driver.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..25303b40e028c2810970ab690271c607279bdbf3
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/driver.c
+@@ -0,0 +1,225 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "native_driver.h"
++#include "nxdisk_owner.h"
++#include "nxcdrom_profile.h"
++
++enum { NX_NATIVE_DEFAULT_SLOTS = 8 };
++
++typedef struct NX_NATIVE_CLASS_CONTEXT {
++    PDRIVER_OBJECT driver;
++    nxd_driver owner;
++    nxd_device device;
++    nxd_class_kind kind;
++    HANDLE object_directory;
++} NX_NATIVE_CLASS_CONTEXT;
++
++static NX_NATIVE_CLASS_CONTEXT disk_context, cdrom_context;
++static WCHAR disk_directory_buffer[] = {'\\','D','e','v','i','c','e','\\','H','a','r','d','d','i','s','k','0',0};
++static WCHAR disk_name_buffer[] = {'\\','D','e','v','i','c','e','\\','H','a','r','d','d','i','s','k','0','\\','P','a','r','t','i','t','i','o','n','0',0};
++static WCHAR cdrom_name_buffer[] = {'\\','D','e','v','i','c','e','\\','C','d','R','o','m','0',0};
++static WCHAR cdrom_link_buffer[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','C','d','R','o','m','0',0};
++static UNICODE_STRING disk_directory = {34,36,disk_directory_buffer};
++static UNICODE_STRING disk_name = {56,58,disk_name_buffer};
++static UNICODE_STRING cdrom_name = {28,30,cdrom_name_buffer};
++static UNICODE_STRING cdrom_link = {38,40,cdrom_link_buffer};
++
++static nxd_status owner_status(NTSTATUS status)
++{
++    if(status==STATUS_SUCCESS) return NXD_SUCCESS;
++    if(status==STATUS_PENDING) return NXD_PENDING;
++    if(status==STATUS_INVALID_PARAMETER) return NXD_INVALID_PARAMETER;
++    if(status==STATUS_INVALID_DEVICE_REQUEST) return NXD_INVALID_DEVICE_REQUEST;
++    if(status==STATUS_BUFFER_TOO_SMALL) return NXD_BUFFER_TOO_SMALL;
++    if(status==STATUS_INSUFFICIENT_RESOURCES) return NXD_NO_MEMORY;
++    if(status==STATUS_DEVICE_NOT_READY) return NXD_NO_DEVICE;
++    if(status==STATUS_MEDIA_WRITE_PROTECTED) return NXD_WRITE_PROTECTED;
++    if(status==STATUS_NOT_SUPPORTED) return NXD_NOT_IMPLEMENTED;
++    return NXD_IO_ERROR;
++}
++
++static NTSTATUS ensure_disk_directory(NX_NATIVE_CLASS_CONTEXT *context)
++{
++    OBJECT_ATTRIBUTES attributes;
++    NTSTATUS status;
++    if(context->object_directory) return STATUS_SUCCESS;
++    InitializeObjectAttributes(&attributes,&disk_directory,
++        OBJ_CASE_INSENSITIVE|OBJ_PERMANENT|OBJ_KERNEL_HANDLE,NULL,NULL);
++    status=ZwCreateDirectoryObject(&context->object_directory,
++                                   DIRECTORY_ALL_ACCESS,&attributes);
++    return status;
++}
++
++static void discard_disk_directory(NX_NATIVE_CLASS_CONTEXT *context)
++{
++    if(!context->object_directory) return;
++    (void)ZwMakeTemporaryObject(context->object_directory);
++    (void)ZwClose(context->object_directory);
++    context->object_directory=NULL;
++}
++
++static nxd_status register_class(void *opaque,nxd_class_kind kind)
++{
++    NX_NATIVE_CLASS_CONTEXT *context=opaque;
++    return context && context->driver && context->kind==kind ?
++        NXD_SUCCESS:NXD_INVALID_PARAMETER;
++}
++
++static nxd_status create_class(void *opaque,nxd_class_kind kind,
++    const nxd_class_identity *identity,const nxd_device_config *config,
++    void *lower,void **created)
++{
++    NX_NATIVE_CLASS_CONTEXT *context=opaque;
++    NX_NATIVE_DEVICE_INIT init;
++    NTSTATUS status;
++    (void)identity;
++    if(!context || !config || !lower || !created || context->kind!=kind)
++        return NXD_INVALID_PARAMETER;
++    if(kind==NXD_CDROM) {
++        status=NxCdromBuildDeviceInit(&init,&cdrom_name,&cdrom_link,
++                                      NX_NATIVE_DEFAULT_SLOTS);
++        if(!NT_SUCCESS(status)) return owner_status(status);
++    } else {
++        status=ensure_disk_directory(context);
++        if(!NT_SUCCESS(status)) return owner_status(status);
++        init.DeviceName=&disk_name;init.SymbolicLinkName=NULL;
++        init.DeviceType=FILE_DEVICE_DISK;init.DeviceCharacteristics=0;
++        init.Config.sector_bytes=config->geometry.bytes_per_sector;
++        init.Config.page_bytes=4096;init.Config.max_bytes=0x20000;
++        init.Config.max_pages=33;init.Config.alignment_mask=config->alignment_mask;
++        init.Config.ata_max_blocks=256;init.Config.capacity_bytes=config->capacity_bytes;
++        init.Config.optical=0;init.Config.cache=NX_CACHE_UNQUALIFIED;
++        init.SlotCount=NX_NATIVE_DEFAULT_SLOTS;
++    }
++    status=NxNativeCreateClassDevice(context->driver,(PDEVICE_OBJECT)lower,
++                                    &init,(PDEVICE_OBJECT *)created);
++    if(!NT_SUCCESS(status) && kind==NXD_DISK) discard_disk_directory(context);
++    return owner_status(status);
++}
++
++static void seal_class(void *opaque,void *created)
++{
++    (void)opaque;
++    NxNativeSealClassDevice((PDEVICE_OBJECT)created);
++}
++
++static nxd_status submit_native(void *opaque,nxd_device *device,
++    const nxd_io *io,nxd_result *result)
++{
++    NTSTATUS status;
++    (void)opaque;
++    if(!device || !io || !result || !io->native_request)
++        return NXD_INVALID_PARAMETER;
++    if(io->major==NXD_READ || io->major==NXD_WRITE)
++        status=NxNativeDispatchReadWrite((PDEVICE_OBJECT)device->class_device,
++                                         (PIRP)io->native_request);
++    else
++        status=NxNativeDispatchFlush((PDEVICE_OBJECT)device->class_device,
++                                     (PIRP)io->native_request);
++    result->status=owner_status(status);result->information=0;
++    return result->status;
++}
++
++static nxd_status forward_native(void *opaque,nxd_device *device,
++    nxd_forward_operation operation,const nxd_io *io,nxd_result *result)
++{
++    NTSTATUS status;
++    (void)opaque;(void)operation;
++    if(!device || !io || !result || !io->native_request)
++        return NXD_INVALID_PARAMETER;
++    status=NxNativeDispatchControl((PDEVICE_OBJECT)device->class_device,
++                                   (PIRP)io->native_request);
++    result->status=owner_status(status);result->information=0;
++    return result->status;
++}
++
++static nxd_owner_port owner_port(NX_NATIVE_CLASS_CONTEXT *context)
++{
++    nxd_owner_port port={context,register_class,create_class,seal_class,
++                         submit_native,forward_native};
++    return port;
++}
++
++static NTSTATUS NTAPI complete_simple(PDEVICE_OBJECT device,PIRP irp)
++{
++    (void)device;
++    irp->IoStatus.Status=STATUS_SUCCESS;irp->IoStatus.Information=0;
++    IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_SUCCESS;
++}
++
++static NTSTATUS NTAPI reject_irp(PDEVICE_OBJECT device,PIRP irp)
++{
++    (void)device;
++    irp->IoStatus.Status=STATUS_INVALID_DEVICE_REQUEST;irp->IoStatus.Information=0;
++    IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_INVALID_DEVICE_REQUEST;
++}
++
++static nxd_device_config initial_config(nxd_class_kind kind,
++                                        PDEVICE_OBJECT lower)
++{
++    nxd_device_config config;
++    ULONG alignment=lower ? lower->AlignmentRequirement:0;
++    config.capacity_bytes=0;
++    config.geometry.cylinders=0;
++    config.geometry.media_type=kind==NXD_DISK ? 12:0;
++    config.geometry.tracks_per_cylinder=0;
++    config.geometry.sectors_per_track=0;
++    config.geometry.bytes_per_sector=kind==NXD_DISK ? 512:2048;
++    config.alignment_mask=alignment<config.geometry.bytes_per_sector ? alignment:0;
++    config.removable=kind==NXD_CDROM;
++    return config;
++}
++
++static NTSTATUS add_class_device(NX_NATIVE_CLASS_CONTEXT *context,
++                                 PDEVICE_OBJECT lower)
++{
++    nxd_device_config config=initial_config(context->kind,lower);
++    nxd_status status=nxd_add_device(&context->owner,&context->device,lower,&config);
++    if(status==NXD_SUCCESS) status=nxd_start_device(&context->device,&config);
++    return status==NXD_SUCCESS ? STATUS_SUCCESS:
++        status==NXD_NO_MEMORY ? STATUS_INSUFFICIENT_RESOURCES:
++        status==NXD_INVALID_PARAMETER ? STATUS_INVALID_PARAMETER:STATUS_IO_DEVICE_ERROR;
++}
++
++static NTSTATUS NTAPI add_disk(PDRIVER_OBJECT driver,PDEVICE_OBJECT lower)
++{
++    (void)driver;return add_class_device(&disk_context,lower);
++}
++
++static NTSTATUS NTAPI add_cdrom(PDRIVER_OBJECT driver,PDEVICE_OBJECT lower)
++{
++    (void)driver;return add_class_device(&cdrom_context,lower);
++}
++
++static NTSTATUS install(PDRIVER_OBJECT driver,NX_NATIVE_CLASS_CONTEXT *context,
++                        nxd_class_kind kind,PDRIVER_ADD_DEVICE add_device)
++{
++    ULONG index;
++    nxd_owner_port port;
++    nxd_status status;
++    if(!driver || !driver->DriverExtension) return STATUS_INVALID_PARAMETER;
++    context->driver=driver;context->kind=kind;port=owner_port(context);
++    status=nxd_driver_entry(&context->owner,kind,&port);
++    if(status!=NXD_SUCCESS) return STATUS_INVALID_PARAMETER;
++    for(index=0;index<=IRP_MJ_MAXIMUM_FUNCTION;++index)
++        driver->MajorFunction[index]=reject_irp;
++    driver->MajorFunction[IRP_MJ_CREATE]=complete_simple;
++    driver->MajorFunction[IRP_MJ_CLOSE]=complete_simple;
++    driver->MajorFunction[IRP_MJ_READ]=NxNativeDispatchReadWrite;
++    driver->MajorFunction[IRP_MJ_WRITE]=NxNativeDispatchReadWrite;
++    driver->MajorFunction[IRP_MJ_DEVICE_CONTROL]=NxNativeDispatchControl;
++    driver->MajorFunction[IRP_MJ_PNP]=NxNativeDispatchPnp;
++    driver->MajorFunction[IRP_MJ_FLUSH_BUFFERS]=NxNativeDispatchFlush;
++    driver->MajorFunction[IRP_MJ_SHUTDOWN]=NxNativeDispatchFlush;
++    driver->DriverExtension->AddDevice=add_device;
++    return STATUS_SUCCESS;
++}
++
++NTSTATUS NTAPI DiskDriverEntry(PDRIVER_OBJECT driver,PUNICODE_STRING registry)
++{
++    (void)registry;return install(driver,&disk_context,NXD_DISK,add_disk);
++}
++
++NTSTATUS NTAPI CdromDriverEntry(PDRIVER_OBJECT driver,PUNICODE_STRING registry)
++{
++    (void)registry;return install(driver,&cdrom_context,NXD_CDROM,add_cdrom);
++}
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..a09120e0cfd973c8b6a3121f851668a3831f44ec
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -0,0 +1,1092 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "native_adapter.h"
++#include "cache_query.h"
++
++enum { NX_NATIVE_SENSE_BYTES=32, NX_NATIVE_TIMEOUT_SECONDS=30,
++       NX_NATIVE_TIMEOUT_LIMIT_SECONDS=120, NX_SRB_SUCCESS=1,
++       NX_CONTROL_BYTES=804, NX_MEDIA_UNKNOWN, NX_MEDIA_ABSENT,
++       NX_MEDIA_PRESENT, NX_PROPERTY_CACHE_DISABLED=1,
++       NX_PROPERTY_CACHE_ENABLED=2 };
++
++
++typedef struct NX_NATIVE_ENVELOPE {
++    struct NX_NATIVE_ADAPTER *adapter;
++    PIRP parent;
++    PIRP child;
++    SCSI_REQUEST_BLOCK srb;
++    UCHAR sense[NX_NATIVE_SENSE_BYTES];
++    nx_packet_ticket ticket;
++    nx_packet_result deferred_result;
++    nx_packet_status deferred_capture;
++    nx_packet_result control_result;
++    nx_packet_status control_capture;
++    nx_handle handle;
++    nx_status terminal_status;
++    uint64_t terminal_bytes;
++    unsigned active, dispatch_active, cancel_active, cancel_latched;
++    unsigned handle_valid, terminal_ready, completed;
++    unsigned submit_active, result_deferred, packet_live;
++    PMDL control_mdl;
++    ULONG control_code, control_output;
++    uint64_t media_epoch;
++    UCHAR control_data[NX_CONTROL_BYTES];
++    KEVENT cache_event, cache_release_event;
++    unsigned control_active, control_recovery, control_recovery_failed;
++    unsigned cache_query_active;
++
++} NX_NATIVE_ENVELOPE;
++
++struct NX_NATIVE_ADAPTER {
++    KSPIN_LOCK lock;
++    KIRQL saved_irql;
++    PDEVICE_OBJECT lower;
++    nx_device core;
++    nx_slot *slots;
++    NX_NATIVE_ENVELOPE *envelopes;
++    ULONG count;
++    unsigned sealed, quarantined;
++    ULONG cache_epoch;
++
++    uint64_t media_capacity;
++    ULONG media_sector, media_generation;
++    uint64_t media_epoch;
++    unsigned media_state, media_capacity_valid;
++};
++
++typedef struct NX_NATIVE_DEVICE_EXTENSION {
++    NX_NATIVE_ADAPTER adapter;
++    PDEVICE_OBJECT self;
++    PDEVICE_OBJECT lower;
++    PUNICODE_STRING symbolic_link;
++} NX_NATIVE_DEVICE_EXTENSION;
++
++static void zero_bytes(void *pointer,size_t bytes)
++{
++    UCHAR *p=pointer;
++    while(bytes--) *p++=0;
++}
++
++static void copy_bytes(void *to,const void *from,size_t bytes)
++{
++    UCHAR *d=to;const UCHAR *s=from;
++    while(bytes--) *d++=*s++;
++}
++
++static uint32_t read_be32(const UCHAR *p)
++{
++    return (uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3];
++}
++
++static uint32_t read_le32(const UCHAR *p)
++{
++    return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
++}
++
++static void write_le32(UCHAR *p,uint32_t value)
++{
++    p[0]=(UCHAR)value;p[1]=(UCHAR)(value>>8);p[2]=(UCHAR)(value>>16);p[3]=(UCHAR)(value>>24);
++}
++
++static void write_le64(UCHAR *p,uint64_t value)
++{
++    write_le32(p,(uint32_t)value);write_le32(p+4,(uint32_t)(value>>32));
++}
++
++static void port_enter(void *context);
++static void port_leave(void *context);
++
++static void quarantine_adapter(NX_NATIVE_ADAPTER *adapter)
++{
++    port_enter(adapter);adapter->quarantined=1;port_leave(adapter);
++    nx_quarantine(&adapter->core);
++}
++
++static void advance_media_generation(NX_NATIVE_ADAPTER *adapter)
++{
++    if(adapter->media_generation!=UINT32_MAX) ++adapter->media_generation;
++}
++
++static void clear_media_capacity(NX_NATIVE_ADAPTER *adapter)
++{
++    adapter->media_capacity=0;adapter->media_capacity_valid=0;
++    adapter->core.config.capacity_bytes=0;
++}
++
++static void observe_media_absent(NX_NATIVE_ADAPTER *adapter)
++{
++    port_enter(adapter);
++    if(adapter->core.config.optical) {
++        if(adapter->media_state==NX_MEDIA_PRESENT) advance_media_generation(adapter);
++        ++adapter->media_epoch;
++        adapter->media_state=NX_MEDIA_ABSENT;clear_media_capacity(adapter);
++    }
++    port_leave(adapter);
++}
++
++static void observe_media_change(NX_NATIVE_ADAPTER *adapter)
++{
++    port_enter(adapter);
++    if(adapter->core.config.optical) {
++        if(adapter->media_state!=NX_MEDIA_UNKNOWN || adapter->media_capacity_valid)
++            advance_media_generation(adapter);
++        ++adapter->media_epoch;
++        adapter->media_state=NX_MEDIA_UNKNOWN;clear_media_capacity(adapter);
++    }
++    port_leave(adapter);
++}
++
++static void observe_media_present(NX_NATIVE_ADAPTER *adapter)
++{
++    port_enter(adapter);
++    if(adapter->core.config.optical && adapter->media_state!=NX_MEDIA_PRESENT) {
++        if(adapter->media_state==NX_MEDIA_ABSENT || !adapter->media_generation)
++            advance_media_generation(adapter);
++        adapter->media_state=NX_MEDIA_PRESENT;++adapter->media_epoch;
++    }
++    port_leave(adapter);
++}
++
++static NTSTATUS native_status(nx_status status)
++{
++    switch(status) {
++    case NX_OK:return STATUS_SUCCESS;
++    case NX_PENDING:return STATUS_PENDING;
++    case NX_INVALID:case NX_RANGE:return STATUS_INVALID_PARAMETER;
++    case NX_NO_MEMORY:return STATUS_INSUFFICIENT_RESOURCES;
++    case NX_SHORT_TRANSFER:return STATUS_BUFFER_OVERFLOW;
++    case NX_CANCELLED:return STATUS_CANCELLED;
++    case NX_WRITE_PROTECTED:return STATUS_MEDIA_WRITE_PROTECTED;
++    case NX_DURABILITY_UNSUPPORTED:return STATUS_NOT_SUPPORTED;
++    default:return STATUS_IO_DEVICE_ERROR;
++    }
++}
++
++static nx_status core_status(const nx_packet_result *result,nx_packet_status captured)
++{
++    if(captured!=NX_PACKET_OK) return NX_PROTOCOL_ERROR;
++    if(result->status==(ULONG)STATUS_CANCELLED) return NX_CANCELLED;
++    if(result->status==(ULONG)STATUS_INSUFFICIENT_RESOURCES) return NX_NO_MEMORY;
++    if((NTSTATUS)result->status<0 || result->srb_base!=NX_SRB_SUCCESS)
++        return NX_IO_ERROR;
++    return NX_OK;
++}
++
++static void observe_control_media_failure(NX_NATIVE_ADAPTER *adapter,
++                                          const nx_packet_result *result)
++{
++    UCHAR code,key,asc;
++    if(!adapter->core.config.optical) return;
++    if(result->status==(ULONG)STATUS_DEVICE_NOT_READY) {
++        observe_media_absent(adapter);return;
++    }
++    if(!result->autosense_valid || result->sense_bytes<8) return;
++    code=result->sense[0]&0x7f;
++    if(code==0x70 || code==0x71) {
++        if(result->sense_bytes<14 || 8u+result->sense[7]<14) return;
++        key=result->sense[2]&0x0f;asc=result->sense[12];
++    } else if(code==0x72 || code==0x73) {
++        key=result->sense[1]&0x0f;asc=result->sense[2];
++    } else return;
++    if(key==2 && asc==0x3a) observe_media_absent(adapter);
++    else if(key==6 && (asc==0x28 || asc==0x29))
++        observe_media_change(adapter);
++}
++
++static void port_enter(void *context)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    adapter->saved_irql=KfAcquireSpinLock(&adapter->lock);
++}
++
++static void port_leave(void *context)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    KfReleaseSpinLock(&adapter->lock,adapter->saved_irql);
++}
++
++static nx_cache classify_cache_descriptor(const UCHAR *descriptor,
++                                          ULONG_PTR information)
++{
++    uint32_t enabled;
++    if(information!=NX_CACHE_DESCRIPTOR_BYTES ||
++       read_le32(descriptor+NX_CACHE_OFF_VERSION)!=NX_CACHE_DESCRIPTOR_BYTES ||
++       read_le32(descriptor+NX_CACHE_OFF_SIZE)!=NX_CACHE_DESCRIPTOR_BYTES ||
++       read_le32(descriptor+NX_CACHE_OFF_TYPE)>3 ||
++       read_le32(descriptor+NX_CACHE_OFF_ENABLED)>2 ||
++       read_le32(descriptor+NX_CACHE_OFF_CHANGEABLE)>2 ||
++       read_le32(descriptor+NX_CACHE_OFF_WRITE_THROUGH)>2 ||
++       descriptor[NX_CACHE_OFF_FLUSH]>1 || descriptor[NX_CACHE_OFF_POWER]>1 ||
++       descriptor[NX_CACHE_OFF_NV]>1 || descriptor[NX_CACHE_OFF_PADDING])
++        return NX_CACHE_UNQUALIFIED;
++    enabled=read_le32(descriptor+NX_CACHE_OFF_ENABLED);
++    if(enabled==NX_PROPERTY_CACHE_DISABLED) return NX_CACHE_DISABLED;
++    if(enabled==NX_PROPERTY_CACHE_ENABLED && descriptor[NX_CACHE_OFF_FLUSH])
++        return NX_CACHE_ENABLED;
++    return NX_CACHE_UNQUALIFIED;
++}
++
++static NTSTATUS NTAPI cache_query_complete(PDEVICE_OBJECT device,PIRP child,
++                                           PVOID context)
++{
++    NX_NATIVE_ENVELOPE *envelope=context;
++    (void)device;
++    if(envelope && child==envelope->child)
++        (void)KeSetEvent(&envelope->cache_event,IO_NO_INCREMENT,FALSE);
++    return STATUS_MORE_PROCESSING_REQUIRED;
++}
++
++static void refresh_cache_qualification(NX_NATIVE_ADAPTER *adapter)
++{
++    NX_NATIVE_ENVELOPE *envelope=NULL;
++    PIO_STACK_LOCATION next;
++    NTSTATUS status;
++    ULONG epoch,index;
++    nx_cache state=NX_CACHE_UNQUALIFIED;
++    if(adapter->core.config.optical) return;
++    /* Revoke before querying; an older overlapping result cannot publish over
++     * a newer refresh. Query failure therefore never preserves stale credit. */
++    port_enter(adapter);
++    epoch=++adapter->cache_epoch;
++    adapter->core.config.cache=NX_CACHE_UNQUALIFIED;
++    if(!adapter->sealed) for(index=0;index<adapter->count;++index)
++        if(!adapter->envelopes[index].active) {
++            envelope=&adapter->envelopes[index];
++            envelope->active=1;envelope->cache_query_active=1;
++            KeInitializeEvent(&envelope->cache_event,NotificationEvent,FALSE);
++            KeInitializeEvent(&envelope->cache_release_event,NotificationEvent,FALSE);
++            break;
++        }
++    port_leave(adapter);
++    if(!envelope) return;
++    IoReuseIrp(envelope->child,STATUS_PENDING);
++    zero_bytes(envelope->control_data,NX_CACHE_DESCRIPTOR_BYTES);
++    write_le32(envelope->control_data+NX_CACHE_OFF_PROPERTY,NX_CACHE_PROPERTY_ID);
++    write_le32(envelope->control_data+NX_CACHE_OFF_QUERY_TYPE,NX_CACHE_STANDARD_QUERY);
++    envelope->child->AssociatedIrp.SystemBuffer=envelope->control_data;
++    envelope->child->MdlAddress=NULL;
++    next=envelope->child->Tail.Overlay.CurrentStackLocation-1;
++    zero_bytes(next,sizeof(*next));next->MajorFunction=IRP_MJ_DEVICE_CONTROL;
++    next->Parameters.DeviceIoControl.InputBufferLength=NX_CACHE_QUERY_BYTES;
++    next->Parameters.DeviceIoControl.OutputBufferLength=NX_CACHE_DESCRIPTOR_BYTES;
++    next->Parameters.DeviceIoControl.IoControlCode=IOCTL_STORAGE_QUERY_PROPERTY;
++    next->CompletionRoutine=cache_query_complete;next->Context=envelope;
++    next->Control=SL_INVOKE_ON_SUCCESS|SL_INVOKE_ON_ERROR|SL_INVOKE_ON_CANCEL;
++    status=IofCallDriver(adapter->lower,envelope->child);
++    if(status==STATUS_PENDING) {
++        status=KeWaitForSingleObject(&envelope->cache_event,Executive,KernelMode,
++                                     FALSE,NULL);
++        if(NT_SUCCESS(status)) status=envelope->child->IoStatus.Status;
++    } else if(NT_SUCCESS(status)) status=envelope->child->IoStatus.Status;
++    if(NT_SUCCESS(status) && status!=STATUS_PENDING)
++        state=classify_cache_descriptor(envelope->control_data,
++                                        envelope->child->IoStatus.Information);
++    port_enter(adapter);
++    if(adapter->cache_epoch==epoch) adapter->core.config.cache=state;
++    envelope->cache_query_active=0;envelope->active=0;
++    port_leave(adapter);
++    (void)KeSetEvent(&envelope->cache_release_event,IO_NO_INCREMENT,FALSE);
++}
++
++static void revoke_cache_qualification(NX_NATIVE_ADAPTER *adapter)
++{
++    if(adapter->core.config.optical) return;
++    port_enter(adapter);
++    ++adapter->cache_epoch;
++    adapter->core.config.cache=NX_CACHE_UNQUALIFIED;
++    port_leave(adapter);
++}
++
++static void drain_cache_queries(NX_NATIVE_ADAPTER *adapter)
++{
++    ULONG index;
++    for(index=0;index<adapter->count;++index) {
++        PKEVENT event=NULL;
++        port_enter(adapter);
++        if(adapter->envelopes[index].active &&
++           adapter->envelopes[index].cache_query_active)
++            event=&adapter->envelopes[index].cache_release_event;
++        port_leave(adapter);
++        if(event)
++            (void)KeWaitForSingleObject(event,Executive,KernelMode,FALSE,NULL);
++    }
++}
++
++static NTSTATUS NTAPI pnp_start_complete(PDEVICE_OBJECT device,PIRP irp,
++                                         PVOID context)
++{
++    (void)device;(void)irp;
++    (void)KeSetEvent((PKEVENT)context,IO_NO_INCREMENT,FALSE);
++    return STATUS_MORE_PROCESSING_REQUIRED;
++}
++
++static NTSTATUS forward_start_and_requalify(NX_NATIVE_DEVICE_EXTENSION *extension,
++                                            PIRP irp)
++{
++    PIO_STACK_LOCATION current=irp->Tail.Overlay.CurrentStackLocation;
++    PIO_STACK_LOCATION next=current-1;
++    KEVENT event;
++    NTSTATUS status;
++    *next=*current;
++    next->CompletionRoutine=pnp_start_complete;next->Context=&event;
++    next->Control=SL_INVOKE_ON_SUCCESS|SL_INVOKE_ON_ERROR|SL_INVOKE_ON_CANCEL;
++    KeInitializeEvent(&event,NotificationEvent,FALSE);
++    status=IofCallDriver(extension->lower,irp);
++    if(status==STATUS_PENDING)
++        (void)KeWaitForSingleObject(&event,Executive,KernelMode,FALSE,NULL);
++    status=irp->IoStatus.Status;
++    if(NT_SUCCESS(status)) refresh_cache_qualification(&extension->adapter);
++    IofCompleteRequest(irp,NT_SUCCESS(status)?IO_DISK_INCREMENT:IO_NO_INCREMENT);
++    return status;
++}
++
++static NX_NATIVE_ENVELOPE *find_parent(NX_NATIVE_ADAPTER *adapter,PIRP parent)
++{
++    ULONG index;
++    for(index=0;index<adapter->count;++index)
++        if(adapter->envelopes[index].active && adapter->envelopes[index].parent==parent)
++            return &adapter->envelopes[index];
++    return NULL;
++}
++
++static nx_status port_prepare(void *context,const nx_command *command)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    NX_NATIVE_ENVELOPE *envelope=find_parent(adapter,(PIRP)command->parent);
++    nx_packet_resources resources;
++    nx_packet_command packet;
++    nx_handle handle;
++    PMDL mdl;
++    uint32_t pfn_capacity=0;
++    unsigned cancel_after;
++    if(!envelope || envelope->packet_live) return NX_PROTOCOL_ERROR;
++    handle.slot=command->token.slot;handle.generation=command->token.generation;
++    port_enter(adapter);envelope->handle=handle;envelope->handle_valid=1;
++    cancel_after=envelope->cancel_latched;port_leave(adapter);
++    if(cancel_after) nx_cancel(&adapter->core,handle);
++    mdl=envelope->parent->MdlAddress;
++    if(mdl && mdl->Size>=(int)sizeof(*mdl))
++        pfn_capacity=((uint32_t)mdl->Size-(uint32_t)sizeof(*mdl))/(uint32_t)sizeof(ULONG);
++    zero_bytes(&resources,sizeof(resources));
++    resources.child=envelope->child;
++    resources.srb=&envelope->srb;
++    resources.mdl=mdl;
++    resources.sense=envelope->sense;
++    resources.sense_capacity=sizeof(envelope->sense);
++    resources.pfn_capacity=pfn_capacity;
++    resources.driver_owned_idle=1;
++    resources.thread_unlinked=1;
++    zero_bytes(&packet,sizeof(packet));
++    packet.token=command->token;
++    packet.mdl_virtual=command->mdl_virtual;
++    packet.data_virtual=command->data_virtual;
++    packet.bytes=command->bytes;
++    packet.direction=command->direction;
++    packet.function=command->function;
++    packet.cdb_length=command->cdb_length;
++    {
++        unsigned index;
++        for(index=0;index<command->cdb_length;++index) packet.cdb[index]=command->cdb[index];
++    }
++    packet.timeout_seconds=NX_NATIVE_TIMEOUT_SECONDS;
++    packet.timeout_limit_seconds=NX_NATIVE_TIMEOUT_LIMIT_SECONDS;
++    packet.max_bytes=adapter->core.config.max_bytes;
++    packet.max_pages=adapter->core.config.max_pages;
++    packet.alignment_mask=adapter->core.config.alignment_mask;
++    packet.lower_stack_count=adapter->lower->StackSize;
++    packet.completion=NxNativeAdapterChildComplete;
++    packet.completion_context=envelope;
++    if(nx_packet_prepare(&resources,&packet,&envelope->ticket)!=NX_PACKET_OK)
++        return NX_INVALID;
++    envelope->packet_live=1;
++    return NX_OK;
++}
++
++static void report_result(NX_NATIVE_ENVELOPE *envelope,const nx_packet_result *result,
++                          nx_packet_status captured)
++{
++    nx_status status=core_status(result,captured);
++    uint32_t bytes=status==NX_PROTOCOL_ERROR ? 0:(uint32_t)result->reported_bytes;
++    uint32_t flags=result->queue_frozen ? NX_LOWER_QUEUE_FROZEN:0;
++    nx_lower_done(&envelope->adapter->core,result->token,status,bytes,flags);
++}
++
++static int port_submit(void *context,const nx_command *command)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    NX_NATIVE_ENVELOPE *envelope=find_parent(adapter,(PIRP)command->parent);
++    NTSTATUS status;
++    nx_packet_result deferred;
++    nx_packet_status captured=NX_PACKET_OK;
++    unsigned report=0;
++    if(!envelope || !envelope->packet_live) return 0;
++    port_enter(adapter);
++    envelope->submit_active=1;
++    port_leave(adapter);
++    status=IofCallDriver(adapter->lower,envelope->child);
++    port_enter(adapter);
++    envelope->submit_active=0;
++    if(envelope->result_deferred) {
++        deferred=envelope->deferred_result;
++        captured=envelope->deferred_capture;
++        envelope->result_deferred=0;
++        report=1;
++    }
++    port_leave(adapter);
++    if(report) report_result(envelope,&deferred,captured);
++    return status==STATUS_PENDING;
++}
++
++static void port_retire(void *context,const nx_command *command)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    NX_NATIVE_ENVELOPE *envelope=find_parent(adapter,(PIRP)command->parent);
++    if(envelope) envelope->packet_live=0;
++}
++
++static void port_cancel(void *context,const nx_command *command)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    NX_NATIVE_ENVELOPE *envelope=find_parent(adapter,(PIRP)command->parent);
++    if(envelope && envelope->packet_live) (void)IoCancelIrp(envelope->child);
++}
++
++static void port_pending(void *context,void *parent)
++{
++    (void)context;
++    IoMarkIrpPending((PIRP)parent);
++}
++
++static void release_envelope_locked(NX_NATIVE_ENVELOPE *envelope)
++{
++    if(envelope->completed && !envelope->dispatch_active && !envelope->cancel_active) {
++        envelope->active=0;
++        envelope->parent=NULL;
++        envelope->handle_valid=0;
++        envelope->terminal_ready=0;
++    }
++}
++
++static void finish_parent(NX_NATIVE_ENVELOPE *envelope)
++{
++    PIRP parent=envelope->parent;
++    NTSTATUS status=native_status(envelope->terminal_status);
++    parent->Tail.Overlay.DriverContext[0]=NULL;
++    parent->IoStatus.Status=status;
++    parent->IoStatus.Information=(ULONG_PTR)envelope->terminal_bytes;
++    envelope->completed=1;
++    IofCompleteRequest(parent,status==STATUS_SUCCESS ? IO_DISK_INCREMENT:IO_NO_INCREMENT);
++}
++
++static NTSTATUS complete_control_output(NX_NATIVE_ENVELOPE *envelope)
++{
++    PIRP parent=envelope->parent;
++    NX_NATIVE_ADAPTER *adapter=envelope->adapter;
++    UCHAR *output=parent->AssociatedIrp.SystemBuffer;
++    uint64_t capacity;
++    ULONG sector;
++    unsigned capacity_valid;
++    port_enter(adapter);capacity=adapter->media_capacity;sector=adapter->media_sector;
++    capacity_valid=adapter->media_capacity_valid;port_leave(adapter);
++    if(!output) return STATUS_INVALID_PARAMETER;
++    if(envelope->control_code==IOCTL_DISK_GET_LENGTH_INFO) {
++        if(envelope->control_output<8) return STATUS_BUFFER_TOO_SMALL;
++        if(!capacity_valid) return STATUS_DEVICE_NOT_READY;
++        write_le64(output,capacity);parent->IoStatus.Information=8;return STATUS_SUCCESS;
++    }
++    if(envelope->control_code==IOCTL_STORAGE_GET_DEVICE_NUMBER) {
++        if(envelope->control_output<12) return STATUS_BUFFER_TOO_SMALL;
++        zero_bytes(output,12);write_le32(output,adapter->core.config.optical ? FILE_DEVICE_CD_ROM:FILE_DEVICE_DISK);
++        parent->IoStatus.Information=12;return STATUS_SUCCESS;
++    }
++    if(envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY ||
++       envelope->control_code==IOCTL_CDROM_GET_DRIVE_GEOMETRY ||
++       envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY_EX) {
++        ULONG required=envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY_EX ? 32:24;
++        uint64_t denominator=(uint64_t)sector*255u*63u;
++        uint64_t cylinders=denominator ? capacity/denominator:0;
++        if(envelope->control_output<required) return STATUS_BUFFER_TOO_SMALL;
++        if(!capacity_valid) return STATUS_DEVICE_NOT_READY;
++        if(!cylinders) cylinders=1;
++        zero_bytes(output,required);write_le64(output,cylinders);
++        write_le32(output+8,adapter->core.config.optical ? RemovableMedia:FixedMedia);
++        write_le32(output+12,255);write_le32(output+16,63);write_le32(output+20,sector);
++        if(required==32) write_le64(output+24,capacity);
++        parent->IoStatus.Information=required;return STATUS_SUCCESS;
++    }
++    return STATUS_INVALID_DEVICE_REQUEST;
++}
++
++static NTSTATUS NTAPI NxNativeControlComplete(PDEVICE_OBJECT,PIRP,PVOID);
++
++static nx_packet_status prepare_control_packet(NX_NATIVE_ENVELOPE *envelope,
++                                               const nx_packet_command *command)
++{
++    nx_packet_resources resources;
++    zero_bytes(&resources,sizeof(resources));resources.child=envelope->child;
++    resources.srb=&envelope->srb;resources.mdl=envelope->control_mdl;
++    resources.sense=envelope->sense;resources.sense_capacity=sizeof(envelope->sense);
++    resources.pfn_capacity=((uint32_t)envelope->control_mdl->Size-
++        (uint32_t)sizeof(*envelope->control_mdl))/sizeof(ULONG);
++    resources.driver_owned_idle=1;resources.thread_unlinked=1;
++    return nx_packet_prepare(&resources,command,&envelope->ticket);
++}
++
++static NTSTATUS finish_control_result(NX_NATIVE_ENVELOPE *envelope,
++                                      const nx_packet_result *result,
++                                      nx_packet_status captured)
++{
++    NX_NATIVE_ADAPTER *adapter=envelope->adapter;
++    nx_status status=core_status(result,captured);
++    NTSTATUS native=native_status(status);
++    PIRP parent=envelope->parent;
++    KIRQL cancel_irql;
++    unsigned finish=0;
++    if(envelope->control_code==IOCTL_CDROM_READ_TOC &&
++       result->status==(ULONG)STATUS_BUFFER_OVERFLOW && result->srb_base==NX_SRB_SUCCESS)
++        status=NX_OK,native=STATUS_SUCCESS;
++    if(status!=NX_OK) observe_control_media_failure(adapter,result);
++    if(envelope->control_recovery_failed && status==NX_OK)
++        status=NX_IO_ERROR,native=STATUS_IO_DEVICE_ERROR;
++    if(status==NX_OK) {
++        if(envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY ||
++           envelope->control_code==IOCTL_DISK_GET_DRIVE_GEOMETRY_EX ||
++           envelope->control_code==IOCTL_CDROM_GET_DRIVE_GEOMETRY ||
++           envelope->control_code==IOCTL_DISK_GET_LENGTH_INFO) {
++            uint32_t last,sector;
++            uint64_t blocks,capacity;
++            if(result->reported_bytes<8) native=STATUS_IO_DEVICE_ERROR;
++            else {
++                last=read_be32(envelope->control_data);sector=read_be32(envelope->control_data+4);
++                blocks=(uint64_t)last+1u;capacity=blocks*sector;
++                if(last==UINT32_MAX || !sector || (sector&(sector-1u)) ||
++                   sector>adapter->core.config.page_bytes ||
++                   capacity/sector!=blocks || capacity>INT64_MAX) native=STATUS_NOT_SUPPORTED;
++                else {
++                    unsigned stale;
++                    port_enter(adapter);
++                    stale=adapter->core.config.optical && envelope->media_epoch!=adapter->media_epoch;
++                    if(!stale) {
++                        if(adapter->core.config.optical) {
++                            if(adapter->media_state==NX_MEDIA_ABSENT ||
++                               (adapter->media_state==NX_MEDIA_UNKNOWN && !adapter->media_generation) ||
++                               (adapter->media_state==NX_MEDIA_PRESENT && adapter->media_capacity_valid &&
++                                (adapter->media_capacity!=capacity || adapter->media_sector!=sector)))
++                                advance_media_generation(adapter);
++                            if(adapter->media_state!=NX_MEDIA_PRESENT ||
++                               (adapter->media_capacity_valid &&
++                                (adapter->media_capacity!=capacity || adapter->media_sector!=sector)))
++                                ++adapter->media_epoch;
++                            adapter->media_state=NX_MEDIA_PRESENT;
++                        }
++                        adapter->media_capacity=capacity;adapter->media_sector=sector;
++                        adapter->media_capacity_valid=1;
++                        adapter->core.config.capacity_bytes=capacity;
++                        adapter->core.config.sector_bytes=sector;
++                        adapter->core.sector_mask=sector-1u;adapter->core.sector_shift=0;
++                        { uint32_t value=sector;while(value>1u){++adapter->core.sector_shift;value>>=1;} }
++                    }
++                    port_leave(adapter);
++                    native=stale ? STATUS_DEVICE_NOT_READY:complete_control_output(envelope);
++                }
++            }
++        } else if(envelope->control_code==IOCTL_CDROM_READ_TOC) {
++            if(envelope->control_output<NX_CONTROL_BYTES || !parent->AssociatedIrp.SystemBuffer ||
++               !result->reported_bytes || result->reported_bytes>NX_CONTROL_BYTES)
++                native=STATUS_IO_DEVICE_ERROR;
++            else {
++                copy_bytes(parent->AssociatedIrp.SystemBuffer,envelope->control_data,
++                           (size_t)result->reported_bytes);
++                parent->IoStatus.Information=(ULONG_PTR)result->reported_bytes;
++                observe_media_present(adapter);
++            }
++        } else if(envelope->control_code==IOCTL_CDROM_CHECK_VERIFY) {
++            if(envelope->control_output && envelope->control_output<4) native=STATUS_BUFFER_TOO_SMALL;
++            else if(envelope->control_output) {
++                observe_media_present(adapter);port_enter(adapter);
++                write_le32(parent->AssociatedIrp.SystemBuffer,adapter->media_generation);
++                port_leave(adapter);parent->IoStatus.Information=4;
++            } else { observe_media_present(adapter);parent->IoStatus.Information=0; }
++        }
++    }
++    IoAcquireCancelSpinLock(&cancel_irql);
++    if(parent->CancelRoutine==NxNativeAdapterCancel) parent->CancelRoutine=NULL;
++    IoReleaseCancelSpinLock(cancel_irql);
++    port_enter(adapter);
++    envelope->packet_live=0;envelope->control_active=0;envelope->control_recovery=0;
++    envelope->terminal_status=native==STATUS_SUCCESS ? NX_OK:
++        native==STATUS_CANCELLED ? NX_CANCELLED:NX_IO_ERROR;
++    envelope->terminal_bytes=parent->IoStatus.Information;
++    envelope->terminal_ready=1;
++    parent->IoStatus.Status=native;
++    if(native!=STATUS_SUCCESS) parent->IoStatus.Information=0;
++    if(!envelope->cancel_active&&!envelope->completed) finish=1;
++    port_leave(adapter);
++    if(finish) {
++        parent->Tail.Overlay.DriverContext[0]=NULL;envelope->completed=1;
++        IofCompleteRequest(parent,native==STATUS_SUCCESS ? IO_DISK_INCREMENT:IO_NO_INCREMENT);
++        port_enter(adapter);release_envelope_locked(envelope);port_leave(adapter);
++    }
++    return native;
++}
++
++static NTSTATUS handle_control_result(NX_NATIVE_ENVELOPE *envelope,
++                                      const nx_packet_result *result,
++                                      nx_packet_status captured)
++{
++    NX_NATIVE_ADAPTER *adapter=envelope->adapter;
++    nx_packet_command command;
++    nx_packet_result deferred,original;
++    nx_packet_status deferred_capture=NX_PACKET_OK,original_capture;
++    unsigned report=0,failed;
++    if(envelope->control_recovery) {
++        original=envelope->control_result;original_capture=envelope->control_capture;
++        failed=core_status(result,captured)!=NX_OK || result->queue_frozen;
++        port_enter(adapter);envelope->control_recovery=0;
++        if(failed) envelope->control_recovery_failed=1;
++        port_leave(adapter);
++        if(failed) quarantine_adapter(adapter);
++        return finish_control_result(envelope,&original,original_capture);
++    }
++    if(!result->queue_frozen) return finish_control_result(envelope,result,captured);
++    envelope->control_result=*result;envelope->control_capture=captured;
++    zero_bytes(&command,sizeof(command));command.token.slot=UINT32_MAX;
++    command.token.generation=envelope->media_epoch;command.token.command=2;
++    command.function=4;command.timeout_seconds=NX_NATIVE_TIMEOUT_SECONDS;
++    command.timeout_limit_seconds=NX_NATIVE_TIMEOUT_LIMIT_SECONDS;
++    command.max_bytes=NX_CONTROL_BYTES;command.max_pages=2;
++    command.lower_stack_count=adapter->lower->StackSize;
++    command.completion=NxNativeControlComplete;command.completion_context=envelope;
++    if(prepare_control_packet(envelope,&command)!=NX_PACKET_OK) {
++        port_enter(adapter);envelope->control_recovery_failed=1;
++        port_leave(adapter);quarantine_adapter(adapter);
++        return finish_control_result(envelope,result,captured);
++    }
++    port_enter(adapter);envelope->control_recovery=1;envelope->packet_live=1;
++    envelope->submit_active=1;port_leave(adapter);
++    (void)IofCallDriver(adapter->lower,envelope->child);
++    port_enter(adapter);envelope->submit_active=0;
++    if(envelope->result_deferred) { deferred=envelope->deferred_result;
++        deferred_capture=envelope->deferred_capture;envelope->result_deferred=0;report=1; }
++    port_leave(adapter);
++    if(report) return handle_control_result(envelope,&deferred,deferred_capture);
++    return STATUS_PENDING;
++}
++
++static NTSTATUS NTAPI NxNativeControlComplete(PDEVICE_OBJECT device,PIRP child,PVOID context)
++{
++    NX_NATIVE_ENVELOPE *envelope=context;
++    NX_NATIVE_ADAPTER *adapter=envelope->adapter;
++    nx_packet_result result;
++    nx_packet_status captured;
++    unsigned defer;
++    (void)device;
++    if(child!=envelope->child) return STATUS_MORE_PROCESSING_REQUIRED;
++    captured=nx_packet_capture(&envelope->ticket,&result);
++    port_enter(adapter);defer=envelope->submit_active;
++    if(defer) { envelope->deferred_result=result;envelope->deferred_capture=captured;
++        envelope->result_deferred=1; }
++    port_leave(adapter);
++    if(!defer) (void)handle_control_result(envelope,&result,captured);
++    return STATUS_MORE_PROCESSING_REQUIRED;
++}
++
++static void port_complete(void *context,void *parent,nx_status status,uint64_t bytes)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    NX_NATIVE_ENVELOPE *envelope;
++    KIRQL cancel_irql;
++    unsigned finish=0;
++    IoAcquireCancelSpinLock(&cancel_irql);
++    envelope=(NX_NATIVE_ENVELOPE *)((PIRP)parent)->Tail.Overlay.DriverContext[0];
++    if(envelope && ((PIRP)parent)->CancelRoutine==NxNativeAdapterCancel)
++        ((PIRP)parent)->CancelRoutine=NULL;
++    IoReleaseCancelSpinLock(cancel_irql);
++    if(!envelope) return;
++    port_enter(adapter);
++    envelope->terminal_status=status;
++    envelope->terminal_bytes=bytes;
++    envelope->terminal_ready=1;
++    if(!envelope->cancel_active && !envelope->completed) finish=1;
++    port_leave(adapter);
++    if(finish) {
++        finish_parent(envelope);
++        port_enter(adapter);release_envelope_locked(envelope);port_leave(adapter);
++    }
++}
++
++NTSTATUS NTAPI NxNativeAdapterChildComplete(PDEVICE_OBJECT device,PIRP child,PVOID context)
++{
++    NX_NATIVE_ENVELOPE *envelope=context;
++    NX_NATIVE_ADAPTER *adapter=envelope->adapter;
++    nx_packet_result result;
++    nx_packet_status captured;
++    unsigned defer;
++    (void)device;
++    if(child!=envelope->child) return STATUS_MORE_PROCESSING_REQUIRED;
++    captured=nx_packet_capture(&envelope->ticket,&result);
++    port_enter(adapter);
++    defer=envelope->submit_active;
++    if(defer) {
++        envelope->deferred_result=result;
++        envelope->deferred_capture=captured;
++        envelope->result_deferred=1;
++    }
++    port_leave(adapter);
++    if(!defer) report_result(envelope,&result,captured);
++    return STATUS_MORE_PROCESSING_REQUIRED;
++}
++
++void NTAPI NxNativeAdapterCancel(PDEVICE_OBJECT device,PIRP parent)
++{
++    NX_NATIVE_ENVELOPE *envelope=(NX_NATIVE_ENVELOPE *)parent->Tail.Overlay.DriverContext[0];
++    NX_NATIVE_ADAPTER *adapter;
++    nx_handle handle;
++    unsigned call_core=0,finish=0;
++    (void)device;
++    if(!envelope) { IoReleaseCancelSpinLock(parent->CancelIrql); return; }
++    adapter=envelope->adapter;
++    port_enter(adapter);
++    envelope->cancel_active=1;
++    envelope->cancel_latched=1;
++    if(envelope->control_active) call_core=2;
++    else if(envelope->handle_valid) { handle=envelope->handle;call_core=1; }
++    port_leave(adapter);
++    IoReleaseCancelSpinLock(parent->CancelIrql);
++    if(call_core==1) nx_cancel(&adapter->core,handle);
++    else if(call_core==2) (void)IoCancelIrp(envelope->child);
++    port_enter(adapter);
++    envelope->cancel_active=0;
++    if(envelope->terminal_ready && !envelope->completed) finish=1;
++    port_leave(adapter);
++    if(finish) finish_parent(envelope);
++    port_enter(adapter);release_envelope_locked(envelope);port_leave(adapter);
++}
++
++NTSTATUS NxNativeAdapterInitialize(NX_NATIVE_ADAPTER *adapter,PDEVICE_OBJECT lower,
++                                   ULONG slot_count,const nx_config *config)
++{
++    nx_port port;
++    ULONG index;
++    if(!adapter || !lower || !slot_count || !config || !lower->StackSize)
++        return STATUS_INVALID_PARAMETER;
++    zero_bytes(adapter,sizeof(*adapter));
++    adapter->slots=ExAllocatePool(NonPagedPool,(size_t)slot_count*sizeof(*adapter->slots));
++    adapter->envelopes=ExAllocatePool(NonPagedPool,(size_t)slot_count*sizeof(*adapter->envelopes));
++    if(adapter->envelopes)
++        zero_bytes(adapter->envelopes,(size_t)slot_count*sizeof(*adapter->envelopes));
++    if(!adapter->slots || !adapter->envelopes) goto no_memory;
++    adapter->lower=lower;adapter->count=slot_count;KeInitializeSpinLock(&adapter->lock);
++    adapter->media_capacity=config->capacity_bytes;adapter->media_sector=config->sector_bytes;
++    adapter->media_capacity_valid=config->capacity_bytes!=0;
++    adapter->media_state=adapter->media_capacity_valid ? NX_MEDIA_PRESENT:NX_MEDIA_UNKNOWN;
++    for(index=0;index<slot_count;++index) {
++        adapter->envelopes[index].adapter=adapter;
++        adapter->envelopes[index].child=IoAllocateIrp((CCHAR)lower->StackSize,FALSE);
++        adapter->envelopes[index].control_mdl=IoAllocateMdl(adapter->envelopes[index].control_data,
++            sizeof(adapter->envelopes[index].control_data),FALSE,FALSE,NULL);
++        if(!adapter->envelopes[index].child || !adapter->envelopes[index].control_mdl) goto no_memory;
++        MmBuildMdlForNonPagedPool(adapter->envelopes[index].control_mdl);
++    }
++    port.context=adapter;port.enter=port_enter;port.leave=port_leave;
++    port.prepare=port_prepare;port.submit=port_submit;port.retire=port_retire;
++    port.cancel=port_cancel;port.mark_pending=port_pending;port.complete=port_complete;
++    if(nx_device_init(&adapter->core,config,&port,adapter->slots,slot_count,
++                      (size_t)slot_count*sizeof(*adapter->slots))!=NX_OK)
++        goto invalid;
++    refresh_cache_qualification(adapter);
++    return STATUS_SUCCESS;
++invalid:
++    for(index=0;index<slot_count;++index) { if(adapter->envelopes[index].child) IoFreeIrp(adapter->envelopes[index].child);if(adapter->envelopes[index].control_mdl) IoFreeMdl(adapter->envelopes[index].control_mdl); }
++    ExFreePool(adapter->envelopes);ExFreePool(adapter->slots);
++    zero_bytes(adapter,sizeof(*adapter));
++    return STATUS_INVALID_PARAMETER;
++no_memory:
++    if(adapter->envelopes) {
++        for(index=0;index<slot_count;++index) { if(adapter->envelopes[index].child) IoFreeIrp(adapter->envelopes[index].child);if(adapter->envelopes[index].control_mdl) IoFreeMdl(adapter->envelopes[index].control_mdl); }
++        ExFreePool(adapter->envelopes);
++    }
++    if(adapter->slots) ExFreePool(adapter->slots);
++    zero_bytes(adapter,sizeof(*adapter));
++    return STATUS_INSUFFICIENT_RESOURCES;
++}
++
++void NxNativeAdapterSeal(NX_NATIVE_ADAPTER *adapter)
++{
++    if(!adapter) return;
++    port_enter(adapter);adapter->sealed=1;
++    if(!adapter->core.config.optical) {
++        ++adapter->cache_epoch;
++        adapter->core.config.cache=NX_CACHE_UNQUALIFIED;
++    }
++    port_leave(adapter);
++    drain_cache_queries(adapter);
++}
++
++static void destroy_unpublished_adapter(NX_NATIVE_ADAPTER *adapter)
++{
++    ULONG index;
++    if(!adapter) return;
++    if(adapter->envelopes) {
++        for(index=0;index<adapter->count;++index) {
++            if(adapter->envelopes[index].child)
++                IoFreeIrp(adapter->envelopes[index].child);
++            if(adapter->envelopes[index].control_mdl)
++                IoFreeMdl(adapter->envelopes[index].control_mdl);
++        }
++        ExFreePool(adapter->envelopes);
++    }
++    if(adapter->slots) ExFreePool(adapter->slots);
++    zero_bytes(adapter,sizeof(*adapter));
++}
++
++NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operation operation,
++                               int64_t byte_offset,uint64_t byte_count,uint32_t flags)
++{
++    NX_NATIVE_ENVELOPE *envelope=NULL;
++    nx_request request;
++    nx_handle handle;
++    nx_status result;
++    ULONG index;
++    KIRQL cancel_irql;
++    unsigned cancel_after=0;
++    if(!adapter || !parent) return STATUS_INVALID_PARAMETER;
++    port_enter(adapter);
++    if(adapter->quarantined) {
++        port_leave(adapter);parent->IoStatus.Status=STATUS_IO_DEVICE_ERROR;
++        parent->IoStatus.Information=0;IofCompleteRequest(parent,IO_NO_INCREMENT);
++        return STATUS_IO_DEVICE_ERROR;
++    }
++    if(!adapter->core.config.optical && operation!=NX_FLUSH &&
++       !adapter->media_capacity_valid) {
++        port_leave(adapter);parent->IoStatus.Status=STATUS_DEVICE_NOT_READY;
++        parent->IoStatus.Information=0;IofCompleteRequest(parent,IO_NO_INCREMENT);
++        return STATUS_DEVICE_NOT_READY;
++    }
++    if(!adapter->sealed) {
++        for(index=0;index<adapter->count;++index) if(!adapter->envelopes[index].active) {
++            envelope=&adapter->envelopes[index];break;
++        }
++    }
++    if(envelope) {
++        envelope->active=1;envelope->dispatch_active=1;envelope->parent=parent;
++        envelope->cancel_active=envelope->cancel_latched=envelope->handle_valid=0;
++        envelope->terminal_ready=envelope->completed=envelope->submit_active=0;
++        envelope->result_deferred=envelope->packet_live=0;
++    }
++    port_leave(adapter);
++    if(!envelope) {
++        parent->IoStatus.Status=STATUS_INSUFFICIENT_RESOURCES;parent->IoStatus.Information=0;
++        IofCompleteRequest(parent,IO_NO_INCREMENT);return STATUS_INSUFFICIENT_RESOURCES;
++    }
++    parent->Tail.Overlay.DriverContext[0]=envelope;
++    IoAcquireCancelSpinLock(&cancel_irql);
++    if(parent->Cancel) envelope->cancel_latched=1;
++    else parent->CancelRoutine=NxNativeAdapterCancel;
++    IoReleaseCancelSpinLock(cancel_irql);
++    zero_bytes(&request,sizeof(request));
++    request.parent=parent;request.operation=operation;request.offset=byte_offset;
++    request.bytes=byte_count;request.flags=flags;
++    if(byte_count && parent->MdlAddress) {
++        PMDL mdl=parent->MdlAddress;
++        if((uintptr_t)mdl->StartVa<=UINTPTR_MAX-mdl->ByteOffset) {
++            request.mdl_virtual=(uintptr_t)mdl->StartVa+mdl->ByteOffset;
++            request.mdl_bytes=mdl->ByteCount;request.mdl_present=1;
++        }
++    }
++    port_enter(adapter);request.cancelled=envelope->cancel_latched;port_leave(adapter);
++    result=nx_start(&adapter->core,&request,&handle);
++    port_enter(adapter);
++    if(envelope->active && !envelope->completed) {
++        envelope->handle=handle;
++        envelope->handle_valid=handle.slot!=UINT32_MAX;
++        cancel_after=envelope->cancel_latched && envelope->handle_valid;
++    }
++    envelope->dispatch_active=0;
++    release_envelope_locked(envelope);
++    port_leave(adapter);
++    if(cancel_after) nx_cancel(&adapter->core,handle);
++    return native_status(result);
++}
++
++NTSTATUS NxNativeCreateClassDevice(PDRIVER_OBJECT driver,PDEVICE_OBJECT lower,
++                                   const NX_NATIVE_DEVICE_INIT *init,PDEVICE_OBJECT *created)
++{
++    PDEVICE_OBJECT device=NULL,attached;
++    NX_NATIVE_DEVICE_EXTENSION *extension;
++    NTSTATUS status;
++    if(!driver || !lower || !init || !created || !init->SlotCount) return STATUS_INVALID_PARAMETER;
++    *created=NULL;
++    status=IoCreateDevice(driver,sizeof(*extension),init->DeviceName,init->DeviceType,
++                          init->DeviceCharacteristics,FALSE,&device);
++    if(!NT_SUCCESS(status)) return status;
++    extension=device->DeviceExtension;zero_bytes(extension,sizeof(*extension));extension->self=device;
++    attached=IoAttachDeviceToDeviceStack(device,lower);
++    if(!attached) { IoDeleteDevice(device);return STATUS_IO_DEVICE_ERROR; }
++    extension->lower=attached;device->Flags|=DO_DIRECT_IO;
++    device->AlignmentRequirement=attached->AlignmentRequirement;
++    if(device->StackSize<=attached->StackSize) device->StackSize=attached->StackSize+1;
++    status=NxNativeAdapterInitialize(&extension->adapter,attached,init->SlotCount,&init->Config);
++    if(!NT_SUCCESS(status)) { IoDetachDevice(attached);IoDeleteDevice(device);return status; }
++    if(init->SymbolicLinkName) {
++        status=IoCreateSymbolicLink(init->SymbolicLinkName,init->DeviceName);
++        if(!NT_SUCCESS(status)) { destroy_unpublished_adapter(&extension->adapter);
++            IoDetachDevice(attached);IoDeleteDevice(device);return status; }
++        extension->symbolic_link=init->SymbolicLinkName;
++    }
++    device->Flags&=~DO_DEVICE_INITIALIZING;*created=device;return STATUS_SUCCESS;
++}
++
++void NxNativeSealClassDevice(PDEVICE_OBJECT device)
++{
++    NX_NATIVE_DEVICE_EXTENSION *extension=device ? device->DeviceExtension:NULL;
++    if(extension) NxNativeAdapterSeal(&extension->adapter);
++}
++
++NTSTATUS NTAPI NxNativeDispatchReadWrite(PDEVICE_OBJECT device,PIRP irp)
++{
++    NX_NATIVE_DEVICE_EXTENSION *extension=device ? device->DeviceExtension:NULL;
++    PIO_STACK_LOCATION stack;
++    nx_operation operation;
++    ULONG length,flags=0;
++    int64_t offset;
++    if(!extension || !irp || !irp->Tail.Overlay.CurrentStackLocation) return STATUS_INVALID_PARAMETER;
++    stack=irp->Tail.Overlay.CurrentStackLocation;
++    if(stack->MajorFunction==IRP_MJ_READ) operation=NX_READ;
++    else if(stack->MajorFunction==IRP_MJ_WRITE) operation=NX_WRITE;
++    else return STATUS_INVALID_DEVICE_REQUEST;
++    length=stack->Parameters.Read.Length;
++#ifdef NX_NATIVE_ADAPTER_HOST
++    offset=stack->Parameters.Read.ByteOffset;
++#else
++    offset=stack->Parameters.Read.ByteOffset.QuadPart;
++#endif
++    if(operation==NX_WRITE && (stack->Flags & SL_WRITE_THROUGH))
++        flags=NX_WRITE_THROUGH;
++    return NxNativeAdapterSubmit(&extension->adapter,irp,operation,offset,length,flags);
++}
++
++NTSTATUS NTAPI NxNativeDispatchFlush(PDEVICE_OBJECT device,PIRP irp)
++{
++    NX_NATIVE_DEVICE_EXTENSION *extension=device ? device->DeviceExtension:NULL;
++    if(!extension || !irp) return STATUS_INVALID_PARAMETER;
++    return NxNativeAdapterSubmit(&extension->adapter,irp,NX_FLUSH,0,0,0);
++}
++
++NTSTATUS NTAPI NxNativeDispatchPnp(PDEVICE_OBJECT device,PIRP irp)
++{
++    NX_NATIVE_DEVICE_EXTENSION *extension=device ? device->DeviceExtension:NULL;
++    UCHAR minor;
++    if(!extension || !extension->lower || !irp ||
++       !irp->Tail.Overlay.CurrentStackLocation) return STATUS_INVALID_PARAMETER;
++    minor=irp->Tail.Overlay.CurrentStackLocation->MinorFunction;
++    if(minor==IRP_MN_START_DEVICE)
++        return forward_start_and_requalify(extension,irp);
++    if(minor==IRP_MN_REMOVE_DEVICE)
++        NxNativeAdapterSeal(&extension->adapter);
++    else if(minor==IRP_MN_STOP_DEVICE || minor==IRP_MN_SURPRISE_REMOVAL)
++        revoke_cache_qualification(&extension->adapter);
++    ++irp->CurrentLocation;
++    ++irp->Tail.Overlay.CurrentStackLocation;
++    return IofCallDriver(extension->lower,irp);
++}
++
++NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device,PIRP irp)
++{
++    NX_NATIVE_DEVICE_EXTENSION *extension=device ? device->DeviceExtension:NULL;
++    NX_NATIVE_ADAPTER *adapter;
++    NX_NATIVE_ENVELOPE *envelope=NULL;
++    PIO_STACK_LOCATION stack;
++    ULONG code,index;
++    KIRQL cancel_irql;
++    nx_packet_command command;
++    NTSTATUS dispatched;
++    unsigned report=0,cached,quarantined;
++    nx_packet_result deferred;
++    nx_packet_status captured=NX_PACKET_OK;
++    if(!extension||!irp||!irp->Tail.Overlay.CurrentStackLocation) return STATUS_INVALID_PARAMETER;
++    adapter=&extension->adapter;stack=irp->Tail.Overlay.CurrentStackLocation;
++    code=stack->Parameters.DeviceIoControl.IoControlCode;
++    port_enter(adapter);cached=adapter->media_capacity_valid;quarantined=adapter->quarantined;
++    port_leave(adapter);
++    if(quarantined) {
++        irp->IoStatus.Status=STATUS_IO_DEVICE_ERROR;irp->IoStatus.Information=0;
++        IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_IO_DEVICE_ERROR;
++    }
++    if(code==IOCTL_STORAGE_QUERY_PROPERTY) {
++        irp->CurrentLocation++;irp->Tail.Overlay.CurrentStackLocation++;
++        return IofCallDriver(extension->lower,irp);
++    }
++    if(code==IOCTL_STORAGE_GET_DEVICE_NUMBER ||
++       ((code==IOCTL_DISK_GET_LENGTH_INFO||code==IOCTL_DISK_GET_DRIVE_GEOMETRY||
++         code==IOCTL_DISK_GET_DRIVE_GEOMETRY_EX||code==IOCTL_CDROM_GET_DRIVE_GEOMETRY)&&cached)) {
++        NX_NATIVE_ENVELOPE local;zero_bytes(&local,sizeof(local));local.adapter=adapter;local.parent=irp;
++        local.control_code=code;local.control_output=stack->Parameters.DeviceIoControl.OutputBufferLength;
++        dispatched=complete_control_output(&local);irp->IoStatus.Status=dispatched;
++        if(dispatched!=STATUS_SUCCESS) irp->IoStatus.Information=0;
++        IofCompleteRequest(irp,dispatched==STATUS_SUCCESS?IO_DISK_INCREMENT:IO_NO_INCREMENT);return dispatched;
++    }
++    if(code!=IOCTL_DISK_GET_LENGTH_INFO&&code!=IOCTL_DISK_GET_DRIVE_GEOMETRY&&
++       code!=IOCTL_DISK_GET_DRIVE_GEOMETRY_EX&&code!=IOCTL_CDROM_GET_DRIVE_GEOMETRY&&
++       code!=IOCTL_CDROM_READ_TOC&&code!=IOCTL_CDROM_CHECK_VERIFY) {
++        irp->IoStatus.Status=STATUS_INVALID_DEVICE_REQUEST;irp->IoStatus.Information=0;
++        IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_INVALID_DEVICE_REQUEST;
++    }
++    if((code==IOCTL_CDROM_READ_TOC &&
++        stack->Parameters.DeviceIoControl.OutputBufferLength<NX_CONTROL_BYTES) ||
++       (code==IOCTL_CDROM_CHECK_VERIFY &&
++        stack->Parameters.DeviceIoControl.OutputBufferLength &&
++        (stack->Parameters.DeviceIoControl.OutputBufferLength<4 ||
++         !irp->AssociatedIrp.SystemBuffer))) {
++        irp->IoStatus.Status=STATUS_BUFFER_TOO_SMALL;irp->IoStatus.Information=0;
++        IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_BUFFER_TOO_SMALL;
++    }
++    port_enter(adapter);
++    if(!adapter->sealed) for(index=0;index<adapter->count;++index)
++        if(!adapter->envelopes[index].active){envelope=&adapter->envelopes[index];break;}
++    if(envelope) {
++        envelope->active=1;envelope->dispatch_active=1;envelope->control_active=1;
++        envelope->parent=irp;envelope->completed=envelope->terminal_ready=0;
++        envelope->cancel_active=envelope->cancel_latched=0;envelope->packet_live=0;
++        envelope->submit_active=envelope->result_deferred=0;
++        envelope->control_recovery=envelope->control_recovery_failed=0;
++        envelope->control_code=code;envelope->control_output=stack->Parameters.DeviceIoControl.OutputBufferLength;
++        envelope->media_epoch=adapter->media_epoch;
++    }
++    port_leave(adapter);
++    if(!envelope){irp->IoStatus.Status=STATUS_INSUFFICIENT_RESOURCES;irp->IoStatus.Information=0;IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_INSUFFICIENT_RESOURCES;}
++    irp->Tail.Overlay.DriverContext[0]=envelope;IoAcquireCancelSpinLock(&cancel_irql);
++    if(irp->Cancel) envelope->cancel_latched=1;else irp->CancelRoutine=NxNativeAdapterCancel;
++    IoReleaseCancelSpinLock(cancel_irql);
++    if(envelope->cancel_latched) {
++        port_enter(adapter);envelope->dispatch_active=0;port_leave(adapter);
++        port_complete(adapter,irp,NX_CANCELLED,0);return STATUS_CANCELLED;
++    }
++    zero_bytes(envelope->control_data,sizeof(envelope->control_data));
++    zero_bytes(&command,sizeof(command));command.token.slot=UINT32_MAX;command.token.generation=envelope->media_epoch;
++    command.mdl_virtual=(uintptr_t)envelope->control_mdl->StartVa+envelope->control_mdl->ByteOffset;
++    command.data_virtual=command.mdl_virtual;command.bytes=8;command.direction=0x40;command.function=0;
++    command.cdb_length=10;command.cdb[0]=0x25;
++    if(code==IOCTL_CDROM_READ_TOC) {
++        command.bytes=NX_CONTROL_BYTES;command.cdb[0]=0x43;command.cdb[1]=2;
++        command.cdb[7]=(UCHAR)(NX_CONTROL_BYTES>>8);command.cdb[8]=(UCHAR)NX_CONTROL_BYTES;
++    } else if(code==IOCTL_CDROM_CHECK_VERIFY) {
++        command.bytes=0;command.direction=0;command.data_virtual=0;command.mdl_virtual=0;
++        command.cdb_length=6;command.cdb[0]=0;
++    }
++    command.timeout_seconds=NX_NATIVE_TIMEOUT_SECONDS;
++    command.timeout_limit_seconds=NX_NATIVE_TIMEOUT_LIMIT_SECONDS;command.max_bytes=NX_CONTROL_BYTES;
++    command.max_pages=2;command.lower_stack_count=adapter->lower->StackSize;command.completion=NxNativeControlComplete;command.completion_context=envelope;
++    if(prepare_control_packet(envelope,&command)!=NX_PACKET_OK) {
++        envelope->terminal_status=NX_INVALID;envelope->terminal_bytes=0;port_complete(adapter,irp,NX_INVALID,0);return STATUS_INVALID_PARAMETER;
++    }
++    envelope->packet_live=1;envelope->submit_active=1;IoMarkIrpPending(irp);
++    dispatched=IofCallDriver(adapter->lower,envelope->child);
++    port_enter(adapter);envelope->submit_active=0;
++    if(envelope->result_deferred){deferred=envelope->deferred_result;
++        captured=envelope->deferred_capture;envelope->result_deferred=0;report=1;}
++    port_leave(adapter);
++    if(report) (void)handle_control_result(envelope,&deferred,captured);
++    dispatched=STATUS_PENDING;
++    port_enter(adapter);envelope->dispatch_active=0;release_envelope_locked(envelope);port_leave(adapter);
++    return dispatched;
++}
+diff --git a/drivers/storage/class/nxstorage/native_adapter.h b/drivers/storage/class/nxstorage/native_adapter.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..ec216f900931c3c5857e4d763975358d8a416414
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/native_adapter.h
+@@ -0,0 +1,40 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_NATIVE_ADAPTER_H
++#define NX_NATIVE_ADAPTER_H
++#ifdef NX_NATIVE_ADAPTER_HOST
++#include "native_adapter_host_platform.h"
++#else
++#include <ntddk.h>
++#include <srb.h>
++#include <ntdddisk.h>
++#include <ntddcdrm.h>
++#include <ntddstor.h>
++#endif
++#include "request.h"
++#include "native_packet.h"
++
++typedef struct NX_NATIVE_ADAPTER NX_NATIVE_ADAPTER;
++typedef struct NX_NATIVE_DEVICE_INIT {
++    PUNICODE_STRING DeviceName;
++    PUNICODE_STRING SymbolicLinkName;
++    ULONG DeviceType;
++    ULONG DeviceCharacteristics;
++    nx_config Config;
++    ULONG SlotCount;
++} NX_NATIVE_DEVICE_INIT;
++
++NTSTATUS NxNativeAdapterInitialize(NX_NATIVE_ADAPTER *, PDEVICE_OBJECT, ULONG,
++                                   const nx_config *);
++void NxNativeAdapterSeal(NX_NATIVE_ADAPTER *);
++NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *, PIRP, nx_operation,
++                               int64_t, uint64_t, uint32_t);
++NTSTATUS NTAPI NxNativeAdapterChildComplete(PDEVICE_OBJECT, PIRP, PVOID);
++void NTAPI NxNativeAdapterCancel(PDEVICE_OBJECT, PIRP);
++NTSTATUS NxNativeCreateClassDevice(PDRIVER_OBJECT, PDEVICE_OBJECT,
++                                   const NX_NATIVE_DEVICE_INIT *, PDEVICE_OBJECT *);
++void NxNativeSealClassDevice(PDEVICE_OBJECT);
++NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT, PIRP);
++NTSTATUS NTAPI NxNativeDispatchReadWrite(PDEVICE_OBJECT, PIRP);
++NTSTATUS NTAPI NxNativeDispatchFlush(PDEVICE_OBJECT, PIRP);
++NTSTATUS NTAPI NxNativeDispatchPnp(PDEVICE_OBJECT, PIRP);
++#endif
+diff --git a/drivers/storage/class/nxstorage/native_driver.h b/drivers/storage/class/nxstorage/native_driver.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..9fc64232dad5d3d437b99656254ed7085f535843
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/native_driver.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_NATIVE_DRIVER_H
++#define NX_NATIVE_DRIVER_H
++
++#include "native_adapter.h"
++
++NTSTATUS NTAPI DiskDriverEntry(PDRIVER_OBJECT, PUNICODE_STRING);
++NTSTATUS NTAPI CdromDriverEntry(PDRIVER_OBJECT, PUNICODE_STRING);
++
++#endif
+diff --git a/drivers/storage/class/nxstorage/native_packet.c b/drivers/storage/class/nxstorage/native_packet.c
+index dab39a6a244fdf6843b02d84133587bb9de6e3a6..386f03823d30472a1f10a8d3e0318bdf70dacaae 100644
+--- a/drivers/storage/class/nxstorage/native_packet.c
++++ b/drivers/storage/class/nxstorage/native_packet.c
+@@ -1,4 +1,8 @@
+ /* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifdef NX_NATIVE_TARGET
++#include <ntddk.h>
++#include <srb.h>
++#endif
+ #include "native_packet.h"
+ 
+ enum { EXECUTE=0, RELEASE_QUEUE=4, DATA_IN=0x40, DATA_OUT=0x80,
+diff --git a/drivers/storage/class/nxstorage/nxdisk_owner.c b/drivers/storage/class/nxstorage/nxdisk_owner.c
+index 52f55017ddfed240d6762c3fbbe5888312c32e2e..e44d98a82ba89f6dcef4b010073160bf7d879509 100644
+--- a/drivers/storage/class/nxstorage/nxdisk_owner.c
++++ b/drivers/storage/class/nxstorage/nxdisk_owner.c
+@@ -26,9 +26,9 @@ static int valid_config(nxd_class_kind kind,const nxd_device_config *config)
+     if(!config)return 0;sector=config->geometry.bytes_per_sector;
+     if(!power_two(sector)||sector<128||config->alignment_mask>=sector||
+        (config->alignment_mask&(config->alignment_mask+1u)))return 0;
+-    if(kind==NXD_DISK&&(!config->capacity_bytes||
+-       (config->capacity_bytes&(sector-1u))||!config->geometry.cylinders||
+-       !config->geometry.tracks_per_cylinder||!config->geometry.sectors_per_track))return 0;
++    if(kind==NXD_DISK&&config->capacity_bytes&&
++       ((config->capacity_bytes&(sector-1u))||!config->geometry.cylinders||
++        !config->geometry.tracks_per_cylinder||!config->geometry.sectors_per_track))return 0;
+     return 1;
+ }
+ 
+diff --git a/drivers/storage/class/nxstorage/request.c b/drivers/storage/class/nxstorage/request.c
+index 4e122cecb18029663b4100a3a2e9899bcdfc9bf9..574045c6e91d0d8a36060e754dbb177accec22cc 100644
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -227,6 +227,10 @@ static void pump(nx_device *d)
+                 preparation_failed(d,s,prepared>NX_OK ? NX_PROTOCOL_ERROR:prepared);
+                 unlock(d); continue;
+             }
++            if (d->quarantined && !s->recovery) {
++                unlock(d); d->port.retire(d->port.context,&s->command);
++                lock(d); s->final_status=NX_IO_ERROR; s->terminal=1; unlock(d); continue;
++            }
+             if (s->cancelled && !s->recovery) {
+                 unlock(d); d->port.retire(d->port.context,&s->command);
+                 lock(d); s->final_status=NX_CANCELLED; s->terminal=1; unlock(d); continue;
+@@ -295,3 +299,10 @@ void nx_cancel(nx_device *d, nx_handle handle)
+     if (s->active && s->generation==handle.generation) s->cancelled=1;
+     unlock(d); pump(d);
+ }
++
++void nx_quarantine(nx_device *d)
++{
++    if (!d) return;
++    lock(d); d->quarantined=1; unlock(d);
++    pump(d);
++}
+diff --git a/drivers/storage/class/nxstorage/request.h b/drivers/storage/class/nxstorage/request.h
+index 084e0c0e6a793bdc04c08173d0ffc206a43fd00a..49a87529109d9bd796ac4a55e911039ff76c415b 100644
+--- a/drivers/storage/class/nxstorage/request.h
++++ b/drivers/storage/class/nxstorage/request.h
+@@ -88,4 +88,5 @@ nx_status nx_device_init(nx_device *, const nx_config *, const nx_port *, nx_slo
+ nx_status nx_start(nx_device *, const nx_request *, nx_handle *);
+ void nx_lower_done(nx_device *, nx_token, nx_status, uint32_t, uint32_t);
+ void nx_cancel(nx_device *, nx_handle);
++void nx_quarantine(nx_device *);
+ #endif
+diff --git a/tests/host/nxstorage/check_adapter.py b/tests/host/nxstorage/check_adapter.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..136adfdf0068879141111026ab3b13f805e874a0
+--- /dev/null
++++ b/tests/host/nxstorage/check_adapter.py
+@@ -0,0 +1,18 @@
++#!/usr/bin/env python3
++from pathlib import Path
++import os, subprocess, sys
++root=Path(__file__).resolve().parents[3]
++source=root/'drivers/storage/class/nxstorage'
++tests=Path(__file__).resolve().parent
++out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
++cc=os.environ.get('CC','clang')
++base=[cc,'-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-DNX_NATIVE_ADAPTER_HOST',
++      '-pthread','-I'+str(source),'-I'+str(tests),'-include',str(tests/'native_adapter_host_platform.h')]
++inputs=[str(source/'request.c'),str(source/'native_packet.c'),str(source/'native_adapter.c'),
++        str(source/'nxdisk_owner.c'),str(source/'nxcdrom_profile.c'),str(source/'driver.c'),
++        str(tests/'native_adapter_test.c')]
++for name,flags in [('adapter-plain',[]),('adapter-sanitized',['-fsanitize=address,undefined','-fno-omit-frame-pointer'])]:
++    exe=out/name;subprocess.run(base+flags+inputs+['-o',str(exe)],check=True)
++    result=subprocess.run([str(exe)],check=True,text=True,capture_output=True,
++      env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0:halt_on_error=1',UBSAN_OPTIONS='halt_on_error=1'))
++    print(name+': '+result.stdout.splitlines()[-1])
+diff --git a/tests/host/nxstorage/native_adapter_host_platform.h b/tests/host/nxstorage/native_adapter_host_platform.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..ab0481b243d47a903375f9946bf08e57e57b69c6
+--- /dev/null
++++ b/tests/host/nxstorage/native_adapter_host_platform.h
+@@ -0,0 +1,143 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_NATIVE_ADAPTER_HOST_PLATFORM_H
++#define NX_NATIVE_ADAPTER_HOST_PLATFORM_H
++#include <stddef.h>
++#include <stdint.h>
++#define NTAPI
++#define FASTCALL
++#define TRUE 1
++#define FALSE 0
++#define NT_SUCCESS(s) ((int32_t)(s) >= 0)
++#define NonPagedPool 0
++typedef void VOID, *PVOID;
++typedef const void *PCVOID;
++typedef uint8_t UCHAR, BOOLEAN, CCHAR, KIRQL;
++typedef uint16_t USHORT;
++typedef uint16_t WCHAR;
++typedef uint32_t ULONG, DEVICE_TYPE;
++typedef int32_t LONG, NTSTATUS;
++typedef uintptr_t ULONG_PTR;
++typedef void *HANDLE;
++typedef struct _KEVENT { unsigned signaled; } KEVENT, *PKEVENT;
++typedef struct _UNICODE_STRING { USHORT Length, MaximumLength; uint16_t *Buffer; } UNICODE_STRING, *PUNICODE_STRING;
++typedef struct _OBJECT_ATTRIBUTES { ULONG Length; HANDLE RootDirectory;
++    PUNICODE_STRING ObjectName; ULONG Attributes; PVOID SecurityDescriptor;
++    PVOID SecurityQualityOfService; } OBJECT_ATTRIBUTES, *POBJECT_ATTRIBUTES;
++#define InitializeObjectAttributes(p,n,a,r,s) do { (p)->Length=sizeof(*(p)); \
++    (p)->RootDirectory=(r);(p)->Attributes=(a);(p)->ObjectName=(n); \
++    (p)->SecurityDescriptor=(s);(p)->SecurityQualityOfService=NULL; } while(0)
++typedef struct _MDL { struct _MDL *Next; int16_t Size, MdlFlags;
++    void *Process, *MappedSystemVa, *StartVa; ULONG ByteCount, ByteOffset; } MDL, *PMDL;
++struct _IRP; struct _DEVICE_OBJECT; struct _DRIVER_OBJECT;
++typedef NTSTATUS (*PDRIVER_ADD_DEVICE)(struct _DRIVER_OBJECT *,struct _DEVICE_OBJECT *);
++typedef NTSTATUS (*PIO_COMPLETION_ROUTINE)(struct _DEVICE_OBJECT *,struct _IRP *,void *);
++typedef void (*PDRIVER_CANCEL)(struct _DEVICE_OBJECT *,struct _IRP *);
++typedef NTSTATUS (*PDRIVER_DISPATCH)(struct _DEVICE_OBJECT *,struct _IRP *);
++struct _SCSI_REQUEST_BLOCK;
++typedef struct _IO_STACK_LOCATION {
++    UCHAR MajorFunction, MinorFunction, Flags, Control;
++    union {
++        struct { ULONG Length; ULONG Key; int64_t ByteOffset; } Read;
++        struct { ULONG Length; ULONG Key; int64_t ByteOffset; } Write;
++        struct { ULONG OutputBufferLength; PVOID Type3InputBuffer; ULONG InputBufferLength; ULONG IoControlCode; } DeviceIoControl;
++        struct { struct _SCSI_REQUEST_BLOCK *Srb; } Scsi;
++    } Parameters;
++    struct _DEVICE_OBJECT *DeviceObject;
++    PVOID FileObject;
++    PIO_COMPLETION_ROUTINE CompletionRoutine;
++    PVOID Context;
++} IO_STACK_LOCATION, *PIO_STACK_LOCATION;
++typedef struct _IRP {
++    struct { NTSTATUS Status; uintptr_t Information; } IoStatus;
++    PMDL MdlAddress;
++    int8_t StackCount, CurrentLocation;
++    BOOLEAN PendingReturned, Cancel, CancelIrql;
++    PDRIVER_CANCEL CancelRoutine;
++    ULONG Flags;
++    union { PVOID SystemBuffer; } AssociatedIrp;
++    struct { struct { PVOID DriverContext[4]; PIO_STACK_LOCATION CurrentStackLocation; PVOID Thread; } Overlay; } Tail;
++    unsigned host_pending, host_completed;
++} IRP, *PIRP;
++#include "packet_srb_declaration.h"
++typedef struct _DEVICE_OBJECT {
++    struct _DRIVER_OBJECT *DriverObject;
++    struct _DEVICE_OBJECT *AttachedDevice;
++    PVOID DeviceExtension;
++    ULONG Flags, Characteristics, AlignmentRequirement;
++    UCHAR StackSize, DeviceType;
++    PVOID Vpb;
++    NTSTATUS (*host_lower)(struct _DEVICE_OBJECT *, PIRP);
++} DEVICE_OBJECT, *PDEVICE_OBJECT;
++typedef struct _DRIVER_EXTENSION { PDRIVER_ADD_DEVICE AddDevice; } DRIVER_EXTENSION, *PDRIVER_EXTENSION;
++typedef struct _DRIVER_OBJECT { PDRIVER_DISPATCH MajorFunction[28]; PDRIVER_EXTENSION DriverExtension; } DRIVER_OBJECT, *PDRIVER_OBJECT;
++typedef ULONG KSPIN_LOCK, *PKSPIN_LOCK;
++
++enum {
++    STATUS_SUCCESS=0, STATUS_PENDING=0x103,
++    STATUS_MORE_PROCESSING_REQUIRED=(NTSTATUS)0xc0000016u,
++    STATUS_INVALID_PARAMETER=(NTSTATUS)0xc000000du,
++    STATUS_INVALID_DEVICE_REQUEST=(NTSTATUS)0xc0000010u,
++    STATUS_BUFFER_TOO_SMALL=(NTSTATUS)0xc0000023u,
++    STATUS_INSUFFICIENT_RESOURCES=(NTSTATUS)0xc000009au,
++    STATUS_IO_DEVICE_ERROR=(NTSTATUS)0xc0000185u,
++    STATUS_CANCELLED=(NTSTATUS)0xc0000120u,
++    STATUS_DEVICE_NOT_READY=(NTSTATUS)0xc00000a3u,
++    STATUS_NOT_SUPPORTED=(NTSTATUS)0xc00000bbu,
++    STATUS_DEVICE_BUSY=(NTSTATUS)0xc000009eu,
++    STATUS_MEDIA_WRITE_PROTECTED=(NTSTATUS)0xc00000a2u,
++    STATUS_BUFFER_OVERFLOW=(NTSTATUS)0x80000005u,
++    IRP_MJ_CREATE=0, IRP_MJ_CLOSE=2, IRP_MJ_READ=3, IRP_MJ_WRITE=4,
++    IRP_MJ_FLUSH_BUFFERS=9, IRP_MJ_DEVICE_CONTROL=14, IRP_MJ_SHUTDOWN=16,
++    IRP_MJ_PNP=27,
++    IRP_MN_START_DEVICE=0, IRP_MN_REMOVE_DEVICE=2, IRP_MN_STOP_DEVICE=4,
++    IRP_MN_SURPRISE_REMOVAL=0x17,
++    IRP_MJ_MAXIMUM_FUNCTION=27,
++    DO_DIRECT_IO=0x200000, DO_DEVICE_INITIALIZING=0x10,
++    IO_NO_INCREMENT=0, IO_DISK_INCREMENT=1, FILE_WRITE_THROUGH=2,
++    SL_WRITE_THROUGH=4, SL_INVOKE_ON_CANCEL=0x20,
++    SL_INVOKE_ON_SUCCESS=0x40, SL_INVOKE_ON_ERROR=0x80,
++    IOCTL_DISK_GET_DRIVE_GEOMETRY=0x00070000,
++    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX=0x000700a0,
++    IOCTL_CDROM_GET_DRIVE_GEOMETRY=0x0002404c,
++    IOCTL_DISK_GET_LENGTH_INFO=0x0007405c,
++    IOCTL_STORAGE_GET_DEVICE_NUMBER=0x002d1080,
++    IOCTL_STORAGE_QUERY_PROPERTY=0x002d1400,
++    IOCTL_CDROM_READ_TOC=0x00024000,
++    IOCTL_CDROM_CHECK_VERIFY=0x00024800,
++    FILE_DEVICE_DISK=7, FILE_DEVICE_CD_ROM=2,
++    RemovableMedia=11, FixedMedia=12,
++    FILE_REMOVABLE_MEDIA=1, FILE_READ_ONLY_DEVICE=2,
++    OBJ_CASE_INSENSITIVE=0x40, OBJ_PERMANENT=0x10, OBJ_KERNEL_HANDLE=0x200,
++    DIRECTORY_ALL_ACCESS=0x000f000f,
++    NotificationEvent=0, Executive=0, KernelMode=0
++};
++VOID KeInitializeEvent(PKEVENT, int, BOOLEAN);
++LONG KeSetEvent(PKEVENT, LONG, BOOLEAN);
++NTSTATUS KeWaitForSingleObject(PVOID, int, int, BOOLEAN, PVOID);
++VOID IoReuseIrp(PIRP, NTSTATUS);
++PIRP IoAllocateIrp(CCHAR, BOOLEAN);
++VOID IoFreeIrp(PIRP);
++NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT, PIRP);
++VOID FASTCALL IofCompleteRequest(PIRP, CCHAR);
++BOOLEAN IoCancelIrp(PIRP);
++VOID IoAcquireCancelSpinLock(KIRQL *);
++VOID IoReleaseCancelSpinLock(KIRQL);
++VOID IoMarkIrpPending(PIRP);
++VOID KeInitializeSpinLock(PKSPIN_LOCK);
++KIRQL FASTCALL KfAcquireSpinLock(PKSPIN_LOCK);
++VOID FASTCALL KfReleaseSpinLock(PKSPIN_LOCK,KIRQL);
++PVOID ExAllocatePool(int,size_t);
++VOID ExFreePool(PVOID);
++PMDL IoAllocateMdl(PVOID,ULONG,BOOLEAN,BOOLEAN,PIRP);
++VOID MmBuildMdlForNonPagedPool(PMDL);
++VOID IoFreeMdl(PMDL);
++NTSTATUS IoCreateDevice(PDRIVER_OBJECT,ULONG,PUNICODE_STRING,DEVICE_TYPE,ULONG,BOOLEAN,PDEVICE_OBJECT *);
++PDEVICE_OBJECT IoAttachDeviceToDeviceStack(PDEVICE_OBJECT,PDEVICE_OBJECT);
++VOID IoDetachDevice(PDEVICE_OBJECT);
++VOID IoDeleteDevice(PDEVICE_OBJECT);
++NTSTATUS IoCreateSymbolicLink(PUNICODE_STRING,PUNICODE_STRING);
++NTSTATUS IoDeleteSymbolicLink(PUNICODE_STRING);
++NTSTATUS ZwCreateDirectoryObject(HANDLE *,ULONG,POBJECT_ATTRIBUTES);
++NTSTATUS ZwMakeTemporaryObject(HANDLE);
++NTSTATUS ZwClose(HANDLE);
++#endif
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..7b98bb5c890232c1fb87e809eb542d50197c5535
+--- /dev/null
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -0,0 +1,796 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "native_adapter_host_platform.h"
++#include "native_adapter.h"
++#include "native_driver.h"
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <pthread.h>
++#include <sched.h>
++#define CHECK(x) do { if (!(x)) { fprintf(stderr,"%s:%d %s\n",__func__,__LINE__,#x); return 0; } } while(0)
++#define MUST(x) do { if (!(x)) abort(); } while(0)
++
++static PDEVICE_OBJECT created_device;
++static PIRP active_child;
++static unsigned lower_calls, cancel_calls, forward_calls;
++static unsigned property_calls,free_irps,free_mdls,detaches,deletes;
++static int fail_pool,fail_symbolic_link;
++static int pool_fail_call=-1,irp_fail_call=-1,mdl_fail_call=-1;
++static unsigned pool_calls,irp_calls,mdl_calls,pool_live;
++static unsigned invalid_irp_frees,invalid_mdl_frees;
++static int poison_pool,cancel_during_prepare,cancel_during_submit;
++static PIRP cancel_parent;
++static void *live_irps[128],*live_mdls[128];
++static uint8_t opcodes[64],functions[64];
++static int lower_pending;
++static NTSTATUS sync_command_status;
++static uint32_t read_capacity_last=15,read_capacity_sector=2048;
++static int freeze_next,release_failure,next_sense_key,next_sense_asc,next_sense_descriptor;
++static NTSTATUS cache_query_status;
++static ULONG_PTR cache_query_information;
++static uint8_t cache_query_descriptor[28];
++static int cache_query_requires_started,lower_started=1;
++static volatile PIRP pending_cache_query;
++static int hold_next_cache_query,cache_query_barrier;
++static unsigned query_barrier_arrivals;
++static unsigned pool_allocations,irp_allocations,mdl_allocations;
++
++static void remember(void **live,void *pointer){for(unsigned i=0;i<128;++i)if(!live[i]){live[i]=pointer;return;}abort();}
++static int forget(void **live,void *pointer){for(unsigned i=0;i<128;++i)if(live[i]==pointer){live[i]=NULL;return 1;}return 0;}
++static unsigned live_count(void **live){unsigned count=0;for(unsigned i=0;i<128;++i)count+=live[i]!=NULL;return count;}
++static void cancel_now(void)
++{
++    PDRIVER_CANCEL routine;
++    MUST(cancel_parent&&cancel_parent->CancelRoutine);
++    routine=cancel_parent->CancelRoutine;cancel_parent->CancelRoutine=NULL;
++    cancel_parent->Cancel=TRUE;cancel_parent->CancelIrql=0;
++    routine(created_device,cancel_parent);
++}
++VOID IoReuseIrp(PIRP i,NTSTATUS s){if(cancel_during_prepare){cancel_during_prepare=0;cancel_now();}int8_t n=i->StackCount;PIO_STACK_LOCATION base=i->Tail.Overlay.CurrentStackLocation-n;memset(i,0,sizeof(*i));i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=base+n;i->IoStatus.Status=s;}
++PIRP IoAllocateIrp(CCHAR n,BOOLEAN q){(void)q;++irp_allocations;unsigned call=irp_calls++;if((int)call==irp_fail_call)return NULL;size_t z=sizeof(IRP)+(size_t)n*sizeof(IO_STACK_LOCATION);PIRP i=calloc(1,z);if(i){remember(live_irps,i);i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=(PIO_STACK_LOCATION)(i+1)+n;}return i;}
++VOID IoFreeIrp(PIRP i){if(!forget(live_irps,i)){++invalid_irp_frees;return;}++free_irps;free(i);}
++
++VOID FASTCALL IofCompleteRequest(PIRP i,CCHAR b){(void)b;MUST(!i->host_completed);i->host_completed=1;}
++VOID IoMarkIrpPending(PIRP i){i->host_pending=1;}
++VOID KeInitializeEvent(PKEVENT event,int type,BOOLEAN state){(void)type;__atomic_store_n(&event->signaled,state,__ATOMIC_RELEASE);}
++LONG KeSetEvent(PKEVENT event,LONG increment,BOOLEAN wait){(void)increment;(void)wait;return (LONG)__atomic_exchange_n(&event->signaled,1,__ATOMIC_ACQ_REL);}
++NTSTATUS KeWaitForSingleObject(PVOID object,int reason,int mode,BOOLEAN alert,PVOID timeout)
++{(void)reason;(void)mode;(void)alert;(void)timeout;while(!__atomic_load_n(&((PKEVENT)object)->signaled,__ATOMIC_ACQUIRE))sched_yield();return STATUS_SUCCESS;}
++VOID IoAcquireCancelSpinLock(KIRQL *q){*q=0;}
++VOID IoReleaseCancelSpinLock(KIRQL q){(void)q;}
++VOID KeInitializeSpinLock(PKSPIN_LOCK l){*l=0;}
++KIRQL FASTCALL KfAcquireSpinLock(PKSPIN_LOCK l){while(__atomic_exchange_n(l,1,__ATOMIC_ACQUIRE))sched_yield();return 0;}
++VOID FASTCALL KfReleaseSpinLock(PKSPIN_LOCK l,KIRQL q){(void)q;MUST(__atomic_load_n(l,__ATOMIC_RELAXED));__atomic_store_n(l,0,__ATOMIC_RELEASE);}
++PVOID ExAllocatePool(int t,size_t n){(void)t;++pool_allocations;unsigned call=pool_calls++;if(fail_pool){--fail_pool;return NULL;}if((int)call==pool_fail_call)return NULL;PVOID p=malloc(n);if(p){memset(p,poison_pool?0xa5:0,n);++pool_live;}return p;}
++VOID ExFreePool(PVOID p){if(p){MUST(pool_live);--pool_live;}free(p);}
++PMDL IoAllocateMdl(PVOID p,ULONG n,BOOLEAN s,BOOLEAN q,PIRP i){(void)s;(void)q;(void)i;++mdl_allocations;unsigned call=mdl_calls++;if((int)call==mdl_fail_call)return NULL;PMDL m=calloc(1,sizeof(*m)+2*sizeof(ULONG));if(m){remember(live_mdls,m);uintptr_t a=(uintptr_t)p;m->StartVa=(PVOID)(a&~(uintptr_t)4095);m->ByteOffset=(ULONG)(a&4095);m->ByteCount=n;m->Size=sizeof(*m)+2*sizeof(ULONG);}return m;}
++
++VOID MmBuildMdlForNonPagedPool(PMDL m){(void)m;}
++VOID IoFreeMdl(PMDL m){if(!forget(live_mdls,m)){++invalid_mdl_frees;return;}++free_mdls;free(m);}
++NTSTATUS IoCreateDevice(PDRIVER_OBJECT d,ULONG n,PUNICODE_STRING u,DEVICE_TYPE t,ULONG c,BOOLEAN x,PDEVICE_OBJECT *o){(void)u;(void)x;PDEVICE_OBJECT v=calloc(1,sizeof(*v)+n);if(!v)return STATUS_INSUFFICIENT_RESOURCES;v->DriverObject=d;v->DeviceExtension=(uint8_t *)v+sizeof(*v);v->DeviceType=(UCHAR)t;v->Characteristics=c;*o=created_device=v;return 0;}
++PDEVICE_OBJECT IoAttachDeviceToDeviceStack(PDEVICE_OBJECT a,PDEVICE_OBJECT b){a->AttachedDevice=b;a->StackSize=b->StackSize+1;return b;}
++VOID IoDetachDevice(PDEVICE_OBJECT d){(void)d;++detaches;}
++VOID IoDeleteDevice(PDEVICE_OBJECT d){++deletes;free(d);}
++NTSTATUS IoCreateSymbolicLink(PUNICODE_STRING a,PUNICODE_STRING b){(void)a;(void)b;return fail_symbolic_link?STATUS_IO_DEVICE_ERROR:0;}
++NTSTATUS IoDeleteSymbolicLink(PUNICODE_STRING a){(void)a;return 0;}
++NTSTATUS ZwCreateDirectoryObject(HANDLE *h,ULONG a,POBJECT_ATTRIBUTES o){(void)a;(void)o;*h=(HANDLE)(uintptr_t)1;return STATUS_SUCCESS;}
++NTSTATUS ZwMakeTemporaryObject(HANDLE h){(void)h;return STATUS_SUCCESS;}
++NTSTATUS ZwClose(HANDLE h){(void)h;return STATUS_SUCCESS;}
++
++static NTSTATUS complete_specific_child(PIRP child,NTSTATUS status,ULONG bytes,UCHAR srb_status)
++{
++    MUST(child);PIO_STACK_LOCATION s=child->Tail.Overlay.CurrentStackLocation-1;
++    child->IoStatus.Status=status;child->IoStatus.Information=bytes;s->Parameters.Scsi.Srb->SrbStatus=srb_status;
++    if(active_child==child)active_child=NULL;return s->CompletionRoutine(created_device,child,s->Context);
++}
++static NTSTATUS complete_child(NTSTATUS status,ULONG bytes,UCHAR srb_status)
++{
++    return complete_specific_child(active_child,status,bytes,srb_status);
++}
++static NTSTATUS complete_cache_query(PIRP child,const uint8_t *descriptor,
++                                     NTSTATUS status,ULONG_PTR information)
++{
++    PIO_STACK_LOCATION s=child->Tail.Overlay.CurrentStackLocation-1;
++    if(NT_SUCCESS(status)&&information<=sizeof(cache_query_descriptor))
++        memcpy(child->AssociatedIrp.SystemBuffer,descriptor,(size_t)information);
++    child->IoStatus.Status=status;child->IoStatus.Information=information;
++    return s->CompletionRoutine(created_device,child,s->Context);
++}
++NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT lower,PIRP child)
++{
++    PIO_STACK_LOCATION s=child->Tail.Overlay.CurrentStackLocation-1;
++    if(s->MajorFunction==IRP_MJ_DEVICE_CONTROL &&
++       s->Parameters.DeviceIoControl.IoControlCode==IOCTL_STORAGE_QUERY_PROPERTY) {
++        const uint8_t *query=child->AssociatedIrp.SystemBuffer;
++        NTSTATUS query_status=cache_query_requires_started&&!lower_started ?
++            STATUS_IO_DEVICE_ERROR:cache_query_status;
++        ULONG_PTR query_information=NT_SUCCESS(query_status)?cache_query_information:0;
++        (void)lower;__atomic_add_fetch(&property_calls,1,__ATOMIC_RELAXED);
++        MUST(s->Parameters.DeviceIoControl.InputBufferLength==12);
++        MUST(s->Parameters.DeviceIoControl.OutputBufferLength==28);
++        MUST(query[0]==4&&query[1]==0&&query[2]==0&&query[3]==0);
++        MUST(query[4]==0&&query[5]==0&&query[6]==0&&query[7]==0);
++        if(__atomic_load_n(&cache_query_barrier,__ATOMIC_ACQUIRE)) {
++            __atomic_add_fetch(&query_barrier_arrivals,1,__ATOMIC_ACQ_REL);
++            while(__atomic_load_n(&query_barrier_arrivals,__ATOMIC_ACQUIRE)<2)
++                sched_yield();
++        }
++        if(__atomic_exchange_n(&hold_next_cache_query,0,__ATOMIC_ACQ_REL)) {
++            __atomic_store_n(&pending_cache_query,child,__ATOMIC_RELEASE);
++            return STATUS_PENDING;
++        }
++        MUST(complete_cache_query(child,cache_query_descriptor,query_status,
++                                  query_information)==STATUS_MORE_PROCESSING_REQUIRED);
++        return query_status;
++    }
++    if(s->MajorFunction==IRP_MJ_PNP) {
++        (void)lower;++forward_calls;
++        if(s->MinorFunction==IRP_MN_START_DEVICE) lower_started=1;
++        else if(s->MinorFunction==IRP_MN_STOP_DEVICE ||
++                s->MinorFunction==IRP_MN_SURPRISE_REMOVAL ||
++                s->MinorFunction==IRP_MN_REMOVE_DEVICE) lower_started=0;
++        child->IoStatus.Status=STATUS_SUCCESS;
++        if(s->CompletionRoutine) {
++            MUST(s->CompletionRoutine(created_device,child,s->Context)==STATUS_MORE_PROCESSING_REQUIRED);
++        } else IofCompleteRequest(child,IO_NO_INCREMENT);
++        return STATUS_SUCCESS;
++    }
++    if(child->StackCount<=1){(void)lower;
++        if(s->Parameters.DeviceIoControl.IoControlCode==IOCTL_STORAGE_QUERY_PROPERTY)
++            ++property_calls;
++        else ++forward_calls;
++        child->IoStatus.Status=STATUS_SUCCESS;
++        IofCompleteRequest(child,IO_NO_INCREMENT);return STATUS_SUCCESS;}
++    (void)lower;
++    MUST(lower_calls<64 && s->Parameters.Scsi.Srb);PSCSI_REQUEST_BLOCK srb=s->Parameters.Scsi.Srb;
++    opcodes[lower_calls]=srb->Cdb[0];functions[lower_calls]=srb->Function;++lower_calls;
++    active_child=child;
++    if(cancel_during_submit){cancel_during_submit=0;cancel_now();}
++
++    if(s->Parameters.Scsi.Srb->Cdb[0]==0x25){uint8_t *b=s->Parameters.Scsi.Srb->DataBuffer;memset(b,0,8);
++        b[0]=(uint8_t)(read_capacity_last>>24);b[1]=(uint8_t)(read_capacity_last>>16);
++        b[2]=(uint8_t)(read_capacity_last>>8);b[3]=(uint8_t)read_capacity_last;
++        b[4]=(uint8_t)(read_capacity_sector>>24);b[5]=(uint8_t)(read_capacity_sector>>16);
++        b[6]=(uint8_t)(read_capacity_sector>>8);b[7]=(uint8_t)read_capacity_sector;}
++    if(s->Parameters.Scsi.Srb->Cdb[0]==0x43){uint8_t *b=s->Parameters.Scsi.Srb->DataBuffer;memset(b,0,804);b[1]=10;b[2]=1;b[3]=1;b[5]=0x14;}
++    if(lower_pending){active_child=child;return STATUS_PENDING;}
++    ULONG bytes=srb->Cdb[0]==0x43 ? 12:srb->DataTransferLength;
++    NTSTATUS status=srb->Cdb[0]==0x35 ? sync_command_status:STATUS_SUCCESS;
++    UCHAR srb_status=NT_SUCCESS(status)?1:2;
++    if(next_sense_key){uint8_t *sense=srb->SenseInfoBuffer;memset(sense,0,18);
++        if(next_sense_descriptor){sense[0]=0x72;sense[1]=(uint8_t)next_sense_key;
++            sense[2]=(uint8_t)next_sense_asc;srb->SenseInfoBufferLength=8;}
++        else {sense[0]=0x70;sense[2]=(uint8_t)next_sense_key;sense[7]=10;
++            sense[12]=(uint8_t)next_sense_asc;srb->SenseInfoBufferLength=18;}
++        next_sense_key=next_sense_asc=next_sense_descriptor=0;
++        status=STATUS_IO_DEVICE_ERROR;srb_status=0x84;bytes=0;}
++    else if(srb->Function==4&&release_failure){status=STATUS_IO_DEVICE_ERROR;srb_status=4;bytes=0;}
++    else if(srb->Function==0&&freeze_next){freeze_next=0;status=STATUS_IO_DEVICE_ERROR;srb_status=0x44;bytes=0;}
++    MUST(complete_specific_child(child,status,bytes,srb_status)==STATUS_MORE_PROCESSING_REQUIRED);
++
++    return STATUS_SUCCESS;
++}
++BOOLEAN IoCancelIrp(PIRP child){++cancel_calls;MUST(complete_specific_child(child,STATUS_CANCELLED,0,2)==STATUS_MORE_PROCESSING_REQUIRED);return TRUE;}
++
++typedef struct parent_fixture { IRP irp; IO_STACK_LOCATION stack; MDL mdl; uint32_t pfns[34]; } parent_fixture;
++typedef struct control_fixture { IRP irp; IO_STACK_LOCATION stack; uint8_t output[804]; } control_fixture;
++static void init_parent(parent_fixture *p,UCHAR major,ULONG bytes)
++{
++    memset(p,0,sizeof(*p));p->irp.StackCount=1;p->irp.CurrentLocation=1;p->irp.Tail.Overlay.CurrentStackLocation=&p->stack;
++    p->stack.MajorFunction=major;p->stack.Parameters.Read.Length=bytes;p->stack.Parameters.Read.ByteOffset=0;
++    p->mdl.Size=(int16_t)(sizeof(MDL)+sizeof(p->pfns));p->mdl.StartVa=0;p->mdl.ByteCount=bytes;p->irp.MdlAddress=&p->mdl;
++}
++static void init_control(control_fixture *p,ULONG code,ULONG bytes)
++{
++    memset(p,0,sizeof(*p));memset(p->output,0xa5,sizeof(p->output));
++    p->irp.StackCount=1;p->irp.CurrentLocation=1;p->irp.Tail.Overlay.CurrentStackLocation=&p->stack;
++    p->irp.AssociatedIrp.SystemBuffer=p->output;p->stack.MajorFunction=IRP_MJ_DEVICE_CONTROL;
++    p->stack.Parameters.DeviceIoControl.IoControlCode=code;
++    p->stack.Parameters.DeviceIoControl.OutputBufferLength=bytes;
++}
++typedef struct pnp_thread {
++    PDRIVER_DISPATCH dispatch;
++    PDEVICE_OBJECT device;
++    IRP irp;
++    IO_STACK_LOCATION stack[3];
++    NTSTATUS status;
++    unsigned entered,returned;
++} pnp_thread;
++static void init_pnp(pnp_thread *thread,PDRIVER_DISPATCH dispatch,
++                     PDEVICE_OBJECT device,UCHAR minor)
++{
++    memset(thread,0,sizeof(*thread));thread->dispatch=dispatch;thread->device=device;
++    thread->irp.StackCount=1;thread->irp.CurrentLocation=1;
++    thread->irp.Tail.Overlay.CurrentStackLocation=&thread->stack[1];
++    thread->stack[1].MajorFunction=IRP_MJ_PNP;thread->stack[1].MinorFunction=minor;
++}
++static void *run_pnp(void *context)
++{
++    pnp_thread *thread=context;
++    __atomic_store_n(&thread->entered,1,__ATOMIC_RELEASE);
++    thread->status=thread->dispatch(thread->device,&thread->irp);
++    __atomic_store_n(&thread->returned,1,__ATOMIC_RELEASE);
++    return NULL;
++}
++static NTSTATUS dispatch_pnp(PDRIVER_DISPATCH dispatch,PDEVICE_OBJECT device,UCHAR minor)
++{
++    pnp_thread thread;init_pnp(&thread,dispatch,device,minor);run_pnp(&thread);
++    MUST(thread.irp.host_completed);return thread.status;
++
++}
++static PDEVICE_OBJECT make_device(ULONG slots)
++{
++    static DRIVER_OBJECT driver;static DEVICE_OBJECT lower;memset(&driver,0,sizeof(driver));memset(&lower,0,sizeof(lower));lower.StackSize=2;
++    nx_config c={512,4096,4096,2,0,256,1u<<20,0,NX_CACHE_ENABLED};
++    NX_NATIVE_DEVICE_INIT init={0};init.DeviceType=7;init.Config=c;init.SlotCount=slots;
++    PDEVICE_OBJECT out=NULL;MUST(NxNativeCreateClassDevice(&driver,&lower,&init,&out)==STATUS_SUCCESS);return out;
++}
++static PDEVICE_OBJECT make_optical(void)
++{
++    static DRIVER_OBJECT driver;static DEVICE_OBJECT lower;memset(&driver,0,sizeof(driver));memset(&lower,0,sizeof(lower));lower.StackSize=2;
++    nx_config c={2048,4096,0x20000,33,0,0xffff,0,1,NX_CACHE_DISABLED};NX_NATIVE_DEVICE_INIT init={0};init.DeviceType=2;init.Config=c;init.SlotCount=2;
++    PDEVICE_OBJECT out=NULL;MUST(NxNativeCreateClassDevice(&driver,&lower,&init,&out)==0);return out;
++}
++static PDEVICE_OBJECT make_unknown_disk(void)
++{
++    static DRIVER_OBJECT driver;static DEVICE_OBJECT lower;memset(&driver,0,sizeof(driver));memset(&lower,0,sizeof(lower));lower.StackSize=2;
++    nx_config c={512,4096,0x20000,33,0,256,0,0,NX_CACHE_UNQUALIFIED};NX_NATIVE_DEVICE_INIT init={0};init.DeviceType=7;init.Config=c;init.SlotCount=2;
++    PDEVICE_OBJECT out=NULL;MUST(NxNativeCreateClassDevice(&driver,&lower,&init,&out)==0);return out;
++}
++static void reset_allocation_faults(void)
++{
++    MUST(!pool_live&&!live_count(live_irps)&&!live_count(live_mdls));
++    fail_pool=0;pool_fail_call=irp_fail_call=mdl_fail_call=-1;
++    pool_calls=irp_calls=mdl_calls=0;free_irps=free_mdls=0;
++    invalid_irp_frees=invalid_mdl_frees=0;poison_pool=1;
++}
++static NTSTATUS initialize_for_failure(ULONG slots)
++{
++    static DEVICE_OBJECT lower;
++    _Alignas(max_align_t) unsigned char storage[4096];
++    nx_config config={512,4096,4096,2,0,256,1u<<20,0,NX_CACHE_ENABLED};
++    memset(&lower,0,sizeof(lower));lower.StackSize=2;memset(storage,0xa5,sizeof(storage));
++    return NxNativeAdapterInitialize((NX_NATIVE_ADAPTER *)(void *)storage,&lower,slots,&config);
++}
++/* Break: partial initialization frees poisoned pointers from envelope slots it never initialized. */
++static int initialization_cleans_only_constructed_envelopes(void)
++{
++    enum { SLOTS=4 };
++    for(int failure=0;failure<2;++failure) {
++        NTSTATUS status;unsigned invalid_irps,invalid_mdls;
++        reset_allocation_faults();pool_fail_call=failure;
++        status=initialize_for_failure(SLOTS);invalid_irps=invalid_irp_frees;invalid_mdls=invalid_mdl_frees;
++        pool_fail_call=-1;poison_pool=0;
++        CHECK(status==STATUS_INSUFFICIENT_RESOURCES);
++        CHECK(!pool_live&&!live_count(live_irps)&&!live_count(live_mdls));
++        CHECK(!invalid_irps&&!invalid_mdls);
++    }
++    for(int failure=0;failure<SLOTS;++failure) {
++        reset_allocation_faults();irp_fail_call=failure;
++        CHECK(initialize_for_failure(SLOTS)==STATUS_INSUFFICIENT_RESOURCES);
++        CHECK(free_irps==(unsigned)failure&&free_mdls==(unsigned)failure+1u);
++        CHECK(!pool_live&&!live_count(live_irps)&&!live_count(live_mdls));
++        CHECK(!invalid_irp_frees&&!invalid_mdl_frees);
++    }
++    for(int failure=0;failure<SLOTS;++failure) {
++        reset_allocation_faults();mdl_fail_call=failure;
++        CHECK(initialize_for_failure(SLOTS)==STATUS_INSUFFICIENT_RESOURCES);
++        CHECK(free_irps==(unsigned)failure+1u&&free_mdls==(unsigned)failure);
++        CHECK(!pool_live&&!live_count(live_irps)&&!live_count(live_mdls));
++        CHECK(!invalid_irp_frees&&!invalid_mdl_frees);
++    }
++    poison_pool=0;return 1;
++}
++static int sync_read_and_write_through(void)
++{
++    PDEVICE_OBJECT d=make_device(2);parent_fixture p;lower_calls=0;lower_pending=0;init_parent(&p,IRP_MJ_READ,4096);
++    CHECK(NxNativeDispatchReadWrite(d,&p.irp)==STATUS_SUCCESS);CHECK(p.irp.host_completed==1&&p.irp.IoStatus.Status==0&&p.irp.IoStatus.Information==4096);
++    CHECK(lower_calls==1&&opcodes[0]==0x28);
++    parent_fixture w;init_parent(&w,IRP_MJ_WRITE,4096);w.stack.Flags=SL_WRITE_THROUGH;
++    CHECK(NxNativeDispatchReadWrite(d,&w.irp)==STATUS_SUCCESS);CHECK(w.irp.host_completed==1&&lower_calls==3&&opcodes[1]==0x2a&&opcodes[2]==0x35);
++    return 1;
++}
++static int pending_cancel_and_pool_bound(void)
++{
++    PDEVICE_OBJECT d=make_device(1);parent_fixture a,b;lower_calls=cancel_calls=0;lower_pending=1;init_parent(&a,IRP_MJ_READ,4096);
++    CHECK(NxNativeDispatchReadWrite(d,&a.irp)==STATUS_PENDING);CHECK(a.irp.host_pending&&!a.irp.host_completed&&a.irp.CancelRoutine);
++    init_parent(&b,IRP_MJ_READ,4096);CHECK(NxNativeDispatchReadWrite(d,&b.irp)==STATUS_INSUFFICIENT_RESOURCES);CHECK(b.irp.host_completed&&b.irp.IoStatus.Status==STATUS_INSUFFICIENT_RESOURCES);
++    NxNativeSealClassDevice(d);
++    CHECK(cancel_calls==0);a.irp.Cancel=1;a.irp.CancelIrql=0;a.irp.CancelRoutine(d,&a.irp);
++    CHECK(cancel_calls==1&&a.irp.host_completed==1&&a.irp.IoStatus.Status==STATUS_CANCELLED);
++    return 1;
++}
++/* Break: a cancelled parent reaches lower transport before commit, or committed transport is not drained once. */
++static int cancellation_respects_transport_commit(void)
++{
++    static const struct { UCHAR major; int delayed; } precancel[] = {
++        {IRP_MJ_READ,0},{IRP_MJ_WRITE,0},{IRP_MJ_READ,1},{IRP_MJ_WRITE,1}
++    };
++    PDEVICE_OBJECT d=make_device(1);parent_fixture parent,before,after;size_t index;
++    for(index=0;index<sizeof(precancel)/sizeof(precancel[0]);++index) {
++        lower_pending=precancel[index].delayed;lower_calls=cancel_calls=0;
++        init_parent(&parent,precancel[index].major,4096);parent.irp.Cancel=TRUE;
++        CHECK(!parent.stack.Flags);
++        CHECK(NxNativeDispatchReadWrite(d,&parent.irp)==STATUS_CANCELLED);
++        CHECK(parent.irp.host_completed==1&&parent.irp.IoStatus.Status==STATUS_CANCELLED);
++        CHECK(parent.irp.IoStatus.Information==0&&!lower_calls&&!cancel_calls);
++    }
++
++    init_parent(&before,IRP_MJ_READ,4096);cancel_parent=&before.irp;cancel_during_prepare=1;
++    CHECK(NxNativeDispatchReadWrite(d,&before.irp)==STATUS_CANCELLED);
++    CHECK(before.irp.host_completed&&before.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(!lower_calls&&!cancel_calls&&!cancel_during_prepare);
++
++    init_parent(&after,IRP_MJ_READ,4096);cancel_parent=&after.irp;cancel_during_submit=1;
++    CHECK(NxNativeDispatchReadWrite(d,&after.irp)==STATUS_PENDING);
++    CHECK(after.irp.host_completed&&after.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(lower_calls==1&&cancel_calls==1&&!cancel_during_submit);
++    cancel_parent=NULL;lower_pending=0;return 1;
++}
++static uint32_t word(const uint8_t *p){return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
++static uint64_t dword(const uint8_t *p){return word(p)|((uint64_t)word(p+4)<<32);}
++static int frozen_control_recovery(ULONG code,ULONG output,UCHAR opcode)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture c;parent_fixture read;
++    init_control(&c,code,output);lower_calls=0;lower_pending=0;release_failure=0;freeze_next=1;
++    CHECK(NxNativeDispatchControl(d,&c.irp)==STATUS_PENDING);
++    CHECK(c.irp.host_pending&&c.irp.host_completed==1&&c.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    CHECK(lower_calls==2&&functions[0]==0&&opcodes[0]==opcode&&functions[1]==4);
++    init_parent(&read,IRP_MJ_READ,2048);
++    CHECK(NxNativeDispatchReadWrite(d,&read.irp)==STATUS_SUCCESS);
++    CHECK(read.irp.host_completed==1&&read.irp.IoStatus.Status==STATUS_SUCCESS&&lower_calls==3);
++    return 1;
++}
++static int read_capacity_releases_frozen_queue(void)
++{ return frozen_control_recovery(IOCTL_CDROM_GET_DRIVE_GEOMETRY,24,0x25); }
++static int read_toc_releases_frozen_queue(void)
++{ return frozen_control_recovery(IOCTL_CDROM_READ_TOC,804,0x43); }
++static int check_verify_releases_frozen_queue(void)
++{ return frozen_control_recovery(IOCTL_CDROM_CHECK_VERIFY,4,0); }
++static int failed_control_recovery_quarantines_adapter(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture c;parent_fixture read;
++    init_control(&c,IOCTL_CDROM_GET_DRIVE_GEOMETRY,24);lower_calls=0;lower_pending=0;
++    release_failure=1;freeze_next=1;CHECK(NxNativeDispatchControl(d,&c.irp)==STATUS_PENDING);
++    release_failure=0;CHECK(c.irp.host_completed==1&&c.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    CHECK(lower_calls==2&&functions[1]==4);
++    init_parent(&read,IRP_MJ_READ,2048);CHECK(NxNativeDispatchReadWrite(d,&read.irp)==STATUS_IO_DEVICE_ERROR);
++    CHECK(read.irp.host_completed==1&&read.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR&&lower_calls==2);
++    return 1;
++}
++/* Break: a failed control release quarantines admission but an already-active
++ * multi-chunk request retires its first chunk and submits the next one. */
++static int failed_control_recovery_drains_active_core(void)
++{
++    PDEVICE_OBJECT d=make_optical();parent_fixture read;control_fixture verify;
++    PIRP data_child,control_child;
++    lower_pending=1;lower_calls=cancel_calls=0;
++    init_parent(&read,IRP_MJ_READ,0x21000);
++    CHECK(NxNativeDispatchReadWrite(d,&read.irp)==STATUS_PENDING);
++    data_child=active_child;CHECK(data_child&&lower_calls==1&&opcodes[0]==0x28);
++
++    init_control(&verify,IOCTL_CDROM_CHECK_VERIFY,4);
++    CHECK(NxNativeDispatchControl(d,&verify.irp)==STATUS_PENDING);
++    control_child=active_child;CHECK(control_child&&control_child!=data_child&&lower_calls==2);
++    CHECK(complete_specific_child(control_child,STATUS_IO_DEVICE_ERROR,0,0x44)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(lower_calls==3&&functions[2]==4);
++    CHECK(complete_specific_child(control_child,STATUS_IO_DEVICE_ERROR,0,4)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(verify.irp.host_completed&&verify.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++
++    if(!read.irp.host_completed)
++        CHECK(complete_specific_child(data_child,STATUS_SUCCESS,0x20000,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(lower_calls==3);
++    CHECK(cancel_calls==1&&read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    lower_pending=0;return 1;
++}
++static int control_recovery_uses_preallocated_state(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture c;NTSTATUS status;
++    init_control(&c,IOCTL_CDROM_READ_TOC,804);lower_calls=0;lower_pending=0;freeze_next=1;
++    fail_pool=100;status=NxNativeDispatchControl(d,&c.irp);fail_pool=0;
++    CHECK(status==STATUS_PENDING&&c.irp.host_completed==1&&c.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    CHECK(lower_calls==2&&functions[1]==4);return 1;
++}
++static int query_geometry(PDEVICE_OBJECT d,control_fixture *c)
++{
++    init_control(c,IOCTL_CDROM_GET_DRIVE_GEOMETRY,24);
++    return NxNativeDispatchControl(d,&c->irp)==STATUS_PENDING&&c->irp.host_completed&&
++        c->irp.IoStatus.Status==STATUS_SUCCESS&&c->irp.IoStatus.Information==24;
++}
++static int query_verify(PDEVICE_OBJECT d,uint32_t *generation)
++{
++    control_fixture c;init_control(&c,IOCTL_CDROM_CHECK_VERIFY,4);
++    if(NxNativeDispatchControl(d,&c.irp)!=STATUS_PENDING||!c.irp.host_completed||
++       c.irp.IoStatus.Status!=STATUS_SUCCESS||c.irp.IoStatus.Information!=4)return 0;
++    *generation=word(c.output);return 1;
++}
++static int verify_preserves_unchanged_generation(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture geometry;uint32_t first,second;
++    lower_pending=0;lower_calls=0;read_capacity_last=15;read_capacity_sector=2048;
++    CHECK(query_geometry(d,&geometry));CHECK(query_verify(d,&first));CHECK(query_verify(d,&second));
++    CHECK(first==1&&second==first);return 1;
++}
++static int removal_invalidates_cached_capacity(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture geometry,remove,length;NTSTATUS dispatch;
++    lower_pending=0;lower_calls=0;read_capacity_last=15;read_capacity_sector=2048;
++    CHECK(query_geometry(d,&geometry));
++    init_control(&remove,IOCTL_CDROM_CHECK_VERIFY,4);next_sense_key=2;next_sense_asc=0x3a;
++    CHECK(NxNativeDispatchControl(d,&remove.irp)==STATUS_PENDING&&remove.irp.host_completed&&
++          remove.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    init_control(&length,IOCTL_DISK_GET_LENGTH_INFO,8);lower_pending=1;
++    dispatch=NxNativeDispatchControl(d,&length.irp);
++    {
++        int queried=dispatch==STATUS_PENDING&&!length.irp.host_completed&&active_child!=NULL;
++        lower_pending=0;if(active_child)CHECK(complete_child(STATUS_IO_DEVICE_ERROR,0,4)==STATUS_MORE_PROCESSING_REQUIRED);
++        CHECK(queried&&length.irp.host_completed&&length.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    }
++    return 1;
++}
++static int new_media_advances_once_and_refreshes_capacity(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture a,remove,b,length;uint32_t generation_a,generation_b;
++    lower_pending=0;lower_calls=0;read_capacity_last=15;read_capacity_sector=2048;
++    CHECK(query_geometry(d,&a));CHECK(query_verify(d,&generation_a));
++    init_control(&remove,IOCTL_CDROM_CHECK_VERIFY,4);next_sense_key=2;next_sense_asc=0x3a;
++    CHECK(NxNativeDispatchControl(d,&remove.irp)==STATUS_PENDING&&remove.irp.host_completed);
++    read_capacity_last=31;CHECK(query_geometry(d,&b));CHECK(query_verify(d,&generation_b));
++    init_control(&length,IOCTL_DISK_GET_LENGTH_INFO,8);
++    CHECK(NxNativeDispatchControl(d,&length.irp)==STATUS_SUCCESS&&dword(length.output)==65536);
++    CHECK(generation_a==1&&generation_b==3);read_capacity_last=15;return 1;
++}
++static int repeated_unit_attention_counts_one_transition(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture geometry,change;uint32_t generation;
++    lower_pending=0;read_capacity_last=15;read_capacity_sector=2048;
++    CHECK(query_geometry(d,&geometry));
++    for(unsigned attempt=0;attempt<2;++attempt) {
++        init_control(&change,IOCTL_CDROM_CHECK_VERIFY,4);next_sense_key=6;next_sense_asc=0x28;
++        CHECK(NxNativeDispatchControl(d,&change.irp)==STATUS_PENDING&&change.irp.host_completed&&
++              change.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    }
++    CHECK(query_verify(d,&generation)&&generation==2);return 1;
++}
++static int repeated_no_media_counts_state_transitions_only(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture geometry,remove;uint32_t generation;
++    lower_pending=0;read_capacity_last=15;read_capacity_sector=2048;
++    CHECK(query_geometry(d,&geometry));
++    for(unsigned attempt=0;attempt<2;++attempt) {
++        init_control(&remove,IOCTL_CDROM_CHECK_VERIFY,4);next_sense_key=2;next_sense_asc=0x3a;
++        next_sense_descriptor=attempt==1;
++        CHECK(NxNativeDispatchControl(d,&remove.irp)==STATUS_PENDING&&remove.irp.host_completed&&
++              remove.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    }
++    CHECK(query_verify(d,&generation)&&generation==3);return 1;
++}
++static int descriptor_no_media_invalidates_cached_capacity(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture geometry,remove,length;NTSTATUS dispatch;
++    lower_pending=0;read_capacity_last=15;read_capacity_sector=2048;
++    CHECK(query_geometry(d,&geometry));init_control(&remove,IOCTL_CDROM_CHECK_VERIFY,4);
++    next_sense_key=2;next_sense_asc=0x3a;next_sense_descriptor=1;
++    CHECK(NxNativeDispatchControl(d,&remove.irp)==STATUS_PENDING&&remove.irp.host_completed&&
++          remove.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    init_control(&length,IOCTL_DISK_GET_LENGTH_INFO,8);lower_pending=1;
++    dispatch=NxNativeDispatchControl(d,&length.irp);
++    {
++        int queried=dispatch==STATUS_PENDING&&!length.irp.host_completed&&active_child!=NULL;
++        lower_pending=0;if(active_child)CHECK(complete_child(STATUS_IO_DEVICE_ERROR,0,4)==STATUS_MORE_PROCESSING_REQUIRED);
++        CHECK(queried&&length.irp.host_completed&&length.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    }
++    return 1;
++}
++static int reset_toc_invalidates_cached_capacity(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture geometry,toc,length;NTSTATUS dispatch;
++    lower_pending=0;lower_calls=0;read_capacity_last=15;read_capacity_sector=2048;
++    CHECK(query_geometry(d,&geometry));init_control(&toc,IOCTL_CDROM_READ_TOC,804);
++    next_sense_key=6;next_sense_asc=0x29;
++    CHECK(NxNativeDispatchControl(d,&toc.irp)==STATUS_PENDING&&toc.irp.host_completed&&
++          toc.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    init_control(&length,IOCTL_DISK_GET_LENGTH_INFO,8);lower_pending=1;
++    dispatch=NxNativeDispatchControl(d,&length.irp);
++    {
++        int queried=dispatch==STATUS_PENDING&&!length.irp.host_completed&&active_child!=NULL;
++        lower_pending=0;if(active_child)CHECK(complete_child(STATUS_IO_DEVICE_ERROR,0,4)==STATUS_MORE_PROCESSING_REQUIRED);
++        CHECK(queried&&length.irp.host_completed&&length.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    }
++    return 1;
++}
++static int stale_capacity_cannot_overwrite_new_media(void)
++{
++    PDEVICE_OBJECT d=make_optical();control_fixture old_capacity,change,new_capacity,length;
++    PIRP old_child;NTSTATUS old_completion;
++    lower_calls=0;lower_pending=1;read_capacity_last=15;read_capacity_sector=2048;
++    init_control(&old_capacity,IOCTL_CDROM_GET_DRIVE_GEOMETRY,24);
++    CHECK(NxNativeDispatchControl(d,&old_capacity.irp)==STATUS_PENDING&&!old_capacity.irp.host_completed);
++    old_child=active_child;lower_pending=0;init_control(&change,IOCTL_CDROM_CHECK_VERIFY,4);
++    next_sense_key=6;next_sense_asc=0x28;
++    CHECK(NxNativeDispatchControl(d,&change.irp)==STATUS_PENDING&&change.irp.host_completed&&
++          change.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    read_capacity_last=31;CHECK(query_geometry(d,&new_capacity));
++    old_completion=complete_specific_child(old_child,STATUS_SUCCESS,8,1);
++    CHECK(old_completion==STATUS_MORE_PROCESSING_REQUIRED&&old_capacity.irp.host_completed&&
++          old_capacity.irp.IoStatus.Status==STATUS_DEVICE_NOT_READY);
++    init_control(&length,IOCTL_DISK_GET_LENGTH_INFO,8);
++    CHECK(NxNativeDispatchControl(d,&length.irp)==STATUS_SUCCESS&&dword(length.output)==65536);
++    read_capacity_last=15;return 1;
++}
++static int geometry_reports_device_media_type(void)
++{
++    PDEVICE_OBJECT optical=make_optical();control_fixture cd,disk_geometry;
++    PDEVICE_OBJECT disk;lower_pending=0;read_capacity_last=15;read_capacity_sector=2048;
++    CHECK(query_geometry(optical,&cd));CHECK(word(cd.output+8)==RemovableMedia);
++    disk=make_unknown_disk();read_capacity_last=31;read_capacity_sector=512;
++    init_control(&disk_geometry,IOCTL_DISK_GET_DRIVE_GEOMETRY,24);
++    CHECK(NxNativeDispatchControl(disk,&disk_geometry.irp)==STATUS_PENDING&&disk_geometry.irp.host_completed);
++    CHECK(word(disk_geometry.output+8)==FixedMedia);
++    read_capacity_last=15;read_capacity_sector=2048;return 1;
++}
++static void cache_property(uint32_t enabled,uint8_t flush)
++{
++    memset(cache_query_descriptor,0,sizeof(cache_query_descriptor));
++    cache_query_descriptor[0]=cache_query_descriptor[4]=28;
++    cache_query_descriptor[12]=(uint8_t)enabled;cache_query_descriptor[24]=flush;
++    cache_query_status=STATUS_SUCCESS;cache_query_information=sizeof(cache_query_descriptor);
++
++}
++static int capacity_control_publishes_geometry(void)
++{
++    PDEVICE_OBJECT d=make_optical();IRP irp;IO_STACK_LOCATION stack;uint8_t output[32];memset(&irp,0,sizeof(irp));memset(&stack,0,sizeof(stack));memset(output,0xa5,sizeof(output));
++    irp.StackCount=1;irp.CurrentLocation=1;irp.Tail.Overlay.CurrentStackLocation=&stack;irp.AssociatedIrp.SystemBuffer=output;
++    stack.MajorFunction=IRP_MJ_DEVICE_CONTROL;stack.Parameters.DeviceIoControl.IoControlCode=IOCTL_CDROM_GET_DRIVE_GEOMETRY;stack.Parameters.DeviceIoControl.OutputBufferLength=24;
++    lower_pending=0;lower_calls=0;CHECK(NxNativeDispatchControl(d,&irp)==STATUS_PENDING);CHECK(irp.host_pending&&irp.host_completed&&irp.IoStatus.Status==0&&irp.IoStatus.Information==24);
++    CHECK(lower_calls==1&&opcodes[0]==0x25);CHECK(word(output+20)==2048);CHECK(word(output+12)>0&&word(output+16)>0);
++    IRP len;IO_STACK_LOCATION ls;uint8_t length[8];memset(&len,0,sizeof(len));memset(&ls,0,sizeof(ls));len.Tail.Overlay.CurrentStackLocation=&ls;len.AssociatedIrp.SystemBuffer=length;ls.MajorFunction=IRP_MJ_DEVICE_CONTROL;ls.Parameters.DeviceIoControl.IoControlCode=IOCTL_DISK_GET_LENGTH_INFO;ls.Parameters.DeviceIoControl.OutputBufferLength=8;
++    CHECK(NxNativeDispatchControl(d,&len)==STATUS_SUCCESS);CHECK(len.IoStatus.Information==8&&word(length)==32768&&word(length+4)==0);CHECK(lower_calls==1);
++    IRP ex;IO_STACK_LOCATION xs;uint8_t extended[32];memset(&ex,0,sizeof(ex));memset(&xs,0,sizeof(xs));memset(extended,0xa5,sizeof(extended));
++    ex.Tail.Overlay.CurrentStackLocation=&xs;ex.AssociatedIrp.SystemBuffer=extended;xs.Parameters.DeviceIoControl.IoControlCode=IOCTL_DISK_GET_DRIVE_GEOMETRY_EX;xs.Parameters.DeviceIoControl.OutputBufferLength=32;
++    CHECK(NxNativeDispatchControl(d,&ex)==STATUS_SUCCESS);CHECK(ex.host_completed&&ex.IoStatus.Information==32);CHECK(dword(extended+24)==32768);CHECK(lower_calls==1);
++    return 1;
++}
++static int optical_toc_verify_and_pending_capacity(void)
++{
++    PDEVICE_OBJECT d=make_optical();IRP toc;IO_STACK_LOCATION ts;uint8_t data[804];memset(&toc,0,sizeof(toc));memset(&ts,0,sizeof(ts));memset(data,0xa5,sizeof(data));toc.Tail.Overlay.CurrentStackLocation=&ts;toc.AssociatedIrp.SystemBuffer=data;ts.Parameters.DeviceIoControl.IoControlCode=IOCTL_CDROM_READ_TOC;ts.Parameters.DeviceIoControl.OutputBufferLength=804;
++    lower_pending=0;lower_calls=0;CHECK(NxNativeDispatchControl(d,&toc)==STATUS_PENDING);CHECK(toc.host_pending&&toc.host_completed&&toc.IoStatus.Information==12&&data[1]==10&&data[5]==0x14);CHECK(opcodes[0]==0x43);
++    IRP tur;IO_STACK_LOCATION vs;uint8_t count[4];memset(&tur,0,sizeof(tur));memset(&vs,0,sizeof(vs));tur.Tail.Overlay.CurrentStackLocation=&vs;tur.AssociatedIrp.SystemBuffer=count;vs.Parameters.DeviceIoControl.IoControlCode=IOCTL_CDROM_CHECK_VERIFY;vs.Parameters.DeviceIoControl.OutputBufferLength=4;
++    CHECK(NxNativeDispatchControl(d,&tur)==STATUS_PENDING);CHECK(tur.host_pending&&tur.host_completed&&tur.IoStatus.Information==4&&word(count)==1);CHECK(opcodes[1]==0);
++    PDEVICE_OBJECT p=make_optical();IRP geo;IO_STACK_LOCATION gs;uint8_t geometry[24];memset(&geo,0,sizeof(geo));memset(&gs,0,sizeof(gs));geo.Tail.Overlay.CurrentStackLocation=&gs;geo.AssociatedIrp.SystemBuffer=geometry;gs.Parameters.DeviceIoControl.IoControlCode=IOCTL_DISK_GET_DRIVE_GEOMETRY;gs.Parameters.DeviceIoControl.OutputBufferLength=24;
++    lower_pending=1;CHECK(NxNativeDispatchControl(p,&geo)==STATUS_PENDING);CHECK(geo.host_pending&&!geo.host_completed);lower_pending=0;CHECK(complete_child(0,8,1)==STATUS_MORE_PROCESSING_REQUIRED);CHECK(geo.host_completed&&geo.IoStatus.Status==0&&geo.IoStatus.Information==24);
++    return 1;
++}
++static int closes_control_races_and_forwards_property(void)
++{
++    PDEVICE_OBJECT d=make_optical();IRP irp;IO_STACK_LOCATION stack[2];uint8_t out[24];
++    memset(&irp,0,sizeof(irp));memset(stack,0,sizeof(stack));
++    irp.StackCount=1;irp.CurrentLocation=1;irp.Tail.Overlay.CurrentStackLocation=&stack[0];
++    irp.AssociatedIrp.SystemBuffer=out;stack[0].Parameters.DeviceIoControl.IoControlCode=IOCTL_STORAGE_GET_DEVICE_NUMBER;
++    stack[0].Parameters.DeviceIoControl.OutputBufferLength=12;
++    CHECK(NxNativeDispatchControl(d,&irp)==STATUS_SUCCESS&&irp.host_completed);
++    CHECK(word(out)==FILE_DEVICE_CD_ROM);
++    memset(&irp,0,sizeof(irp));memset(stack,0,sizeof(stack));irp.StackCount=1;irp.CurrentLocation=1;
++    irp.Tail.Overlay.CurrentStackLocation=&stack[0];stack[0].Parameters.DeviceIoControl.IoControlCode=IOCTL_STORAGE_QUERY_PROPERTY;
++    property_calls=0;CHECK(NxNativeDispatchControl(d,&irp)==STATUS_SUCCESS);
++    CHECK(property_calls==1&&irp.host_completed);
++    memset(&irp,0,sizeof(irp));memset(stack,0,sizeof(stack));irp.Tail.Overlay.CurrentStackLocation=&stack[0];
++    stack[0].Parameters.DeviceIoControl.IoControlCode=IOCTL_CDROM_CHECK_VERIFY;
++    stack[0].Parameters.DeviceIoControl.OutputBufferLength=4;
++    CHECK(NxNativeDispatchControl(d,&irp)==STATUS_BUFFER_TOO_SMALL&&irp.host_completed);
++    memset(&irp,0,sizeof(irp));memset(stack,0,sizeof(stack));irp.Tail.Overlay.CurrentStackLocation=&stack[0];
++    irp.Cancel=1;stack[0].Parameters.DeviceIoControl.IoControlCode=IOCTL_CDROM_READ_TOC;
++    stack[0].Parameters.DeviceIoControl.OutputBufferLength=804;irp.AssociatedIrp.SystemBuffer=out;
++    lower_calls=0;CHECK(NxNativeDispatchControl(d,&irp)==STATUS_CANCELLED);
++    CHECK(irp.host_completed&&irp.IoStatus.Status==STATUS_CANCELLED&&!lower_calls);
++    return 1;
++}
++static int publishes_authoritative_disk_capacity(void)
++{
++    static const uint64_t sizes[]={UINT64_C(8)<<30,UINT64_C(10)<<30};
++    for(unsigned test=0;test<2;++test) {
++        PDEVICE_OBJECT d=make_unknown_disk();parent_fixture read;IRP geometry;IO_STACK_LOCATION stack;uint8_t out[24];
++        init_parent(&read,IRP_MJ_READ,512);lower_calls=0;
++        CHECK(NxNativeDispatchReadWrite(d,&read.irp)==STATUS_DEVICE_NOT_READY);
++        CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_DEVICE_NOT_READY&&!lower_calls);
++        read_capacity_sector=512;read_capacity_last=(uint32_t)(sizes[test]/512-1);
++        memset(&geometry,0,sizeof(geometry));memset(&stack,0,sizeof(stack));memset(out,0,sizeof(out));
++        geometry.Tail.Overlay.CurrentStackLocation=&stack;geometry.AssociatedIrp.SystemBuffer=out;
++        stack.Parameters.DeviceIoControl.IoControlCode=IOCTL_DISK_GET_DRIVE_GEOMETRY;
++        stack.Parameters.DeviceIoControl.OutputBufferLength=24;lower_pending=0;
++        CHECK(NxNativeDispatchControl(d,&geometry)==STATUS_PENDING);
++        CHECK(geometry.host_completed&&word(out+20)==512);
++        CHECK(dword(out)==sizes[test]/(512u*255u*63u));
++        init_parent(&read,IRP_MJ_READ,512);CHECK(NxNativeDispatchReadWrite(d,&read.irp)==STATUS_SUCCESS);
++        CHECK(read.irp.host_completed&&read.irp.IoStatus.Information==512);
++    }
++    read_capacity_last=15;read_capacity_sector=2048;
++    return 1;
++}
++static int unwinds_unpublished_creation(void)
++{
++    DRIVER_OBJECT driver={0};DEVICE_OBJECT lower={0};NX_NATIVE_DEVICE_INIT init={0};
++    WCHAR name_buffer[2]={0},link_buffer[2]={0};UNICODE_STRING name={0,2,name_buffer},link={0,2,link_buffer};
++    PDEVICE_OBJECT out=NULL;lower.StackSize=2;init.DeviceName=&name;init.SymbolicLinkName=&link;
++    init.DeviceType=FILE_DEVICE_CD_ROM;init.Config=(nx_config){2048,4096,0x20000,33,0,0xffff,0,1,NX_CACHE_DISABLED};init.SlotCount=2;
++    detaches=deletes=free_irps=free_mdls=0;fail_pool=1;
++    CHECK(NxNativeCreateClassDevice(&driver,&lower,&init,&out)==STATUS_INSUFFICIENT_RESOURCES);
++    CHECK(!out&&detaches==1&&deletes==1);
++    detaches=deletes=free_irps=free_mdls=0;fail_symbolic_link=1;
++    CHECK(NxNativeCreateClassDevice(&driver,&lower,&init,&out)==STATUS_IO_DEVICE_ERROR);
++    fail_symbolic_link=0;CHECK(!out&&detaches==1&&deletes==1&&free_irps==2&&free_mdls==2);
++    return 1;
++}
++static int production_cache_qualification_and_durability(void)
++{
++    DRIVER_EXTENSION disk_extension={0},cdrom_extension={0};
++    DRIVER_OBJECT disk={0},cdrom={0};DEVICE_OBJECT disk_lower={0},cdrom_lower={0};
++    PDEVICE_OBJECT disk_device;IRP geometry;IO_STACK_LOCATION geometry_stack;uint8_t geometry_data[24];
++    disk.DriverExtension=&disk_extension;cdrom.DriverExtension=&cdrom_extension;
++    disk_lower.StackSize=2;cdrom_lower.StackSize=2;
++    cache_property(2,1);property_calls=0;cache_query_requires_started=1;lower_started=0;
++    CHECK(DiskDriverEntry(&disk,NULL)==STATUS_SUCCESS);
++    CHECK(CdromDriverEntry(&cdrom,NULL)==STATUS_SUCCESS);
++    CHECK(disk.DriverExtension->AddDevice&&cdrom.DriverExtension->AddDevice);
++    CHECK(disk.MajorFunction[IRP_MJ_READ]==NxNativeDispatchReadWrite);
++    CHECK(cdrom.MajorFunction[IRP_MJ_DEVICE_CONTROL]==NxNativeDispatchControl);
++    CHECK(disk.MajorFunction[IRP_MJ_PNP]==NxNativeDispatchPnp);
++    CHECK(disk.DriverExtension->AddDevice(&disk,&disk_lower)==STATUS_SUCCESS);
++    CHECK(created_device&&created_device->DeviceType==FILE_DEVICE_DISK);
++    disk_device=created_device;CHECK(property_calls==1);
++    parent_fixture before_start;init_parent(&before_start,IRP_MJ_FLUSH_BUFFERS,0);
++    CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&before_start.irp)==STATUS_NOT_SUPPORTED);
++    CHECK(before_start.irp.host_completed&&before_start.irp.IoStatus.Status==STATUS_NOT_SUPPORTED);
++    CHECK(property_calls==1&&!lower_started);
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    CHECK(property_calls==2&&lower_started);
++    memset(&geometry,0,sizeof(geometry));memset(&geometry_stack,0,sizeof(geometry_stack));
++    geometry.Tail.Overlay.CurrentStackLocation=&geometry_stack;geometry.AssociatedIrp.SystemBuffer=geometry_data;
++    geometry_stack.Parameters.DeviceIoControl.IoControlCode=IOCTL_DISK_GET_DRIVE_GEOMETRY;
++    geometry_stack.Parameters.DeviceIoControl.OutputBufferLength=sizeof(geometry_data);
++    read_capacity_sector=512;read_capacity_last=2047;lower_calls=0;lower_pending=0;
++    CHECK(disk.MajorFunction[IRP_MJ_DEVICE_CONTROL](disk_device,&geometry)==STATUS_PENDING);
++    CHECK(geometry.host_completed&&geometry.IoStatus.Status==STATUS_SUCCESS&&lower_calls==1&&opcodes[0]==0x25);
++    unsigned pools_before=pool_allocations,irps_before=irp_allocations,mdls_before=mdl_allocations;
++
++    parent_fixture enabled;init_parent(&enabled,IRP_MJ_WRITE,512);enabled.stack.Flags=SL_WRITE_THROUGH;
++    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&enabled.irp)==STATUS_SUCCESS);
++    CHECK(enabled.irp.host_completed&&enabled.irp.IoStatus.Status==STATUS_SUCCESS);
++    CHECK(lower_calls==2&&opcodes[0]==0x2a&&opcodes[1]==0x35);
++    CHECK(property_calls==2);
++
++    /* A changed lower snapshot has no effect until a lifecycle revocation. */
++    cache_property(1,1);parent_fixture retained;init_parent(&retained,IRP_MJ_WRITE,512);retained.stack.Flags=SL_WRITE_THROUGH;
++    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&retained.irp)==STATUS_SUCCESS);
++    CHECK(retained.irp.host_completed&&lower_calls==2&&opcodes[0]==0x2a&&opcodes[1]==0x35);
++    CHECK(property_calls==2);
++
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
++    parent_fixture revoked;init_parent(&revoked,IRP_MJ_WRITE,512);revoked.stack.Flags=SL_WRITE_THROUGH;
++    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&revoked.irp)==STATUS_NOT_SUPPORTED);
++    CHECK(revoked.irp.host_completed&&!lower_calls&&property_calls==2);
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    CHECK(property_calls==3);
++    parent_fixture disabled;init_parent(&disabled,IRP_MJ_WRITE,512);disabled.stack.Flags=SL_WRITE_THROUGH;
++    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&disabled.irp)==STATUS_SUCCESS);
++    CHECK(disabled.irp.host_completed&&lower_calls==1&&opcodes[0]==0x2a);
++
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
++    cache_property(0,0);CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    parent_fixture unknown;init_parent(&unknown,IRP_MJ_WRITE,512);unknown.stack.Flags=SL_WRITE_THROUGH;
++    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&unknown.irp)==STATUS_NOT_SUPPORTED);
++    CHECK(unknown.irp.host_completed&&unknown.irp.IoStatus.Status==STATUS_NOT_SUPPORTED&&!lower_calls);
++
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
++    cache_property(2,0);CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    parent_fixture unsupported;init_parent(&unsupported,IRP_MJ_WRITE,512);unsupported.stack.Flags=SL_WRITE_THROUGH;
++    lower_calls=0;CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&unsupported.irp)==STATUS_NOT_SUPPORTED);
++    CHECK(unsupported.irp.host_completed&&unsupported.irp.IoStatus.Status==STATUS_NOT_SUPPORTED&&!lower_calls);
++
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
++    cache_property(2,1);cache_query_descriptor[4]=27;
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    parent_fixture malformed;init_parent(&malformed,IRP_MJ_WRITE,512);malformed.stack.Flags=SL_WRITE_THROUGH;
++    lower_calls=0;
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&malformed.irp)==STATUS_NOT_SUPPORTED);
++    CHECK(malformed.irp.host_completed&&malformed.irp.IoStatus.Status==STATUS_NOT_SUPPORTED&&!lower_calls);
++
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
++    cache_query_status=STATUS_IO_DEVICE_ERROR;cache_query_information=0;
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    parent_fixture failed;init_parent(&failed,IRP_MJ_WRITE,512);failed.stack.Flags=SL_WRITE_THROUGH;
++    lower_calls=0;
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&failed.irp)==STATUS_NOT_SUPPORTED);
++    CHECK(failed.irp.host_completed&&failed.irp.IoStatus.Status==STATUS_NOT_SUPPORTED&&!lower_calls);
++
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
++    cache_property(2,1);CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++
++    parent_fixture write,flush;init_parent(&write,IRP_MJ_WRITE,512);init_parent(&flush,IRP_MJ_FLUSH_BUFFERS,0);
++    lower_pending=1;lower_calls=0;
++    CHECK(disk.MajorFunction[IRP_MJ_WRITE](disk_device,&write.irp)==STATUS_PENDING);
++    CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&flush.irp)==STATUS_PENDING);
++    CHECK(lower_calls==1&&opcodes[0]==0x2a&&!write.irp.host_completed&&!flush.irp.host_completed);
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(write.irp.host_completed&&write.irp.IoStatus.Status==STATUS_SUCCESS);
++    CHECK(!flush.irp.host_completed&&lower_calls==2&&opcodes[1]==0x35);
++    CHECK(complete_child(STATUS_IO_DEVICE_ERROR,0,2)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(flush.irp.host_completed&&flush.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    lower_pending=0;sync_command_status=STATUS_IO_DEVICE_ERROR;
++    parent_fixture shutdown;init_parent(&shutdown,IRP_MJ_SHUTDOWN,0);lower_calls=0;
++    CHECK(disk.MajorFunction[IRP_MJ_SHUTDOWN](disk_device,&shutdown.irp)==STATUS_IO_DEVICE_ERROR);
++    CHECK(shutdown.irp.host_completed&&shutdown.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR&&lower_calls==1&&opcodes[0]==0x35);
++    sync_command_status=STATUS_SUCCESS;
++
++    /* Concurrent START requalification owns distinct preallocated envelopes.
++     * Both calls must reach the lower edge before either is released. */
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
++    cache_property(1,1);cache_query_barrier=1;query_barrier_arrivals=0;lower_calls=0;
++    pnp_thread parallel[2];
++    init_pnp(&parallel[0],disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE);
++    init_pnp(&parallel[1],disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE);
++    pthread_t parallel_ids[2];
++    CHECK(!pthread_create(&parallel_ids[0],NULL,run_pnp,&parallel[0]));
++    CHECK(!pthread_create(&parallel_ids[1],NULL,run_pnp,&parallel[1]));
++    CHECK(!pthread_join(parallel_ids[0],NULL)&&!pthread_join(parallel_ids[1],NULL));
++    cache_query_barrier=0;
++    for(unsigned i=0;i<2;++i) {
++        CHECK(parallel[i].irp.host_completed&&parallel[i].status==STATUS_SUCCESS);
++    }
++    CHECK(query_barrier_arrivals==2&&!lower_calls);
++    unsigned queries_after_parallel=property_calls;
++    parent_fixture parallel_flush;init_parent(&parallel_flush,IRP_MJ_FLUSH_BUFFERS,0);
++    CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&parallel_flush.irp)==STATUS_SUCCESS);
++    CHECK(parallel_flush.irp.host_completed&&!lower_calls&&property_calls==queries_after_parallel);
++
++    /* A held older START result cannot overwrite a newer disabled result. */
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
++    uint8_t stale_enabled[sizeof(cache_query_descriptor)];cache_property(2,1);
++    memcpy(stale_enabled,cache_query_descriptor,sizeof(stale_enabled));
++    pending_cache_query=NULL;hold_next_cache_query=1;lower_calls=0;
++    pnp_thread stale;init_pnp(&stale,disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE);
++    pthread_t stale_id;CHECK(!pthread_create(&stale_id,NULL,run_pnp,&stale));
++    unsigned spins=0;
++    while(!__atomic_load_n(&pending_cache_query,__ATOMIC_ACQUIRE)&&++spins<1000000)
++        sched_yield();
++    PIRP held=__atomic_load_n(&pending_cache_query,__ATOMIC_ACQUIRE);CHECK(held);
++    cache_property(1,1);
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE)==STATUS_SUCCESS);
++    CHECK(complete_cache_query(held,stale_enabled,STATUS_SUCCESS,sizeof(stale_enabled))==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(!pthread_join(stale_id,NULL));
++    CHECK(stale.status==STATUS_SUCCESS&&stale.irp.host_completed&&!lower_calls);
++    parent_fixture stale_flush;init_parent(&stale_flush,IRP_MJ_FLUSH_BUFFERS,0);
++    CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&stale_flush.irp)==STATUS_SUCCESS);
++    CHECK(stale_flush.irp.host_completed&&!lower_calls);
++
++    /* REMOVE seals the adapter but retains an in-flight preallocated query
++     * envelope until its lower completion; its result remains revoked. */
++    CHECK(dispatch_pnp(disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_STOP_DEVICE)==STATUS_SUCCESS);
++    cache_property(2,1);pending_cache_query=NULL;hold_next_cache_query=1;
++    pnp_thread removing;init_pnp(&removing,disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_START_DEVICE);
++    pthread_t removing_id;CHECK(!pthread_create(&removing_id,NULL,run_pnp,&removing));
++    spins=0;
++    while(!__atomic_load_n(&pending_cache_query,__ATOMIC_ACQUIRE)&&++spins<1000000)
++        sched_yield();
++    held=__atomic_load_n(&pending_cache_query,__ATOMIC_ACQUIRE);CHECK(held);
++    pnp_thread removal;init_pnp(&removal,disk.MajorFunction[IRP_MJ_PNP],disk_device,IRP_MN_REMOVE_DEVICE);
++    pthread_t removal_id;CHECK(!pthread_create(&removal_id,NULL,run_pnp,&removal));
++    while(!__atomic_load_n(&removal.entered,__ATOMIC_ACQUIRE)) sched_yield();
++    for(unsigned i=0;i<1000;++i) sched_yield();
++    CHECK(!__atomic_load_n(&removal.returned,__ATOMIC_ACQUIRE));
++    CHECK(complete_cache_query(held,cache_query_descriptor,STATUS_SUCCESS,
++                               sizeof(cache_query_descriptor))==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(!pthread_join(removing_id,NULL)&&removing.irp.host_completed);
++    CHECK(!pthread_join(removal_id,NULL)&&removal.irp.host_completed&&removal.status==STATUS_SUCCESS);
++    parent_fixture after_remove;init_parent(&after_remove,IRP_MJ_FLUSH_BUFFERS,0);
++    CHECK(disk.MajorFunction[IRP_MJ_FLUSH_BUFFERS](disk_device,&after_remove.irp)==STATUS_INSUFFICIENT_RESOURCES);
++    CHECK(after_remove.irp.host_completed&&!lower_calls);
++
++    CHECK(pool_allocations==pools_before&&irp_allocations==irps_before&&mdl_allocations==mdls_before);
++
++    cache_query_requires_started=0;lower_started=1;
++    CHECK(cdrom.DriverExtension->AddDevice(&cdrom,&cdrom_lower)==STATUS_SUCCESS);
++    CHECK(created_device&&created_device->DeviceType==FILE_DEVICE_CD_ROM);
++    return 1;
++}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();printf("25 adapter groups, %u failures\n",f);return f?1:0;}

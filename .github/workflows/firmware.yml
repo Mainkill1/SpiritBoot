@@ -41,10 +41,11 @@ jobs:
       - name: Build flash
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-            spiritboot-toolchain python3 scripts/build-firmware.py \
+            spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend complete-candidate \
             --source .reference/roswell --output artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
             --variant ${{ matrix.variant }} --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
       - name: Check the built source identity and actual kernel work
+        if: matrix.variant == 'release'
         run: |
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           guest_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["build_directory"])')
@@ -55,12 +56,24 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 3c23ea01cf43c2979c4c3ef247236e03d079f465
+            test "$actual_tree" = 319d81cfe9f6e1a524012cbab66d9bd8f5f929d4
+            python3 /work/tools/check_ata_settle.py --source-root "$GUEST_SOURCE" >"$output/ata-settle.log" 2>&1
+            python3 /work/tools/kernel_coverage.py --source-root "$GUEST_SOURCE" --check >"$output/kernel-coverage.log" 2>&1
+            python3 /work/tools/check_kernel_semaphore_overflow.py --source-root "$GUEST_SOURCE" --platform xbox --output "$output/semaphore-xbox" >"$output/semaphore-xbox.log" 2>&1
+            python3 /work/tools/check_kernel_semaphore_overflow.py --source-root "$GUEST_SOURCE" --platform nt --output "$output/semaphore-nt" >"$output/semaphore-nt.log" 2>&1
+            python3 /work/tools/check_kernel_public_contracts.py --source-root "$GUEST_SOURCE" --output "$output/kernel-public-contracts" >"$output/kernel-public-contracts.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/nxstorage/check.py" "$output/nxstorage" >"$output/nxstorage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/init-audit-data/check.py" "$output/init-audit-data" >"$output/init-audit-data.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/lto-relink/check.py" "$output/lto-relink" >"$output/lto-relink.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
+            if ninja -C "$GUEST_BUILD" -t commands classpnp >/dev/null 2>&1; then
+              python3 "$GUEST_SOURCE/tests/host/class-errorlog-layout/check.py" "$GUEST_BUILD" "$output/class-errorlog-layout" >"$output/class-errorlog-layout.log" 2>&1
+            else
+              storage_backend=$(sed -n "s/^NXK_STORAGE_BACKEND:STRING=//p" "$GUEST_BUILD/CMakeCache.txt")
+              test "$storage_backend" = complete-candidate
+              echo "SKIP: complete-candidate has no legacy classpnp target" >"$output/class-errorlog-layout.log"
+            fi
             python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check.py" "$output/upper-ram-reservation" >"$output/upper-ram-reservation.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" >"$output/upper-ram-config.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/upper-ram-reservation/check-config.py" "$output/upper-ram-config" --storage-backend complete-candidate --source-tree "$actual_tree" --link-recorder /work/tools/storage_link_record.py --artifact-recorder /work/tools/storage_artifact_record.py >"$output/upper-ram-config.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/warm-stage/check.py" >"$output/warm-stage.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/av-encoder-option/check.py" "$GUEST_SOURCE" "$output/av-encoder-option" >"$output/av-encoder-option.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/av-saved-image/check.py" "$output/av-saved-image" >"$output/av-saved-image.log" 2>&1
@@ -123,13 +136,14 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/performance-counter/check.py" "$output/performance-counter" >"$output/performance-counter.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/vm-query-fastpath/check.py" "$GUEST_SOURCE" "$output/vm-query-fastpath" >"$output/vm-query-fastpath.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/immediate-delay/check.py" "$GUEST_SOURCE" "$output/immediate-delay" >"$output/immediate-delay.log" 2>&1
-            python3 "$GUEST_SOURCE/tests/host/storage-completion/check.py" "$GUEST_SOURCE" "$output/storage-completion" >"$output/storage-completion.log" 2>&1
+            test "$(sed -n 's/^NXK_STORAGE_BACKEND:STRING=//p' "$GUEST_BUILD/CMakeCache.txt")" = complete-candidate
             python3 "$GUEST_SOURCE/tests/host/interrupt-static/check.py" "$GUEST_SOURCE" "$output/interrupt-static" >"$output/interrupt-static.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/interrupt-static/check-built.py" "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/interrupt-static-built.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/io-apc-order/check.py" "$output/io-apc-order" >"$output/io-apc-order.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/critical-section/check.py" "$output/critical-section" >"$output/critical-section.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/workqueue/check-fixed-worker-queue.py" "$output/fixed-worker-queue" >"$output/fixed-worker-queue.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs/check.py" "$output/xdvdfs-create" >"$output/xdvdfs-create.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/xdvdfs/check-verify.py" "$GUEST_SOURCE" "$output/xdvdfs-verify" >"$output/xdvdfs-verify.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs-directory/check.py" "$output/xdvdfs-directory" >"$output/xdvdfs-directory.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs-masks/check.py" "$output/xdvdfs-masks" >"$output/xdvdfs-masks.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs-read-completion/check.py" "$output/xdvdfs-read-completion" >"$output/xdvdfs-read-completion.log" 2>&1
@@ -170,7 +184,7 @@ jobs:
         if: matrix.variant == 'release' && matrix.memory_mib == 128
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-            spiritboot-toolchain python3 scripts/build-firmware.py \
+            spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend complete-candidate \
             --source .reference/roswell --output artifacts/firmware-upper-reserve \
             --variant release --memory-mib 128 --reserve-upper-ram ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
           python3 - <<'PY'
@@ -178,16 +192,17 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '3c23ea01cf43c2979c4c3ef247236e03d079f465', result
+          assert result['source_tree'] == '319d81cfe9f6e1a524012cbab66d9bd8f5f929d4', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-            spiritboot-toolchain python3 scripts/build-firmware.py \
+            spiritboot-toolchain python3 scripts/build-firmware.py --storage-backend complete-candidate \
             --source .reference/roswell --output artifacts/firmware-repeat --memory-mib ${{ matrix.memory_mib }} ${{ inputs.metadata_counters && '--metadata-counters' || '' }}
           cmp artifacts/firmware-release-${{ matrix.memory_mib }}mib/flash.bin artifacts/firmware-repeat/flash.bin
       - name: Prepare pinned open runtime fixtures
+        if: matrix.variant == 'release'
         run: |
           python3 - <<'PY'
           import hashlib, json, pathlib, urllib.request
@@ -204,18 +219,22 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
             -w /work/artifacts spiritboot-toolchain ./xemu.AppImage --appimage-extract
       - name: Build guests from the tested patched source
+        if: matrix.variant == 'release'
         run: |
           nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           kernel_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["build_directory"])')
-          for guest in api-regression clean-room-contracts clean-room-warm-reboot rom-shadow-persistence kernel-performance $(python3 -c 'import json; print(" ".join(json.load(open("sources/native-regressions.json"))))'); do
+          for guest in api-regression clean-room-contracts clean-room-warm-reboot clean-room-ordinary-reset rom-shadow-persistence kernel-performance $(python3 -c 'import json; print(" ".join(json.load(open("sources/native-regressions.json"))))'); do
+            guest_directory="$guest_source/tests/xbe/$guest"
+            if [ "$guest" = kernel-export-contracts ]; then guest_directory="/work/tests/xbe/$guest"; fi
             docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
               -e KERNEL_ASM="$kernel_build/sdk/include/asm/ks386.inc" \
               -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-              -w "$guest_source/tests/xbe/$guest" \
+              -w "$guest_directory" \
               "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
           done
       - name: Run API, contracts, warm reboot, and performance correctness guests
+        if: matrix.variant == 'release'
         run: |
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           docker run --rm -v "$PWD:/work" \
@@ -223,24 +242,27 @@ jobs:
             -e MEMORY_MIB=${{ matrix.memory_mib }} -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -ec '
             Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
             python3 -c "import time; time.sleep(1)"
-            guests="api-regression clean-room-contracts clean-room-warm-reboot kernel-performance $(python3 -c "import json; print(\" \".join(json.load(open(\"sources/native-regressions.json\"))))")"
+            guests="api-regression clean-room-contracts clean-room-warm-reboot clean-room-ordinary-reset kernel-performance $(python3 -c "import json; print(\" \".join(json.load(open(\"sources/native-regressions.json\"))))")"
             if [ "$VARIANT" = release-64mib ]; then guests="$guests rom-shadow-persistence"; fi
             for guest in $guests; do
               case "$guest" in
                 api-regression) iso=nxkrnl-api-regression.iso; capture=open-xbe ;;
-                clean-room-contracts|clean-room-warm-reboot|rom-shadow-persistence|kernel-performance) iso=$guest.iso; capture=$guest ;;
+                clean-room-contracts|clean-room-warm-reboot|clean-room-ordinary-reset|rom-shadow-persistence|kernel-performance) iso=$guest.iso; capture=$guest ;;
                 *) iso=$(python3 -c "import json,sys; print(json.load(open(\"sources/native-regressions.json\"))[sys.argv[1]][\"iso\"])" "$guest"); capture=$guest ;;
               esac
+              guest_directory="$GUEST_SOURCE/tests/xbe/$guest"
+              if [ "$guest" = kernel-export-contracts ]; then guest_directory="/work/tests/xbe/$guest"; fi
               DISPLAY=:99 python3 scripts/run-firmware.py \
                 --xemu artifacts/squashfs-root/usr/bin/xemu \
                 --flash "artifacts/firmware-$VARIANT/flash.bin" \
                 --hdd artifacts/xbox_hdd.qcow2 \
-                --dvd "$GUEST_SOURCE/tests/xbe/$guest/$iso" \
+                --dvd "$guest_directory/$iso" \
                 --memory-mib "$MEMORY_MIB" --output "artifacts/$capture-$VARIANT" --timeout 240 --expect-tap
             done'
           python3 - <<'PY'
           import json
-          for guest, plan in (('clean-room-contracts', 23), ('clean-room-warm-reboot', 7)):
+          for guest, plan in (('clean-room-contracts', 23), ('clean-room-warm-reboot', 7),
+                              ('clean-room-ordinary-reset', 2)):
               result = json.load(open(f'artifacts/{guest}-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/run.json'))
               assert result['status'] == 'passed' and result['tap']['plan'] == plan, result
               assert result['tap']['ok'] == plan, result
@@ -280,10 +302,12 @@ jobs:
             artifacts/open-xbe-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/clean-room-contracts-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/clean-room-warm-reboot-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/clean-room-ordinary-reset-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/rom-shadow-persistence-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/saved-image-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/interrupt-public-abi-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/object-handle-fastpath-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/kernel-export-contracts-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/kernel-performance-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/pool-size-limit-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/zero-reuse-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/

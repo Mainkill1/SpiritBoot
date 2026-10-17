@@ -1,0 +1,115 @@
+--- baseline
++++ v5
+@@ -10,54 +10,68 @@
+   11:	83 ec 1c             	sub    esp,0x1c
+   14:	8b 5d 08             	mov    ebx,DWORD PTR [ebp+0x8]
+   17:	f3 a5                	rep movs DWORD PTR es:[edi],DWORD PTR ds:[esi]
+-  19:	85 db                	test   ebx,ebx
+-  1b:	0f 84 a2 00 00 00    	je     c3 <FUNC+0xc3>
+-  21:	8b 75 d8             	mov    esi,DWORD PTR [ebp-0x28]
+-  24:	3b 73 50             	cmp    esi,DWORD PTR [ebx+0x50]
+-  27:	0f 83 96 00 00 00    	jae    c3 <FUNC+0xc3>
++  19:	8b 7d d8             	mov    edi,DWORD PTR [ebp-0x28]
++  1c:	85 db                	test   ebx,ebx
++  1e:	0f 84 c7 00 00 00    	je     eb <FUNC+0xeb>
++  24:	3b 7b 50             	cmp    edi,DWORD PTR [ebx+0x50]
++  27:	0f 83 be 00 00 00    	jae    eb <FUNC+0xeb>
+   2d:	89 d8                	mov    eax,ebx
+   2f:	e8 00 00 00 00       	call   34 <FUNC+0x34>	30: DISP32	.text$lock
+-  34:	69 c6 f8 00 00 00    	imul   eax,esi,0xf8
++  34:	69 c7 f8 00 00 00    	imul   eax,edi,0xf8
+   3a:	03 43 4c             	add    eax,DWORD PTR [ebx+0x4c]
+   3d:	83 b8 cc 00 00 00 00 	cmp    DWORD PTR [eax+0xcc],0x0
+-  44:	74 41                	je     87 <FUNC+0x87>
++  44:	74 42                	je     88 <FUNC+0x88>
+   46:	83 b8 d8 00 00 00 00 	cmp    DWORD PTR [eax+0xd8],0x0
+-  4d:	74 38                	je     87 <FUNC+0x87>
++  4d:	74 39                	je     88 <FUNC+0x88>
+   4f:	83 b8 dc 00 00 00 00 	cmp    DWORD PTR [eax+0xdc],0x0
+-  56:	74 2f                	je     87 <FUNC+0x87>
+-  58:	83 b8 e0 00 00 00 00 	cmp    DWORD PTR [eax+0xe0],0x0
+-  5f:	75 26                	jne    87 <FUNC+0x87>
+-  61:	8b 90 98 00 00 00    	mov    edx,DWORD PTR [eax+0x98]
+-  67:	8b 4d e4             	mov    ecx,DWORD PTR [ebp-0x1c]
+-  6a:	39 88 9c 00 00 00    	cmp    DWORD PTR [eax+0x9c],ecx
+-  70:	75 15                	jne    87 <FUNC+0x87>
+-  72:	3b 55 e0             	cmp    edx,DWORD PTR [ebp-0x20]
+-  75:	75 10                	jne    87 <FUNC+0x87>
+-  77:	8b 50 58             	mov    edx,DWORD PTR [eax+0x58]
+-  7a:	8b 7d ec             	mov    edi,DWORD PTR [ebp-0x14]
+-  7d:	39 78 5c             	cmp    DWORD PTR [eax+0x5c],edi
+-  80:	75 05                	jne    87 <FUNC+0x87>
+-  82:	3b 55 e8             	cmp    edx,DWORD PTR [ebp-0x18]
+-  85:	74 09                	je     90 <FUNC+0x90>
+-  87:	89 d8                	mov    eax,ebx
+-  89:	e8 00 00 00 00       	call   8e <FUNC+0x8e>	8a: DISP32	.text$unlock
+-  8e:	eb 33                	jmp    c3 <FUNC+0xc3>
+-  90:	c7 80 e0 00 00 00 01 00 00 00 	mov    DWORD PTR [eax+0xe0],0x1
+-  9a:	8b 55 24             	mov    edx,DWORD PTR [ebp+0x24]
+-  9d:	89 90 bc 00 00 00    	mov    DWORD PTR [eax+0xbc],edx
+-  a3:	8b 55 28             	mov    edx,DWORD PTR [ebp+0x28]
+-  a6:	89 90 c0 00 00 00    	mov    DWORD PTR [eax+0xc0],edx
+-  ac:	8b 55 2c             	mov    edx,DWORD PTR [ebp+0x2c]
+-  af:	89 90 c4 00 00 00    	mov    DWORD PTR [eax+0xc4],edx
+-  b5:	89 d8                	mov    eax,ebx
+-  b7:	e8 00 00 00 00       	call   bc <FUNC+0xbc>	b8: DISP32	.text$unlock
+-  bc:	89 d8                	mov    eax,ebx
+-  be:	e8 00 00 00 00       	call   c3 <FUNC+0xc3>	bf: DISP32	.text$pump
+-  c3:	83 c4 1c             	add    esp,0x1c
+-  c6:	5b                   	pop    ebx
+-  c7:	5e                   	pop    esi
+-  c8:	5f                   	pop    edi
+-  c9:	5d                   	pop    ebp
+-  ca:	c3                   	ret
+-  cb:	90                   	nop
++  56:	74 30                	je     88 <FUNC+0x88>
++  58:	8b b0 e0 00 00 00    	mov    esi,DWORD PTR [eax+0xe0]
++  5e:	85 f6                	test   esi,esi
++  60:	75 26                	jne    88 <FUNC+0x88>
++  62:	8b 90 98 00 00 00    	mov    edx,DWORD PTR [eax+0x98]
++  68:	8b 4d e4             	mov    ecx,DWORD PTR [ebp-0x1c]
++  6b:	39 88 9c 00 00 00    	cmp    DWORD PTR [eax+0x9c],ecx
++  71:	75 15                	jne    88 <FUNC+0x88>
++  73:	3b 55 e0             	cmp    edx,DWORD PTR [ebp-0x20]
++  76:	75 10                	jne    88 <FUNC+0x88>
++  78:	8b 50 58             	mov    edx,DWORD PTR [eax+0x58]
++  7b:	8b 4d ec             	mov    ecx,DWORD PTR [ebp-0x14]
++  7e:	39 48 5c             	cmp    DWORD PTR [eax+0x5c],ecx
++  81:	75 05                	jne    88 <FUNC+0x88>
++  83:	3b 55 e8             	cmp    edx,DWORD PTR [ebp-0x18]
++  86:	74 09                	je     91 <FUNC+0x91>
++  88:	89 d8                	mov    eax,ebx
++  8a:	e8 00 00 00 00       	call   8f <FUNC+0x8f>	8b: DISP32	.text$unlock
++  8f:	eb 5a                	jmp    eb <FUNC+0xeb>
++  91:	c7 80 e0 00 00 00 01 00 00 00 	mov    DWORD PTR [eax+0xe0],0x1
++  9b:	8b 55 24             	mov    edx,DWORD PTR [ebp+0x24]
++  9e:	89 90 bc 00 00 00    	mov    DWORD PTR [eax+0xbc],edx
++  a4:	8b 55 28             	mov    edx,DWORD PTR [ebp+0x28]
++  a7:	89 90 c0 00 00 00    	mov    DWORD PTR [eax+0xc0],edx
++  ad:	8b 55 2c             	mov    edx,DWORD PTR [ebp+0x2c]
++  b0:	89 90 c4 00 00 00    	mov    DWORD PTR [eax+0xc4],edx
++  b6:	83 7b 70 00          	cmp    DWORD PTR [ebx+0x70],0x0
++  ba:	89 7b 54             	mov    DWORD PTR [ebx+0x54],edi
++  bd:	75 0e                	jne    cd <FUNC+0xcd>
++  bf:	c7 43 70 01 00 00 00 	mov    DWORD PTR [ebx+0x70],0x1
++  c6:	be 01 00 00 00       	mov    esi,0x1
++  cb:	eb 0c                	jmp    d9 <FUNC+0xd9>
++  cd:	8b 43 74             	mov    eax,DWORD PTR [ebx+0x74]
++  d0:	83 f8 ff             	cmp    eax,0xffffffff
++  d3:	74 04                	je     d9 <FUNC+0xd9>
++  d5:	40                   	inc    eax
++  d6:	89 43 74             	mov    DWORD PTR [ebx+0x74],eax
++  d9:	89 d8                	mov    eax,ebx
++  db:	e8 00 00 00 00       	call   e0 <FUNC+0xe0>	dc: DISP32	.text$unlock
++  e0:	85 f6                	test   esi,esi
++  e2:	74 07                	je     eb <FUNC+0xeb>
++  e4:	89 d8                	mov    eax,ebx
++  e6:	e8 00 00 00 00       	call   eb <FUNC+0xeb>	e7: DISP32	.text$run_pump
++  eb:	83 c4 1c             	add    esp,0x1c
++  ee:	5b                   	pop    ebx
++  ef:	5e                   	pop    esi
++  f0:	5f                   	pop    edi
++  f1:	5d                   	pop    ebp
++  f2:	c3                   	ret
++  f3:	90                   	nop
+ 

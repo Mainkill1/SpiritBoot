@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "experiment": "forza-map-pump-lock-rejected-20261015",
+  "candidate": {
+    "biosSha256": "0762122d7632fc9f6cf7e1f2a0f54f077318fd9e61a3621d64b8dd52cac722bf",
+    "biosBytes": 524288,
+    "sourceTree": "108b4645062f737210e354a23789a2b7c7220530",
+    "buildType": "release",
+    "memoryMiB": 64,
+    "debugger": false,
+    "firmwareTracing": false
+  },
+  "fixture": {
+    "sha256": "d095682b8691b0c43deae66530a7ccd553d8bc828b4fe4537469b86c463b4b6b",
+    "passes": 16,
+    "operationsPerPass": 1024,
+    "queueDepth": 12,
+    "pressurePages": 900
+  },
+  "runs": [
+    {
+      "position": "D1",
+      "jobId": "forza-map-stream-pump2-d1-20261015-v1",
+      "serialSha256": "51a7430a1b510e4fd7366535112f934e5ba5a144e83b2b34bf60e04f63ee4535",
+      "serialBytes": 6971655,
+      "analysis": {
+        "status": "qualified",
+        "reasons": [],
+        "passes": 16,
+        "operations": 16384,
+        "queue_high_water_min": 12,
+        "pressure_pages": 900,
+        "reported_failures": 0,
+        "warmup_oracle_failures": 0,
+        "oracle_failure_records": 0,
+        "malformed_records": [],
+        "error_stages": [],
+        "apc_batch_ticks": [
+          48138274,
+          48168194,
+          52267014,
+          48924334,
+          53231127,
+          51913107,
+          52264374,
+          51950580,
+          50974146,
+          52829406,
+          52737080,
+          52885653,
+          52419840,
+          49866006,
+          52737960,
+          52668733
+        ],
+        "apc_batch_median_ticks": 52265694.0,
+        "timing_median_ticks": {
+          "apc_batch": 52265694.0,
+          "caller_batch": 52265694.0,
+          "submit_sum": 45497209.5,
+          "post_return_to_apc_sum": 187849093.0,
+          "return_after_apc_sum": 44366.0
+        }
+      }
+    },
+    {
+      "position": "D2",
+      "jobId": "forza-map-stream-pump2-d2-20261015-v1",
+      "serialSha256": "765b6e70a5116e62192dd13111800c0d96c08bef9811a7511f97f08a4e45f1af",
+      "serialBytes": 6971039,
+      "analysis": {
+        "status": "qualified",
+        "reasons": [],
+        "passes": 16,
+        "operations": 16384,
+        "queue_high_water_min": 12,
+        "pressure_pages": 900,
+        "reported_failures": 0,
+        "warmup_oracle_failures": 0,
+        "oracle_failure_records": 0,
+        "malformed_records": [],
+        "error_stages": [],
+        "apc_batch_ticks": [
+          48764686,
+          48407847,
+          49301266,
+          52497207,
+          50710440,
+          52993673,
+          49032867,
+          49547006,
+          50791107,
+          55306386,
+          52163613,
+          51280900,
+          51026507,
+          51717307,
+          49819440,
+          50523000
+        ],
+        "apc_batch_median_ticks": 50750773.5,
+        "timing_median_ticks": {
+          "apc_batch": 50750773.5,
+          "caller_batch": 50750773.5,
+          "submit_sum": 45012963.0,
+          "post_return_to_apc_sum": 173934021.0,
+          "return_after_apc_sum": 40519.5
+        }
+      }
+    }
+  ],
+  "pairwise": {
+    "C1_to_D1": {
+      "status": "qualified",
+      "candidate_over_reference": 1.001068916335117,
+      "candidate_change_percent": 0.1068916335116965,
+      "reference_median_ticks": 52209886.0,
+      "candidate_median_ticks": 52265694.0,
+      "timing_change_percent": {
+        "apc_batch": 0.1068916335116965,
+        "caller_batch": 0.1068916335116965,
+        "post_return_to_apc_sum": -8.763975237243105,
+        "return_after_apc_sum": 18.851295239626033,
+        "submit_sum": 3.7506235253324416
+      }
+    },
+    "C1_to_D2": {
+      "status": "qualified",
+      "candidate_over_reference": 0.9720529460646591,
+      "candidate_change_percent": -2.7947053935340915,
+      "reference_median_ticks": 52209886.0,
+      "candidate_median_ticks": 50750773.5,
+      "timing_change_percent": {
+        "apc_batch": -2.7947053935340915,
+        "caller_batch": -2.7947053935340915,
+        "post_return_to_apc_sum": -15.522356836495987,
+        "return_after_apc_sum": 8.546974202362767,
+        "submit_sum": 2.6463607174131987
+      }
+    },
+    "C2_to_D1": {
+      "status": "qualified",
+      "candidate_over_reference": 1.0088647370669248,
+      "candidate_change_percent": 0.886473706692481,
+      "reference_median_ticks": 51806443.5,
+      "candidate_median_ticks": 52265694.0,
+      "timing_change_percent": {
+        "apc_batch": 0.886473706692481,
+        "caller_batch": 0.886473706692481,
+        "post_return_to_apc_sum": -3.3656156666797,
+        "return_after_apc_sum": -1.6296756169486226,
+        "submit_sum": 1.3423201493106829
+      }
+    },
+    "C2_to_D2": {
+      "status": "qualified",
+      "candidate_over_reference": 0.9796228050281043,
+      "candidate_change_percent": -2.037719497189572,
+      "reference_median_ticks": 51806443.5,
+      "candidate_median_ticks": 50750773.5,
+      "timing_change_percent": {
+        "apc_batch": -2.037719497189572,
+        "caller_batch": -2.037719497189572,
+        "post_return_to_apc_sum": -10.523885074314387,
+        "return_after_apc_sum": -10.158311345646442,
+        "submit_sum": 0.263689956964841
+      }
+    },
+    "D1_to_D2": {
+      "status": "qualified",
+      "candidate_over_reference": 0.9710150122564143,
+      "candidate_change_percent": -2.898498774358571,
+      "reference_median_ticks": 52265694.0,
+      "candidate_median_ticks": 50750773.5,
+      "timing_change_percent": {
+        "apc_batch": -2.898498774358571,
+        "caller_batch": -2.898498774358571,
+        "post_return_to_apc_sum": -7.407580083444964,
+        "return_after_apc_sum": -8.669927421899647,
+        "submit_sum": -1.0643432978015954
+      }
+    }
+  },
+  "aggregatePhaseTiming": {
+    "apc_batch": {
+      "queue_depth_candidate_mean_of_run_medians": 52008164.75,
+      "pump_lock_mean_of_run_medians": 51508233.75,
+      "pump_lock_change_percent": -0.9612548383568953
+    },
+    "submit_sum": {
+      "queue_depth_candidate_mean_of_run_medians": 44373524.5,
+      "pump_lock_mean_of_run_medians": 45255086.25,
+      "pump_lock_change_percent": 1.9866840868139723
+    },
+    "post_return_to_apc_sum": {
+      "queue_depth_candidate_mean_of_run_medians": 200142559.5,
+      "pump_lock_mean_of_run_medians": 180891557.0,
+      "pump_lock_change_percent": -9.618645103816615
+    }
+  },
+  "hostDirectionalResult": {
+    "workload": "1,000,000 QD12 FIFO completion+submit cycles per sample",
+    "stableMedianChangePercent": -10.2,
+    "qualification": "directional only; host frequency changed during early samples"
+  },
+  "result": {
+    "correctness": "passed",
+    "performance": "rejected",
+    "pumpLockApcBatchChangeVsQueueDepthCandidatePercent": -0.9612548383568953,
+    "pumpLockSubmitSumChangeVsQueueDepthCandidatePercent": 1.9866840868139723,
+    "finding": "The lock-carry change improved the host microbenchmark but did not improve the native release workload; it is not integrated."
+  }
+}

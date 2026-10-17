@@ -19,7 +19,7 @@
 
 /* Normalized inputs, NOT Xbox USB packet bits. Source includes device generation. */
 enum { SB_START=1u, SB_UP=2u, SB_DOWN=4u, SB_LEFT=8u, SB_RIGHT=16u,
-       SB_A=32u, SB_B=64u, SB_X=128u, SB_BACK=256u };
+       SB_A=32u, SB_B=64u, SB_X=128u, SB_BACK=256u, SB_Y=512u };
 typedef struct { uint32_t ms, source, buttons; bool valid; } SbInput;
 typedef enum { SB_GATE_WAIT, SB_GATE_ENTER, SB_GATE_BOOT } SbGateResult;
 typedef struct {
@@ -30,11 +30,24 @@ SB_INIT_CODE void sb_boot_gate_init(SbBootGate *gate, uint32_t now);
 SB_INIT_CODE SbGateResult sb_boot_gate_poll(SbBootGate *gate, SbInput input);
 
 /* Only standardized setting indices 7/8/9; no factory or key material. */
-typedef struct { uint32_t language, video, audio; } SbSettings;
+/* experimental is session-only. It is never written to the console EEPROM. */
+typedef struct { uint32_t language, video, audio, experimental; } SbSettings;
+enum {
+    SB_EXPERIMENT_CONTIG_CACHE_ALIAS=1u,
+    SB_EXPERIMENT_XDVDFS_ASYNC=2u,
+    SB_EXPERIMENT_ATA_FORCE_ALL=8u,
+    SB_EXPERIMENT_ATA_MODE_MASK=8u,
+    SB_EXPERIMENT_ADVANCED_ALL_MASK=
+        SB_EXPERIMENT_CONTIG_CACHE_ALIAS | SB_EXPERIMENT_XDVDFS_ASYNC |
+        SB_EXPERIMENT_ATA_FORCE_ALL
+};
 enum { SB_LANGUAGE_WORD=1u, SB_VIDEO_WORD=2u, SB_AUDIO_WORD=4u };
 typedef enum {
     SB_LANGUAGE, SB_ASPECT, SB_480P, SB_720P, SB_1080I, SB_PAL60,
-    SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_FIELD_COUNT,
+    SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_STANDARD_FIELD_COUNT,
+    SB_ADVANCED_ALL=SB_STANDARD_FIELD_COUNT, SB_CONTIG_CACHE_ALIAS,
+    SB_XDVDFS_ASYNC, SB_ATA_STATUS_SETTLE,
+    SB_FIELD_COUNT,
     SB_SAVE=SB_FIELD_COUNT, SB_CONTINUE, SB_ROW_COUNT
 } SbSetupRow;
 #define SB_ALL_FIELDS ((1u << SB_FIELD_COUNT) - 1u)
@@ -47,7 +60,8 @@ typedef struct {
 } SbSettingsStore;
 typedef enum {
     SB_MENU_EDIT, SB_MENU_CONFIRM_SAVE, SB_MENU_CONFIRM_DISCARD,
-    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY, SB_MENU_CREDITS
+    SB_MENU_CONTINUE, SB_MENU_REBOOT, SB_MENU_RECOVERY, SB_MENU_CREDITS,
+    SB_MENU_ADVANCED
 } SbMenuState;
 typedef struct {
     SbSettings original, edited;

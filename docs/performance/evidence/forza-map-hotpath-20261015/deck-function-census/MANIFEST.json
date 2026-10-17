@@ -1,0 +1,241 @@
+{
+  "schema": 1,
+  "name": "Steam Deck retained-SG Forza marked function census",
+  "run_id": "20261016-065809185-372316c894b54f5c902ac9b4be7281ae",
+  "capture_utc": {
+    "start": "2026-10-16T06:58:09.1850354Z",
+    "end": "2026-10-16T07:00:02.9881891Z"
+  },
+  "source": {
+    "spiritboot_tree_commit": "e65870455d2af1bfcc7b187b629a7e3988021491",
+    "nxdk_commit": "29638d0b001f179b73c3513489af10ddc2986216",
+    "xemu_commit": "dcc536830deba245eec36cd009db5860ca04884c",
+    "xemu_version": "0.8.136-0-gdcc536830deb",
+    "xemu_elf_build_id": "0f8ec555e648e22df98a0298e9ff9c2c2855073e",
+    "runner_version": "0.2.0+3aa5e059d52339bf4b14725260e124322c30beca"
+  },
+  "host": {
+    "machine": "MainDeck",
+    "os": "SteamOS",
+    "cpu": "AMD Custom APU 0405",
+    "logical_processors": 8,
+    "memory_bytes": 15524212736,
+    "gpu": "1002:163F (amdgpu)",
+    "kernel": "6.16.12-valve24.5-1-neptune-616-gb2f7cfe85e45",
+    "perf_version": "6.15-3",
+    "desktop_preserved": true,
+    "restart_or_logout": false
+  },
+  "identities": {
+    "bios": {
+      "path": "inputs/flash.bin",
+      "sha256": "f7f22399a2448b71b2cdb93e696c131648c6805d753ca0e3225ec1caaf2a84ef",
+      "bytes": 524288
+    },
+    "unstripped_kernel": {
+      "path": "inputs/xboxkrnl.unstripped.exe",
+      "sha256": "37b31c369e9a3df6a2f34d65201cecb4761778bf69217f3b7b2b02ff93692bfb",
+      "bytes": 1081810
+    },
+    "xemu": {
+      "capture_source_path": "<checkout-of-xemu-commit-dcc536830deb>",
+      "deck_package_path": "/home/deck/xemu-performance/pr30-disk-assets-live/workspace/Queue/Testing/agent-forza-map-stream-sg-phase-profile-deck-20261015-v1/xemu",
+      "sha256": "95bf0ae6c73e19c3696807fb1810e4f3e8ce8929397f14da286e5973a342e459",
+      "bytes": 31626544,
+      "included": false,
+      "reason": "Immutable hash and runner manifest identify the existing release-optimized plugin-enabled diagnostic xemu; the 31.6 MB binary is omitted from the compact bundle."
+    },
+    "fixture_xiso": {
+      "path": "inputs/forza-map-stream-profile.iso",
+      "sha256": "8e2346ebd329eb7e6e1a0a7b48bc5af45f06a85dbf40edcfbfb6c83fb6a62743",
+      "bytes": 655360
+    },
+    "original_fixture_xiso": {
+      "sha256": "d095682b8691b0c43deae66530a7ccd553d8bc828b4fe4537469b86c463b4b6b",
+      "bytes": 720896
+    },
+    "marker_xbe": {
+      "sha256": "50e78c1a3ad5a482ce10c664f27830d24d6030f385247a72ad936f896a3957a1",
+      "bytes": 110592
+    },
+    "marker_main_exe": {
+      "sha256": "de21cc96331fd1afa314c971ef91f9df5c3863435fba35c17cee8855f88b0592",
+      "bytes": 98304
+    },
+    "marker_link_map": {
+      "path": "fixture-source/profile.map",
+      "sha256": "30da5b30dddeac369bdb975353984b841457633eec6aad19c6ae570becc1e3cb"
+    },
+    "plugin": {
+      "path": "tools/phase_function_profile.so",
+      "sha256": "efd0f245f85349debc167d044012d9f1aa8fe5eb6e4c1b3acd54031fa329f113",
+      "bytes": 43400
+    },
+    "function_entries": {
+      "path": "tools/spiritboot-sg.functions",
+      "sha256": "a8ae36d4b1cb08280ad0407b776a36a508b21327b715812193355c22544ca21e",
+      "unique_addresses": 1685
+    },
+    "config": {
+      "path": "inputs/xemu.toml",
+      "sha256": "60ad884ddd5d32add17bee47b2d6106d2cfec8190d5cdda494b299fcc1e1cf9c",
+      "bytes": 596
+    },
+    "private_eeprom": {
+      "sha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5",
+      "included": false
+    },
+    "hdd_asset": {
+      "asset_id": "pr256-clean-fatx-compat010-v1",
+      "sha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+      "included": false
+    },
+    "bootrom_asset": {
+      "asset_id": "pr73-deck-bootrom-e99e3a-v1",
+      "sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335",
+      "included": false
+    },
+    "jit_perf_map_uncompressed": {
+      "sha256": "ccf9d70966d8626fd357011ca8def15b529824456d3ee4a241abd3a5a4c9ed57",
+      "bytes": 3472712,
+      "compressed_path": "evidence/perf-20642.map.gz"
+    },
+    "raw_serial_uncompressed": {
+      "sha256": "3fd1e9937f456723976b6d9e92ac7bed573147fa4acfc0b8d4883de80d29ce69",
+      "bytes": 7008969,
+      "compressed_path": "evidence/serial.log.gz"
+    }
+  },
+  "marker_contract": {
+    "begin_symbol": "profile_phase_begin",
+    "begin_guest_pc": "0x000110e0",
+    "end_symbol": "profile_phase_end",
+    "end_guest_pc": "0x000110f0",
+    "window_selection": "first complete begin/end window only; the remaining 15 fixture passes are ignored",
+    "begin_position": "immediately after phase(\"measured_ready\") and before run_batch(depth)",
+    "end_position": "after successful run_batch(depth) and before phase(\"timing_end\")",
+    "timing_relationship": "both calls are outside the fixture RDTSC interval: the first request issue occurs after begin; end occurs after the final APC and batch return",
+    "implementation": "noinline/used empty functions with a compiler memory barrier; marker calls add translation/call overhead but no intentional kernel operation within the window",
+    "workload": {
+      "operations": 1024,
+      "bytes": 10871296,
+      "queue_depth": 12,
+      "pressure_pages": 900,
+      "passes_in_fixture": 16
+    }
+  },
+  "commands": {
+    "fixture_build": "cd fixture-source && test -n \"$NXDK_DIR\" && export PATH=\"<llvm-dlltool-wrapper>:$NXDK_DIR/bin:$PATH\" && make V=1",
+    "function_list": "python3 tools/generate_function_entries.py inputs/xboxkrnl.unstripped.exe tools/spiritboot-sg.functions --metadata tools/spiritboot-sg.functions.metadata.json",
+    "plugin_build": "gcc -std=gnu11 -O2 -g -fPIC -shared -Wall -Wextra -Werror -I<plugin-enabled-xemu>/include/qemu $(pkg-config --cflags glib-2.0) -o tools/phase_function_profile.so tools/phase_function_profile.c $(pkg-config --libs glib-2.0)",
+    "submit_and_collect": "python3 tools/run_deck_profile.py",
+    "emulator_arguments": [
+      "-config_path",
+      "{packageDir}/xemu.toml",
+      "-m",
+      "64",
+      "-device",
+      "lpc47m157",
+      "-serial",
+      "file:{resultDir}/serial.log",
+      "-plugin",
+      "{packageDir}/phase_function_profile.so,entries={packageDir}/spiritboot-sg.functions,output={resultDir}/phase-profile.ndjson,begin=0x110e0,end=0x110f0",
+      "-perfmap",
+      "-no-shutdown"
+    ],
+    "integrity": "sha256sum -c SHA256SUMS",
+    "analysis_verification": "python3 tools/verify_capture.py ."
+  },
+  "capture": {
+    "status": "pass",
+    "exit_code": 0,
+    "operator_intervention": false,
+    "oracle_failures": 0,
+    "completed_windows": 1,
+    "clock_errors": 0,
+    "loaded_function_entries": 1685,
+    "executed_ledger_rows": 191,
+    "exact_nonzero_entry_rows": 190,
+    "range_only_rows": 1,
+    "all_tb_callbacks": 3002554,
+    "kernel_tb_callbacks": 2969179,
+    "exact_entry_hits": 384062,
+    "weighted_guest_instructions": 13550787,
+    "phase_wall_ns_diagnostic": 2761942653,
+    "phase_vcpu_thread_cpu_ns_diagnostic": 2446371997,
+    "attributed_kernel_cpu_ns_diagnostic": 2416803914,
+    "attributed_kernel_cpu_coverage_percent": 98.79134967877904,
+    "linux_perf_sampling": "not captured; perf availability was verified and the xemu -perfmap artifact is included"
+  },
+  "counter_integrity": {
+    "counter_width_bits": 64,
+    "maximum_observed": {
+      "hits": 44016,
+      "tb_executions": 374167,
+      "weighted_instructions": 1415676,
+      "attributed_thread_cpu_ns": 258568984
+    },
+    "overflow": false,
+    "lost_or_dropped_records": 0,
+    "plugin_drop_queue": "none: counters are updated synchronously on the single emulated vCPU and emitted once at exit",
+    "allocation_or_parse_failures": 0,
+    "runner_monitor_samples": 228,
+    "runner_monitor_overruns": 0,
+    "runner_dropped_write_samples": 0
+  },
+  "unsupported_attribution": [
+    "Inlined and LTO-eliminated source functions have no independent emitted entry.",
+    "Aliases at one address are combined into one ledger row.",
+    "Range attribution uses the nearest lower supplied entry and may absorb local/private assembly bodies, padding, or gaps.",
+    "Weighted instructions count translated guest instructions and do not weight TCG helpers or host storage/render/audio workers.",
+    "Diagnostic vCPU thread CPU excludes other host threads and is strongly perturbed by per-TB callbacks and clock reads.",
+    "No Linux perf samples were captured, so host sampled-CPU attribution is unsupported for this run.",
+    "The diagnostic first pass took about 2.76 s versus about 0.27 s for later unmarked passes; wall and CPU values are excluded from release performance claims."
+  ],
+  "disposition": {
+    "review_categories": [
+      "optimize",
+      "required_hardware",
+      "correctness",
+      "emulator",
+      "diagnostic"
+    ],
+    "category_columns": [
+      "primary_review_category",
+      "category_optimize",
+      "category_required_hardware",
+      "category_correctness",
+      "category_emulator",
+      "category_diagnostic",
+      "cpu_attribution_status",
+      "emulator_attribution_status"
+    ],
+    "disposition_columns": [
+      "primary_disposition",
+      "optimized_in_batch",
+      "required_hardware_correctness_path",
+      "next_candidate",
+      "disposition_basis",
+      "next_step"
+    ],
+    "primary_counts": {
+      "required_hardware_correctness_path": 154,
+      "next_candidate": 16,
+      "optimized_in_batch": 21
+    },
+    "primary_review_category_counts": {
+      "required_hardware": 153,
+      "correctness": 21,
+      "diagnostic": 1,
+      "optimize": 16
+    },
+    "category_flag_counts": {
+      "optimize": 16,
+      "required_hardware": 158,
+      "correctness": 190,
+      "emulator": 0,
+      "diagnostic": 1
+    },
+    "rule": "range-only rows are diagnostic; actionable candidates are optimize; hardware-sensitive exact rows are required_hardware; other exact rows are correctness. No emulator function was sampled because this ledger is guest-kernel-only. Boolean columns retain overlapping constraints/history."
+  }
+}

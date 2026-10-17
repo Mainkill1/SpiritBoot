@@ -1,0 +1,2291 @@
+diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
+new file mode 100644
+index 00000000..5cb00945
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/CMakeLists.txt
+@@ -0,0 +1,4 @@
++# Independently authored laboratory primitives; no FDO/IRP adapter yet.
++# This target is linked only by the explicitly labeled partial prototype.
++add_library(nxstorage STATIC request.c geometry_composer.c)
++target_include_directories(nxstorage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+diff --git a/drivers/storage/class/nxstorage/geometry_composer.c b/drivers/storage/class/nxstorage/geometry_composer.c
+new file mode 100644
+index 00000000..a78fad2b
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/geometry_composer.c
+@@ -0,0 +1,168 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "geometry_composer.h"
++
++/* Public-interface shape checks; these are not private response layouts.
++ * The 8-byte alignment models the Windows x86 public integer ABI. */
++struct ig_geometry_shape {
++    _Alignas(8) ig_i64 cylinders;
++    ig_u32 media_type;
++    ig_u32 tracks_per_cylinder;
++    ig_u32 sectors_per_track;
++    ig_u32 bytes_per_sector;
++};
++
++struct ig_extended_shape {
++    struct ig_geometry_shape geometry;
++    _Alignas(8) ig_i64 disk_bytes;
++    ig_u8 data[1];
++};
++
++struct ig_partition_shape {
++    ig_u32 record_bytes;
++    ig_u32 style;
++    union {
++        struct { ig_u32 signature; ig_u32 checksum; } mbr;
++        ig_u8 gpt_disk_id[16];
++    } identity;
++};
++
++struct ig_int13_shape {
++    unsigned short drive_select;
++    ig_u32 max_cylinders;
++    unsigned short sectors_per_track;
++    unsigned short max_heads;
++    unsigned short number_drives;
++};
++
++struct ig_ex_int13_shape {
++    unsigned short buffer_size;
++    unsigned short flags;
++    ig_u32 cylinders;
++    ig_u32 heads;
++    ig_u32 sectors_per_track;
++    _Alignas(8) ig_u64 sectors_per_drive;
++    unsigned short sector_size;
++    unsigned short reserved;
++};
++
++struct ig_detection_shape {
++    ig_u32 record_bytes;
++    ig_u32 detection_type;
++    struct ig_int13_shape int13;
++    struct ig_ex_int13_shape ex_int13;
++};
++
++_Static_assert(sizeof(ig_u8) == 1 && (ig_u8)-1 == 255, "8-bit byte required");
++_Static_assert(sizeof(unsigned short) == 2, "16-bit short required");
++_Static_assert(sizeof(ig_u32) == 4, "32-bit public ULONG required");
++_Static_assert(sizeof(ig_i64) == 8 && sizeof(ig_u64) == 8, "64-bit integer required");
++_Static_assert(sizeof(struct ig_geometry_shape) == 24, "public geometry size");
++_Static_assert(offsetof(struct ig_geometry_shape, bytes_per_sector) == 20,
++               "public sector size offset");
++_Static_assert(offsetof(struct ig_extended_shape, disk_bytes) == 24,
++               "public capacity offset");
++_Static_assert(offsetof(struct ig_extended_shape, data) == IG_BASE_BYTES,
++               "public variable data offset");
++_Static_assert(sizeof(struct ig_partition_shape) == IG_PARTITION_BYTES,
++               "public partition size");
++_Static_assert(offsetof(struct ig_partition_shape, identity) == 8,
++               "public partition union offset");
++_Static_assert(sizeof(struct ig_int13_shape) == 16, "public Int13 size");
++_Static_assert(sizeof(struct ig_ex_int13_shape) == 32, "public ExInt13 size");
++_Static_assert(offsetof(struct ig_ex_int13_shape, sectors_per_drive) == 16,
++               "public ExInt13 64-bit offset");
++_Static_assert(sizeof(struct ig_detection_shape) == IG_DETECTION_BYTES,
++               "public detection size");
++_Static_assert(offsetof(struct ig_detection_shape, ex_int13) == 24,
++               "public detection extended offset");
++_Static_assert(IG_BASE_BYTES + IG_PARTITION_BYTES + IG_DETECTION_BYTES ==
++               IG_COMPLETE_BYTES, "complete response byte count");
++
++static ig_u32 read_word(const ig_u8 *bytes)
++{
++    return (ig_u32)bytes[0] | ((ig_u32)bytes[1] << 8) |
++           ((ig_u32)bytes[2] << 16) | ((ig_u32)bytes[3] << 24);
++}
++
++static void write_word(ig_u8 *bytes, ig_u32 value)
++{
++    bytes[0] = (ig_u8)value;
++    bytes[1] = (ig_u8)(value >> 8);
++    bytes[2] = (ig_u8)(value >> 16);
++    bytes[3] = (ig_u8)(value >> 24);
++}
++
++struct ig_result ig_compose_geometry(const struct ig_lower_response *lower,
++                                     const struct ig_owner_snapshot *owner,
++                                     void *caller_buffer, size_t caller_bytes)
++{
++    struct ig_result result = { IG_BUFFER_TOO_SMALL, 0, 0 };
++    struct ig_owner_snapshot snapshot;
++    ig_u8 base[IG_BASE_BYTES];
++    ig_u8 *output = caller_buffer;
++    ig_u32 sector_bytes, capacity_low, capacity_high;
++    size_t count, index;
++
++    if (lower) result.lower_status = lower->status;
++    if (caller_bytes < IG_BASE_BYTES) return result;
++    result.outcome = IG_INVALID_ARGUMENT;
++    if (!lower) return result;
++    if (lower->status & 0x80000000u) {
++        result.outcome = IG_LOWER_FAILURE;
++        return result;
++    }
++    if (lower->status != 0) {
++        result.outcome = IG_LOWER_NOT_COMPLETE;
++        return result;
++    }
++    if (!owner || !output) return result;
++    result.outcome = IG_INVALID_LOWER;
++    if (!lower->buffer || lower->returned_bytes < IG_BASE_BYTES ||
++        lower->returned_bytes > lower->buffer_bytes) return result;
++
++    /* Read input snapshots before any output mutation, including aliases. */
++    for (index = 0; index < IG_BASE_BYTES; ++index)
++        base[index] = ((const ig_u8 *)lower->buffer)[index];
++    snapshot = *owner;
++    sector_bytes = read_word(base + 20);
++    capacity_low = read_word(base + 24);
++    capacity_high = read_word(base + 28);
++    if (sector_bytes < 128 || sector_bytes > 65536 ||
++        (sector_bytes & (sector_bytes - 1)) != 0 ||
++        (base[7] & 0x80u) != 0 || read_word(base + 12) == 0 ||
++        read_word(base + 16) == 0 || (capacity_high & 0x80000000u) != 0 ||
++        (capacity_low | capacity_high) == 0 ||
++        (capacity_low & (sector_bytes - 1)) != 0) return result;
++
++    result.outcome = IG_INVALID_SNAPSHOT;
++    if ((snapshot.partition_style > IG_PARTITION_RAW &&
++         snapshot.partition_style != IG_PARTITION_BRFR) ||
++        snapshot.identity_available > 1 || snapshot.mbr_checksum_available > 1)
++        return result;
++
++    /* Match observed returned-prefix counts without truncating meaningful
++     * records. Cleared short tails are unavailable padding (size zero when
++     * the whole size field fits), not partial identity or BIOS records. */
++    count = caller_bytes < IG_COMPLETE_BYTES ? caller_bytes : IG_COMPLETE_BYTES;
++    for (index = 0; index < count; ++index) output[index] = 0;
++    for (index = 0; index < IG_BASE_BYTES; ++index) output[index] = base[index];
++    if (count >= IG_BASE_BYTES + IG_PARTITION_BYTES) {
++        write_word(output + IG_BASE_BYTES, IG_PARTITION_BYTES);
++        write_word(output + IG_BASE_BYTES + 4, snapshot.partition_style);
++        if (snapshot.partition_style == IG_PARTITION_MBR) {
++            if (snapshot.identity_available)
++                write_word(output + IG_BASE_BYTES + 8, snapshot.mbr_signature);
++            if (snapshot.mbr_checksum_available)
++                write_word(output + IG_BASE_BYTES + 12, snapshot.mbr_checksum);
++        } else if (snapshot.partition_style == IG_PARTITION_GPT &&
++                   snapshot.identity_available) {
++            for (index = 0; index < sizeof(snapshot.gpt_disk_id); ++index)
++                output[IG_BASE_BYTES + 8 + index] = snapshot.gpt_disk_id[index];
++        }
++    }
++    if (count == IG_COMPLETE_BYTES)
++        write_word(output + IG_BASE_BYTES + IG_PARTITION_BYTES, IG_DETECTION_BYTES);
++    result.outcome = IG_SUCCESS;
++    result.initialized_bytes = count;
++    return result;
++}
+diff --git a/drivers/storage/class/nxstorage/geometry_composer.h b/drivers/storage/class/nxstorage/geometry_composer.h
+new file mode 100644
+index 00000000..2179d550
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/geometry_composer.h
+@@ -0,0 +1,74 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef INDEPENDENT_GEOMETRY_COMPOSER_H
++#define INDEPENDENT_GEOMETRY_COMPOSER_H
++
++#include <stddef.h>
++
++/* Widths are checked in the production translation unit. */
++typedef unsigned char ig_u8;
++typedef unsigned int ig_u32;
++typedef unsigned long long ig_u64;
++typedef signed long long ig_i64;
++
++enum ig_outcome {
++    IG_SUCCESS,
++    IG_BUFFER_TOO_SMALL,
++    IG_LOWER_FAILURE,
++    IG_LOWER_NOT_COMPLETE,
++    IG_INVALID_LOWER,
++    IG_INVALID_SNAPSHOT,
++    IG_INVALID_ARGUMENT
++};
++
++enum ig_partition_style {
++    IG_PARTITION_MBR = 0,
++    IG_PARTITION_GPT = 1,
++    IG_PARTITION_RAW = 2,
++    IG_PARTITION_BRFR = 128
++};
++
++enum {
++    IG_BASE_BYTES = 32,
++    IG_PARTITION_BYTES = 24,
++    IG_DETECTION_BYTES = 56,
++    IG_COMPLETE_BYTES = 112
++};
++
++struct ig_lower_response {
++    ig_u32 status;
++    const void *buffer;
++    size_t buffer_bytes;
++    size_t returned_bytes;
++};
++
++struct ig_owner_snapshot {
++    ig_u32 partition_style;
++    ig_u32 identity_available;
++    ig_u32 mbr_checksum_available;
++    ig_u32 mbr_signature;
++    ig_u32 mbr_checksum;
++    ig_u8 gpt_disk_id[16];
++};
++
++struct ig_result {
++    enum ig_outcome outcome;
++    ig_u32 lower_status;
++    size_t initialized_bytes;
++};
++
++/*
++ * lower and owner are immutable input snapshots; caller_buffer is writable
++ * for caller_bytes. Only the returned initialized prefix is changed.
++ * On success its extent is min(caller_bytes, IG_COMPLETE_BYTES). Optional
++ * records are meaningful only when complete; shorter tails are cleared
++ * unavailable padding with size zero when the complete size field fits.
++ * Optional lower data is deliberately ignored under the DetectNone policy.
++ * No pointer is retained and no request/completion or lock is owned here.
++ */
++struct ig_result ig_compose_geometry(
++    const struct ig_lower_response *lower,
++    const struct ig_owner_snapshot *owner,
++    void *caller_buffer,
++    size_t caller_bytes);
++
++#endif
+diff --git a/drivers/storage/class/nxstorage/request.c b/drivers/storage/class/nxstorage/request.c
+new file mode 100644
+index 00000000..50cd5e54
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -0,0 +1,297 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "request.h"
++
++enum { EXECUTE=0x00, RELEASE=0x04, READ10=0x28, WRITE10=0x2a, SYNC10=0x35,
++       DATA_IN=0x40, DATA_OUT=0x80 };
++
++static int power_two(uint32_t n) { return n && !(n & (n-1u)); }
++static void clear_bytes(void *storage, size_t bytes)
++{
++    unsigned char *p=storage;
++    for (size_t i=0;i<bytes;++i) p[i]=0;
++}
++static void lock(nx_device *d) { d->port.enter(d->port.context); }
++static void unlock(nx_device *d) { d->port.leave(d->port.context); }
++static void pending(nx_device *d, nx_slot *s)
++{
++    if (!s->pending) {
++        s->pending=1;
++        d->port.mark_pending(d->port.context,s->request.parent);
++    }
++}
++static nx_status validate(const nx_device *d, const nx_request *r)
++{
++    const nx_config *c=&d->config;
++    if (!r->parent || r->operation>NX_FLUSH || r->operation<NX_READ) return NX_INVALID;
++    if ((r->flags & ~(uint32_t)NX_WRITE_THROUGH) ||
++        (r->flags && r->operation!=NX_WRITE)) return NX_INVALID;
++    if (r->cancelled) return NX_CANCELLED;
++    if (r->operation==NX_FLUSH) return r->bytes ? NX_INVALID:NX_OK;
++    if (r->operation==NX_WRITE && c->optical) return NX_WRITE_PROTECTED;
++    if ((r->flags & NX_WRITE_THROUGH) && c->cache==NX_CACHE_UNQUALIFIED)
++        return NX_DURABILITY_UNSUPPORTED;
++    if (r->offset<0 || ((uint64_t)r->offset & d->sector_mask) || (r->bytes & d->sector_mask))
++        return NX_INVALID;
++    uint64_t offset=(uint64_t)r->offset;
++    if (r->bytes>UINT64_MAX-offset) return NX_RANGE;
++    if (!c->optical && (offset>c->capacity_bytes || r->bytes>c->capacity_bytes-offset))
++        return NX_RANGE;
++    if (!r->bytes) return NX_OK;
++    uint64_t first=offset>>d->sector_shift, blocks=r->bytes>>d->sector_shift;
++    if (first>UINT32_MAX || blocks-1u>UINT32_MAX-first) return NX_RANGE;
++    if (!r->mdl_virtual || r->mdl_offset>r->mdl_bytes || r->bytes>r->mdl_bytes-r->mdl_offset)
++        return NX_INVALID;
++    if (r->mdl_offset>UINTPTR_MAX-r->mdl_virtual) return NX_INVALID;
++    uintptr_t start=r->mdl_virtual+(uintptr_t)r->mdl_offset;
++    if (r->bytes>UINTPTR_MAX-start || (start & c->alignment_mask)) return NX_INVALID;
++    return NX_OK;
++}
++
++nx_status nx_device_init(nx_device *d, const nx_config *c, const nx_port *p,
++                         nx_slot *slots, uint32_t count, size_t slot_storage_bytes)
++{
++    if (!d || !c || !p || !slots || !count ||
++        count>slot_storage_bytes/sizeof(*slots) ||
++        !power_two(c->sector_bytes) || !power_two(c->page_bytes) ||
++        c->page_bytes<c->sector_bytes || c->max_bytes<c->sector_bytes ||
++        !c->max_pages || !c->ata_max_blocks || c->alignment_mask>=c->sector_bytes ||
++        (c->alignment_mask & (c->alignment_mask+1u)) ||
++        c->cache<NX_CACHE_DISABLED || c->cache>NX_CACHE_UNQUALIFIED ||
++        !p->enter || !p->leave || !p->prepare || !p->submit || !p->retire ||
++        !p->cancel || !p->mark_pending || !p->complete)
++        return NX_INVALID;
++    clear_bytes(d,sizeof(*d));
++    clear_bytes(slots,(size_t)count*sizeof(*slots));
++    d->config=*c; d->port=*p; d->slots=slots; d->count=count;
++    d->sector_mask=c->sector_bytes-1u;
++    for (uint32_t sector=c->sector_bytes;sector>1u;sector>>=1) ++d->sector_shift;
++    return NX_OK;
++}
++
++/* Flush and write-through admissions order later writes; a sync phase also
++ * waits for prior writes. Reads retain lower concurrency. Called under lock. */
++static int cache_sync(const nx_slot *s)
++{
++    return s->request.operation==NX_FLUSH || s->syncing;
++}
++static int barrier_clear(const nx_device *d, const nx_slot *s)
++{
++    if (s->recovery || s->request.operation==NX_READ) return 1;
++    for (uint32_t i=0;i<d->count;++i) {
++        const nx_slot *other=&d->slots[i];
++        if (!other->active || other->order>=s->order) continue;
++        if (other->request.operation==NX_FLUSH || (other->request.flags & NX_WRITE_THROUGH) ||
++            (cache_sync(s) && other->request.operation==NX_WRITE))
++            return 0;
++    }
++    return 1;
++}
++
++static nx_status build_command(nx_device *d, nx_slot *s, uint32_t index)
++{
++    nx_command *c=&s->command;
++    if (s->sequence==UINT64_MAX) return NX_PROTOCOL_ERROR;
++    clear_bytes(c,sizeof(*c));
++    c->token.slot=index; c->token.generation=s->generation; c->token.command=++s->sequence;
++    c->parent=s->request.parent; c->lease=s->request.lease;
++    c->function=s->recovery ? RELEASE:EXECUTE;
++    if (s->recovery) return NX_OK;
++    c->cdb_length=10;
++    if (cache_sync(s)) { c->cdb[0]=SYNC10; return NX_OK; }
++    c->mdl_virtual=s->request.mdl_virtual; c->mdl_bytes=s->request.mdl_bytes;
++    c->data_virtual=c->mdl_virtual+(uintptr_t)(s->request.mdl_offset+s->transferred);
++    c->disk_byte=(uint64_t)s->request.offset+s->transferred;
++    uint64_t bytes=s->request.bytes-s->transferred;
++    uint64_t page_room=(uint64_t)d->config.max_pages*d->config.page_bytes-
++                       (c->data_virtual & (d->config.page_bytes-1u));
++    uint64_t block_room=(uint64_t)d->config.ata_max_blocks<<d->sector_shift;
++    uint64_t cdb_room=UINT64_C(65535)<<d->sector_shift;
++    if (bytes>d->config.max_bytes) bytes=d->config.max_bytes;
++    if (bytes>page_room) bytes=page_room;
++    if (bytes>block_room) bytes=block_room;
++    if (bytes>cdb_room) bytes=cdb_room;
++    bytes &= ~(uint64_t)d->sector_mask;
++    if (!bytes) return NX_INVALID;
++    c->bytes=(uint32_t)bytes;
++    uint32_t lba=(uint32_t)(c->disk_byte>>d->sector_shift);
++    uint32_t blocks=c->bytes>>d->sector_shift;
++    c->cdb[0]=s->request.operation==NX_READ ? READ10:WRITE10;
++    c->direction=s->request.operation==NX_READ ? DATA_IN:DATA_OUT;
++    c->cdb[2]=(uint8_t)(lba>>24); c->cdb[3]=(uint8_t)(lba>>16);
++    c->cdb[4]=(uint8_t)(lba>>8); c->cdb[5]=(uint8_t)lba;
++    c->cdb[7]=(uint8_t)(blocks>>8); c->cdb[8]=(uint8_t)blocks;
++    return NX_OK;
++}
++
++static void preparation_failed(nx_device *d, nx_slot *s, nx_status result)
++{
++    if (s->recovery) {
++        d->quarantined=1; s->recovery=0;
++        if (s->final_status==NX_OK) s->final_status=NX_IO_ERROR;
++    } else s->final_status=s->cancelled ? NX_CANCELLED:result;
++    s->terminal=1;
++}
++
++static void record_result(nx_device *d, nx_slot *s)
++{
++    nx_status result=s->lower_status;
++    uint32_t actual=s->lower_bytes;
++    if (result>NX_OK || actual>s->command.bytes) result=NX_PROTOCOL_ERROR;
++    if (s->recovery) {
++        s->recovery=0;
++        if (result!=NX_OK || (s->lower_flags & NX_LOWER_QUEUE_FROZEN)) {
++            d->quarantined=1; s->terminal=1;
++            if (s->final_status==NX_OK) s->final_status=NX_IO_ERROR;
++        }
++        if (s->cancelled) { s->final_status=NX_CANCELLED; s->terminal=1; }
++        return;
++    }
++    if (!cache_sync(s) && actual<=s->command.bytes)
++        s->transferred+=actual;
++    if (s->cancelled) result=NX_CANCELLED;
++    else if (d->quarantined && (result==NX_OK || result==NX_CANCELLED)) result=NX_IO_ERROR;
++    else if (result==NX_OK && actual!=s->command.bytes) result=NX_SHORT_TRANSFER;
++    if (result!=NX_OK) { s->final_status=result; s->terminal=1; }
++    else if (cache_sync(s)) s->terminal=1;
++    else if (s->transferred==s->request.bytes) {
++        if (s->request.flags & NX_WRITE_THROUGH) s->syncing=1;
++        else s->terminal=1;
++    }
++    if (s->lower_flags & NX_LOWER_QUEUE_FROZEN) s->recovery=1;
++}
++
++/* All transport calls occur outside the short state lock. One pump owns all
++ * command mutation. Inline callbacks publish results and return immediately. */
++static void pump(nx_device *d)
++{
++    lock(d);
++    if (d->pumping) { unlock(d); return; }
++    d->pumping=1;
++    unlock(d);
++    for (;;) {
++        enum { NONE, SEND, RETIRE, CANCEL, COMPLETE } action=NONE;
++        nx_slot *s=NULL; uint32_t index=0;
++        void *parent=NULL; nx_status final=NX_OK; uint64_t bytes=0;
++        lock(d);
++        for (uint32_t scanned=0;scanned<d->count;++scanned) {
++            index=d->cursor; d->cursor=index+1u==d->count ? 0:index+1u;
++            s=&d->slots[index];
++            if (!s->active) continue;
++            if (s->inflight) {
++                if (s->done) {
++                    action=RETIRE; s->inflight=0; s->done=0; s->prepared=0; break;
++                }
++                if ((s->cancelled || d->quarantined) && !s->cancel_sent && !s->recovery) {
++                    s->cancel_sent=1; action=CANCEL; break;
++                }
++                continue;
++            }
++            if (s->cancelled && !s->recovery) { s->final_status=NX_CANCELLED; s->terminal=1; }
++            if (d->quarantined && !s->recovery) {
++                if (s->final_status==NX_OK) s->final_status=NX_IO_ERROR;
++                s->terminal=1;
++            }
++            if (!s->terminal && !barrier_clear(d,s)) { pending(d,s); continue; }
++            if (!s->terminal && cache_sync(s) && !s->recovery &&
++                d->config.cache!=NX_CACHE_ENABLED) {
++                s->terminal=1;
++                if (d->config.cache==NX_CACHE_UNQUALIFIED) s->final_status=NX_DURABILITY_UNSUPPORTED;
++            }
++            if (s->terminal && !s->recovery) {
++                action=COMPLETE; parent=s->request.parent; final=s->final_status; bytes=s->transferred;
++                if (s->dispatch_result) *s->dispatch_result=s->pending ? NX_PENDING:final;
++                s->dispatch_result=NULL; s->active=0; break;
++            }
++            nx_status built=build_command(d,s,index);
++            if (built!=NX_OK) { preparation_failed(d,s,built); action=NONE; break; }
++            s->cancel_sent=0;
++            action=SEND; break;
++        }
++        if (action==NONE) {
++            /* A command construction failure created a terminal runnable slot. */
++            if (s && s->active && s->terminal && !s->inflight) { unlock(d); continue; }
++            d->pumping=0; unlock(d); return;
++        }
++        unlock(d);
++        if (action==COMPLETE) {
++            d->port.complete(d->port.context,parent,final,bytes);
++        } else if (action==CANCEL) {
++            d->port.cancel(d->port.context,&s->command);
++        } else if (action==RETIRE) {
++            d->port.retire(d->port.context,&s->command);
++            lock(d); record_result(d,s); unlock(d);
++        } else {
++            nx_status prepared=d->port.prepare(d->port.context,&s->command);
++            lock(d);
++            if (prepared!=NX_OK) {
++                preparation_failed(d,s,prepared>NX_OK ? NX_PROTOCOL_ERROR:prepared);
++                unlock(d); continue;
++            }
++            if (s->cancelled && !s->recovery) {
++                unlock(d); d->port.retire(d->port.context,&s->command);
++                lock(d); s->final_status=NX_CANCELLED; s->terminal=1; unlock(d); continue;
++            }
++            /* Submission commit: subsequent cancellation may race with the
++             * unlocked port call, so it must cancel/drain committed transport. */
++            s->inflight=1; s->prepared=1;
++            unlock(d);
++            int submitted_pending=d->port.submit(d->port.context,&s->command);
++            lock(d);
++            /* A return value never proves lower ownership ended. A broken
++             * adapter that omits its terminal report keeps the pages live. */
++            if (submitted_pending || !s->done) pending(d,s);
++            unlock(d);
++        }
++    }
++}
++
++nx_status nx_start(nx_device *d, const nx_request *r, nx_handle *handle)
++{
++    if (!d || !r || !handle || !r->parent) return NX_INVALID;
++    handle->slot=UINT32_MAX; handle->generation=0;
++    nx_status result=validate(d,r);
++    if (result!=NX_OK || (r->operation!=NX_FLUSH && !r->bytes)) {
++        d->port.complete(d->port.context,r->parent,result,0); return result;
++    }
++    lock(d);
++    uint32_t index;
++    for (index=0;index<d->count;++index)
++        if (!d->slots[index].active && d->slots[index].generation!=UINT64_MAX) break;
++    if (d->quarantined || index==d->count || d->order==UINT64_MAX) {
++        result=d->quarantined ? NX_IO_ERROR:NX_NO_MEMORY;
++        unlock(d); d->port.complete(d->port.context,r->parent,result,0); return result;
++    }
++    nx_slot *s=&d->slots[index]; uint64_t generation=s->generation+1u;
++    clear_bytes(s,sizeof(*s)); s->generation=generation; s->order=++d->order;
++    s->request=*r; s->active=1; s->dispatch_result=&result;
++    handle->slot=index; handle->generation=generation;
++    if (d->pumping) pending(d,s);
++    unlock(d);
++    pump(d);
++    lock(d);
++    if (s->active && s->generation==generation && s->dispatch_result==&result) {
++        pending(d,s); s->dispatch_result=NULL; result=NX_PENDING;
++    }
++    unlock(d);
++    return result;
++}
++
++void nx_lower_done(nx_device *d, nx_token token, nx_status status, uint32_t bytes, uint32_t flags)
++{
++    if (!d || token.slot>=d->count) return;
++    lock(d); nx_slot *s=&d->slots[token.slot];
++    if (!s->active || !s->inflight || !s->prepared || s->done ||
++        s->generation!=token.generation || s->command.token.command!=token.command) {
++        unlock(d); return;
++    }
++    s->lower_status=status; s->lower_bytes=bytes; s->lower_flags=flags; s->done=1;
++    unlock(d); pump(d);
++}
++
++void nx_cancel(nx_device *d, nx_handle handle)
++{
++    if (!d || handle.slot>=d->count) return;
++    lock(d); nx_slot *s=&d->slots[handle.slot];
++    if (s->active && s->generation==handle.generation) s->cancelled=1;
++    unlock(d); pump(d);
++}
+diff --git a/drivers/storage/class/nxstorage/request.h b/drivers/storage/class/nxstorage/request.h
+new file mode 100644
+index 00000000..31b87514
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/request.h
+@@ -0,0 +1,85 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_STORAGE_REQUEST_H
++#define NX_STORAGE_REQUEST_H
++#include <stddef.h>
++#include <stdint.h>
++
++typedef enum nx_status {
++    NX_OK=0, NX_PENDING=1, NX_INVALID=-1, NX_RANGE=-2, NX_NO_MEMORY=-3,
++    NX_IO_ERROR=-4, NX_SHORT_TRANSFER=-5, NX_PROTOCOL_ERROR=-6,
++    NX_CANCELLED=-7, NX_WRITE_PROTECTED=-8, NX_DURABILITY_UNSUPPORTED=-9
++} nx_status;
++typedef enum nx_operation { NX_READ, NX_WRITE, NX_FLUSH } nx_operation;
++typedef enum nx_cache { NX_CACHE_DISABLED, NX_CACHE_ENABLED, NX_CACHE_UNQUALIFIED } nx_cache;
++enum { NX_LOWER_QUEUE_FROZEN=1 };
++/* Valid only on NX_WRITE; one parent includes data and real durability sync. */
++enum { NX_WRITE_THROUGH=1 };
++
++typedef struct nx_handle { uint32_t slot; uint64_t generation; } nx_handle;
++typedef struct nx_token { uint32_t slot; uint64_t generation, command; } nx_token;
++typedef struct nx_config {
++    uint32_t sector_bytes, page_bytes, max_bytes, max_pages, alignment_mask;
++    uint32_t ata_max_blocks;
++    uint64_t capacity_bytes;
++    int optical;
++    nx_cache cache;
++} nx_config;
++typedef struct nx_request {
++    void *parent;
++    nx_operation operation;
++    int64_t offset;
++    uint64_t bytes;
++    uintptr_t mdl_virtual;
++    uint64_t mdl_bytes, mdl_offset;
++    void *lease;
++    int cancelled;
++    uint32_t flags;
++} nx_request;
++typedef struct nx_command {
++    nx_token token;
++    void *parent, *lease;
++    uintptr_t mdl_virtual, data_virtual;
++    uint64_t mdl_bytes, disk_byte;
++    uint32_t bytes, direction;
++    uint8_t function, cdb_length, cdb[10];
++} nx_command;
++typedef struct nx_port {
++    void *context;
++    void (*enter)(void *);
++    void (*leave)(void *);
++    nx_status (*prepare)(void *, const nx_command *);
++    int (*submit)(void *, const nx_command *);
++    void (*retire)(void *, const nx_command *);
++    void (*cancel)(void *, const nx_command *);
++    void (*mark_pending)(void *, void *parent);
++    void (*complete)(void *, void *parent, nx_status, uint64_t);
++} nx_port;
++
++/* Storage stays resident through externally fenced whole-call/callback rundown.
++ * These fields are private to request.c; the adapter must not modify them. */
++typedef struct nx_slot {
++    nx_request request;
++    nx_command command;
++    uint64_t generation, sequence, order, transferred;
++    nx_status final_status, lower_status;
++    uint32_t lower_bytes, lower_flags;
++    nx_status *dispatch_result;
++    unsigned active, terminal, recovery, inflight, prepared, done;
++    unsigned cancelled, cancel_sent, pending, syncing;
++} nx_slot;
++typedef struct nx_device {
++    nx_config config;
++    nx_port port;
++    nx_slot *slots;
++    uint32_t count, cursor;
++    uint32_t sector_shift, sector_mask;
++    uint64_t order;
++    unsigned pumping, quarantined;
++} nx_device;
++
++/* Last argument is the actual caller-provided slot storage byte capacity. */
++nx_status nx_device_init(nx_device *, const nx_config *, const nx_port *, nx_slot *, uint32_t, size_t);
++nx_status nx_start(nx_device *, const nx_request *, nx_handle *);
++void nx_lower_done(nx_device *, nx_token, nx_status, uint32_t, uint32_t);
++void nx_cancel(nx_device *, nx_handle);
++#endif
+diff --git a/tests/host/nxstorage/check.py b/tests/host/nxstorage/check.py
+new file mode 100644
+index 00000000..3456216b
+--- /dev/null
++++ b/tests/host/nxstorage/check.py
+@@ -0,0 +1,27 @@
++#!/usr/bin/env python3
++"""Compile the exact owned production primitives, without legacy source extraction."""
++import os
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++source = root / "drivers/storage/class/nxstorage"
++tests = Path(__file__).resolve().parent
++output = Path(sys.argv[1]).resolve()
++output.mkdir(parents=True, exist_ok=True)
++cc = os.environ.get("CC", "clang" if shutil.which("clang") else "gcc")
++flags = ["-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-I" + str(source)]
++for case, production in (("request_test", "request.c"), ("pthread_ownership_test", "request.c"), ("test_geometry_composer", "geometry_composer.c")):
++    executable = output / case
++    subprocess.run([cc] + flags + ["-pthread", str(source / production), str(tests / (case + ".c")), "-o", str(executable)], check=True)
++    subprocess.run([str(executable)], check=True, env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1", UBSAN_OPTIONS="halt_on_error=1"))
++for production in ("request.c", "geometry_composer.c"):
++    obj = output / (production + ".i386.o")
++    target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
++    subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-I" + str(source), "-c", str(source / production), "-o", str(obj)], check=True)
++    undefined = subprocess.check_output(["nm", "-u", str(obj)], text=True)
++    if undefined.strip():
++        raise SystemExit("Unexpected i386 helpers: " + undefined)
++print("Owned nxstorage production checks passed; kernel adapter/native qualification remains open")
+diff --git a/tests/host/nxstorage/pthread_ownership_test.c b/tests/host/nxstorage/pthread_ownership_test.c
+new file mode 100644
+index 00000000..3b45dec9
+--- /dev/null
++++ b/tests/host/nxstorage/pthread_ownership_test.c
+@@ -0,0 +1,329 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#define _POSIX_C_SOURCE 200809L
++#include "request.h"
++#include <pthread.h>
++#include <stdatomic.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++
++#define MUST(x) do { if (!(x)) { fprintf(stderr,"%s:%d: %s\n",__func__,__LINE__,#x); abort(); } } while (0)
++
++typedef struct gate {
++    pthread_mutex_t mutex;
++    pthread_cond_t cond;
++    atomic_int armed;
++    int reached, released;
++} gate;
++typedef struct parent {
++    unsigned completions, pending;
++    nx_status status;
++    uint64_t bytes;
++    int lease_alive, heap_owned;
++} parent;
++typedef struct fixture {
++    nx_device dev;
++    nx_slot slots[4];
++    pthread_mutex_t core, events;
++    gate prepare_gate, commit_gate, submit_gate, complete_gate;
++    uint8_t commit_opcode, buffer[4096];
++    nx_command log[32];
++    unsigned commands, resources[4], retires, cancels, refs, sealed;
++    void *resource_parent[4];
++    unsigned total_completions;
++    int delay_all;
++    parent *blocked_parent, *chain_parent;
++    nx_request chain_request;
++    nx_handle chain_handle;
++    nx_status chain_dispatch;
++} fixture;
++typedef struct start_job { fixture *f; nx_request request; nx_handle handle; nx_status dispatch; } start_job;
++typedef struct done_job { fixture *f; nx_token token; nx_status status; uint32_t bytes; } done_job;
++
++static void gate_init(gate *g)
++{
++    memset(g,0,sizeof(*g)); MUST(!pthread_mutex_init(&g->mutex,NULL));
++    MUST(!pthread_cond_init(&g->cond,NULL)); atomic_init(&g->armed,0);
++}
++static void gate_hit(gate *g)
++{
++    if (!atomic_exchange(&g->armed,0)) return;
++    MUST(!pthread_mutex_lock(&g->mutex)); g->reached=1;
++    MUST(!pthread_cond_broadcast(&g->cond));
++    while (!g->released) MUST(!pthread_cond_wait(&g->cond,&g->mutex));
++    MUST(!pthread_mutex_unlock(&g->mutex));
++}
++static void gate_wait(gate *g)
++{
++    struct timespec until; MUST(!clock_gettime(CLOCK_REALTIME,&until)); until.tv_sec+=10;
++    MUST(!pthread_mutex_lock(&g->mutex));
++    while (!g->reached) MUST(!pthread_cond_timedwait(&g->cond,&g->mutex,&until));
++    MUST(!pthread_mutex_unlock(&g->mutex));
++}
++static void gate_release(gate *g)
++{
++    MUST(!pthread_mutex_lock(&g->mutex)); g->released=1;
++    MUST(!pthread_cond_broadcast(&g->cond)); MUST(!pthread_mutex_unlock(&g->mutex));
++}
++static void gate_destroy(gate *g)
++{
++    MUST(!pthread_cond_destroy(&g->cond)); MUST(!pthread_mutex_destroy(&g->mutex));
++}
++static void events_lock(fixture *f) { MUST(!pthread_mutex_lock(&f->events)); }
++static void events_unlock(fixture *f) { MUST(!pthread_mutex_unlock(&f->events)); }
++static void ref_enter(fixture *f) { events_lock(f); ++f->refs; events_unlock(f); }
++static void ref_leave(fixture *f) { events_lock(f); MUST(f->refs); --f->refs; events_unlock(f); }
++
++/* Test-only adapter lifetime model: every whole core call has a rundown ref.
++ * A real kernel adapter must also fence lower callback sources before freeing. */
++static nx_status tracked_start(fixture *f,const nx_request *r,nx_handle *h)
++{
++    events_lock(f);
++    if (f->sealed) { events_unlock(f); return NX_IO_ERROR; }
++    ++f->refs; events_unlock(f);
++    nx_status result=nx_start(&f->dev,r,h); ref_leave(f); return result;
++}
++static void tracked_done(fixture *f,nx_token token,nx_status status,uint32_t bytes)
++{
++    ref_enter(f); nx_lower_done(&f->dev,token,status,bytes,0); ref_leave(f);
++}
++static void tracked_cancel(fixture *f,nx_handle h)
++{
++    ref_enter(f); nx_cancel(&f->dev,h); ref_leave(f);
++}
++static void enter(void *p) { fixture *f=p; MUST(!pthread_mutex_lock(&f->core)); }
++static void leave(void *p)
++{
++    fixture *f=p; int committed=0;
++    /* Private state is inspected only under its actual mutex to locate the
++     * requested interleaving. Assertions below concern transport/ownership. */
++    if (atomic_load(&f->commit_gate.armed)) {
++        for (unsigned i=0;i<4;++i) {
++            nx_slot *s=&f->slots[i];
++            if (s->active && s->inflight && s->prepared && !s->done &&
++                s->command.cdb[0]==f->commit_opcode) committed=1;
++        }
++    }
++    MUST(!pthread_mutex_unlock(&f->core));
++    if (committed) gate_hit(&f->commit_gate); /* Wait with no core lock held. */
++}
++static nx_status prepare(void *p,const nx_command *c)
++{
++    fixture *f=p; events_lock(f); MUST(!f->resources[c->token.slot]);
++    MUST(((parent *)c->parent)->lease_alive);
++    f->resources[c->token.slot]=1; f->resource_parent[c->token.slot]=c->parent;
++    events_unlock(f); gate_hit(&f->prepare_gate); return NX_OK;
++}
++static int submit(void *p,const nx_command *c)
++{
++    fixture *f=p; events_lock(f); MUST(f->commands<32);
++    MUST(f->resources[c->token.slot] && f->resource_parent[c->token.slot]==c->parent);
++    f->log[f->commands++]=*c; int delayed=f->delay_all; events_unlock(f);
++    gate_hit(&f->submit_gate);
++    if (!delayed) nx_lower_done(&f->dev,c->token,NX_OK,c->bytes,0);
++    return delayed;
++}
++static void retire(void *p,const nx_command *c)
++{
++    fixture *f=p; events_lock(f); MUST(f->resources[c->token.slot]);
++    f->resources[c->token.slot]=0; f->resource_parent[c->token.slot]=NULL;
++    ++f->retires; events_unlock(f);
++}
++static void cancel(void *p,const nx_command *c)
++{
++    fixture *f=p; events_lock(f); MUST(f->resources[c->token.slot]);
++    ++f->cancels; events_unlock(f);
++}
++static void mark_pending(void *p,void *q)
++{
++    fixture *f=p; parent *r=q; events_lock(f); MUST(!r->completions);
++    ++r->pending; events_unlock(f);
++}
++static void complete(void *p,void *q,nx_status status,uint64_t bytes)
++{
++    fixture *f=p; parent *r=q;
++    if (r==f->blocked_parent) gate_hit(&f->complete_gate);
++    events_lock(f); MUST(r->lease_alive && !r->completions);
++    for (unsigned i=0;i<4;++i) MUST(!f->resources[i] || f->resource_parent[i]!=r);
++    ++r->completions; r->status=status; r->bytes=bytes; ++f->total_completions;
++    int chain=r==f->chain_parent, heap=r->heap_owned; events_unlock(f);
++    if (chain) {
++        nx_status result=tracked_start(f,&f->chain_request,&f->chain_handle);
++        events_lock(f); f->chain_dispatch=result; f->chain_parent=NULL; events_unlock(f);
++    }
++    if (heap) free(r); /* Real reclamation before the originating core call returns. */
++}
++static void init(fixture *f)
++{
++    memset(f,0,sizeof(*f)); MUST(!pthread_mutex_init(&f->core,NULL)); MUST(!pthread_mutex_init(&f->events,NULL));
++    gate_init(&f->prepare_gate); gate_init(&f->commit_gate); gate_init(&f->submit_gate); gate_init(&f->complete_gate);
++    nx_config cfg={512,4096,131072,33,0,256,67108864,0,NX_CACHE_ENABLED};
++    nx_port port={f,enter,leave,prepare,submit,retire,cancel,mark_pending,complete};
++    MUST(nx_device_init(&f->dev,&cfg,&port,f->slots,4,sizeof(f->slots))==NX_OK);
++    f->delay_all=1;
++}
++static void destroy(fixture *f)
++{
++    events_lock(f); MUST(!f->refs); for (unsigned i=0;i<4;++i) MUST(!f->resources[i]); events_unlock(f);
++    gate_destroy(&f->prepare_gate); gate_destroy(&f->commit_gate); gate_destroy(&f->submit_gate); gate_destroy(&f->complete_gate);
++    MUST(!pthread_mutex_destroy(&f->core)); MUST(!pthread_mutex_destroy(&f->events));
++}
++static parent fresh(void) { parent p={0,0,NX_PROTOCOL_ERROR,0,1,0}; return p; }
++static nx_request request(fixture *f,parent *p,nx_operation op)
++{
++    nx_request r={p,op,0,op==NX_FLUSH ? 0u:512u,(uintptr_t)f->buffer,sizeof(f->buffer),0,p,0,0}; return r;
++}
++static void *start_worker(void *p)
++{
++    start_job *j=p; j->dispatch=tracked_start(j->f,&j->request,&j->handle); return NULL;
++}
++static void *done_worker(void *p)
++{
++    done_job *j=p; tracked_done(j->f,j->token,j->status,j->bytes); return NULL;
++}
++static pthread_t start_thread(start_job *j)
++{
++    pthread_t t; MUST(!pthread_create(&t,NULL,start_worker,j)); return t;
++}
++static pthread_t done_thread(done_job *j)
++{
++    pthread_t t; MUST(!pthread_create(&t,NULL,done_worker,j)); return t;
++}
++static void join(pthread_t t) { MUST(!pthread_join(t,NULL)); }
++static nx_command command(fixture *f,unsigned n)
++{
++    events_lock(f); MUST(n<f->commands); nx_command c=f->log[n]; events_unlock(f); return c;
++}
++static void finish_on_thread(fixture *f,unsigned n,nx_status s,uint32_t bytes)
++{
++    done_job j={f,command(f,n).token,s,bytes}; join(done_thread(&j));
++}
++static void expect_parent(fixture *f,parent *p,unsigned n,nx_status s,uint64_t bytes)
++{
++    events_lock(f); MUST(p->completions==n);
++    if (n) MUST(p->status==s && p->bytes==bytes);
++    events_unlock(f);
++}
++static void expect_transport(fixture *f,unsigned commands,unsigned retires,unsigned cancels)
++{
++    events_lock(f); MUST(f->commands==commands && f->retires==retires && f->cancels==cancels); events_unlock(f);
++}
++
++/* Break: cancellation after commit frees committed pages or fabricates zero bytes. */
++static void cancel_after_commit_keeps_transport_and_actual_bytes(void)
++{
++    fixture f; init(&f); parent p=fresh(); f.commit_opcode=0x2a; atomic_store(&f.commit_gate.armed,1);
++    start_job j={&f,request(&f,&p,NX_WRITE),{0,0},NX_INVALID}; pthread_t t=start_thread(&j);
++    gate_wait(&f.commit_gate); tracked_cancel(&f,j.handle); tracked_cancel(&f,j.handle);
++    expect_transport(&f,0,0,0); expect_parent(&f,&p,0,NX_OK,0);
++    gate_release(&f.commit_gate); join(t); MUST(j.dispatch==NX_PENDING);
++    expect_transport(&f,1,0,1); expect_parent(&f,&p,0,NX_OK,0);
++    finish_on_thread(&f,0,NX_OK,512); expect_parent(&f,&p,1,NX_CANCELLED,512);
++    expect_transport(&f,1,1,1); destroy(&f);
++}
++/* Break: precommit cancellation during prepare still submits lower work. */
++static void cancel_during_prepare_prevents_commit(void)
++{
++    fixture f; init(&f); parent p=fresh(); atomic_store(&f.prepare_gate.armed,1);
++    start_job j={&f,request(&f,&p,NX_WRITE),{0,0},NX_INVALID}; pthread_t t=start_thread(&j);
++    gate_wait(&f.prepare_gate); tracked_cancel(&f,j.handle); gate_release(&f.prepare_gate); join(t);
++    MUST(j.dispatch==NX_CANCELLED); expect_parent(&f,&p,1,NX_CANCELLED,0); expect_transport(&f,0,1,0); destroy(&f);
++}
++/* Break: cancellation tries to cancel an already terminal inline child or hides written bytes. */
++static void committed_inline_terminal_needs_no_late_lower_cancel(void)
++{
++    fixture f; init(&f); f.delay_all=0; parent p=fresh(); f.commit_opcode=0x2a;
++    atomic_store(&f.commit_gate.armed,1);
++    start_job j={&f,request(&f,&p,NX_WRITE),{0,0},NX_INVALID}; pthread_t t=start_thread(&j);
++    gate_wait(&f.commit_gate); tracked_cancel(&f,j.handle); gate_release(&f.commit_gate); join(t);
++    MUST(j.dispatch==NX_CANCELLED); expect_parent(&f,&p,1,NX_CANCELLED,512);
++    expect_transport(&f,1,1,0); destroy(&f);
++}
++/* Break: the write-through sync commit gap drops data accounting or its resource lifetime. */
++static void write_through_cancel_after_sync_commit(void)
++{
++    fixture f; init(&f); parent p=fresh(); f.commit_opcode=0x35; atomic_store(&f.commit_gate.armed,1);
++    start_job j={&f,request(&f,&p,NX_WRITE),{0,0},NX_INVALID}; j.request.flags=NX_WRITE_THROUGH;
++    join(start_thread(&j)); MUST(j.dispatch==NX_PENDING);
++    done_job data={&f,command(&f,0).token,NX_OK,512}; pthread_t lower=done_thread(&data);
++    gate_wait(&f.commit_gate); tracked_cancel(&f,j.handle);
++    expect_transport(&f,1,1,0); expect_parent(&f,&p,0,NX_OK,0);
++    gate_release(&f.commit_gate); join(lower); expect_transport(&f,2,1,1);
++    MUST(command(&f,1).cdb[0]==0x35); finish_on_thread(&f,1,NX_OK,0);
++    expect_parent(&f,&p,1,NX_CANCELLED,512); expect_transport(&f,2,2,1); destroy(&f);
++}
++/* Break: threaded terminal callback retires a child while submit still uses it. */
++static void terminal_report_while_submit_is_running(void)
++{
++    fixture f; init(&f); parent p=fresh(); atomic_store(&f.submit_gate.armed,1);
++    start_job j={&f,request(&f,&p,NX_READ),{0,0},NX_INVALID}; pthread_t t=start_thread(&j);
++    gate_wait(&f.submit_gate); finish_on_thread(&f,0,NX_OK,512);
++    expect_transport(&f,1,0,0); expect_parent(&f,&p,0,NX_OK,0);
++    gate_release(&f.submit_gate); join(t); MUST(j.dispatch==NX_PENDING);
++    expect_parent(&f,&p,1,NX_OK,512); expect_transport(&f,1,1,0); destroy(&f);
++}
++/* Break: zero active slots is mistaken for callback/pump rundown completion. */
++static void active_zero_does_not_end_adapter_rundown(void)
++{
++    fixture f; init(&f); parent p=fresh(); f.blocked_parent=&p; atomic_store(&f.complete_gate.armed,1);
++    start_job j={&f,request(&f,&p,NX_READ),{0,0},NX_INVALID}; join(start_thread(&j)); MUST(j.dispatch==NX_PENDING);
++    done_job d={&f,command(&f,0).token,NX_OK,512}; pthread_t lower=done_thread(&d);
++    gate_wait(&f.complete_gate);
++    MUST(!pthread_mutex_lock(&f.core)); unsigned active=0;
++    for (unsigned i=0;i<4;++i) active+=f.slots[i].active;
++    MUST(active==0 && f.dev.pumping); MUST(!pthread_mutex_unlock(&f.core));
++    events_lock(&f); f.sealed=1; MUST(f.refs==1 && !f.total_completions); events_unlock(&f);
++    parent denied=fresh(); nx_handle denied_handle;
++    nx_request denied_request=request(&f,&denied,NX_READ);
++    MUST(tracked_start(&f,&denied_request,&denied_handle)==NX_IO_ERROR);
++    /* No free/destroy is permitted while this whole-call rundown ref exists. */
++    gate_release(&f.complete_gate); join(lower);
++    events_lock(&f); MUST(f.sealed && !f.refs && f.total_completions==1); events_unlock(&f);
++    expect_parent(&f,&p,1,NX_OK,512); destroy(&f);
++}
++/* Break: callback admission/reuse leaves a pending pointer on a returned stack or accepts an old token. */
++static void completion_callback_reuses_slot_and_frees_parent(void)
++{
++    fixture f; init(&f); parent *first=malloc(sizeof(*first)); MUST(first); *first=fresh(); first->heap_owned=1;
++    parent next=fresh(); f.chain_parent=first; f.chain_request=request(&f,&next,NX_READ);
++    start_job j={&f,request(&f,first,NX_READ),{0,0},NX_INVALID}; join(start_thread(&j)); MUST(j.dispatch==NX_PENDING);
++    nx_token old=command(&f,0).token; finish_on_thread(&f,0,NX_OK,512);
++    events_lock(&f); MUST(f.total_completions==1 && f.chain_dispatch==NX_PENDING); nx_handle h=f.chain_handle; events_unlock(&f);
++    nx_command second=command(&f,1); MUST(h.slot==old.slot && h.generation!=old.generation);
++    MUST(second.token.generation==h.generation);
++    done_job duplicate={&f,old,NX_IO_ERROR,0}; join(done_thread(&duplicate)); tracked_cancel(&f,j.handle);
++    expect_parent(&f,&next,0,NX_OK,0); expect_transport(&f,2,1,0);
++    finish_on_thread(&f,1,NX_OK,512); expect_parent(&f,&next,1,NX_OK,512); destroy(&f);
++}
++/* Break: cross-thread pending completion loses flush ordering or serializes independent reads. */
++static void threaded_flush_barrier_and_pending_stack_lifetimes(void)
++{
++    fixture f; init(&f); parent w=fresh(), flush=fresh(), later=fresh(), rd=fresh();
++    start_job a={&f,request(&f,&w,NX_WRITE),{0,0},NX_INVALID}; join(start_thread(&a)); MUST(a.dispatch==NX_PENDING);
++    start_job b={&f,request(&f,&flush,NX_FLUSH),{0,0},NX_INVALID}; join(start_thread(&b)); MUST(b.dispatch==NX_PENDING);
++    start_job c={&f,request(&f,&later,NX_WRITE),{0,0},NX_INVALID}; join(start_thread(&c)); MUST(c.dispatch==NX_PENDING);
++    start_job r={&f,request(&f,&rd,NX_READ),{0,0},NX_INVALID}; join(start_thread(&r)); MUST(r.dispatch==NX_PENDING);
++    expect_transport(&f,2,0,0); finish_on_thread(&f,1,NX_OK,512); expect_parent(&f,&rd,1,NX_OK,512);
++    finish_on_thread(&f,0,NX_OK,512); expect_parent(&f,&w,1,NX_OK,512); expect_parent(&f,&later,0,NX_OK,0);
++    MUST(command(&f,2).cdb[0]==0x35); finish_on_thread(&f,2,NX_OK,0);
++    expect_parent(&f,&flush,1,NX_OK,0); MUST(command(&f,3).parent==&later);
++    finish_on_thread(&f,3,NX_OK,512); expect_parent(&f,&later,1,NX_OK,512); expect_transport(&f,4,4,0); destroy(&f);
++}
++
++int main(void)
++{
++    struct { const char *name; void (*run)(void); } tests[]={
++        {"cancel_after_commit_keeps_transport_and_actual_bytes",cancel_after_commit_keeps_transport_and_actual_bytes},
++        {"cancel_during_prepare_prevents_commit",cancel_during_prepare_prevents_commit},
++        {"committed_inline_terminal_needs_no_late_lower_cancel",committed_inline_terminal_needs_no_late_lower_cancel},
++        {"write_through_cancel_after_sync_commit",write_through_cancel_after_sync_commit},
++        {"terminal_report_while_submit_is_running",terminal_report_while_submit_is_running},
++        {"active_zero_does_not_end_adapter_rundown",active_zero_does_not_end_adapter_rundown},
++        {"completion_callback_reuses_slot_and_frees_parent",completion_callback_reuses_slot_and_frees_parent},
++        {"threaded_flush_barrier_and_pending_stack_lifetimes",threaded_flush_barrier_and_pending_stack_lifetimes}
++    };
++    for (unsigned i=0;i<sizeof(tests)/sizeof(tests[0]);++i) { tests[i].run(); printf("PASS pthread %s\n",tests[i].name); }
++    printf("%u pthread scenarios, 0 failures\n",(unsigned)(sizeof(tests)/sizeof(tests[0])));
++    return 0;
++}
+diff --git a/tests/host/nxstorage/request_test.c b/tests/host/nxstorage/request_test.c
+new file mode 100644
+index 00000000..1596cd55
+--- /dev/null
++++ b/tests/host/nxstorage/request_test.c
+@@ -0,0 +1,758 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "request.h"
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++/* Each test names a missing observable obligation, not an internal layout.
++ * Only the physical/OS transport is doubled. All scheduling, CDB generation,
++ * validation, ownership, byte accounting and parent results are production C. */
++#define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s\n", __func__, __LINE__, #x); return 0; } } while (0)
++#define MUST(x) do { if (!(x)) abort(); } while (0)
++static void *test_allocations[64];
++static unsigned allocation_count;
++static void register_allocation(void *p) { MUST(allocation_count<64); test_allocations[allocation_count++]=p; }
++static void release_allocation(void *p)
++{
++    for (unsigned i=0;i<allocation_count;++i) if (test_allocations[i]==p) {
++        free(p); test_allocations[i]=test_allocations[--allocation_count]; return;
++    }
++    abort();
++}
++
++typedef struct parent {
++    unsigned completions, pending;
++    nx_status status;
++    uint64_t bytes;
++    int lease_alive;
++} parent;
++
++typedef struct fixture {
++    nx_device dev;
++    nx_slot slots[4];
++    nx_command held[4], log[40];
++    unsigned held_live[4], resource_live[4];
++    unsigned commands, prepares, retires, cancels, fail_prepare;
++    unsigned depth, max_depth, lock_depth;
++    int delayed, pending_inline, cancel_delivers, delay_sync;
++    int omit_terminal, cancel_preparing;
++    unsigned null_completions;
++    unsigned scripted_at;
++    nx_status scripted_status;
++    uint32_t scripted_bytes, scripted_flags;
++    unsigned sync_fails, release_fails;
++    uint8_t *buffer;
++    size_t buffer_size;
++} fixture;
++
++static void enter(void *p) { fixture *f=p; MUST(f->lock_depth == 0); f->lock_depth=1; }
++static void leave(void *p) { fixture *f=p; MUST(f->lock_depth == 1); f->lock_depth=0; }
++static nx_status prepare(void *p, const nx_command *c)
++{
++    fixture *f=p; MUST(!f->lock_depth); ++f->prepares;
++    if (f->fail_prepare == f->prepares) return NX_NO_MEMORY;
++    MUST(!f->resource_live[c->token.slot]); f->resource_live[c->token.slot]=1;
++    MUST(((parent *)c->parent)->lease_alive);
++    if (f->cancel_preparing) {
++        nx_handle h={c->token.slot,c->token.generation}; nx_cancel(&f->dev,h);
++    }
++    return NX_OK;
++}
++static void deliver(fixture *f, const nx_command *c, nx_status s, uint32_t n, uint32_t flags)
++{
++    MUST(f->resource_live[c->token.slot]);
++    MUST(((parent *)c->parent)->lease_alive);
++    if (c->cdb[0] == 0x28 && n <= c->bytes) {
++        uint8_t *b=(uint8_t *)c->data_virtual;
++        for (uint32_t i=0; i<n; ++i) b[i]=(uint8_t)((c->disk_byte+i)%251);
++    }
++    nx_lower_done(&f->dev,c->token,s,n,flags);
++}
++static int submit(void *p, const nx_command *c)
++{
++    fixture *f=p; MUST(!f->lock_depth); ++f->depth;
++    if (f->depth > f->max_depth) f->max_depth=f->depth;
++    if (f->commands < 40) f->log[f->commands]=*c;
++    ++f->commands;
++    nx_status s=NX_OK; uint32_t n=c->bytes, flags=0;
++    if (f->scripted_at == f->commands) { s=f->scripted_status; n=f->scripted_bytes; flags=f->scripted_flags; }
++    if (c->cdb[0] == 0x35 && f->sync_fails) s=NX_IO_ERROR;
++    if (c->function == 0x04 && f->release_fails) s=NX_IO_ERROR;
++    if (f->delayed || f->omit_terminal || (f->delay_sync && c->cdb[0]==0x35)) {
++        f->held[c->token.slot]=*c; f->held_live[c->token.slot]=1;
++    } else deliver(f,c,s,n,flags);
++    --f->depth;
++    return f->delayed || f->pending_inline || (f->delay_sync && c->cdb[0]==0x35);
++}
++static void retire(void *p, const nx_command *c)
++{
++    fixture *f=p; MUST(!f->lock_depth); MUST(!f->depth);
++    MUST(f->resource_live[c->token.slot]); f->resource_live[c->token.slot]=0;
++    ++f->retires;
++}
++static void cancel(void *p, const nx_command *c)
++{
++    fixture *f=p; MUST(!f->lock_depth); ++f->cancels;
++    MUST(f->resource_live[c->token.slot]);
++    if (f->cancel_delivers) { f->held_live[c->token.slot]=0; deliver(f,c,NX_CANCELLED,0,0); }
++}
++static void mark_pending(void *p, void *q)
++{
++    fixture *f=p; parent *r=q; MUST(f->lock_depth); MUST(!r->completions); ++r->pending;
++}
++static void complete(void *p, void *q, nx_status s, uint64_t n)
++{
++    fixture *f=p; parent *r=q; MUST(!f->lock_depth);
++    if (!r) { ++f->null_completions; return; }
++    MUST(r->lease_alive);
++    for (unsigned i=0; i<4; ++i)
++        if (f->resource_live[i]) MUST(f->held[i].parent != q);
++    ++r->completions; r->status=s; r->bytes=n;
++}
++static int init(fixture *f, nx_config *cfg)
++{
++    memset(f,0,sizeof(*f)); f->buffer_size=32u*1024u*1024u;
++    f->buffer=aligned_alloc(4096,f->buffer_size); MUST(f->buffer); register_allocation(f->buffer);
++    memset(f->buffer,0xa5,f->buffer_size);
++    nx_port port={f,enter,leave,prepare,submit,retire,cancel,mark_pending,complete};
++    return nx_device_init(&f->dev,cfg,&port,f->slots,4,sizeof(f->slots))==NX_OK;
++}
++static void cleanup(fixture *f) { for (unsigned i=0;i<4;++i) MUST(!f->resource_live[i]); release_allocation(f->buffer); }
++static nx_config config(void)
++{
++    nx_config c={512,4096,131072,33,0,256,UINT64_C(64)*1024*1024,0,NX_CACHE_ENABLED}; return c;
++}
++static parent fresh(void) { parent p={0,0,NX_PROTOCOL_ERROR,0,1}; return p; }
++static nx_request request(fixture *f, parent *p, nx_operation op, int64_t offset, uint64_t bytes)
++{
++    nx_request r={p,op,offset,bytes,(uintptr_t)f->buffer,f->buffer_size,0,p,0,0}; return r;
++}
++static void finish_held(fixture *f, unsigned i, nx_status s, uint32_t bytes, uint32_t flags)
++{
++    MUST(f->held_live[i]); nx_command c=f->held[i]; f->held_live[i]=0;
++    deliver(f,&c,s,bytes,flags);
++}
++
++/* Break: validation permits invalid ranges to reach the physical transport. */
++static int rejects_invalid_input(void)
++{
++    nx_config cfg=config(); fixture f; CHECK(init(&f,&cfg));
++    struct { int64_t offset; uint64_t bytes, mdl_bytes, mdl_offset; nx_status want; } cases[]={
++        {-512,512,4096,0,NX_INVALID}, {1,512,4096,0,NX_INVALID},
++        {0,511,4096,0,NX_INVALID}, {67108864,512,4096,0,NX_RANGE},
++        {INT64_MAX-511,1024,4096,0,NX_RANGE}, {0,512,511,0,NX_INVALID},
++        {0,512,4096,4096,NX_INVALID}, {0,UINT64_MAX,UINT64_MAX,0,NX_INVALID}
++    };
++    for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
++        parent p=fresh(); nx_handle h;
++        nx_request r=request(&f,&p,NX_READ,cases[i].offset,cases[i].bytes);
++        r.mdl_bytes=cases[i].mdl_bytes; r.mdl_offset=cases[i].mdl_offset;
++        CHECK(nx_start(&f.dev,&r,&h)==cases[i].want);
++        CHECK(p.completions==1 && p.status==cases[i].want && p.bytes==0);
++    }
++    CHECK(f.commands==0 && f.prepares==0); cleanup(&f); return 1;
++}
++/* Break: zero data unnecessarily requires MDL ownership or emits a command. */
++static int zero_has_no_transport(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); parent p=fresh(); nx_handle h;
++    nx_request r=request(&f,&p,NX_READ,0,0); r.mdl_virtual=0; r.mdl_bytes=0; r.lease=0;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_OK); CHECK(p.completions==1 && p.bytes==0 && f.commands==0);
++    cleanup(&f); return 1;
++}
++/* Break: a successful inline single command loses bytes, has wrong CDB, or retires early. */
++static int one_inline_read_owns_until_return(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); parent p=fresh(); nx_handle h;
++    nx_request r=request(&f,&p,NX_READ,1024,512); r.mdl_offset=512;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++    CHECK(p.completions==1 && !p.pending && p.status==NX_OK && p.bytes==512);
++    CHECK(f.commands==1 && f.retires==1 && f.prepares==1 && f.max_depth==1);
++    const uint8_t expected[10]={0x28,0,0,0,0,2,0,0,1,0};
++    CHECK(!memcmp(f.log[0].cdb,expected,10)); CHECK(f.log[0].function==0 && f.log[0].direction==0x40);
++    CHECK(f.log[0].data_virtual==(uintptr_t)f.buffer+512 && f.log[0].lease==&p);
++    CHECK(f.buffer[512]==20 && f.buffer[1023]==29 && f.buffer[511]==0xa5);
++    cleanup(&f); return 1;
++}
++/* Break: dispatch success hides pending or stale callbacks complete a new parent. */
++static int pending_duplicate_generation(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delayed=1;
++    parent a=fresh(); nx_handle h; nx_request r=request(&f,&a,NX_READ,0,512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING); CHECK(a.pending==1 && !a.completions);
++    nx_token old=f.held[h.slot].token; finish_held(&f,h.slot,NX_OK,512,0);
++    CHECK(a.completions==1 && a.status==NX_OK && a.bytes==512);
++    nx_lower_done(&f.dev,old,NX_IO_ERROR,0,0); CHECK(a.completions==1);
++    parent b=fresh(); r=request(&f,&b,NX_READ,512,512); nx_handle next;
++    CHECK(nx_start(&f.dev,&r,&next)==NX_PENDING);
++    nx_lower_done(&f.dev,old,NX_IO_ERROR,0,0); nx_cancel(&f.dev,h);
++    CHECK(!b.completions && f.cancels==0);
++    finish_held(&f,next.slot,NX_OK,512,0); CHECK(b.completions==1 && b.status==NX_OK);
++    cleanup(&f); return 1;
++}
++/* Break: pending returned after inline completion is omitted from parent pending semantics. */
++static int inline_pending_still_marks_parent(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.pending_inline=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING); CHECK(p.pending==1 && p.completions==1 && p.status==NX_OK);
++    cleanup(&f); return 1;
++}
++/* Break: splitting recurses or derives wrong offset/count after many inline completions. */
++static int long_inline_sequence_is_iterative(void)
++{
++    fixture f; nx_config cfg=config(); cfg.max_bytes=512; CHECK(init(&f,&cfg));
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,UINT64_C(512)*50000);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_OK); CHECK(p.bytes==25600000 && p.completions==1);
++    CHECK(f.commands==50000 && f.retires==50000 && f.max_depth==1);
++    CHECK(f.log[1].disk_byte==512 && f.log[39].disk_byte==19968);
++    CHECK(f.buffer[25599999]==7);
++    cleanup(&f); return 1;
++}
++/* Break: page, ATA or READ(10) count limits are omitted from segmentation. */
++static int respects_page_and_block_limits(void)
++{
++    fixture f; nx_config cfg=config(); cfg.max_pages=1; cfg.ata_max_blocks=4; CHECK(init(&f,&cfg));
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,0,8192); r.mdl_offset=3584;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_OK); CHECK(p.bytes==8192 && f.commands==5);
++    CHECK(f.log[0].bytes==512 && f.log[1].bytes==2048 && f.log[2].bytes==2048 && f.log[4].bytes==1536);
++    CHECK(f.log[0].cdb[0]==0x2a && f.log[0].direction==0x80);
++    cleanup(&f); return 1;
++}
++/* Break: completion input length is credited instead of actual bytes, or errors retry writes. */
++static int partial_error_stops_without_fabrication(void)
++{
++    fixture f; nx_config cfg=config(); cfg.max_bytes=1024; CHECK(init(&f,&cfg));
++    f.scripted_at=2; f.scripted_status=NX_IO_ERROR; f.scripted_bytes=512;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,0,4096);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_IO_ERROR); CHECK(p.bytes==1536 && p.completions==1 && f.commands==2);
++    cleanup(&f); return 1;
++}
++/* Break: short-success continues or an over-reported segment gets credited. */
++static int short_and_overreport_are_bounded(void)
++{
++    nx_status statuses[]={NX_SHORT_TRANSFER,NX_PROTOCOL_ERROR}; uint32_t actual[]={512,2049};
++    for (unsigned i=0;i<2;++i) {
++        fixture f; nx_config cfg=config(); cfg.max_bytes=2048; CHECK(init(&f,&cfg));
++        f.scripted_at=1; f.scripted_status=NX_OK; f.scripted_bytes=actual[i];
++        parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,4096);
++        CHECK(nx_start(&f.dev,&r,&h)==statuses[i]); CHECK(p.bytes==(i==0 ? 512u:0u) && f.commands==1);
++        cleanup(&f);
++    } return 1;
++}
++/* Break: preparation failure leaks children or destroys later admission progress. */
++static int low_memory_cleans_and_allows_next_parent(void)
++{
++    for (unsigned fail=1;fail<=3;++fail) {
++        fixture f; nx_config cfg=config(); cfg.max_bytes=512; CHECK(init(&f,&cfg)); f.fail_prepare=fail;
++        parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,1536);
++        CHECK(nx_start(&f.dev,&r,&h)==NX_NO_MEMORY); CHECK(p.bytes==(fail-1u)*512 && p.completions==1);
++        CHECK(f.retires==fail-1u); f.fail_prepare=0;
++        parent q=fresh(); r=request(&f,&q,NX_READ,0,512); CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++        CHECK(q.completions==1 && q.bytes==512); cleanup(&f);
++    } return 1;
++}
++/* Break: cancel frees pages before terminal lower completion or sends repeated cancel requests. */
++static int cancellation_waits_for_lower_ownership(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delayed=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,1024);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING); nx_cancel(&f.dev,h); nx_cancel(&f.dev,h);
++    CHECK(f.cancels==1 && f.retires==0 && !p.completions && f.resource_live[h.slot]);
++    finish_held(&f,h.slot,NX_OK,512,0); CHECK(p.completions==1 && p.status==NX_CANCELLED && p.bytes==512);
++    cleanup(&f); return 1;
++}
++/* Break: cancellation before admission emits a command or leaks a reserved slot. */
++static int initial_cancel_and_inline_cancel(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); parent p=fresh(); nx_handle h;
++    nx_request r=request(&f,&p,NX_READ,0,512); r.cancelled=1;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_CANCELLED); CHECK(p.completions==1 && f.commands==0);
++    f.delayed=1; f.cancel_delivers=1; parent q=fresh(); r=request(&f,&q,NX_READ,0,512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING); nx_cancel(&f.dev,h);
++    CHECK(q.status==NX_CANCELLED && q.completions==1 && f.retires==1); cleanup(&f); return 1;
++}
++/* Break: flush uses a fake SRB flush or overtakes a preceding write. */
++static int flush_is_real_ordered_cache_sync(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delayed=1;
++    parent w=fresh(), s=fresh(), later=fresh(), rd=fresh(); nx_handle wh,sh,lh,rh;
++    nx_request r=request(&f,&w,NX_WRITE,0,512); CHECK(nx_start(&f.dev,&r,&wh)==NX_PENDING);
++    r=request(&f,&s,NX_FLUSH,0,0); CHECK(nx_start(&f.dev,&r,&sh)==NX_PENDING);
++    r=request(&f,&later,NX_WRITE,512,512); CHECK(nx_start(&f.dev,&r,&lh)==NX_PENDING);
++    r=request(&f,&rd,NX_READ,1024,512); CHECK(nx_start(&f.dev,&r,&rh)==NX_PENDING);
++    CHECK(f.commands==2); finish_held(&f,wh.slot,NX_OK,512,0);
++    CHECK(w.completions==1 && f.commands==3 && f.held[sh.slot].cdb[0]==0x35);
++    CHECK(f.held[sh.slot].function==0 && f.held[sh.slot].direction==0 && f.held[sh.slot].bytes==0);
++    finish_held(&f,sh.slot,NX_IO_ERROR,0,0); CHECK(s.status==NX_IO_ERROR && s.bytes==0 && s.completions==1);
++    CHECK(f.commands==4 && f.held[lh.slot].cdb[0]==0x2a);
++    finish_held(&f,lh.slot,NX_OK,512,0); finish_held(&f,rh.slot,NX_OK,512,0);
++    cleanup(&f); return 1;
++}
++/* Break: cache capability is treated as proof of unsupported durability. */
++static int cache_capability_is_visible(void)
++{
++    for (unsigned i=0;i<3;++i) {
++        fixture f; nx_config cfg=config(); cfg.cache=(nx_cache)i; CHECK(init(&f,&cfg));
++        parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_FLUSH,0,0);
++        nx_status want=i==NX_CACHE_UNQUALIFIED ? NX_DURABILITY_UNSUPPORTED:NX_OK;
++        CHECK(nx_start(&f.dev,&r,&h)==want); CHECK(p.status==want && p.bytes==0 && p.completions==1);
++        CHECK(f.commands==(i==NX_CACHE_ENABLED ? 1u:0u)); cleanup(&f);
++    } return 1;
++}
++/* Break: queue freeze strands later work or low memory creates unbounded recovery. */
++static int frozen_queue_uses_bounded_release(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg));
++    f.scripted_at=1; f.scripted_status=NX_IO_ERROR; f.scripted_flags=NX_LOWER_QUEUE_FROZEN;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,0,512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_IO_ERROR);
++    CHECK(f.commands==2 && f.log[1].function==0x04 && f.log[1].bytes==0 && p.completions==1);
++    parent q=fresh(); r=request(&f,&q,NX_READ,0,512); CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++    CHECK(q.bytes==512 && q.completions==1); cleanup(&f);
++    CHECK(init(&f,&cfg)); f.scripted_at=1; f.scripted_status=NX_IO_ERROR;
++    f.scripted_flags=NX_LOWER_QUEUE_FROZEN; f.fail_prepare=2; p=fresh(); r=request(&f,&p,NX_READ,0,512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_IO_ERROR); CHECK(p.completions==1 && f.commands==1);
++    q=fresh(); r=request(&f,&q,NX_READ,0,512); CHECK(nx_start(&f.dev,&r,&h)==NX_IO_ERROR);
++    CHECK(q.completions==1 && f.commands==1); cleanup(&f); return 1;
++}
++/* Break: fixed-slot exhaustion affects already pending parents or optical tails are rejected. */
++static int concurrent_slots_and_optical_policy(void)
++{
++    fixture f; nx_config cfg=config(); cfg.optical=1; cfg.capacity_bytes=4096; CHECK(init(&f,&cfg)); f.delayed=1;
++    parent p[5]; nx_handle h[5];
++    for (unsigned i=0;i<5;++i) {
++        p[i]=fresh(); nx_request r=request(&f,&p[i],NX_READ,4096,4096);
++        CHECK(nx_start(&f.dev,&r,&h[i])==(i==4 ? NX_NO_MEMORY:NX_PENDING));
++    }
++    CHECK(f.commands==4 && p[4].completions==1);
++    for (unsigned i=0;i<4;++i) finish_held(&f,h[i].slot,NX_OK,4096,0);
++    f.delayed=0; parent wr=fresh(); nx_request r=request(&f,&wr,NX_WRITE,0,512);
++    CHECK(nx_start(&f.dev,&r,&h[0])==NX_WRITE_PROTECTED); CHECK(f.commands==4);
++    cleanup(&f); return 1;
++}
++/* Break: pointer wrapping, configured alignment, or 32-bit CDB range is silently truncated. */
++static int address_and_cdb_overflow_are_rejected(void)
++{
++    fixture f; nx_config cfg=config(); cfg.capacity_bytes=UINT64_MAX; cfg.alignment_mask=3; CHECK(init(&f,&cfg));
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,512); r.mdl_virtual+=1;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_INVALID);
++    p=fresh(); r=request(&f,&p,NX_READ,0,512); r.mdl_virtual=UINTPTR_MAX-255;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_INVALID);
++    p=fresh(); r=request(&f,&p,NX_READ,INT64_C(2199023255552),512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_RANGE); CHECK(f.commands==0);
++    cleanup(&f); return 1;
++}
++
++/* Break: dispatch return is substituted for terminal completion, freeing live pages. */
++static int missing_terminal_does_not_release_pages(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.omit_terminal=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    CHECK(!p.completions && f.retires==0 && f.resource_live[h.slot]);
++    finish_held(&f,h.slot,NX_OK,512,0); CHECK(p.completions==1 && p.bytes==512);
++    cleanup(&f); return 1;
++}
++/* Break: cancellation accepted during resource preparation still submits data. */
++static int cancellation_during_preparation_retires_without_submit(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.cancel_preparing=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_CANCELLED);
++    CHECK(p.completions==1 && !p.bytes && f.retires==1 && !f.commands);
++    cleanup(&f); return 1;
++}
++/* Break: a prior segment callback is counted twice while a later segment is live. */
++static int duplicate_segment_is_ignored(void)
++{
++    fixture f; nx_config cfg=config(); cfg.max_bytes=512; CHECK(init(&f,&cfg)); f.delayed=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,1024);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING); nx_token first=f.held[h.slot].token;
++    finish_held(&f,h.slot,NX_OK,512,0); CHECK(!p.completions && f.commands==2);
++    nx_lower_done(&f.dev,first,NX_IO_ERROR,512,0); CHECK(!p.completions && f.retires==1);
++    finish_held(&f,h.slot,NX_OK,512,0); CHECK(p.bytes==1024 && p.completions==1);
++    cleanup(&f); return 1;
++}
++/* Break: optical odd virtual addresses are rejected despite lower PIO support. */
++static int odd_optical_buffer_reaches_transport(void)
++{
++    fixture f; nx_config cfg=config(); cfg.optical=1; cfg.sector_bytes=2048; cfg.capacity_bytes=2048;
++    CHECK(init(&f,&cfg)); parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,4096);
++    r.mdl_offset=1; CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++    CHECK(p.bytes==4096 && f.commands==1 && f.log[0].data_virtual==(uintptr_t)f.buffer+1);
++    CHECK(f.buffer[0]==0xa5 && f.buffer[1]==0 && f.buffer[4096]==79);
++    cleanup(&f); return 1;
++}
++/* Break: a large adapter limit overflows the READ(10) transfer-block field. */
++static int cdb_count_splits_at_65535_blocks(void)
++{
++    fixture f; nx_config cfg=config(); cfg.max_bytes=UINT32_MAX; cfg.max_pages=100000;
++    cfg.ata_max_blocks=100000; CHECK(init(&f,&cfg)); parent p=fresh(); nx_handle h;
++    nx_request r=request(&f,&p,NX_READ,0,33554432);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_OK); CHECK(p.bytes==33554432 && f.commands==2);
++    CHECK(f.log[0].bytes==33553920 && f.log[0].cdb[7]==255 && f.log[0].cdb[8]==255);
++    CHECK(f.log[1].bytes==512 && f.log[1].disk_byte==33553920 && f.log[1].cdb[8]==1);
++    cleanup(&f); return 1;
++}
++/* Break: malformed API input triggers an invalid parent callback or enters transport. */
++static int invalid_parent_has_no_delivery(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); nx_handle h;
++    nx_request r=request(&f,NULL,NX_READ,0,512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_INVALID); CHECK(!f.null_completions && !f.commands);
++    cleanup(&f); return 1;
++}
++/* Break: failed queue recovery abandons lower-owned requests on the frozen queue. */
++static int failed_recovery_cancels_live_and_finishes_waiters(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delayed=1;
++    parent rd=fresh(), w=fresh(), flush=fresh(), next=fresh(); nx_handle rh,wh,fh,nh;
++    nx_request r=request(&f,&rd,NX_READ,0,512); CHECK(nx_start(&f.dev,&r,&rh)==NX_PENDING);
++    r=request(&f,&w,NX_WRITE,512,512); CHECK(nx_start(&f.dev,&r,&wh)==NX_PENDING);
++    r=request(&f,&flush,NX_FLUSH,0,0); CHECK(nx_start(&f.dev,&r,&fh)==NX_PENDING);
++    r=request(&f,&next,NX_WRITE,1024,512); CHECK(nx_start(&f.dev,&r,&nh)==NX_PENDING);
++    finish_held(&f,wh.slot,NX_IO_ERROR,0,NX_LOWER_QUEUE_FROZEN);
++    CHECK(f.commands==3 && f.held[wh.slot].function==0x04);
++    finish_held(&f,wh.slot,NX_IO_ERROR,0,0);
++    CHECK(f.cancels==1 && !rd.completions && f.resource_live[rh.slot]);
++    CHECK(w.completions==1 && flush.completions==1 && next.completions==1);
++    CHECK(flush.status==NX_IO_ERROR && next.status==NX_IO_ERROR && f.commands==3);
++    finish_held(&f,rh.slot,NX_CANCELLED,0,0); CHECK(rd.completions==1 && rd.status==NX_IO_ERROR);
++    cleanup(&f); return 1;
++}
++
++/* Break: shifted sector conversion narrows high offsets or uses the wrong shift. */
++static int sector_sizes_preserve_high_offset_cdb(void)
++{
++    const struct { uint32_t sector, page; int64_t offset; uint64_t bytes; } cases[]={
++        {512,4096,INT64_C(8657438720),1536},
++        {2048,4096,INT64_C(34629754880),6144},
++        {4096,4096,INT64_C(69259509760),12288},
++        {65536,65536,INT64_C(1108152156160),196608}
++    };
++    const uint8_t cdb[10]={0x28,0,1,2,3,4,0,0,3,0};
++    for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
++        fixture f; nx_config cfg=config(); cfg.sector_bytes=cases[i].sector;
++        cfg.page_bytes=cases[i].page; cfg.max_bytes=1048576; cfg.capacity_bytes=UINT64_MAX;
++        CHECK(init(&f,&cfg)); parent p=fresh(); nx_handle h;
++        nx_request r=request(&f,&p,NX_READ,cases[i].offset,cases[i].bytes);
++        CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++        CHECK(p.bytes==cases[i].bytes && f.commands==1);
++        CHECK(f.log[0].disk_byte==(uint64_t)cases[i].offset && !memcmp(f.log[0].cdb,cdb,10));
++        cleanup(&f);
++    }
++    return 1;
++}
++/* Break: last-LBA validation rejects the legal final sector or allows one past it. */
++static int final_lba_and_exact_capacity_end(void)
++{
++    const struct { uint32_t sector, page; int64_t last; uint64_t end; } cases[]={
++        {512,4096,INT64_C(2199023255040),UINT64_C(2199023255552)},
++        {2048,4096,INT64_C(8796093020160),UINT64_C(8796093022208)},
++        {4096,4096,INT64_C(17592186040320),UINT64_C(17592186044416)},
++        {65536,65536,INT64_C(281474976645120),UINT64_C(281474976710656)}
++    };
++    const uint8_t cdb[10]={0x28,0,255,255,255,255,0,0,1,0};
++    for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
++        fixture f; nx_config cfg=config(); cfg.sector_bytes=cases[i].sector;
++        cfg.page_bytes=cases[i].page; cfg.capacity_bytes=cases[i].end; CHECK(init(&f,&cfg));
++        parent p=fresh(); nx_handle h;
++        nx_request r=request(&f,&p,NX_READ,cases[i].last,cases[i].sector);
++        CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++        CHECK(p.bytes==cases[i].sector && f.commands==1 && !memcmp(f.log[0].cdb,cdb,10));
++        p=fresh(); r=request(&f,&p,NX_READ,(int64_t)cases[i].end,cases[i].sector);
++        CHECK(nx_start(&f.dev,&r,&h)==NX_RANGE); CHECK(p.completions==1 && !p.bytes && f.commands==1);
++        p=fresh(); r=request(&f,&p,NX_READ,(int64_t)cases[i].end,0);
++        CHECK(nx_start(&f.dev,&r,&h)==NX_OK); CHECK(p.completions==1 && !p.bytes && f.commands==1);
++        cleanup(&f);
++        cfg.capacity_bytes=UINT64_MAX; CHECK(init(&f,&cfg)); p=fresh();
++        r=request(&f,&p,NX_READ,cases[i].last,(uint64_t)cases[i].sector*2u);
++        CHECK(nx_start(&f.dev,&r,&h)==NX_RANGE); CHECK(f.commands==0); cleanup(&f);
++    }
++    return 1;
++}
++/* Break: alignment masking accidentally drops high bits or accepts a low remainder. */
++static int sector_alignment_remainders_are_rejected(void)
++{
++    const struct { uint32_t sector, page; int64_t bad_offset; uint64_t bad_bytes; } cases[]={
++        {512,4096,INT64_C(8657438721),1535},
++        {2048,4096,INT64_C(34629754881),6143},
++        {4096,4096,INT64_C(69259509761),12287},
++        {65536,65536,INT64_C(1108152156161),196607}
++    };
++    for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
++        fixture f; nx_config cfg=config(); cfg.sector_bytes=cases[i].sector;
++        cfg.page_bytes=cases[i].page; cfg.capacity_bytes=UINT64_MAX; CHECK(init(&f,&cfg));
++        parent p=fresh(); nx_handle h;
++        nx_request r=request(&f,&p,NX_READ,cases[i].bad_offset,cases[i].sector);
++        CHECK(nx_start(&f.dev,&r,&h)==NX_INVALID);
++        p=fresh(); r=request(&f,&p,NX_READ,0,cases[i].bad_bytes);
++        CHECK(nx_start(&f.dev,&r,&h)==NX_INVALID); CHECK(f.commands==0); cleanup(&f);
++    }
++    return 1;
++}
++/* Break: shift initialization accepts a non-power sector or overflows the largest valid power. */
++static int sector_configuration_rejects_nonpowers(void)
++{
++    const uint32_t bad[]={0,3,513,520,UINT32_MAX};
++    for (unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i) {
++        fixture f; nx_config cfg=config(); cfg.sector_bytes=bad[i];
++        CHECK(!init(&f,&cfg)); CHECK(!f.commands); cleanup(&f);
++    }
++    fixture f; nx_config cfg=config(); cfg.sector_bytes=UINT32_C(2147483648);
++    cfg.page_bytes=UINT32_C(2147483648); cfg.max_bytes=UINT32_MAX; cfg.capacity_bytes=UINT64_MAX;
++    CHECK(init(&f,&cfg)); parent p=fresh(); nx_handle h;
++    nx_request r=request(&f,&p,NX_READ,0,0); CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++    CHECK(p.completions==1 && !f.commands); cleanup(&f); return 1;
++}
++/* Break: conversion optimization truncates the independently validated MDL byte domain. */
++static int mdl_offsets_keep_their_full_width(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); parent p=fresh(); nx_handle h;
++    nx_request r=request(&f,&p,NX_WRITE,0,512);
++    /* Abstract host-only MDL metadata: the transport double does no write-data
++     * dereference. It verifies the core's address/count boundary, not real DMA. */
++    r.mdl_virtual=(uintptr_t)UINT64_C(65536); r.mdl_bytes=UINT64_C(4294967808);
++    r.mdl_offset=UINT64_C(4294967296);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++    CHECK(p.bytes==512 && f.commands==1 && f.log[0].data_virtual==(uintptr_t)UINT64_C(4295032832));
++    CHECK(f.log[0].mdl_bytes==UINT64_C(4294967808)); cleanup(&f); return 1;
++}
++
++/* Break: write-through finishes after data instead of issuing real inline sync. */
++static int write_through_inline_chunks_then_sync(void)
++{
++    fixture f; nx_config cfg=config(); cfg.max_bytes=512; CHECK(init(&f,&cfg));
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,1024,1536); r.flags=NX_WRITE_THROUGH;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++    CHECK(p.completions==1 && p.bytes==1536 && f.commands==4 && f.retires==4 && f.max_depth==1);
++    for (unsigned i=0;i<3;++i) {
++        CHECK(f.log[i].cdb[0]==0x2a && f.log[i].cdb[1]==0 && f.log[i].bytes==512);
++        CHECK(f.log[i].parent==&p && f.log[i].token.slot==h.slot && f.log[i].token.generation==h.generation);
++    }
++    const uint8_t sync[10]={0x35,0,0,0,0,0,0,0,0,0};
++    CHECK(!memcmp(f.log[3].cdb,sync,10) && f.log[3].function==0 && f.log[3].direction==0 && !f.log[3].bytes);
++    CHECK(f.log[3].parent==&p && f.log[3].token.slot==h.slot && f.log[3].token.generation==h.generation);
++    cleanup(&f); return 1;
++}
++/* Break: delayed sync does not keep the parent pending with its lower resource live. */
++static int write_through_delayed_sync_holds_parent(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delay_sync=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,0,1024); r.flags=NX_WRITE_THROUGH;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    CHECK(!p.completions && p.pending==1 && f.commands==2 && f.retires==1);
++    CHECK(f.held_live[h.slot] && f.resource_live[h.slot] && f.held[h.slot].cdb[0]==0x35);
++    finish_held(&f,h.slot,NX_OK,0,0); CHECK(p.completions==1 && p.status==NX_OK && p.bytes==1024);
++    cleanup(&f); return 1;
++}
++/* Break: terminal sync failure is swallowed or discards verified written bytes. */
++static int write_through_sync_error_preserves_data(void)
++{
++    for (unsigned delayed=0;delayed<2;++delayed) {
++        fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delay_sync=(int)delayed; f.sync_fails=1;
++        parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,0,1024); r.flags=NX_WRITE_THROUGH;
++        CHECK(nx_start(&f.dev,&r,&h)==(delayed ? NX_PENDING:NX_IO_ERROR));
++        if (delayed) { CHECK(!p.completions); finish_held(&f,h.slot,NX_IO_ERROR,0,0); }
++        CHECK(p.completions==1 && p.status==NX_IO_ERROR && p.bytes==1024 && f.commands==2 && f.retires==2);
++        cleanup(&f);
++    }
++    return 1;
++}
++/* Break: partial or failed write-through data is retried or falsely made durable. */
++static int write_through_partial_data_stops(void)
++{
++    const nx_status lower[]={NX_IO_ERROR,NX_OK}, want[]={NX_IO_ERROR,NX_SHORT_TRANSFER};
++    for (unsigned i=0;i<2;++i) {
++        fixture f; nx_config cfg=config(); cfg.max_bytes=1024; CHECK(init(&f,&cfg));
++        f.scripted_at=2; f.scripted_status=lower[i]; f.scripted_bytes=512;
++        parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,0,4096); r.flags=NX_WRITE_THROUGH;
++        CHECK(nx_start(&f.dev,&r,&h)==want[i]);
++        CHECK(p.completions==1 && p.status==want[i] && p.bytes==1536 && f.commands==2 && f.retires==2);
++        cleanup(&f);
++    }
++    return 1;
++}
++/* Break: cancellation during sync releases memory or delivers the parent before lower stops. */
++static int write_through_cancel_during_sync_waits(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delay_sync=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,0,1024); r.flags=NX_WRITE_THROUGH;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING); nx_token sync=f.held[h.slot].token;
++    nx_cancel(&f.dev,h); nx_cancel(&f.dev,h);
++    CHECK(f.cancels==1 && !p.completions && f.resource_live[h.slot] && f.retires==1);
++    finish_held(&f,h.slot,NX_OK,0,0);
++    CHECK(p.completions==1 && p.status==NX_CANCELLED && p.bytes==1024 && f.retires==2);
++    nx_lower_done(&f.dev,sync,NX_IO_ERROR,0,0); CHECK(p.completions==1);
++    cleanup(&f); return 1;
++}
++/* Break: write-through sync overtakes an earlier write or cancellation while waiting issues sync. */
++static int write_through_cancel_before_sync_keeps_data_count(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delayed=1;
++    parent earlier=fresh(), p=fresh(); nx_handle eh,h;
++    nx_request r=request(&f,&earlier,NX_WRITE,0,512); CHECK(nx_start(&f.dev,&r,&eh)==NX_PENDING);
++    r=request(&f,&p,NX_WRITE,512,512); r.flags=NX_WRITE_THROUGH; CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    finish_held(&f,h.slot,NX_OK,512,0); CHECK(!p.completions && f.commands==2 && !f.resource_live[h.slot]);
++    nx_cancel(&f.dev,h); CHECK(p.completions==1 && p.status==NX_CANCELLED && p.bytes==512 && f.commands==2);
++    finish_held(&f,eh.slot,NX_OK,512,0); cleanup(&f); return 1;
++}
++/* Break: following writes pass the durability barrier, or independent reads lose concurrency. */
++static int write_through_orders_following_write_allows_read(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delay_sync=1;
++    parent p=fresh(), later=fresh(), rd=fresh(); nx_handle h,lh,rh;
++    nx_request r=request(&f,&p,NX_WRITE,0,512); r.flags=NX_WRITE_THROUGH;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    r=request(&f,&later,NX_WRITE,512,512); CHECK(nx_start(&f.dev,&r,&lh)==NX_PENDING);
++    CHECK(!later.completions && f.commands==2);
++    r=request(&f,&rd,NX_READ,1024,512); CHECK(nx_start(&f.dev,&r,&rh)==NX_OK);
++    CHECK(rd.completions==1 && rd.bytes==512 && f.commands==3 && !p.completions);
++    finish_held(&f,h.slot,NX_OK,0,0);
++    CHECK(p.completions==1 && p.bytes==512 && later.completions==1 && later.bytes==512);
++    CHECK(f.commands==4 && f.log[3].parent==&later && f.log[3].cdb[0]==0x2a);
++    cleanup(&f); return 1;
++}
++/* Break: sync starts before previous ordinary writes have reached terminal completion. */
++static int write_through_sync_waits_for_prior_write(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delayed=1;
++    parent earlier=fresh(), p=fresh(); nx_handle eh,h;
++    nx_request r=request(&f,&earlier,NX_WRITE,0,512); CHECK(nx_start(&f.dev,&r,&eh)==NX_PENDING);
++    r=request(&f,&p,NX_WRITE,512,512); r.flags=NX_WRITE_THROUGH; CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    finish_held(&f,h.slot,NX_OK,512,0); CHECK(!p.completions && f.commands==2);
++    finish_held(&f,eh.slot,NX_OK,512,0);
++    CHECK(earlier.completions==1 && !p.completions && f.commands==3 && f.held[h.slot].cdb[0]==0x35);
++    finish_held(&f,h.slot,NX_OK,0,0); CHECK(p.completions==1 && p.bytes==512);
++    cleanup(&f); return 1;
++}
++/* Break: disabled cache skips required ordering or emits unnecessary cache commands. */
++static int write_through_disabled_cache_still_orders(void)
++{
++    fixture f; nx_config cfg=config(); cfg.cache=NX_CACHE_DISABLED; CHECK(init(&f,&cfg)); f.delayed=1;
++    parent earlier=fresh(), p=fresh(); nx_handle eh,h;
++    nx_request r=request(&f,&earlier,NX_WRITE,0,512); CHECK(nx_start(&f.dev,&r,&eh)==NX_PENDING);
++    r=request(&f,&p,NX_WRITE,512,512); r.flags=NX_WRITE_THROUGH; CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    finish_held(&f,h.slot,NX_OK,512,0); CHECK(!p.completions && f.commands==2);
++    finish_held(&f,eh.slot,NX_OK,512,0); CHECK(p.completions==1 && p.status==NX_OK && p.bytes==512 && f.commands==2);
++    cleanup(&f); return 1;
++}
++/* Break: old data callbacks corrupt the live sync phase or duplicate parent delivery. */
++static int write_through_duplicate_data_and_sync_are_ignored(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delayed=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,0,512); r.flags=NX_WRITE_THROUGH;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING); nx_token data=f.held[h.slot].token;
++    finish_held(&f,h.slot,NX_OK,512,0); CHECK(!p.completions && f.commands==2);
++    nx_token sync=f.held[h.slot].token;
++    nx_lower_done(&f.dev,data,NX_IO_ERROR,512,0); CHECK(!p.completions && f.retires==1);
++    finish_held(&f,h.slot,NX_OK,0,0); nx_lower_done(&f.dev,sync,NX_OK,0,0);
++    CHECK(p.completions==1 && p.bytes==512 && f.retires==2); cleanup(&f); return 1;
++}
++/* Break: unqualified durability or illegal flags reach lower transport. */
++static int write_through_zero_and_invalid_flags(void)
++{
++    const struct { nx_operation op; uint32_t flags; uint64_t bytes; nx_cache cache; nx_status want; } cases[]={
++        {NX_READ,NX_WRITE_THROUGH,512,NX_CACHE_ENABLED,NX_INVALID},
++        {NX_FLUSH,NX_WRITE_THROUGH,0,NX_CACHE_ENABLED,NX_INVALID},
++        {NX_WRITE,2,512,NX_CACHE_ENABLED,NX_INVALID},
++        {NX_WRITE,UINT32_C(2147483648),512,NX_CACHE_ENABLED,NX_INVALID},
++        {NX_WRITE,NX_WRITE_THROUGH|2,512,NX_CACHE_ENABLED,NX_INVALID},
++        {NX_WRITE,NX_WRITE_THROUGH,512,NX_CACHE_UNQUALIFIED,NX_DURABILITY_UNSUPPORTED},
++        {NX_WRITE,NX_WRITE_THROUGH,0,NX_CACHE_UNQUALIFIED,NX_DURABILITY_UNSUPPORTED},
++        {NX_WRITE,NX_WRITE_THROUGH,0,NX_CACHE_ENABLED,NX_OK},
++        {NX_WRITE,NX_WRITE_THROUGH,0,NX_CACHE_DISABLED,NX_OK},
++        {NX_WRITE,2,0,NX_CACHE_ENABLED,NX_INVALID}
++    };
++    for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
++        fixture f; nx_config cfg=config(); cfg.cache=cases[i].cache; CHECK(init(&f,&cfg));
++        parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,cases[i].op,0,cases[i].bytes); r.flags=cases[i].flags;
++        if (!r.bytes) { r.mdl_virtual=0; r.mdl_bytes=0; }
++        CHECK(nx_start(&f.dev,&r,&h)==cases[i].want);
++        CHECK(p.completions==1 && p.status==cases[i].want && !p.bytes && !f.commands && !f.prepares);
++        cleanup(&f);
++    }
++    return 1;
++}
++/* Break: failed sync preparation leaks a slot or returns unwritten/full fabricated accounting. */
++static int write_through_sync_prepare_failure_preserves_data(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.fail_prepare=2;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_WRITE,0,512); r.flags=NX_WRITE_THROUGH;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_NO_MEMORY);
++    CHECK(p.completions==1 && p.bytes==512 && p.status==NX_NO_MEMORY && f.commands==1 && f.retires==1);
++    parent next=fresh(); r=request(&f,&next,NX_WRITE,512,512); CHECK(nx_start(&f.dev,&r,&h)==NX_OK);
++    CHECK(next.completions==1 && next.bytes==512); cleanup(&f); return 1;
++}
++
++/* Break: init clears beyond caller-declared storage or multiplies an impossible count. */
++static int impossible_slot_count_rejects_before_any_clear(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg));
++    nx_port port=f.dev.port;
++    memset(&f.dev,0xa5,sizeof(f.dev)); memset(f.slots,0xa5,sizeof(f.slots));
++    CHECK(nx_device_init(&f.dev,&cfg,&port,f.slots,2,sizeof(nx_slot))==NX_INVALID);
++    const unsigned char *device=(const unsigned char *)&f.dev;
++    const unsigned char *slots=(const unsigned char *)f.slots;
++    for (size_t i=0;i<sizeof(f.dev);++i) CHECK(device[i]==0xa5);
++    for (size_t i=0;i<sizeof(f.slots);++i) CHECK(slots[i]==0xa5);
++    CHECK(nx_device_init(&f.dev,&cfg,&port,f.slots,UINT32_MAX,sizeof(f.slots))==NX_INVALID);
++    for (size_t i=0;i<sizeof(f.dev);++i) CHECK(device[i]==0xa5);
++    for (size_t i=0;i<sizeof(f.slots);++i) CHECK(slots[i]==0xa5);
++    cleanup(&f); return 1;
++}
++
++int main(void)
++{
++    struct {const char *name; int (*run)(void);} tests[]={
++        {"rejects_invalid_input",rejects_invalid_input}, {"zero_has_no_transport",zero_has_no_transport},
++        {"one_inline_read_owns_until_return",one_inline_read_owns_until_return},
++        {"pending_duplicate_generation",pending_duplicate_generation},
++        {"inline_pending_still_marks_parent",inline_pending_still_marks_parent},
++        {"long_inline_sequence_is_iterative",long_inline_sequence_is_iterative},
++        {"respects_page_and_block_limits",respects_page_and_block_limits},
++        {"partial_error_stops_without_fabrication",partial_error_stops_without_fabrication},
++        {"short_and_overreport_are_bounded",short_and_overreport_are_bounded},
++        {"low_memory_cleans_and_allows_next_parent",low_memory_cleans_and_allows_next_parent},
++        {"cancellation_waits_for_lower_ownership",cancellation_waits_for_lower_ownership},
++        {"initial_cancel_and_inline_cancel",initial_cancel_and_inline_cancel},
++        {"flush_is_real_ordered_cache_sync",flush_is_real_ordered_cache_sync},
++        {"cache_capability_is_visible",cache_capability_is_visible},
++        {"frozen_queue_uses_bounded_release",frozen_queue_uses_bounded_release},
++        {"concurrent_slots_and_optical_policy",concurrent_slots_and_optical_policy},
++        {"address_and_cdb_overflow_are_rejected",address_and_cdb_overflow_are_rejected},
++        {"missing_terminal_does_not_release_pages",missing_terminal_does_not_release_pages},
++        {"cancellation_during_preparation_retires_without_submit",cancellation_during_preparation_retires_without_submit},
++        {"duplicate_segment_is_ignored",duplicate_segment_is_ignored},
++        {"odd_optical_buffer_reaches_transport",odd_optical_buffer_reaches_transport},
++        {"cdb_count_splits_at_65535_blocks",cdb_count_splits_at_65535_blocks},
++        {"invalid_parent_has_no_delivery",invalid_parent_has_no_delivery},
++        {"failed_recovery_cancels_live_and_finishes_waiters",failed_recovery_cancels_live_and_finishes_waiters},
++        {"sector_sizes_preserve_high_offset_cdb",sector_sizes_preserve_high_offset_cdb},
++        {"final_lba_and_exact_capacity_end",final_lba_and_exact_capacity_end},
++        {"sector_alignment_remainders_are_rejected",sector_alignment_remainders_are_rejected},
++        {"sector_configuration_rejects_nonpowers",sector_configuration_rejects_nonpowers},
++        {"mdl_offsets_keep_their_full_width",mdl_offsets_keep_their_full_width},
++        {"write_through_inline_chunks_then_sync",write_through_inline_chunks_then_sync},
++        {"write_through_delayed_sync_holds_parent",write_through_delayed_sync_holds_parent},
++        {"write_through_sync_error_preserves_data",write_through_sync_error_preserves_data},
++        {"write_through_partial_data_stops",write_through_partial_data_stops},
++        {"write_through_cancel_during_sync_waits",write_through_cancel_during_sync_waits},
++        {"write_through_cancel_before_sync_keeps_data_count",write_through_cancel_before_sync_keeps_data_count},
++        {"write_through_orders_following_write_allows_read",write_through_orders_following_write_allows_read},
++        {"write_through_sync_waits_for_prior_write",write_through_sync_waits_for_prior_write},
++        {"write_through_disabled_cache_still_orders",write_through_disabled_cache_still_orders},
++        {"write_through_duplicate_data_and_sync_are_ignored",write_through_duplicate_data_and_sync_are_ignored},
++        {"write_through_zero_and_invalid_flags",write_through_zero_and_invalid_flags},
++        {"write_through_sync_prepare_failure_preserves_data",write_through_sync_prepare_failure_preserves_data},
++        {"impossible_slot_count_rejects_before_any_clear",impossible_slot_count_rejects_before_any_clear}
++    };
++    unsigned failed=0;
++    for (unsigned i=0;i<sizeof(tests)/sizeof(tests[0]);++i) {
++        int ok=tests[i].run(); printf("%s %s\n",ok ? "PASS":"FAIL",tests[i].name); failed+=!ok;
++        while (allocation_count) release_allocation(test_allocations[0]);
++    }
++    printf("%u tests, %u failures\n",(unsigned)(sizeof(tests)/sizeof(tests[0])),failed);
++    return failed ? 1:0;
++}
+diff --git a/tests/host/nxstorage/test_geometry_composer.c b/tests/host/nxstorage/test_geometry_composer.c
+new file mode 100644
+index 00000000..3216222b
+--- /dev/null
++++ b/tests/host/nxstorage/test_geometry_composer.c
+@@ -0,0 +1,495 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "geometry_composer.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <pthread.h>
++
++static unsigned failures;
++static unsigned checks;
++
++#define CHECK(expr) do { \
++    ++checks; \
++    if (!(expr)) { \
++        fprintf(stderr, "FAIL %s:%d: %s\n", __func__, __LINE__, #expr); \
++        ++failures; \
++    } \
++} while (0)
++
++/* Literal fixture: 7 cylinders, fixed media 12, 3 tracks, 11 sectors,
++ * 512 bytes/sector, exact length 1048576. Exact length is not CHS product. */
++static const unsigned char base[32] = {
++    7, 0, 0, 0, 0, 0, 0, 0,
++    12, 0, 0, 0, 3, 0, 0, 0,
++    11, 0, 0, 0, 0, 2, 0, 0,
++    0, 0, 16, 0, 0, 0, 0, 0
++};
++
++static struct ig_lower_response lower_for(const void *bytes, size_t count)
++{
++    struct ig_lower_response lower = { 0, bytes, count, count };
++    return lower;
++}
++
++static struct ig_owner_snapshot mbr_owner(void)
++{
++    struct ig_owner_snapshot owner;
++    memset(&owner, 0, sizeof(owner));
++    owner.partition_style = IG_PARTITION_MBR;
++    owner.identity_available = 1;
++    owner.mbr_checksum_available = 1;
++    owner.mbr_signature = 0x12345678u;
++    owner.mbr_checksum = 0x10203040u;
++    return owner;
++}
++
++/* Catches accepting short output, truncating meaningful records, incorrect
++ * observed prefix accounting, overrun, and CHS-derived capacity. Sizes
++ * 33/39/41/55/63/111 exercise declared policy, not observed native parity. */
++static void test_output_boundaries(void)
++{
++    const size_t lengths[] = {
++        0, 1, 31, 32, 33, 39, 40, 41, 55, 56, 57, 63, 64, 111, 112, 128, 200, 256
++    };
++    const size_t expected[] = {
++        0, 0, 0, 32, 33, 39, 40, 41, 55, 56, 57, 63, 64, 111, 112, 112, 112, 112
++    };
++    const unsigned char mbr[24] = {
++        24, 0, 0, 0, 0, 0, 0, 0,
++        0x78, 0x56, 0x34, 0x12, 0x40, 0x30, 0x20, 0x10,
++        0, 0, 0, 0, 0, 0, 0, 0
++    };
++    const unsigned char no_detection[56] = { 56 };
++    struct ig_lower_response lower = lower_for(base, sizeof(base));
++    struct ig_owner_snapshot owner = mbr_owner();
++    size_t n;
++
++    for (n = 0; n < sizeof(lengths) / sizeof(lengths[0]); ++n) {
++        unsigned char guarded[258];
++        struct ig_result result;
++        size_t byte;
++        memset(guarded, 0xa5, sizeof(guarded));
++        result = ig_compose_geometry(&lower, &owner, guarded + 1, lengths[n]);
++        CHECK(result.outcome == (lengths[n] < 32 ? IG_BUFFER_TOO_SMALL : IG_SUCCESS));
++        CHECK(result.lower_status == 0);
++        CHECK(result.initialized_bytes == expected[n]);
++        CHECK(result.initialized_bytes <= lengths[n]);
++        CHECK(guarded[0] == 0xa5);
++        CHECK(guarded[257] == 0xa5);
++        if (expected[n] >= 32) CHECK(memcmp(guarded + 1, base, 32) == 0);
++        if (expected[n] >= 56) CHECK(memcmp(guarded + 33, mbr, 24) == 0);
++        if (expected[n] >= 112) CHECK(memcmp(guarded + 57, no_detection, 56) == 0);
++        if (expected[n] < 56)
++            for (byte = 32; byte < expected[n]; ++byte) CHECK(guarded[byte + 1] == 0);
++        if (expected[n] >= 56 && expected[n] < 112)
++            for (byte = 56; byte < expected[n]; ++byte) CHECK(guarded[byte + 1] == 0);
++        for (byte = expected[n]; byte < 257; ++byte) CHECK(guarded[byte + 1] == 0xa5);
++        for (byte = 0; byte < expected[n]; ++byte) CHECK(guarded[byte + 1] != 0xa5);
++    }
++}
++
++/* Catches returning stale padding, or leaking even one GUID byte into a
++ * partition prefix that lacks space for a complete record. Also catches
++ * presenting a partial BIOS record with a nonzero public size field. */
++static void test_unavailable_optional_prefixes(void)
++{
++    const size_t lengths[] = { 33, 39, 40, 41, 55, 63, 64, 111 };
++    const unsigned char unavailable[56] = { 0 };
++    const unsigned char gpt[24] = {
++        24, 0, 0, 0, 1, 0, 0, 0,
++        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
++    };
++    struct ig_lower_response lower = lower_for(base, sizeof(base));
++    struct ig_owner_snapshot owner = mbr_owner();
++    size_t index;
++    owner.partition_style = IG_PARTITION_GPT;
++    memcpy(owner.gpt_disk_id, gpt + 8, 16);
++    for (index = 0; index < sizeof(lengths) / sizeof(lengths[0]); ++index) {
++        unsigned char output[128];
++        struct ig_result result;
++        memset(output, 0xa5, sizeof(output));
++        result = ig_compose_geometry(&lower, &owner, output, lengths[index]);
++        CHECK(result.outcome == IG_SUCCESS);
++        CHECK(result.initialized_bytes == lengths[index]);
++        CHECK(memcmp(output, base, 32) == 0);
++        if (lengths[index] < 56) {
++            CHECK(memcmp(output + 32, unavailable, lengths[index] - 32) == 0);
++        } else {
++            CHECK(memcmp(output + 32, gpt, 24) == 0);
++            CHECK(memcmp(output + 56, unavailable, lengths[index] - 56) == 0);
++        }
++        CHECK(output[lengths[index]] == 0xa5);
++        CHECK(output[127] == 0xa5);
++    }
++}
++
++/* Catches leaking inactive MBR or GPT bytes and reusing a previous style. */
++static void test_snapshot_styles(void)
++{
++    const unsigned char guid[16] = {
++        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++        0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe
++    };
++    const unsigned char gpt[24] = {
++        24, 0, 0, 0, 1, 0, 0, 0,
++        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
++        0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe
++    };
++    const unsigned char raw[24] = { 24, 0, 0, 0, 2 };
++    const unsigned char empty_mbr[24] = { 24 };
++    const unsigned char empty_gpt[24] = { 24, 0, 0, 0, 1 };
++    struct ig_lower_response lower = lower_for(base, sizeof(base));
++    struct ig_owner_snapshot owner = mbr_owner();
++    unsigned char output[112];
++    struct ig_result result;
++    unsigned iteration;
++
++    memcpy(owner.gpt_disk_id, guid, 16);
++    for (iteration = 0; iteration < 100; ++iteration) {
++        owner.partition_style = IG_PARTITION_GPT;
++        result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++        CHECK(result.outcome == IG_SUCCESS);
++        CHECK(memcmp(output + 32, gpt, 24) == 0);
++        owner.partition_style = IG_PARTITION_RAW;
++        result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++        CHECK(result.outcome == IG_SUCCESS);
++        CHECK(memcmp(output + 32, raw, 24) == 0);
++        owner.partition_style = IG_PARTITION_MBR;
++        owner.identity_available = 0;
++        owner.mbr_checksum_available = 0;
++        result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++        CHECK(result.outcome == IG_SUCCESS);
++        CHECK(memcmp(output + 32, empty_mbr, 24) == 0);
++        owner.partition_style = IG_PARTITION_GPT;
++        result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++        CHECK(result.outcome == IG_SUCCESS);
++        CHECK(memcmp(output + 32, empty_gpt, 24) == 0);
++        owner.identity_available = 1;
++        owner.mbr_checksum_available = 1;
++    }
++}
++
++/* Catches dropping a meaningful checksum when signature is unavailable,
++ * and exposing an unavailable checksum when the signature is known. */
++static void test_independent_mbr_availability(void)
++{
++    struct ig_lower_response lower = lower_for(base, sizeof(base));
++    struct ig_owner_snapshot owner = mbr_owner();
++    const unsigned char checksum_only[24] = {
++        24, 0, 0, 0, 0, 0, 0, 0,
++        0, 0, 0, 0, 0x40, 0x30, 0x20, 0x10,
++        0, 0, 0, 0, 0, 0, 0, 0
++    };
++    const unsigned char signature_only[24] = {
++        24, 0, 0, 0, 0, 0, 0, 0,
++        0x78, 0x56, 0x34, 0x12, 0, 0, 0, 0,
++        0, 0, 0, 0, 0, 0, 0, 0
++    };
++    unsigned char output[56];
++    struct ig_result result;
++    owner.identity_available = 0;
++    result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++    CHECK(result.outcome == IG_SUCCESS);
++    CHECK(memcmp(output + 32, checksum_only, 24) == 0);
++    owner.identity_available = 1;
++    owner.mbr_checksum_available = 0;
++    result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++    CHECK(result.outcome == IG_SUCCESS);
++    CHECK(memcmp(output + 32, signature_only, 24) == 0);
++}
++
++/* Catches coercing the caller-required Xbox style to a public MBR/GPT
++ * interpretation, or leaking stale identity bytes for the custom style. */
++static void test_brfr_empty_identity(void)
++{
++    const unsigned char brfr[24] = { 24, 0, 0, 0, 128 };
++    struct ig_lower_response lower = lower_for(base, sizeof(base));
++    struct ig_owner_snapshot owner = mbr_owner();
++    unsigned char output[112];
++    struct ig_result result;
++    owner.partition_style = IG_PARTITION_BRFR;
++    memset(owner.gpt_disk_id, 0xee, sizeof(owner.gpt_disk_id));
++    result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++    CHECK(result.outcome == IG_SUCCESS);
++    CHECK(result.initialized_bytes == 112);
++    CHECK(memcmp(output + 32, brfr, 24) == 0);
++}
++
++static void expect_unchanged_failure(struct ig_lower_response *lower,
++                                     struct ig_owner_snapshot *owner,
++                                     enum ig_outcome outcome)
++{
++    unsigned char output[128];
++    unsigned char sentinel[128];
++    struct ig_result result;
++    memset(output, 0xa5, sizeof(output));
++    memset(sentinel, 0xa5, sizeof(sentinel));
++    result = ig_compose_geometry(lower, owner, output, sizeof(output));
++    CHECK(result.outcome == outcome);
++    CHECK(result.initialized_bytes == 0);
++    CHECK(result.lower_status == (lower ? lower->status : 0));
++    CHECK(memcmp(output, sentinel, sizeof(output)) == 0);
++}
++
++/* Catches ignoring lower failures, reading a failed response, admitting
++ * pending as success, and stale success after a formerly valid query. */
++static void test_lower_status(void)
++{
++    const ig_u32 statuses[] = { 0xc00000a3u, 0xc0000001u, 0x80000005u };
++    struct ig_lower_response lower = lower_for(base, sizeof(base));
++    struct ig_owner_snapshot owner = mbr_owner();
++    unsigned char output[112];
++    struct ig_result result;
++    size_t index;
++    result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++    CHECK(result.outcome == IG_SUCCESS);
++    for (index = 0; index < sizeof(statuses) / sizeof(statuses[0]); ++index) {
++        lower.status = statuses[index];
++        lower.buffer = NULL;
++        lower.buffer_bytes = 0;
++        lower.returned_bytes = 999;
++        expect_unchanged_failure(&lower, &owner, IG_LOWER_FAILURE);
++    }
++    lower.status = 0x103u;
++    expect_unchanged_failure(&lower, &owner, IG_LOWER_NOT_COMPLETE);
++    lower.status = 1;
++    expect_unchanged_failure(&lower, &owner, IG_LOWER_NOT_COMPLETE);
++}
++
++/* Catches trusting an impossible initialized count or short lower base. */
++static void test_lower_counts(void)
++{
++    struct ig_lower_response lower = lower_for(base, sizeof(base));
++    struct ig_owner_snapshot owner = mbr_owner();
++    size_t count;
++    for (count = 0; count < 32; ++count) {
++        lower.returned_bytes = count;
++        expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    }
++    lower.returned_bytes = 33;
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    lower.returned_bytes = (size_t)-1;
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    lower.returned_bytes = 32;
++    lower.buffer_bytes = 31;
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    lower.buffer_bytes = 32;
++    lower.buffer = NULL;
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++}
++
++/* Catches emitting zero/negative/unaligned capacity, invalid sector size,
++ * and malformed CHS without touching the output on error. */
++static void test_invalid_geometry(void)
++{
++    const unsigned char invalid_sectors[][4] = {
++        { 0, 0, 0, 0 }, { 1, 0, 0, 0 }, { 64, 0, 0, 0 },
++        { 0xe8, 3, 0, 0 }, { 0, 0, 2, 0 }, { 0xff, 0xff, 0xff, 0xff }
++    };
++    struct ig_owner_snapshot owner = mbr_owner();
++    unsigned char bytes[32];
++    struct ig_lower_response lower = lower_for(bytes, sizeof(bytes));
++    size_t index;
++    for (index = 0; index < sizeof(invalid_sectors) / 4; ++index) {
++        memcpy(bytes, base, 32);
++        memcpy(bytes + 20, invalid_sectors[index], 4);
++        expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    }
++    memcpy(bytes, base, 32);
++    memset(bytes + 24, 0, 8);
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    memset(bytes + 24, 0xff, 8);
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    memcpy(bytes, base, 32);
++    bytes[24] = 1;
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    memcpy(bytes, base, 32);
++    memset(bytes, 0xff, 8);
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    memcpy(bytes, base, 32);
++    memset(bytes + 12, 0, 4);
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++    memcpy(bytes, base, 32);
++    memset(bytes + 16, 0, 4);
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_LOWER);
++}
++
++/* Catches imposing CHS-derived capacity or rejecting supported sector
++ * endpoints, zero cylinders, and a positive capacity above 32 bits. */
++static void test_exact_capacity_and_sector_endpoints(void)
++{
++    const unsigned char sectors[][4] = { { 128, 0, 0, 0 }, { 0, 0, 1, 0 } };
++    unsigned char bytes[32];
++    unsigned char output[32];
++    struct ig_owner_snapshot owner = mbr_owner();
++    struct ig_lower_response lower = lower_for(bytes, sizeof(bytes));
++    struct ig_result result;
++    size_t index;
++    for (index = 0; index < 2; ++index) {
++        memcpy(bytes, base, 32);
++        memset(bytes, 0, 8);
++        memcpy(bytes + 20, sectors[index], 4);
++        bytes[28] = 1; /* exact capacity 0x0000000100100000 */
++        result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++        CHECK(result.outcome == IG_SUCCESS);
++        CHECK(result.initialized_bytes == 32);
++        CHECK(memcmp(output, bytes, 32) == 0);
++    }
++}
++
++/* Catches silently coercing unsupported style/flags or dereferencing
++ * missing required inputs. */
++static void test_invalid_snapshot_and_arguments(void)
++{
++    struct ig_lower_response lower = lower_for(base, sizeof(base));
++    struct ig_owner_snapshot owner = mbr_owner();
++    struct ig_result result;
++    expect_unchanged_failure(NULL, &owner, IG_INVALID_ARGUMENT);
++    expect_unchanged_failure(&lower, NULL, IG_INVALID_ARGUMENT);
++    owner.partition_style = 127;
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_SNAPSHOT);
++    owner.partition_style = 0xffffffffu;
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_SNAPSHOT);
++    owner = mbr_owner();
++    owner.identity_available = 2;
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_SNAPSHOT);
++    owner = mbr_owner();
++    owner.mbr_checksum_available = 2;
++    expect_unchanged_failure(&lower, &owner, IG_INVALID_SNAPSHOT);
++    owner = mbr_owner();
++    result = ig_compose_geometry(&lower, &owner, NULL, 32);
++    CHECK(result.outcome == IG_INVALID_ARGUMENT);
++    CHECK(result.initialized_bytes == 0);
++    result = ig_compose_geometry(NULL, NULL, NULL, 0);
++    CHECK(result.outcome == IG_BUFFER_TOO_SMALL);
++    CHECK(result.initialized_bytes == 0);
++}
++
++/* Catches accidentally forwarding a lower optional tail or treating spare
++ * initialized lower bytes as a BIOS detection contract. */
++static void test_explicit_no_detection_policy(void)
++{
++    unsigned char lower_bytes[200];
++    unsigned char output[112];
++    const unsigned char no_detection[56] = { 56 };
++    struct ig_lower_response lower = lower_for(lower_bytes, sizeof(lower_bytes));
++    struct ig_owner_snapshot owner = mbr_owner();
++    struct ig_result result;
++    memset(lower_bytes, 0xf3, sizeof(lower_bytes));
++    memcpy(lower_bytes, base, 32);
++    result = ig_compose_geometry(&lower, &owner, output, sizeof(output));
++    CHECK(result.outcome == IG_SUCCESS);
++    CHECK(result.initialized_bytes == 112);
++    CHECK(memcmp(output + 56, no_detection, 56) == 0);
++}
++
++/* Catches writing the output before capturing an overlapping lower base.
++ * Also deliberately uses unaligned byte storage for lower/output data. */
++static void test_aliasing(void)
++{
++    unsigned char storage[160];
++    const unsigned char expected_base[32] = {
++        7, 0, 0, 0, 0, 0, 0, 0,
++        12, 0, 0, 0, 3, 0, 0, 0,
++        11, 0, 0, 0, 0, 2, 0, 0,
++        0, 0, 16, 0, 0, 0, 0, 0
++    };
++    struct ig_lower_response lower;
++    struct ig_owner_snapshot owner = mbr_owner();
++    struct ig_result result;
++    memset(storage, 0xa5, sizeof(storage));
++    memcpy(storage + 13, base, 32);
++    lower = lower_for(storage + 13, 32);
++    result = ig_compose_geometry(&lower, &owner, storage + 1, 112);
++    CHECK(result.outcome == IG_SUCCESS);
++    CHECK(memcmp(storage + 1, expected_base, 32) == 0);
++    CHECK(storage[0] == 0xa5);
++    CHECK(storage[113] == 0xa5);
++}
++
++struct concurrent_case {
++    struct ig_owner_snapshot owner;
++    unsigned char expected_partition[24];
++    unsigned failed;
++};
++
++static void *compose_many(void *argument)
++{
++    struct concurrent_case *fixture = argument;
++    struct ig_lower_response lower = lower_for(base, sizeof(base));
++    unsigned iteration;
++    for (iteration = 0; iteration < 10000; ++iteration) {
++        unsigned char output[112];
++        struct ig_result result = ig_compose_geometry(
++            &lower, &fixture->owner, output, sizeof(output));
++        if (result.outcome != IG_SUCCESS || result.initialized_bytes != 112 ||
++            memcmp(output, base, 32) != 0 ||
++            memcmp(output + 32, fixture->expected_partition, 24) != 0) {
++            fixture->failed = 1;
++            break;
++        }
++    }
++    return NULL;
++}
++
++/* Catches mutable global scratch space or retained metadata shared across
++ * independent concurrent calls. Each input is already a stable snapshot. */
++static void test_concurrent_immutable_snapshots(void)
++{
++    const unsigned char partitions[4][24] = {
++        { 24, 0, 0, 0, 0, 0, 0, 0,
++          0x40, 0x30, 0x20, 0x10, 0x80, 0x70, 0x60, 0x50 },
++        { 24, 0, 0, 0, 1, 0, 0, 0,
++          1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 },
++        { 24, 0, 0, 0, 2 },
++        { 24, 0, 0, 0, 128 }
++    };
++    const unsigned styles[4] = { 0, 1, 2, 128 };
++    struct concurrent_case fixtures[4];
++    pthread_t threads[4];
++    unsigned created = 0;
++    unsigned index;
++    memset(fixtures, 0, sizeof(fixtures));
++    for (index = 0; index < 4; ++index) {
++        fixtures[index].owner.partition_style = styles[index];
++        fixtures[index].owner.identity_available = 1;
++        fixtures[index].owner.mbr_checksum_available = 1;
++        fixtures[index].owner.mbr_signature = 0x10203040;
++        fixtures[index].owner.mbr_checksum = 0x50607080;
++        memcpy(fixtures[index].owner.gpt_disk_id, partitions[1] + 8, 16);
++        memcpy(fixtures[index].expected_partition, partitions[index], 24);
++        if (pthread_create(&threads[index], NULL, compose_many, &fixtures[index]) != 0) {
++            CHECK(0);
++            break;
++        }
++        ++created;
++    }
++    for (index = 0; index < created; ++index) {
++        CHECK(pthread_join(threads[index], NULL) == 0);
++        CHECK(fixtures[index].failed == 0);
++    }
++}
++
++int main(void)
++{
++    test_output_boundaries();
++    test_unavailable_optional_prefixes();
++    test_snapshot_styles();
++    test_independent_mbr_availability();
++    test_brfr_empty_identity();
++    test_lower_status();
++    test_lower_counts();
++    test_invalid_geometry();
++    test_exact_capacity_and_sector_endpoints();
++    test_invalid_snapshot_and_arguments();
++    test_explicit_no_detection_policy();
++    test_aliasing();
++    test_concurrent_immutable_snapshots();
++    if (failures) {
++        fprintf(stderr, "%u failed assertions / %u checks\n", failures, checks);
++        return EXIT_FAILURE;
++    }
++    printf("PASS: 13 scenarios, %u checks\n", checks);
++    return EXIT_SUCCESS;
++}

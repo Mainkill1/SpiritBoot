@@ -1,0 +1,128 @@
+--- a/ntoskrnl/ex/sem.c
++++ b/ntoskrnl/ex/sem.c
+@@ -258,116 +258,125 @@
+     /* Get the Object */
+     Status = ObReferenceObjectByHandle(SemaphoreHandle,
+                                        SEMAPHORE_QUERY_STATE,
+                                        ExSemaphoreObjectType,
+                                        PreviousMode,
+                                        (PVOID*)&Semaphore,
+                                        NULL);
+ 
+     /* Check for success */
+     if (NT_SUCCESS(Status))
+     {
+         /* Entry SEH Block */
+         _SEH2_TRY
+         {
+             PSEMAPHORE_BASIC_INFORMATION BasicInfo =
+                 (PSEMAPHORE_BASIC_INFORMATION)SemaphoreInformation;
+ 
+             /* Return the basic information */
+             BasicInfo->CurrentCount = KeReadStateSemaphore(Semaphore);
+             BasicInfo->MaximumCount = Semaphore->Limit;
+ 
+             /* Return the length */
+             if (ReturnLength) *ReturnLength = sizeof(*BasicInfo);
+         }
+         _SEH2_EXCEPT(ExSystemExceptionFilter())
+         {
+             /* Get the exception code */
+             Status = _SEH2_GetExceptionCode();
+         }
+         _SEH2_END;
+ 
+         /* Dereference the Object */
+         ObDereferenceObject(Semaphore);
+    }
+ 
+    /* Return status */
+    return Status;
+ }
+ 
+ /*
+  * @implemented
+  */
+ NTSTATUS
+ NTAPI
+ NtReleaseSemaphore(IN HANDLE SemaphoreHandle,
+                    IN LONG ReleaseCount,
+                    OUT PLONG PreviousCount OPTIONAL)
+ {
+     KPROCESSOR_MODE PreviousMode = ExGetPreviousMode();
+     PKSEMAPHORE Semaphore;
+     NTSTATUS Status;
+     PAGED_CODE();
+ 
+     /* Check if we were called from user-mode */
+     if ((PreviousCount) && (PreviousMode != KernelMode))
+     {
+         /* Entry SEH Block */
+         _SEH2_TRY
+         {
+             /* Make sure the state pointer is valid */
+             ProbeForWriteLong(PreviousCount);
+          }
+         _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
+         {
+             /* Return the exception code */
+             _SEH2_YIELD(return _SEH2_GetExceptionCode());
+         }
+         _SEH2_END;
+     }
+ 
+     /* Make sure count makes sense */
+     if (ReleaseCount <= 0)
+     {
+         DPRINT("Invalid Release Count\n");
+         return STATUS_INVALID_PARAMETER;
+     }
+ 
+     /* Get the Object */
+     Status = ObReferenceObjectByHandle(SemaphoreHandle,
+                                        SEMAPHORE_MODIFY_STATE,
+                                        ExSemaphoreObjectType,
+                                        PreviousMode,
+                                        (PVOID*)&Semaphore,
+                                        NULL);
+ 
+     /* Check for success */
+     if (NT_SUCCESS(Status))
+     {
+         /* Enter SEH Block */
+         _SEH2_TRY
+         {
+             /* Release the semaphore */
+             LONG PrevCount = KeReleaseSemaphore(Semaphore,
+                                                 IO_NO_INCREMENT,
+                                                 ReleaseCount,
+                                                 FALSE);
+ 
+             /* Return the old count if requested */
+             if (PreviousCount) *PreviousCount = PrevCount;
+         }
++#ifdef SARCH_XBOX
++        /* Title calls enter in KernelMode, but the Xbox Nt API returns the
++         * documented semaphore overflow status. Keep the limit check inside
++         * KeReleaseSemaphore's dispatcher lock; other kernel faults retain
++         * their normal exception propagation. */
++        _SEH2_EXCEPT(_SEH2_GetExceptionCode() == STATUS_SEMAPHORE_LIMIT_EXCEEDED ?
++                     EXCEPTION_EXECUTE_HANDLER : ExSystemExceptionFilter())
++#else
+         _SEH2_EXCEPT(ExSystemExceptionFilter())
++#endif
+         {
+             /* Get the exception code */
+             Status = _SEH2_GetExceptionCode();
+         }
+         _SEH2_END;
+ 
+         /* Dereference the Semaphore */
+         ObDereferenceObject(Semaphore);
+     }
+ 
+     /* Return Status */
+     return Status;
+ }
+ 
+ /* EOF */

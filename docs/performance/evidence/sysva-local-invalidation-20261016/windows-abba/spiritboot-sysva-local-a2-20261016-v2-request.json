@@ -1,0 +1,216 @@
+{
+  "id": "spiritboot-sysva-local-a2-20261016-v2",
+  "files": [
+    {
+      "Path": "flash.bin",
+      "Length": 524288,
+      "Sha256": "e7c70bbdc2b766c397bff4119cc65cdc2629dfe4e9f8ff21e922d0e869bf2326",
+      "Executable": false
+    },
+    {
+      "Path": "native-launch.exe",
+      "Length": 96256,
+      "Sha256": "95af55de843e8aa2af9155d870adca277e4e93a56f8ebdfb401b9c5be23d7f94",
+      "Executable": true
+    },
+    {
+      "Path": "qemu.exe",
+      "Length": 37139563,
+      "Sha256": "75a2abdd708ed761b8ba5d95cb5f37b259567d5434e7d499dad3952d5d8505f6",
+      "Executable": true
+    },
+    {
+      "Path": "state/eeprom.bin",
+      "Length": 256,
+      "Sha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5",
+      "Executable": false
+    },
+    {
+      "Path": "xemu.toml",
+      "Length": 596,
+      "Sha256": "60ad884ddd5d32add17bee47b2d6106d2cfec8190d5cdda494b299fcc1e1cf9c",
+      "Executable": false
+    },
+    {
+      "Path": "game.iso",
+      "Length": 655360,
+      "Sha256": "f7c7b0e6941a7d86a9f79b19a248efd10a04e6ff38c48dad4f5ceaca18f9049b",
+      "Executable": false
+    }
+  ],
+  "job": {
+    "id": "spiritboot-sysva-local-a2-20261016-v2",
+    "targetOs": "windows",
+    "executable": "native-launch.exe",
+    "expectedExecutableSha256": "95af55de843e8aa2af9155d870adca277e4e93a56f8ebdfb401b9c5be23d7f94",
+    "arguments": [
+      "-config_path",
+      "{packageDir}/xemu.toml",
+      "-m",
+      "64",
+      "-device",
+      "lpc47m157",
+      "-serial",
+      "file:{resultDir}/native-serial.log",
+      "-no-shutdown"
+    ],
+    "environment": {
+      "PR248_NATIVE_PACKAGE": "{packageDir}",
+      "PR248_NATIVE_EVIDENCE": "{resultDir}",
+      "SB_GAME": "conker",
+      "SB_BIOS_ARM": "xdvdfs-on-c",
+      "SB_MODE": "profile",
+      "SB_SAMPLE_SECONDS": "60",
+      "XEMU_FRAME_LOG": "{resultDir}/guest-frames.log",
+      "XEMU_FLIP_LOG": "{resultDir}/guest-flips.log",
+      "DISABLE_RTSS_LAYER": "1",
+      "DISABLE_VULKAN_OBS_CAPTURE": "1"
+    },
+    "workingDirectory": ".",
+    "launchMode": "direct",
+    "timeoutSeconds": 300,
+    "startPaused": false,
+    "requireInput": false,
+    "requiredFiles": [
+      "flash.bin",
+      "native-launch.exe",
+      "qemu.exe",
+      "state/eeprom.bin",
+      "xemu.toml",
+      "game.iso"
+    ],
+    "inputs": [
+      {
+        "path": "flash.bin",
+        "hash": true,
+        "expectedSha256": "e7c70bbdc2b766c397bff4119cc65cdc2629dfe4e9f8ff21e922d0e869bf2326",
+        "role": "diagnostic-input"
+      },
+      {
+        "path": "native-launch.exe",
+        "hash": true,
+        "expectedSha256": "95af55de843e8aa2af9155d870adca277e4e93a56f8ebdfb401b9c5be23d7f94",
+        "role": "diagnostic-input"
+      },
+      {
+        "path": "qemu.exe",
+        "hash": true,
+        "expectedSha256": "75a2abdd708ed761b8ba5d95cb5f37b259567d5434e7d499dad3952d5d8505f6",
+        "role": "emulator"
+      },
+      {
+        "path": "state/eeprom.bin",
+        "hash": true,
+        "expectedSha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5",
+        "role": "diagnostic-input"
+      },
+      {
+        "path": "xemu.toml",
+        "hash": true,
+        "expectedSha256": "60ad884ddd5d32add17bee47b2d6106d2cfec8190d5cdda494b299fcc1e1cf9c",
+        "role": "diagnostic-input"
+      },
+      {
+        "path": "game.iso",
+        "hash": true,
+        "expectedSha256": "f7c7b0e6941a7d86a9f79b19a248efd10a04e6ff38c48dad4f5ceaca18f9049b",
+        "role": "native-regression-input"
+      }
+    ],
+    "tags": [
+      "SPIRITBOOT-SYSVA-SUSTAINED-ABBA",
+      "USER-POWERSHELL-PIPE",
+      "RELEASE64",
+      "POSITION:A2",
+      "ARM:control",
+      "ITERATIONS:1048576",
+      "SAMPLES:4"
+    ],
+    "operations": {
+      "mode": "diagnostic",
+      "allowDiagnostics": false,
+      "allowManualInput": false,
+      "allowPauseResume": false,
+      "allowPreview": false,
+      "allowBulkTransfers": false
+    },
+    "diagnostics": [],
+    "plan": [
+      {
+        "type": "wait_for_artifact",
+        "condition": {
+          "path": "native-serial.log",
+          "scope": "result",
+          "mustExist": true,
+          "containsText": "== kernel-performance end PASS =="
+        },
+        "pollIntervalMs": 100,
+        "timeoutMs": 240000
+      },
+      {
+        "type": "wait",
+        "delayMs": 500
+      },
+      {
+        "type": "quit"
+      }
+    ],
+    "runtimeState": {
+      "enabled": true,
+      "files": [
+        {
+          "source": "state/eeprom.bin",
+          "destination": "eeprom.bin",
+          "expectedSha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5"
+        }
+      ],
+      "diskAssets": [
+        {
+          "assetId": "pr256-clean-fatx-compat010-v1",
+          "destination": "hdd.qcow2",
+          "expectedSha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+          "retention": "deleteAfterEvidence"
+        }
+      ],
+      "keepOnSuccess": false,
+      "keepOnFailure": true,
+      "isolation": {
+        "cacheMode": "cold",
+        "cacheShaders": false,
+        "driverCache": "uncontrolled",
+        "allowUncontrolledDriverCache": true,
+        "requirePrivateGuestState": true,
+        "maximumBytes": 536870912,
+        "maximumFiles": 8192,
+        "deadlineSeconds": 30,
+        "readOnlyAssets": [
+          {
+            "field": "bootrom_path",
+            "assetId": "devbox-mcpx10-readonly-v1",
+            "expectedSha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335"
+          }
+        ]
+      }
+    },
+    "workload": {
+      "requirePlanCompletion": true
+    },
+    "experiment": {
+      "id": "spiritboot-sysva-local-invalidation-20261016",
+      "variant": "control",
+      "reference": "control",
+      "variedFactors": [
+        "bios"
+      ],
+      "controlledFactors": [
+        "fixture",
+        "xemu",
+        "config",
+        "eeprom",
+        "hdd",
+        "host",
+        "release-build"
+      ]
+    }
+  }
+}

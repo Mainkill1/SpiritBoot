@@ -1,0 +1,215 @@
+diff --git a/ntoskrnl/xb/mm/pagesupply.c b/ntoskrnl/xb/mm/pagesupply.c
+index e9e32fc7..4eb21372 100644
+--- a/ntoskrnl/xb/mm/pagesupply.c
++++ b/ntoskrnl/xb/mm/pagesupply.c
+@@ -342,13 +342,18 @@ NxkPageSupplyReturn(PFN_NUMBER Page)
+ /* Callers hold the PFN lock, including translation of buffer VAs, so
+  * relocation cannot race a pin. Overflow latches a permanent pin until reboot:
+  * VOID lock cannot report failure, so discarding an extra lock is unsafe. */
+-BOOLEAN NxkPageSupplyCanPin(PFN_NUMBER Page, BOOLEAN Unlock)
++static __inline__ __attribute__((__always_inline__))
++BOOLEAN NxpCanPin(PFN_NUMBER Page, BOOLEAN Unlock)
+ {
+     if (NxpLinks == NULL || Page == 0 || Page > NxpHighestPfn ||
+         (NxpLinks[Page] & NXP_FREE)) return FALSE;
+     return Unlock ? (NxpPins[Page] & (NXP_PIN_LIMIT | NXP_PIN_OVERFLOW)) != 0 :
+                     !(NxpPins[Page] & NXP_RETURN_PENDING);
+ }
++BOOLEAN NxkPageSupplyCanPin(PFN_NUMBER Page, BOOLEAN Unlock)
++{
++    return NxpCanPin(Page, Unlock);
++}
+ BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER Page)
+ {
+     return NxpLinks != NULL && Page > 0 && Page <= NxpHighestPfn &&
+@@ -357,7 +362,7 @@ BOOLEAN NxkPageSupplyIsPinned(PFN_NUMBER Page)
+ VOID NxkPageSupplyPin(PFN_NUMBER Page, BOOLEAN Unlock)
+ {
+     MI_ASSERT_PFN_LOCK_HELD();
+-    if (!NxkPageSupplyCanPin(Page, Unlock)) return;
++    if (!NxpCanPin(Page, Unlock)) return;
+     if (NxpPins[Page] & NXP_PIN_OVERFLOW) return;
+     if (Unlock) {
+         --NxpPins[Page];
+diff --git a/ntoskrnl/xb/scattergather.c b/ntoskrnl/xb/scattergather.c
+index 885a78ae..45380294 100644
+--- a/ntoskrnl/xb/scattergather.c
++++ b/ntoskrnl/xb/scattergather.c
+@@ -177,7 +177,7 @@ static NTSTATUS XbScatterGather(BOOLEAN Write, HANDLE FileHandle, HANDLE Event,
+         if (!NxkPageSupplyCanPin(pfn, FALSE)) {
+             MiReleasePfnLock(pfnIrql); status = STATUS_INVALID_PARAMETER; goto fail;
+         }
+-        NxkPageSupplyPin(pfn, FALSE);
++        NxkPageSupplyCommitPin(pfn);
+ #endif
+         r->Pages[i].Buffer = page; r->Pages[i].Pfn = pfn; ++r->Count;
+         MiReleasePfnLock(pfnIrql);
+diff --git a/tests/host/dma-lifetime/fixture.c b/tests/host/dma-lifetime/fixture.c
+index 36dc8b9a..228fe407 100644
+--- a/tests/host/dma-lifetime/fixture.c
++++ b/tests/host/dma-lifetime/fixture.c
+@@ -90,6 +90,8 @@ static FILE_OBJECT file;
+ static int IoFileObjectType, ExEventObjectType;
+ static ULONG next_pfn, bad, cases, irps, mdls, refs, locks, allocations;
+ static int pfn_locked, fail_irp, fail_mdl, fail_pool, pool_calls;
++static unsigned can_pin_calls, commit_pin_calls, lock_pin_calls, unlock_pin_calls;
++static unsigned reject_pin_call;
+ static unsigned map_calls, unmap_calls;
+ static int fail_map, fail_mdl_once, skew_mdl_once, force_uncached;
+ static ULONG fake_pde[1024],fake_pte[1024*1024];
+@@ -123,9 +125,16 @@ static uintptr_t NxMmGetPhysicalAddress(void *p) {
+     uintptr_t va=(uintptr_t)p; return ((*pte_for(va&~(PAGE_SIZE-1))>>12)*PAGE_SIZE)+(va&(PAGE_SIZE-1));
+ }
+ static int NxMmIsAddressValid(void *p) { return p!=NULL; }
+-static int NxkPageSupplyCanPin(PFN_NUMBER p, int unpin) { (void)unpin; return p>0&&p<256; }
++static int NxkPageSupplyCanPin(PFN_NUMBER p, int unpin) {
++    (void)unpin; ++can_pin_calls;
++    return p>0&&p<256&&(!reject_pin_call||can_pin_calls!=reject_pin_call);
++}
+ static void NxkPageSupplyPin(PFN_NUMBER p, int unpin) {
+-    assert(pfn_locked); if(unpin){assert(frames[p].pins);--frames[p].pins;} else ++frames[p].pins;
++    assert(pfn_locked); if(unpin){++unlock_pin_calls;assert(frames[p].pins);--frames[p].pins;}
++    else {++lock_pin_calls;++frames[p].pins;}
++}
++static void NxkPageSupplyCommitPin(PFN_NUMBER p) {
++    assert(pfn_locked);++commit_pin_calls;++frames[p].pins;
+ }
+ static void *ExAllocatePoolWithTag(int kind, size_t n, int tag) {
+     (void)kind;(void)tag; if(++pool_calls==fail_pool)return NULL;
+@@ -235,6 +244,7 @@ static void reset(void){
+     assert(!allocations&&!irps&&!mdls&&!refs&&!locks&&!pfn_locked);
+     for(unsigned i=1;i<=pages;i++){assert(!frames[i].pins);free(frames[i].orphan);}
+     memset(frames,0,sizeof(frames));pages=next_pfn=0;pool_calls=0;fail_pool=fail_mdl=fail_irp=delayed=fail_map=0;map_calls=unmap_calls=mdl_calls=0;fail_mdl_once=skew_mdl_once=force_uncached=0;allocated_bytes=copy_bytes=0;pending=NULL;completion_status=0;
++    can_pin_calls=commit_pin_calls=lock_pin_calls=unlock_pin_calls=reject_pin_call=0;
+     file.Flags=FO_NO_INTERMEDIATE_BUFFERING;
+ }
+ static void check_scatter(int write,int delay,NTSTATUS outcome,int failure,ULONG length){
+@@ -247,8 +257,10 @@ static void check_scatter(int write,int delay,NTSTATUS outcome,int failure,ULONG
+     if(failure==1)fail_irp=1;
+     if(failure==2)fail_mdl=1;
+     if(failure==3)fail_pool=pool_calls+2;
++    if(failure==4)reject_pin_call=3;
+     NTSTATUS s=XbScatterGather(write,(void*)1,NULL,NULL,NULL,&iosb,segments,length,&offset);
+-    if(failure)assert(s==STATUS_INSUFFICIENT_RESOURCES);
++    if(failure==4)assert(s==STATUS_INVALID_PARAMETER);
++    else if(failure)assert(s==STATUS_INSUFFICIENT_RESOURCES);
+     else{
+         if(delay){assert(s==STATUS_PENDING&&pending);if(write)memset(caller,0xee,length);attempt_relocation(pending->MdlAddress);finish_irp(pending);pending=NULL;}
+         assert(iosb.Status==outcome);
+@@ -256,6 +268,11 @@ static void check_scatter(int write,int delay,NTSTATUS outcome,int failure,ULONG
+     }
+     assert(allocations==1&&!irps&&!mdls&&!refs&&!locks);
+     for(unsigned i=1;i<=pages;i++)assert(!frames[i].pins);
++    unsigned page_count=(length+PAGE_SIZE-1)/PAGE_SIZE;
++    unsigned expected_checks=failure==4?3:page_count;
++    unsigned expected_commits=failure==4?2:page_count;
++    assert(can_pin_calls==expected_checks&&commit_pin_calls==expected_commits);
++    assert(lock_pin_calls==0&&unlock_pin_calls==expected_commits);
+     ExFreePoolWithTag(caller,0);++cases;
+ }
+ static void check_paging(int write,int delay,NTSTATUS outcome,int failure){
+@@ -315,7 +332,7 @@ int main(void){
+     for(unsigned f=1;f<=6;f++)for(unsigned d=0;d<2;d++)check_sync_work(f,d,STATUS_SUCCESS,65536);
+     for(unsigned w=0;w<2;w++)for(unsigned d=0;d<2;d++)for(unsigned o=0;o<3;o++)for(unsigned n=0;n<4;n++)check_scatter(w,d,outcomes[o],0,lengths[n]);
+     check_scatter(0,0,STATUS_SUCCESS,0,0);check_scatter(1,0,STATUS_SUCCESS,0,0);
+-    for(unsigned f=1;f<=3;f++)check_scatter(0,0,0,f,4608);
++    for(unsigned f=1;f<=4;f++)check_scatter(0,0,0,f,12288);
+     for(unsigned w=0;w<2;w++)for(unsigned d=0;d<2;d++)for(unsigned o=0;o<3;o++)check_paging(w,d,outcomes[o],0);
+     check_paging(0,0,0,1);reset();
+     if(bad){fprintf(stderr,"FAIL: %u relocation/payload violations across %u cases\n",bad,cases);return 1;}
+diff --git a/tests/host/kernel-performance/pins.py b/tests/host/kernel-performance/pins.py
+index 5fa4eb35..fe523d96 100644
+--- a/tests/host/kernel-performance/pins.py
++++ b/tests/host/kernel-performance/pins.py
+@@ -11,8 +11,10 @@ api = (root / 'ntoskrnl/xb/mm/api.c').read_text()
+ body = supply[:supply.index('/*\n * Frame ownership:')] + '\n#endif\n'
+ body += supply[supply.index('BOOLEAN\nNxkPageSupplyIsFree'):supply.index('BOOLEAN\nNxkPageSupplyTakeSpecific')]
+ body += api[api.index('/* LOCK / UNLOCK '):api.index('/* QUERIES ')]
+-body = body.replace('BOOLEAN NxkPageSupplyCanPin(PFN_NUMBER Page, BOOLEAN Unlock)\n{',
+-                    'BOOLEAN NxkPageSupplyCanPin(PFN_NUMBER Page, BOOLEAN Unlock)\n{\n    ++can_pin_checks;')
++needle = ('static __inline__ __attribute__((__always_inline__))\n'
++          'BOOLEAN NxpCanPin(PFN_NUMBER Page, BOOLEAN Unlock)\n{')
++assert needle in body, 'private inline page-pin predicate is missing'
++body = body.replace(needle, needle + '\n    ++can_pin_checks;')
+ (output / 'pins-actual.inc').write_text(body)
+ diagnostics = ['-DDBG=1', '-DNXK_PIN_BATCH_DIAGNOSTICS'] if '--diagnostics' in sys.argv else []
+ subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra'] + diagnostics + ['-I' + str(here.parent / 'clean-room/include'), '-I' + str(output), '-I' + str(root / 'ntoskrnl/xb/mm'), str(here / 'pins.c'), '-o', str(output / 'pins')], check=True)
+diff --git a/tests/host/page-pin-hotpath/check.py b/tests/host/page-pin-hotpath/check.py
+new file mode 100644
+index 00000000..e1c24838
+--- /dev/null
++++ b/tests/host/page-pin-hotpath/check.py
+@@ -0,0 +1,51 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Keep validated page-pin commits on their single-check hot paths."""
++from pathlib import Path
++import re
++import sys
++
++root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parents[3]
++pages = (root / "ntoskrnl/xb/mm/pagesupply.c").read_text()
++scatter = (root / "ntoskrnl/xb/scattergather.c").read_text()
++
++
++def function(source, name):
++    match = re.search(r"(?:^|\n)(?:static\s+)?(?:__inline__\s+)?(?:__attribute__\(\([^)]*\)\)\s+)?(?:BOOLEAN|VOID)\s+" +
++                      re.escape(name) + r"\([^)]*\)\s*\{", source)
++    assert match, f"missing {name}"
++    start = match.start()
++    brace = source.index("{", match.start())
++    depth = 0
++    for index in range(brace, len(source)):
++        if source[index] == "{":
++            depth += 1
++        elif source[index] == "}":
++            depth -= 1
++            if depth == 0:
++                return source[start:index + 1]
++    raise AssertionError(f"unterminated {name}")
++
++
++assert "static __inline__ __attribute__((__always_inline__))\nBOOLEAN NxpCanPin(" in pages
++private = function(pages, "NxpCanPin")
++public = function(pages, "NxkPageSupplyCanPin")
++pin = function(pages, "NxkPageSupplyPin")
++try_unlock = function(pages, "NxkPageSupplyTryUnlock")
++assert "return NxpCanPin(Page, Unlock);" in public
++assert "NxpCanPin(Page, Unlock)" in pin
++assert "NxkPageSupplyCanPin" not in pin
++assert "NxkPageSupplyCanPin(Page, TRUE)" in try_unlock
++assert "NxpCanPin(Page, TRUE)" not in try_unlock
++assert "NxpLinks == NULL" in private and "Page > NxpHighestPfn" in private
++assert "NXP_FREE" in private and "NXP_RETURN_PENDING" in private
++
++sg_start = scatter.index("pfnIrql = MiAcquirePfnLock();")
++sg_end = scatter.index("r->Pages[i].Buffer = page;", sg_start)
++sg_end = scatter.index("MiReleasePfnLock(pfnIrql);", sg_end) + len("MiReleasePfnLock(pfnIrql);")
++sg = scatter[sg_start:sg_end]
++assert sg.count("NxkPageSupplyCanPin(pfn, FALSE)") == 1
++assert sg.count("NxkPageSupplyCommitPin(pfn)") == 1
++assert "NxkPageSupplyPin(pfn, FALSE)" not in sg
++assert sg.index("NxkPageSupplyCanPin") < sg.index("NxkPageSupplyCommitPin") < sg.rindex("MiReleasePfnLock")
++print("page-pin hot-path source checks: PASS")
+diff --git a/tests/host/system-va-raw/check.py b/tests/host/system-va-raw/check.py
+index 39cb304..3fd071b 100644
+--- a/tests/host/system-va-raw/check.py
++++ b/tests/host/system-va-raw/check.py
+@@ -21,7 +21,7 @@ spec = importlib.util.spec_from_file_location('extract', root/'tests/host/kernel
+ extract = importlib.util.module_from_spec(spec); spec.loader.exec_module(extract)
+ def function(source, name):
+     text = extract.function(source, name)
+-    signature = re.search(r'(?:static\s+)?(?:PFN_NUMBER|BOOLEAN|VOID|ULONG|PVOID|ULONG_PTR)\s+(?:NTAPI\s+)?' + name + r'\s*\(', text)
++    signature = re.search(r'(?:static\s+)?(?:__inline__\s+)?(?:__attribute__\(\([^)]*\)\)\s+)?(?:PFN_NUMBER|BOOLEAN|VOID|ULONG|PVOID|ULONG_PTR)\s+(?:NTAPI\s+)?' + name + r'\s*\(', text)
+     assert signature, name
+     return text[signature.start():]
+ supply = (root/'ntoskrnl/xb/mm/pagesupply.c').read_text()
+@@ -36,7 +36,7 @@ prefix = prefix.replace('    PULONG HeadPtr = NxpHeadFor(Page);',
+ names = ['NxkPageSupplyInitialize', 'NxkPageSupplyTakeAny', 'NxkPageSupplyTakeTitleAny',
+          'NxkPageSupplyTakeZero', 'NxkPageSupplyTakeTitleZero', 'NxkPageSupplyReturn',
+          'NxkPageSupplyIsFree', 'NxkPageSupplyTakeSpecific', 'NxkPageSupplySetOwner',
+-         'NxkPageSupplyGetOwner', 'NxkPageSupplyCanPin', 'NxkPageSupplyIsPinned',
++         'NxkPageSupplyGetOwner', 'NxpCanPin', 'NxkPageSupplyCanPin', 'NxkPageSupplyIsPinned',
+          'NxkPageSupplyPin']
+ if 'NxkPageSupplyTakeSystemBatch(' in supply:
+     names.append('NxkPageSupplyTakeSystemBatch')

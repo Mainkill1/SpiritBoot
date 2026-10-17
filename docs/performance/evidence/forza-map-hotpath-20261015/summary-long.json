@@ -1,0 +1,54 @@
+{
+  "build": "clang -O3 -DNDEBUG (release host)",
+  "workload": {
+    "queue_depth": 12,
+    "bytes_per_read": 4096,
+    "batches_per_sample": 1000000,
+    "samples_per_process_median": 5,
+    "operations_per_process": 60000000,
+    "process_runs": 3
+  },
+  "rows": [
+    {
+      "variant": "baseline",
+      "round": 1,
+      "ns_per_io": 182.9
+    },
+    {
+      "variant": "candidate",
+      "round": 1,
+      "ns_per_io": 141.42
+    },
+    {
+      "variant": "baseline",
+      "round": 2,
+      "ns_per_io": 183.02
+    },
+    {
+      "variant": "candidate",
+      "round": 2,
+      "ns_per_io": 137.35
+    },
+    {
+      "variant": "baseline",
+      "round": 3,
+      "ns_per_io": 182.3
+    },
+    {
+      "variant": "candidate",
+      "round": 3,
+      "ns_per_io": 136.65
+    }
+  ],
+  "baseline": {
+    "median_ns_per_io": 182.9,
+    "min": 182.3,
+    "max": 183.02
+  },
+  "candidate": {
+    "median_ns_per_io": 137.35,
+    "min": 136.65,
+    "max": 141.42
+  },
+  "improvement_percent": 24.90431930016403
+}

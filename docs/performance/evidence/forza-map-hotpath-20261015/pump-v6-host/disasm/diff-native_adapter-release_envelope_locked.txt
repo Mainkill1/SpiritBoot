@@ -1,0 +1,63 @@
+--- baseline
++++ v5
+@@ -1,29 +1,33 @@
+ 00000000 <FUNC>:
+-   0:	83 b8 18 02 00 00 00 	cmp    DWORD PTR [eax+0x218],0x0
+-   7:	74 4b                	je     54 <FUNC+0x54>
+-   9:	83 b8 04 02 00 00 00 	cmp    DWORD PTR [eax+0x204],0x0
+-  10:	75 42                	jne    54 <FUNC+0x54>
+-  12:	83 b8 08 02 00 00 00 	cmp    DWORD PTR [eax+0x208],0x0
+-  19:	75 39                	jne    54 <FUNC+0x54>
+-  1b:	55                   	push   ebp
+-  1c:	31 d2                	xor    edx,edx
+-  1e:	89 e5                	mov    ebp,esp
+-  20:	83 ec 10             	sub    esp,0x10
+-  23:	89 90 00 02 00 00    	mov    DWORD PTR [eax+0x200],edx
+-  29:	89 50 04             	mov    DWORD PTR [eax+0x4],edx
+-  2c:	89 90 10 02 00 00    	mov    DWORD PTR [eax+0x210],edx
+-  32:	89 90 14 02 00 00    	mov    DWORD PTR [eax+0x214],edx
+-  38:	89 54 24 08          	mov    DWORD PTR [esp+0x8],edx
+-  3c:	89 54 24 04          	mov    DWORD PTR [esp+0x4],edx
+-  40:	8b 00                	mov    eax,DWORD PTR [eax]
+-  42:	05 94 00 00 00       	add    eax,0x94
+-  47:	89 04 24             	mov    DWORD PTR [esp],eax
+-  4a:	e8 00 00 00 00       	call   4f <FUNC+0x4f>	4b: DISP32	KeSetEvent@12
+-  4f:	83 ec 0c             	sub    esp,0xc
+-  52:	c9                   	leave
+-  53:	c3                   	ret
+-  54:	c3                   	ret
+-  55:	90                   	nop
+-  56:	90                   	nop
+-  57:	90                   	nop
++   0:	83 b8 00 02 00 00 00 	cmp    DWORD PTR [eax+0x200],0x0
++   7:	74 6a                	je     73 <FUNC+0x73>
++   9:	83 b8 18 02 00 00 00 	cmp    DWORD PTR [eax+0x218],0x0
++  10:	74 61                	je     73 <FUNC+0x73>
++  12:	83 b8 04 02 00 00 00 	cmp    DWORD PTR [eax+0x204],0x0
++  19:	75 58                	jne    73 <FUNC+0x73>
++  1b:	83 b8 08 02 00 00 00 	cmp    DWORD PTR [eax+0x208],0x0
++  22:	75 4f                	jne    73 <FUNC+0x73>
++  24:	55                   	push   ebp
++  25:	31 d2                	xor    edx,edx
++  27:	89 e5                	mov    ebp,esp
++  29:	83 ec 10             	sub    esp,0x10
++  2c:	89 90 00 02 00 00    	mov    DWORD PTR [eax+0x200],edx
++  32:	89 50 04             	mov    DWORD PTR [eax+0x4],edx
++  35:	89 90 10 02 00 00    	mov    DWORD PTR [eax+0x210],edx
++  3b:	89 90 14 02 00 00    	mov    DWORD PTR [eax+0x214],edx
++  41:	8b 10                	mov    edx,DWORD PTR [eax]
++  43:	8b 8a 9c 00 00 00    	mov    ecx,DWORD PTR [edx+0x9c]
++  49:	89 88 94 05 00 00    	mov    DWORD PTR [eax+0x594],ecx
++  4f:	31 c9                	xor    ecx,ecx
++  51:	89 82 9c 00 00 00    	mov    DWORD PTR [edx+0x9c],eax
++  57:	89 4c 24 08          	mov    DWORD PTR [esp+0x8],ecx
++  5b:	89 4c 24 04          	mov    DWORD PTR [esp+0x4],ecx
++  5f:	8b 00                	mov    eax,DWORD PTR [eax]
++  61:	05 a8 00 00 00       	add    eax,0xa8
++  66:	89 04 24             	mov    DWORD PTR [esp],eax
++  69:	e8 00 00 00 00       	call   6e <FUNC+0x6e>	6a: DISP32	KeSetEvent@12
++  6e:	83 ec 0c             	sub    esp,0xc
++  71:	c9                   	leave
++  72:	c3                   	ret
++  73:	c3                   	ret
+ 

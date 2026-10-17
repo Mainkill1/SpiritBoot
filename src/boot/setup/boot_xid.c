@@ -102,6 +102,7 @@ bool sb_xid_decode_report(const uint8_t *r, size_t bytes, uint32_t *buttons)
     if (r[4]) out |= SB_A;
     if (r[5]) out |= SB_B;
     if (r[6]) out |= SB_X;
+    if (r[7]) out |= SB_Y;
     *buttons = out;
     return true;
 }

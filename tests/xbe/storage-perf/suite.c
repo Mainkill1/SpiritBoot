@@ -1,0 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later
+ * One selected public case per fresh process, using the runner's prepared
+ * private FATX plan slot. No guest network or shared disk editing. */
+#include <xboxkrnl/xboxkrnl.h>
+#include <stdio.h>
+#include <string.h>
+#include "tap.h"
+char storage_selected_id[96],storage_selected_base[96],storage_selected_cache[16];
+int storage_warmup_only;
+static char configuration[131073];
+int storage_pilot_main(void),storage_replay_main(void),storage_families_main(void);
+static int value(const char *start,const char *key,char *out,ULONG size){char token[80];snprintf(token,sizeof(token),"\"%s\"",key);const char *p=strstr(start,token);if(!p)return 0;p=strchr(p+strlen(token),':');if(!p)return 0;++p;while(*p==' '||*p=='\r'||*p=='\n'||*p=='\t')++p;if(*p++!='"')return 0;ULONG n=0;while(*p&&*p!='"'){if(n+1>=size||*p=='\\')return 0;out[n++]=*p++;}if(*p!='"')return 0;out[n]=0;return 1;}
+static void fail(const char *stage){tap_comment("STORAGE-PERF-ERROR stage=%s",stage);tap_drain();HalWriteSMBusValue(0x20,0x02,FALSE,0x80);for(;;)__asm__ __volatile__("hlt");}
+int main(void){const char *path="\\Device\\Harddisk0\\Partition1\\xemu_perf_tests\\xemu_perf_tests_config.json";ANSI_STRING n={(USHORT)strlen(path),(USHORT)(strlen(path)+1),(PCHAR)path};OBJECT_ATTRIBUTES oa={0};IO_STATUS_BLOCK io;memset(&io,0x5a,sizeof(io));HANDLE h=NULL;oa.ObjectName=&n;oa.Attributes=OBJ_CASE_INSENSITIVE;if(NtCreateFile(&h,GENERIC_READ|SYNCHRONIZE,&oa,&io,NULL,0,FILE_SHARE_READ,FILE_OPEN,FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE)!=0)fail("plan-open");LARGE_INTEGER at={0};memset(&io,0x5a,sizeof(io));NTSTATUS s=NtReadFile(h,NULL,NULL,NULL,&io,configuration,sizeof(configuration)-1,&at);NtClose(h);if(s!=0||io.Status!=0||io.Information==0||io.Information>=sizeof(configuration))fail("plan-read");configuration[io.Information]=0;const char *plan=strstr(configuration,"\"resolved_plan\"");const char *tests=plan?strstr(plan,"\"tests\""):NULL;if(!tests||!value(tests,"id",storage_selected_id,sizeof(storage_selected_id)))fail("plan-selection");const char *next=strstr(strstr(tests,"\"id\"")+4,"\"id\"");if(next)fail("plan-multiple-cases");char *separator=strrchr(storage_selected_id,'.');if(!separator)fail("plan-cache-suffix");ULONG base=separator-storage_selected_id;if(base>=sizeof(storage_selected_base))fail("plan-case-size");memcpy(storage_selected_base,storage_selected_id,base);storage_selected_base[base]=0;snprintf(storage_selected_cache,sizeof(storage_selected_cache),"%s",separator+1);if(strcmp(storage_selected_cache,"warm")&&strcmp(storage_selected_cache,"cold-ish"))fail("plan-cache-policy");tap_comment("STORAGE-PERF-SELECTION id=%s cache=%s fresh_case=1",storage_selected_id,storage_selected_cache);if(!strcmp(storage_selected_base,"small-hdd-read"))return storage_pilot_main();if(!strncmp(storage_selected_base,"fatx-",5))return storage_replay_main();return storage_families_main();}

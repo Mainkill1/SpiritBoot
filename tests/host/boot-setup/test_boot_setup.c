@@ -59,9 +59,9 @@ static void ohci_zero_length_checks_status_td(void) {
 }
 static void xid_report_decodes_menu_controls(void) {
     uint8_t report[20]={0}; uint32_t buttons=0;
-    report[1]=20; report[2]=0x15; report[4]=0xff; report[6]=1;
+    report[1]=20; report[2]=0x15; report[4]=0xff; report[6]=1; report[7]=1;
     assert(sb_xid_decode_report(report,sizeof(report),&buttons));
-    assert(buttons==(SB_START|SB_UP|SB_LEFT|SB_A|SB_X));
+    assert(buttons==(SB_START|SB_UP|SB_LEFT|SB_A|SB_X|SB_Y));
     report[1]=19;
     assert(!sb_xid_decode_report(report,sizeof(report),&buttons));
     assert(!sb_xid_decode_report(report,19,&buttons));
@@ -136,7 +136,7 @@ static SbCommitResult commit(void *ctx, const SbSettings *old,
     if (f->result==SB_COMMIT_UNCERTAIN) f->hardware.video=value->video ^ 1u;
     return f->result;
 }
-static SbSettings initial(void) { return (SbSettings){1,0x80000010u,0x40000000u}; }
+static SbSettings initial(void) { return (SbSettings){1,0x80000010u,0x40000000u,0}; }
 static void sample(SbSetup *s, uint32_t keys, uint32_t source, bool valid,
                    const SbSettingsStore *store) {
     sb_setup_input(s,input(0,source,keys,valid),store);
@@ -149,7 +149,7 @@ static void row(SbSetup *s, SbSetupRow target) {
     assert(s->row==target);
 }
 static void menu_starts_without_mutation(void) {
-    SbSetup s; SbSettings v={0,0xdeadbeef,0xbaadf00d};
+    SbSetup s; SbSettings v={0,0xdeadbeef,0xbaadf00d,0};
     sb_setup_open(&s,v,SB_ALL_FIELDS);
     assert(sb_setup_changed(&s)==0 && s.state==SB_MENU_EDIT);
     assert(memcmp(&s.edited,&v,sizeof(v))==0);
@@ -186,7 +186,7 @@ static void language_wrap_and_unknown_value(void) {
     SbSetup s; sb_setup_open(&s,initial(),SB_ALL_FIELDS);
     press(&s,SB_LEFT,NULL); assert(s.edited.language==9);
     press(&s,SB_RIGHT,NULL); assert(s.edited.language==1);
-    sb_setup_open(&s,(SbSettings){999,0,0},SB_ALL_FIELDS);
+    sb_setup_open(&s,(SbSettings){999,0,0,0},SB_ALL_FIELDS);
     press(&s,SB_RIGHT,NULL); assert(s.edited.language==1);
 }
 static void video_edit_preserves_unknown_bits(void) {
@@ -211,11 +211,99 @@ static void audio_edit_preserves_unknown_bits(void) {
     assert(s.edited.audio==(initial().audio|2u|0x30000u));
     assert(sb_setup_changed(&s)==SB_AUDIO_WORD);
 }
+static void advanced_cache_alias_is_session_only(void) {
+    Store f={0}; SbSettingsStore io={&f,commit}; SbSetup s; char text[32];
+    sb_setup_open(&s,initial(),SB_ALL_FIELDS); press(&s,SB_Y,&io);
+    assert(s.state==SB_MENU_ADVANCED && s.row==SB_ADVANCED_ALL);
+    press(&s,SB_DOWN,&io);
+    assert(s.state==SB_MENU_ADVANCED && s.row==SB_CONTIG_CACHE_ALIAS);
+    press(&s,SB_A,&io);
+    assert(s.edited.experimental==SB_EXPERIMENT_CONTIG_CACHE_ALIAS);
+    assert(sb_setup_changed(&s)==0);
+    sb_setup_field_value(&s,SB_CONTIG_CACHE_ALIAS,text,sizeof(text));
+    assert(strcmp(text,"On")==0);
+    press(&s,SB_B,&io);
+    assert(s.state==SB_MENU_EDIT && s.row==SB_LANGUAGE && f.calls==0);
+    assert(s.edited.experimental==SB_EXPERIMENT_CONTIG_CACHE_ALIAS);
+}
+static void advanced_xdvdfs_async_is_session_only(void) {
+    Store f={0}; SbSettingsStore io={&f,commit}; SbSetup s; char text[32];
+    sb_setup_open(&s,initial(),SB_ALL_FIELDS); press(&s,SB_Y,&io);
+    press(&s,SB_DOWN,&io); press(&s,SB_DOWN,&io);
+    assert(s.state==SB_MENU_ADVANCED && s.row==SB_XDVDFS_ASYNC);
+    press(&s,SB_A,&io);
+    assert(s.edited.experimental==SB_EXPERIMENT_XDVDFS_ASYNC);
+    assert(sb_setup_changed(&s)==0 && f.calls==0);
+    sb_setup_field_value(&s,SB_XDVDFS_ASYNC,text,sizeof(text));
+    assert(strcmp(text,"On")==0);
+    press(&s,SB_A,&io);
+    assert(s.edited.experimental==0);
+}
+static void advanced_all_toggle_is_explicit_and_session_only(void) {
+    Store f={0}; SbSettingsStore io={&f,commit}; SbSetup s; char text[32];
+    sb_setup_open(&s,initial(),SB_ALL_FIELDS); press(&s,SB_Y,&io);
+    assert(s.state==SB_MENU_ADVANCED && s.row==SB_ADVANCED_ALL);
+    sb_setup_field_value(&s,SB_ADVANCED_ALL,text,sizeof(text));
+    assert(strcmp(text,"Off")==0);
+    press(&s,SB_A,&io);
+    assert((s.edited.experimental & SB_EXPERIMENT_ADVANCED_ALL_MASK)==
+           SB_EXPERIMENT_ADVANCED_ALL_MASK);
+    assert(sb_setup_changed(&s)==0 && f.calls==0);
+    sb_setup_field_value(&s,SB_ADVANCED_ALL,text,sizeof(text));
+    assert(strcmp(text,"On")==0);
+    press(&s,SB_DOWN,&io);
+    press(&s,SB_A,&io);
+    press(&s,SB_UP,&io);
+    sb_setup_field_value(&s,SB_ADVANCED_ALL,text,sizeof(text));
+    assert(strcmp(text,"Mixed")==0);
+    press(&s,SB_A,&io);
+    assert((s.edited.experimental & SB_EXPERIMENT_ADVANCED_ALL_MASK)==
+           SB_EXPERIMENT_ADVANCED_ALL_MASK);
+    press(&s,SB_A,&io);
+    assert((s.edited.experimental & SB_EXPERIMENT_ADVANCED_ALL_MASK)==0);
+}
+static void advanced_ata_settle_is_explicit_and_session_only(void) {
+    Store f={0}; SbSettingsStore io={&f,commit}; SbSetup s; char text[32];
+    sb_setup_open(&s,initial(),SB_ALL_FIELDS);
+    press(&s,SB_Y,&io);
+    press(&s,SB_DOWN,&io);
+    press(&s,SB_DOWN,&io);
+    press(&s,SB_DOWN,&io);
+    assert(s.state==SB_MENU_ADVANCED && s.row==SB_ATA_STATUS_SETTLE);
+    sb_setup_field_value(&s,SB_ATA_STATUS_SETTLE,text,sizeof(text));
+    assert(strcmp(text,"Safe delay")==0);
+    assert((s.edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK)==0);
+    press(&s,SB_A,&io);
+    assert(s.edited.experimental==SB_EXPERIMENT_ATA_FORCE_ALL);
+    assert(sb_setup_changed(&s)==0 && f.calls==0);
+    sb_setup_field_value(&s,SB_ATA_STATUS_SETTLE,text,sizeof(text));
+    assert(strcmp(text,"All devices (test)")==0);
+    press(&s,SB_A,&io);
+    assert((s.edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK)==0);
+    press(&s,SB_Y,&io);
+    assert(s.state==SB_MENU_EDIT && s.row==SB_LANGUAGE);
+    assert(s.edited.experimental==0);
+}
+static void main_navigation_skips_advanced_rows(void) {
+    SbSetup s; sb_setup_open(&s,initial(),SB_ALL_FIELDS);
+    for (unsigned i=0;i<SB_STANDARD_FIELD_COUNT;i++) press(&s,SB_DOWN,NULL);
+    assert(s.row==SB_SAVE && s.state==SB_MENU_EDIT);
+    press(&s,SB_DOWN,NULL); assert(s.row==SB_CONTINUE);
+    press(&s,SB_DOWN,NULL); assert(s.row==SB_LANGUAGE);
+}
 static void unavailable_fields_cannot_be_changed(void) {
     SbSetup s; char text[32]; sb_setup_open(&s,initial(),0);
-    for (unsigned i=0;i<SB_FIELD_COUNT;i++) {
+    for (unsigned i=0;i<SB_STANDARD_FIELD_COUNT;i++) {
         row(&s,(SbSetupRow)i); press(&s,SB_A,NULL);
         assert(sb_setup_changed(&s)==0);
+        sb_setup_field_value(&s,(SbSetupRow)i,text,sizeof(text));
+        assert(strcmp(text,"Unavailable")==0);
+    }
+    press(&s,SB_Y,NULL);
+    assert(s.state==SB_MENU_ADVANCED);
+    for (unsigned i=SB_STANDARD_FIELD_COUNT;i<SB_FIELD_COUNT;i++) {
+        s.row=(SbSetupRow)i; press(&s,SB_A,NULL);
+        assert(s.edited.experimental==0);
         sb_setup_field_value(&s,(SbSetupRow)i,text,sizeof(text));
         assert(strcmp(text,"Unavailable")==0);
     }
@@ -352,7 +440,7 @@ static void credits_cannot_leave_uncertain_eeprom_recovery(void) {
 
 static void display_is_bounded_and_unknown_values_are_visible(void) {
     SbSetup s; char b[32], tiny[2]={'!','!'};
-    sb_setup_open(&s,(SbSettings){999,0x110000,3},SB_ALL_FIELDS);
+    sb_setup_open(&s,(SbSettings){999,0x110000,3,0},SB_ALL_FIELDS);
     sb_setup_field_value(&s,SB_LANGUAGE,b,sizeof(b)); assert(strstr(b,"Unknown"));
     sb_setup_field_value(&s,SB_ASPECT,b,sizeof(b)); assert(strstr(b,"Unknown"));
     sb_setup_field_value(&s,SB_AUDIO_MODE,b,sizeof(b)); assert(strstr(b,"Unknown"));
@@ -427,6 +515,11 @@ int main(void) {
     RUN(reconnect_requires_neutral_report); RUN(changing_device_without_disconnect_requires_release);
     RUN(language_wrap_and_unknown_value); RUN(video_edit_preserves_unknown_bits);
     RUN(aspect_modes_are_mutually_exclusive); RUN(audio_edit_preserves_unknown_bits);
+    RUN(advanced_cache_alias_is_session_only);
+    RUN(advanced_xdvdfs_async_is_session_only);
+    RUN(advanced_all_toggle_is_explicit_and_session_only);
+    RUN(advanced_ata_settle_is_explicit_and_session_only);
+    RUN(main_navigation_skips_advanced_rows);
     RUN(unavailable_fields_cannot_be_changed); RUN(conflicting_buttons_are_ignored);
     RUN(clean_continue_never_calls_writer); RUN(dirty_discard_needs_confirmation_and_never_writes);
     RUN(save_requires_second_press_and_verified_result); RUN(no_change_save_performs_no_write);

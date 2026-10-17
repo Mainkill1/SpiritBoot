@@ -1,0 +1,122 @@
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -39,7 +39,7 @@
+     if (!r->bytes) return NX_OK;
+     uint64_t first=offset>>d->sector_shift, blocks=r->bytes>>d->sector_shift;
+     if (first>UINT32_MAX || blocks-1u>UINT32_MAX-first) return NX_RANGE;
+-    if (!r->mdl_virtual || r->mdl_offset>r->mdl_bytes || r->bytes>r->mdl_bytes-r->mdl_offset)
++    if (r->mdl_present!=1 || r->mdl_offset>r->mdl_bytes || r->bytes>r->mdl_bytes-r->mdl_offset)
+         return NX_INVALID;
+     if (r->mdl_offset>UINTPTR_MAX-r->mdl_virtual) return NX_INVALID;
+     uintptr_t start=r->mdl_virtual+(uintptr_t)r->mdl_offset;
+--- a/drivers/storage/class/nxstorage/request.h
++++ b/drivers/storage/class/nxstorage/request.h
+@@ -34,6 +34,12 @@
+     void *lease;
+     int cancelled;
+     uint32_t flags;
++    /* Nonempty data requires exactly 1. The platform verifies a non-null,
++     * valid descriptor and sufficient locked-page/PFN coverage before setting
++     * this; mdl_virtual is its numeric original domain and may be zero.
++     * The core checks byte ranges, never dereferences the domain or PFNs.
++     * Descriptor/pages/lease stay borrowed until lower ownership ends. */
++    int mdl_present;
+ } nx_request;
+ typedef struct nx_command {
+     nx_token token;
+--- a/tests/host/nxstorage/request_test.c
++++ b/tests/host/nxstorage/request_test.c
+@@ -125,7 +125,7 @@
+ static parent fresh(void) { parent p={0,0,NX_PROTOCOL_ERROR,0,1}; return p; }
+ static nx_request request(fixture *f, parent *p, nx_operation op, int64_t offset, uint64_t bytes)
+ {
+-    nx_request r={p,op,offset,bytes,(uintptr_t)f->buffer,f->buffer_size,0,p,0,0}; return r;
++    nx_request r={p,op,offset,bytes,(uintptr_t)f->buffer,f->buffer_size,0,p,0,0,1}; return r;
+ }
+ static void finish_held(fixture *f, unsigned i, nx_status s, uint32_t bytes, uint32_t flags)
+ {
+@@ -152,11 +152,63 @@
+     }
+     CHECK(f.commands==0 && f.prepares==0); cleanup(&f); return 1;
+ }
++/* Break: a valid zero-origin descriptor is confused with a missing MDL.
++ * The logical transport retains a descriptor, never dereferences VA zero.
++ * Physical PFN interpretation is outside this neutral production core. */
++static int zero_domain_write_through(void)
++{
++    fixture f; nx_config cfg=config(); cfg.max_bytes=4096; cfg.max_pages=1;
++    CHECK(init(&f,&cfg)); f.delayed=1;
++    struct { uintptr_t base; uint64_t bytes; } mdl={0,8192};
++    parent p=fresh(), later=fresh(); nx_handle h, next;
++    nx_request r=request(&f,&p,NX_WRITE,0,8192);
++    r.mdl_virtual=mdl.base; r.mdl_bytes=mdl.bytes; r.flags=NX_WRITE_THROUGH;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    CHECK(!p.completions && p.pending==1 && f.commands==1);
++    CHECK(f.held[h.slot].mdl_virtual==0 && f.held[h.slot].data_virtual==0);
++    CHECK(f.held[h.slot].bytes==4096);
++    nx_request tail=request(&f,&later,NX_WRITE,8192,512);
++    CHECK(nx_start(&f.dev,&tail,&next)==NX_PENDING && f.commands==1);
++    finish_held(&f,h.slot,NX_OK,4096,0);
++    CHECK(f.commands==2 && !p.completions);
++    CHECK(f.held[h.slot].mdl_virtual==0 && f.held[h.slot].data_virtual==4096);
++    CHECK(f.held[h.slot].disk_byte==4096 && f.held[h.slot].bytes==4096);
++    finish_held(&f,h.slot,NX_OK,4096,0);
++    CHECK(f.commands==3 && f.held[h.slot].cdb[0]==0x35 && !p.completions);
++    finish_held(&f,h.slot,NX_OK,0,0);
++    CHECK(p.completions==1 && p.status==NX_OK && p.bytes==8192);
++    CHECK(f.commands==4 && !later.completions);
++    finish_held(&f,next.slot,NX_OK,512,0);
++    CHECK(later.completions==1 && later.bytes==512 && f.retires==4);
++    cleanup(&f); return 1;
++}
++/* Break: removing the zero-base rejection also removes descriptor/range guards. */
++static int zero_domain_guards(void)
++{
++    fixture f; nx_config cfg=config(); cfg.alignment_mask=511;
++    CHECK(init(&f,&cfg));
++    struct { uintptr_t base; uint64_t extent, offset; int present; } cases[]={
++        {0,8192,0,0}, {4096,8192,0,0}, {0,8192,0,2},
++        {0,8192,8192,1}, {0,8192,8193,1}, {0,8192,1,1},
++        {UINTPTR_MAX-255,8192,0,1},
++        {512,UINT64_MAX,UINTPTR_MAX,1},
++        {0,UINT64_MAX,UINTPTR_MAX-511,1}
++    };
++    for (unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
++        parent p=fresh(); nx_handle h;
++        nx_request r=request(&f,&p,NX_WRITE,0,512);
++        r.mdl_virtual=cases[i].base; r.mdl_bytes=cases[i].extent;
++        r.mdl_offset=cases[i].offset; r.mdl_present=cases[i].present;
++        CHECK(nx_start(&f.dev,&r,&h)==NX_INVALID);
++        CHECK(p.completions==1 && p.status==NX_INVALID && !p.bytes);
++    }
++    CHECK(!f.commands && !f.prepares); cleanup(&f); return 1;
++}
+ /* Break: zero data unnecessarily requires MDL ownership or emits a command. */
+ static int zero_has_no_transport(void)
+ {
+     fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); parent p=fresh(); nx_handle h;
+-    nx_request r=request(&f,&p,NX_READ,0,0); r.mdl_virtual=0; r.mdl_bytes=0; r.lease=0;
++    nx_request r=request(&f,&p,NX_READ,0,0); r.mdl_virtual=0; r.mdl_bytes=0; r.lease=0; r.mdl_present=0;
+     CHECK(nx_start(&f.dev,&r,&h)==NX_OK); CHECK(p.completions==1 && p.bytes==0 && f.commands==0);
+     cleanup(&f); return 1;
+ }
+@@ -706,6 +758,8 @@
+ int main(void)
+ {
+     struct {const char *name; int (*run)(void);} tests[]={
++        {"zero_domain_write_through",zero_domain_write_through},
++        {"zero_domain_guards",zero_domain_guards},
+         {"rejects_invalid_input",rejects_invalid_input}, {"zero_has_no_transport",zero_has_no_transport},
+         {"one_inline_read_owns_until_return",one_inline_read_owns_until_return},
+         {"pending_duplicate_generation",pending_duplicate_generation},
+--- a/tests/host/nxstorage/pthread_ownership_test.c
++++ b/tests/host/nxstorage/pthread_ownership_test.c
+@@ -172,7 +172,7 @@
+ static parent fresh(void) { parent p={0,0,NX_PROTOCOL_ERROR,0,1,0}; return p; }
+ static nx_request request(fixture *f,parent *p,nx_operation op)
+ {
+-    nx_request r={p,op,0,op==NX_FLUSH ? 0u:512u,(uintptr_t)f->buffer,sizeof(f->buffer),0,p,0,0}; return r;
++    nx_request r={p,op,0,op==NX_FLUSH ? 0u:512u,(uintptr_t)f->buffer,sizeof(f->buffer),0,p,0,0,1}; return r;
+ }
+ static void *start_worker(void *p)
+ {
