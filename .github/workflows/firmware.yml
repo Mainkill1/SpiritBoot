@@ -56,7 +56,7 @@ jobs:
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 76266ba77fdf73210b3d4dea47ed7922bdc6b0cf
+            test "$actual_tree" = ad8641445795b0701ec73c987f1c771d0ac83654
             python3 /work/tools/check_ata_settle.py --source-root "$GUEST_SOURCE" >"$output/ata-settle.log" 2>&1
             python3 /work/tools/kernel_coverage.py --source-root "$GUEST_SOURCE" --check >"$output/kernel-coverage.log" 2>&1
             python3 /work/tools/check_kernel_semaphore_overflow.py --source-root "$GUEST_SOURCE" --platform xbox --output "$output/semaphore-xbox" >"$output/semaphore-xbox.log" 2>&1
@@ -143,6 +143,7 @@ jobs:
             python3 "$GUEST_SOURCE/tests/host/critical-section/check.py" "$output/critical-section" >"$output/critical-section.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/workqueue/check-fixed-worker-queue.py" "$output/fixed-worker-queue" >"$output/fixed-worker-queue.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs/check.py" "$output/xdvdfs-create" >"$output/xdvdfs-create.log" 2>&1
+            python3 "$GUEST_SOURCE/tests/host/xdvdfs/check-verify.py" "$GUEST_SOURCE" "$output/xdvdfs-verify" >"$output/xdvdfs-verify.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs-directory/check.py" "$output/xdvdfs-directory" >"$output/xdvdfs-directory.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs-masks/check.py" "$output/xdvdfs-masks" >"$output/xdvdfs-masks.log" 2>&1
             python3 "$GUEST_SOURCE/tests/host/xdvdfs-read-completion/check.py" "$output/xdvdfs-read-completion" >"$output/xdvdfs-read-completion.log" 2>&1
@@ -191,7 +192,7 @@ jobs:
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '76266ba77fdf73210b3d4dea47ed7922bdc6b0cf', result
+          assert result['source_tree'] == 'ad8641445795b0701ec73c987f1c771d0ac83654', result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'
@@ -223,7 +224,7 @@ jobs:
           nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           kernel_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["build_directory"])')
-          for guest in api-regression clean-room-contracts clean-room-warm-reboot rom-shadow-persistence kernel-performance $(python3 -c 'import json; print(" ".join(json.load(open("sources/native-regressions.json"))))'); do
+          for guest in api-regression clean-room-contracts clean-room-warm-reboot clean-room-ordinary-reset rom-shadow-persistence kernel-performance $(python3 -c 'import json; print(" ".join(json.load(open("sources/native-regressions.json"))))'); do
             guest_directory="$guest_source/tests/xbe/$guest"
             if [ "$guest" = kernel-export-contracts ]; then guest_directory="/work/tests/xbe/$guest"; fi
             docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
@@ -241,12 +242,12 @@ jobs:
             -e MEMORY_MIB=${{ matrix.memory_mib }} -e SDL_AUDIO_DRIVER=dummy spiritboot-toolchain sh -ec '
             Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
             python3 -c "import time; time.sleep(1)"
-            guests="api-regression clean-room-contracts clean-room-warm-reboot kernel-performance $(python3 -c "import json; print(\" \".join(json.load(open(\"sources/native-regressions.json\"))))")"
+            guests="api-regression clean-room-contracts clean-room-warm-reboot clean-room-ordinary-reset kernel-performance $(python3 -c "import json; print(\" \".join(json.load(open(\"sources/native-regressions.json\"))))")"
             if [ "$VARIANT" = release-64mib ]; then guests="$guests rom-shadow-persistence"; fi
             for guest in $guests; do
               case "$guest" in
                 api-regression) iso=nxkrnl-api-regression.iso; capture=open-xbe ;;
-                clean-room-contracts|clean-room-warm-reboot|rom-shadow-persistence|kernel-performance) iso=$guest.iso; capture=$guest ;;
+                clean-room-contracts|clean-room-warm-reboot|clean-room-ordinary-reset|rom-shadow-persistence|kernel-performance) iso=$guest.iso; capture=$guest ;;
                 *) iso=$(python3 -c "import json,sys; print(json.load(open(\"sources/native-regressions.json\"))[sys.argv[1]][\"iso\"])" "$guest"); capture=$guest ;;
               esac
               guest_directory="$GUEST_SOURCE/tests/xbe/$guest"
@@ -260,7 +261,8 @@ jobs:
             done'
           python3 - <<'PY'
           import json
-          for guest, plan in (('clean-room-contracts', 23), ('clean-room-warm-reboot', 7)):
+          for guest, plan in (('clean-room-contracts', 23), ('clean-room-warm-reboot', 7),
+                              ('clean-room-ordinary-reset', 2)):
               result = json.load(open(f'artifacts/{guest}-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/run.json'))
               assert result['status'] == 'passed' and result['tap']['plan'] == plan, result
               assert result['tap']['ok'] == plan, result
@@ -300,6 +302,7 @@ jobs:
             artifacts/open-xbe-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/clean-room-contracts-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/clean-room-warm-reboot-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
+            artifacts/clean-room-ordinary-reset-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/rom-shadow-persistence-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/saved-image-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/
             artifacts/interrupt-public-abi-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/

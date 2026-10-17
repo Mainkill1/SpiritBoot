@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SYSVA_REVERT = "patches/roswell/0155-revert-sysva-local-invalidation.patch"
 XDVDFS_REPAIR = "patches/roswell/0156-xdvdfs-preserve-file-position.patch"
 PAYLOAD_QUALIFICATION = "patches/roswell/0157-forza-payload-association-qualification.patch"
+RESET_MEDIA_LIFETIME = "patches/roswell/0158-reset-media-lifetime.patch"
 
 
 class ForzaCorruptionRegressionTests(unittest.TestCase):
@@ -18,12 +19,12 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
         lock = json.loads((ROOT / "sources/firmware-lock.json").read_text())
         self.entries = lock["repositories"]["roswell"]["patches"]
 
-    def test_corrective_patches_are_final_and_hash_locked(self):
+    def test_corrective_patches_are_consecutive_and_hash_locked(self):
         self.assertEqual(
-            [entry["path"] for entry in self.entries[-3:]],
-            [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION],
+            [entry["path"] for entry in self.entries[-4:]],
+            [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION, RESET_MEDIA_LIFETIME],
         )
-        for entry in self.entries[-3:]:
+        for entry in self.entries[-4:]:
             self.assertEqual(
                 hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
                 entry["sha256"],

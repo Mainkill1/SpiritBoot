@@ -55,7 +55,7 @@ epoch. `source` identifies the supplied pristine checkout; `source_directory`
 is the actual source used by CMake and guest builds; `build_directory` and
 `output_directory` identify their outputs. `base_source_tree` is the pristine
 tree and `source_tree` is the patched Git index tree, including new guest tests.
-The current reviewed patched tree is `76266ba77fdf73210b3d4dea47ed7922bdc6b0cf`.
+The current reviewed patched tree is `ad8641445795b0701ec73c987f1c771d0ac83654`.
 The base epoch is exported as `SOURCE_DATE_EPOCH` to avoid wall-clock PE linker
 timestamps. Each build uses a fresh configure tree so previous CMake cache flags,
 compiler selections, or timestamps cannot leak into a newly attributed image.
@@ -95,14 +95,15 @@ supplies its runtime dependencies, including host `libusb`. A native launch
 needs an X display, those runtime libraries, and the appropriate audio backend.
 For a desktop run, the AppImage can also run normally through FUSE.
 
-Build the API regression, 23-check targeted contract guest, and 7-check warm
-reboot guest using the recorded nxdk container. Obtain their source path from
-the manifest of the flash being tested, so the payloads use its patched tests:
+Build the API regression, 23-check targeted contract guest, 7-check warm reboot
+guest, and 2-check ordinary-reset lifetime guest using the recorded nxdk
+container. Obtain their source path from the manifest of the flash being tested,
+so the payloads use its patched tests:
 
 ```sh
 guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-release/build.json"))["source_directory"])')
 nxdk_image=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["fixtures"]["nxdk_container"])')
-for guest in api-regression clean-room-contracts clean-room-warm-reboot; do
+for guest in api-regression clean-room-contracts clean-room-warm-reboot clean-room-ordinary-reset; do
   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
     -e PATH=/usr/src/nxdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     -w "$guest_source/tests/xbe/$guest" \
