@@ -1,0 +1,202 @@
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -26,6 +26,8 @@
+     unsigned active, dispatch_active, cancel_active, cancel_latched;
+     unsigned handle_valid, terminal_ready, completed;
+     unsigned submit_active, result_deferred, packet_live;
++    unsigned deferred_control;
++    KDPC completion_dpc;
+     PMDL control_mdl;
+     ULONG control_code, control_output;
+     uint64_t media_epoch;
+@@ -112,6 +114,7 @@
+ 
+ static void port_enter(void *context);
+ static void port_leave(void *context);
++static VOID NTAPI NxNativeCompletionDpc(PKDPC,PVOID,PVOID,PVOID);
+ 
+ static void quarantine_adapter(NX_NATIVE_ADAPTER *adapter)
+ {
+@@ -589,18 +592,39 @@
+     NX_NATIVE_ADAPTER *adapter=envelope->adapter;
+     nx_packet_result result;
+     nx_packet_status captured;
+-    unsigned defer;
++    unsigned defer,queue=0;
+     (void)device;
+     if(child!=envelope->child) return STATUS_MORE_PROCESSING_REQUIRED;
+     captured=nx_packet_capture(&envelope->ticket,&result);
+     port_enter(adapter);defer=envelope->submit_active;
+-    if(defer) { envelope->deferred_result=result;envelope->deferred_capture=captured;
+-        envelope->result_deferred=1; }
++    envelope->deferred_result=result;envelope->deferred_capture=captured;
++    envelope->result_deferred=1;envelope->deferred_control=1;
++    if(!defer) queue=1;
+     port_leave(adapter);
+-    if(!defer) (void)handle_control_result(envelope,&result,captured);
++    if(queue) (void)KeInsertQueueDpc(&envelope->completion_dpc,NULL,NULL);
+     return STATUS_MORE_PROCESSING_REQUIRED;
+ }
+ 
++static VOID NTAPI NxNativeCompletionDpc(PKDPC dpc,PVOID context,PVOID argument1,PVOID argument2)
++{
++    NX_NATIVE_ENVELOPE *envelope=context;
++    NX_NATIVE_ADAPTER *adapter=envelope->adapter;
++    nx_packet_result result;
++    nx_packet_status captured=NX_PACKET_OK;
++    unsigned report=0,control=0;
++    (void)dpc;(void)argument1;(void)argument2;
++    port_enter(adapter);
++    if(envelope->result_deferred) {
++        result=envelope->deferred_result;captured=envelope->deferred_capture;
++        control=envelope->deferred_control;envelope->result_deferred=0;
++        envelope->deferred_control=0;report=1;
++    }
++    port_leave(adapter);
++    if(!report) return;
++    if(control) (void)handle_control_result(envelope,&result,captured);
++    else report_result(envelope,&result,captured);
++}
++
+ static void port_complete(void *context,void *parent,nx_status status,uint64_t bytes)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+@@ -631,19 +655,18 @@
+     NX_NATIVE_ADAPTER *adapter=envelope->adapter;
+     nx_packet_result result;
+     nx_packet_status captured;
+-    unsigned defer;
++    unsigned defer,queue=0;
+     (void)device;
+     if(child!=envelope->child) return STATUS_MORE_PROCESSING_REQUIRED;
+     captured=nx_packet_capture(&envelope->ticket,&result);
+     port_enter(adapter);
+     defer=envelope->submit_active;
+-    if(defer) {
+-        envelope->deferred_result=result;
+-        envelope->deferred_capture=captured;
+-        envelope->result_deferred=1;
+-    }
++    envelope->deferred_result=result;
++    envelope->deferred_capture=captured;
++    envelope->result_deferred=1;envelope->deferred_control=0;
++    if(!defer) queue=1;
+     port_leave(adapter);
+-    if(!defer) report_result(envelope,&result,captured);
++    if(queue) (void)KeInsertQueueDpc(&envelope->completion_dpc,NULL,NULL);
+     return STATUS_MORE_PROCESSING_REQUIRED;
+ }
+ 
+@@ -693,6 +716,8 @@
+     adapter->media_state=adapter->media_capacity_valid ? NX_MEDIA_PRESENT:NX_MEDIA_UNKNOWN;
+     for(index=0;index<slot_count;++index) {
+         adapter->envelopes[index].adapter=adapter;
++        KeInitializeDpc(&adapter->envelopes[index].completion_dpc,
++                        NxNativeCompletionDpc,&adapter->envelopes[index]);
+         adapter->envelopes[index].child=IoAllocateIrp((CCHAR)lower->StackSize,FALSE);
+         adapter->envelopes[index].control_mdl=IoAllocateMdl(adapter->envelopes[index].control_data,
+             sizeof(adapter->envelopes[index].control_data),FALSE,FALSE,NULL);
+--- a/tests/host/nxstorage/native_adapter_host_platform.h
++++ b/tests/host/nxstorage/native_adapter_host_platform.h
+@@ -19,6 +19,10 @@
+ typedef uintptr_t ULONG_PTR;
+ typedef void *HANDLE;
+ typedef struct _KEVENT { unsigned signaled; } KEVENT, *PKEVENT;
++struct _KDPC;
++typedef void (NTAPI *PKDEFERRED_ROUTINE)(struct _KDPC *,PVOID,PVOID,PVOID);
++typedef struct _KDPC { PKDEFERRED_ROUTINE DeferredRoutine; PVOID DeferredContext;
++    unsigned Inserted; } KDPC, *PKDPC;
+ typedef struct _UNICODE_STRING { USHORT Length, MaximumLength; uint16_t *Buffer; } UNICODE_STRING, *PUNICODE_STRING;
+ typedef struct _OBJECT_ATTRIBUTES { ULONG Length; HANDLE RootDirectory;
+     PUNICODE_STRING ObjectName; ULONG Attributes; PVOID SecurityDescriptor;
+@@ -114,6 +118,8 @@
+ VOID KeInitializeEvent(PKEVENT, int, BOOLEAN);
+ LONG KeSetEvent(PKEVENT, LONG, BOOLEAN);
+ NTSTATUS KeWaitForSingleObject(PVOID, int, int, BOOLEAN, PVOID);
++VOID KeInitializeDpc(PKDPC,PKDEFERRED_ROUTINE,PVOID);
++BOOLEAN KeInsertQueueDpc(PKDPC,PVOID,PVOID);
+ VOID IoReuseIrp(PIRP, NTSTATUS);
+ PIRP IoAllocateIrp(CCHAR, BOOLEAN);
+ VOID IoFreeIrp(PIRP);
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -41,6 +41,10 @@
+ static NTSTATUS completion_reentry_status;
+ static PIRP lower_call_child;
+ static unsigned child_reuse_before_lower_return;
++static unsigned completion_callback_active,child_reuse_during_completion;
++static PKDPC queued_dpcs[32];
++static PVOID queued_dpc_a1[32],queued_dpc_a2[32];
++static unsigned queued_dpc_count;
+ static unsigned burst_complete_during_submit,burst_seed;
+ static unsigned stamp_read_payloads;
+ static void publish_host_cache_from_descriptor(void);
+@@ -56,7 +60,7 @@
+     cancel_parent->Cancel=TRUE;cancel_parent->CancelIrql=0;
+     routine(created_device,cancel_parent);
+ }
+-VOID IoReuseIrp(PIRP i,NTSTATUS s){if(i==lower_call_child)++child_reuse_before_lower_return;if(cancel_during_prepare){cancel_during_prepare=0;cancel_now();}int8_t n=i->StackCount;PIO_STACK_LOCATION base=i->Tail.Overlay.CurrentStackLocation-n;memset(i,0,sizeof(*i));i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=base+n;i->IoStatus.Status=s;}
++VOID IoReuseIrp(PIRP i,NTSTATUS s){if(i==lower_call_child)++child_reuse_before_lower_return;if(completion_callback_active)++child_reuse_during_completion;if(cancel_during_prepare){cancel_during_prepare=0;cancel_now();}int8_t n=i->StackCount;PIO_STACK_LOCATION base=i->Tail.Overlay.CurrentStackLocation-n;memset(i,0,sizeof(*i));i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=base+n;i->IoStatus.Status=s;}
+ PIRP IoAllocateIrp(CCHAR n,BOOLEAN q){(void)q;++irp_allocations;unsigned call=irp_calls++;if((int)call==irp_fail_call)return NULL;size_t z=sizeof(IRP)+(size_t)n*sizeof(IO_STACK_LOCATION);PIRP i=calloc(1,z);if(i){remember(live_irps,i);i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=(PIO_STACK_LOCATION)(i+1)+n;}return i;}
+ VOID IoFreeIrp(PIRP i){if(!forget(live_irps,i)){++invalid_irp_frees;return;}++free_irps;free(i);}
+ 
+@@ -69,6 +73,16 @@
+ LONG KeSetEvent(PKEVENT event,LONG increment,BOOLEAN wait){(void)increment;(void)wait;return (LONG)__atomic_exchange_n(&event->signaled,1,__ATOMIC_ACQ_REL);}
+ NTSTATUS KeWaitForSingleObject(PVOID object,int reason,int mode,BOOLEAN alert,PVOID timeout)
+ {(void)reason;(void)mode;(void)alert;(void)timeout;while(!__atomic_load_n(&((PKEVENT)object)->signaled,__ATOMIC_ACQUIRE))sched_yield();return STATUS_SUCCESS;}
++VOID KeInitializeDpc(PKDPC d,PKDEFERRED_ROUTINE routine,PVOID context)
++{ memset(d,0,sizeof(*d));d->DeferredRoutine=routine;d->DeferredContext=context; }
++BOOLEAN KeInsertQueueDpc(PKDPC d,PVOID a1,PVOID a2)
++{ if(d->Inserted)return FALSE;MUST(queued_dpc_count<32);d->Inserted=1;
++  queued_dpcs[queued_dpc_count]=d;queued_dpc_a1[queued_dpc_count]=a1;
++  queued_dpc_a2[queued_dpc_count++]=a2;return TRUE; }
++static void drain_dpcs(void)
++{ while(queued_dpc_count){PKDPC d=queued_dpcs[0];PVOID a1=queued_dpc_a1[0],a2=queued_dpc_a2[0];
++  for(unsigned i=1;i<queued_dpc_count;++i){queued_dpcs[i-1]=queued_dpcs[i];queued_dpc_a1[i-1]=queued_dpc_a1[i];queued_dpc_a2[i-1]=queued_dpc_a2[i];}
++  --queued_dpc_count;d->Inserted=0;d->DeferredRoutine(d,d->DeferredContext,a1,a2);} }
+ VOID IoAcquireCancelSpinLock(KIRQL *q){*q=0;}
+ VOID IoReleaseCancelSpinLock(KIRQL q){(void)q;}
+ VOID KeInitializeSpinLock(PKSPIN_LOCK l){*l=0;}
+@@ -109,7 +123,11 @@
+             pending_children[tail-1]=pending_children[tail];
+         pending_children[--pending_child_count]=NULL;break;
+     }
+-    return s->CompletionRoutine(created_device,child,s->Context);
++    completion_callback_active=1;
++    NTSTATUS result=s->CompletionRoutine(created_device,child,s->Context);
++    completion_callback_active=0;
++    drain_dpcs();
++    return result;
+ }
+ static NTSTATUS complete_child(NTSTATUS status,ULONG bytes,UCHAR srb_status)
+ {
+@@ -331,6 +349,23 @@
+     CHECK(!child_reuse_before_lower_return&&!lower_call_child);
+     completion_reentry_device=NULL;return 1;
+ }
++/* A lower driver owns the current completion stack until the completion
++ * routine returns.  A split transfer must not reuse and resubmit that child
++ * IRP from inside the callback that completed its preceding segment. */
++static int async_split_waits_until_completion_callback_returns(void)
++{
++    PDEVICE_OBJECT d=make_device(1);parent_fixture p;
++    lower_calls=0;lower_pending=1;child_reuse_during_completion=0;
++    init_parent(&p,IRP_MJ_READ,8192);
++    CHECK(NxNativeDispatchReadWrite(d,&p.irp)==STATUS_PENDING);
++    CHECK(active_child&&!p.irp.host_completed&&lower_calls==1);
++    CHECK(complete_child(STATUS_SUCCESS,4096,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(!child_reuse_during_completion);
++    CHECK(active_child&&!p.irp.host_completed&&lower_calls==2);
++    CHECK(complete_child(STATUS_SUCCESS,4096,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(!child_reuse_during_completion&&p.irp.host_completed);
++    lower_pending=0;return 1;
++}
+ /* Native-shaped stress: keep a QD12 read window while one lower submission
+  * synchronously publishes randomized bursts of older completions.  Every
+  * completion must remain discoverable by scanning persistent slot state. */
+@@ -919,4 +954,4 @@
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!control_lease_is_removed_from_free_list();printf("29 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!control_lease_is_removed_from_free_list();printf("30 adapter groups, %u failures\n",f);return f?1:0;}

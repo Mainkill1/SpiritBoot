@@ -12,6 +12,9 @@ SYSVA_REVERT = "patches/roswell/0155-revert-sysva-local-invalidation.patch"
 XDVDFS_REPAIR = "patches/roswell/0156-xdvdfs-preserve-file-position.patch"
 PAYLOAD_QUALIFICATION = "patches/roswell/0157-forza-payload-association-qualification.patch"
 RESET_MEDIA_LIFETIME = "patches/roswell/0158-reset-media-lifetime.patch"
+OPTICAL_ADMISSION = "patches/roswell/0160-optical-qd12-admission.patch"
+COMPLETION_LIFETIME = "patches/roswell/0161-defer-native-child-completion.patch"
+TRANSIENT_ENVELOPE_GROWTH = "patches/roswell/0162-transient-native-envelope-growth.patch"
 
 
 class ForzaCorruptionRegressionTests(unittest.TestCase):
@@ -21,10 +24,12 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
 
     def test_corrective_patches_are_consecutive_and_hash_locked(self):
         self.assertEqual(
-            [entry["path"] for entry in self.entries[-4:]],
-            [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION, RESET_MEDIA_LIFETIME],
+            [entry["path"] for entry in self.entries[-7:]],
+            [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION,
+             RESET_MEDIA_LIFETIME, OPTICAL_ADMISSION, COMPLETION_LIFETIME,
+             TRANSIENT_ENVELOPE_GROWTH],
         )
-        for entry in self.entries[-4:]:
+        for entry in self.entries[-7:]:
             self.assertEqual(
                 hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
                 entry["sha256"],
@@ -50,6 +55,28 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
             "pending_children[pick]",
             "CHECK(first==expected&&last==~expected)",
             'TEXT(label_xdvdfs_async, "Optical direct reads")',
+        ):
+            self.assertIn(token, patch)
+
+    def test_child_irp_reuse_is_deferred_past_lower_completion(self):
+        patch = (ROOT / COMPLETION_LIFETIME).read_text()
+        for token in (
+            "KDPC completion_dpc",
+            "KeInsertQueueDpc(&envelope->completion_dpc",
+            "NxNativeCompletionDpc",
+            "async_split_waits_until_completion_callback_returns",
+            "child_reuse_during_completion",
+        ):
+            self.assertIn(token, patch)
+
+    def test_storage_bursts_grow_transiently_instead_of_failing_reads(self):
+        patch = (ROOT / TRANSIENT_ENVELOPE_GROWTH).read_text()
+        for token in (
+            "allocate_dynamic_envelope",
+            "NxNativeTrimDpc",
+            "core_count=slot_count*4u",
+            "saturated_pool_grows_transiently_instead_of_failing_game_reads",
+            "pool_live==pools_before",
         ):
             self.assertIn(token, patch)
 
