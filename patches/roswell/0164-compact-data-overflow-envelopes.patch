@@ -1,0 +1,139 @@
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -34,11 +34,12 @@
+     PMDL control_mdl;
+     ULONG control_code, control_output;
+     uint64_t media_epoch;
+-    UCHAR control_data[NX_CONTROL_BYTES];
+     nx_lcq_observation cache_observation;
+     unsigned cache_guard;
+     unsigned control_active, control_recovery, control_recovery_failed;
+     struct NX_NATIVE_ENVELOPE *next_free;
++    /* Data-only transient envelopes end before this control-only tail. */
++    UCHAR control_data[NX_CONTROL_BYTES];
+ 
+ } NX_NATIVE_ENVELOPE;
+ 
+@@ -134,20 +135,23 @@
+     ExFreePool(envelope);
+ }
+ 
+-static NX_NATIVE_ENVELOPE *allocate_dynamic_envelope(NX_NATIVE_ADAPTER *adapter)
+-{
+-    NX_NATIVE_ENVELOPE *envelope=ExAllocatePool(NonPagedPool,sizeof(*envelope));
++static NX_NATIVE_ENVELOPE *allocate_dynamic_envelope(NX_NATIVE_ADAPTER *adapter,
++                                                     unsigned control)
++{
++    size_t bytes=control ? sizeof(NX_NATIVE_ENVELOPE):
++        offsetof(NX_NATIVE_ENVELOPE,control_data);
++    NX_NATIVE_ENVELOPE *envelope=ExAllocatePool(NonPagedPool,bytes);
+     if(!envelope) return NULL;
+-    zero_bytes(envelope,sizeof(*envelope));
++    zero_bytes(envelope,bytes);
+     envelope->adapter=adapter;envelope->dynamic=1;
+     KeInitializeDpc(&envelope->completion_dpc,NxNativeCompletionDpc,envelope);
+     envelope->child=IoAllocateIrp((CCHAR)adapter->lower->StackSize,FALSE);
+-    envelope->control_mdl=IoAllocateMdl(envelope->control_data,
++    if(control) envelope->control_mdl=IoAllocateMdl(envelope->control_data,
+         sizeof(envelope->control_data),FALSE,FALSE,NULL);
+-    if(!envelope->child || !envelope->control_mdl) {
++    if(!envelope->child || (control && !envelope->control_mdl)) {
+         destroy_dynamic_envelope(envelope);return NULL;
+     }
+-    MmBuildMdlForNonPagedPool(envelope->control_mdl);
++    if(control) MmBuildMdlForNonPagedPool(envelope->control_mdl);
+     return envelope;
+ }
+ 
+@@ -949,7 +953,7 @@
+         adapter->free_envelopes=envelope->next_free;
+     } else if(!adapter->sealed) grow=1;
+     port_leave(adapter);
+-    if(!envelope && grow) envelope=allocate_dynamic_envelope(adapter);
++    if(!envelope && grow) envelope=allocate_dynamic_envelope(adapter,0);
+     port_enter(adapter);
+     if(envelope && (adapter->sealed || adapter->quarantined)) {
+         grow=envelope->dynamic;port_leave(adapter);
+@@ -1158,7 +1162,7 @@
+     } else if(!adapter->sealed) grow=1;
+     port_leave(adapter);
+     if(!envelope && grow)
+-        envelope=allocate_dynamic_envelope(adapter);
++        envelope=allocate_dynamic_envelope(adapter,1);
+     port_enter(adapter);
+     if(envelope && (adapter->sealed || adapter->quarantined)) {
+         unsigned dynamic=envelope->dynamic;port_leave(adapter);
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -18,6 +18,7 @@
+ static unsigned lower_calls, cancel_calls, forward_calls;
+ static unsigned property_calls,free_irps,free_mdls,detaches,deletes;
+ static int fail_pool,fail_symbolic_link;
++static size_t pool_request_limit=SIZE_MAX;
+ static int pool_fail_call=-1,irp_fail_call=-1,mdl_fail_call=-1;
+ static unsigned pool_calls,irp_calls,mdl_calls,pool_live;
+ static unsigned invalid_irp_frees,invalid_mdl_frees;
+@@ -89,7 +90,7 @@
+ VOID KeInitializeSpinLock(PKSPIN_LOCK l){*l=0;}
+ KIRQL FASTCALL KfAcquireSpinLock(PKSPIN_LOCK l){while(__atomic_exchange_n(l,1,__ATOMIC_ACQUIRE))sched_yield();return 0;}
+ VOID FASTCALL KfReleaseSpinLock(PKSPIN_LOCK l,KIRQL q){(void)q;MUST(__atomic_load_n(l,__ATOMIC_RELAXED));__atomic_store_n(l,0,__ATOMIC_RELEASE);}
+-PVOID ExAllocatePool(int t,size_t n){(void)t;++pool_allocations;unsigned call=pool_calls++;if(fail_pool){--fail_pool;return NULL;}if((int)call==pool_fail_call)return NULL;PVOID p=malloc(n);if(p){memset(p,poison_pool?0xa5:0,n);++pool_live;}return p;}
++PVOID ExAllocatePool(int t,size_t n){(void)t;++pool_allocations;unsigned call=pool_calls++;if(n>pool_request_limit)return NULL;if(fail_pool){--fail_pool;return NULL;}if((int)call==pool_fail_call)return NULL;PVOID p=malloc(n);if(p){memset(p,poison_pool?0xa5:0,n);++pool_live;}return p;}
+ VOID ExFreePool(PVOID p){if(p){MUST(pool_live);--pool_live;}free(p);}
+ PMDL IoAllocateMdl(PVOID p,ULONG n,BOOLEAN s,BOOLEAN q,PIRP i){(void)s;(void)q;(void)i;++mdl_allocations;unsigned call=mdl_calls++;if((int)call==mdl_fail_call)return NULL;PMDL m=calloc(1,sizeof(*m)+2*sizeof(ULONG));if(m){remember(live_mdls,m);uintptr_t a=(uintptr_t)p;m->StartVa=(PVOID)(a&~(uintptr_t)4095);m->ByteOffset=(ULONG)(a&4095);m->ByteCount=n;m->Size=sizeof(*m)+2*sizeof(ULONG);}return m;}
+ 
+@@ -1004,13 +1005,13 @@
+         CHECK(reads[index].irp.host_completed&&
+               reads[index].irp.IoStatus.Status==STATUS_SUCCESS&&
+               reads[index].irp.IoStatus.Information==4096);
+-    CHECK(pool_live==pools_before&&free_irps==irps_before+1&&free_mdls==mdls_before+1);
++    CHECK(pool_live==pools_before&&free_irps==irps_before+1&&free_mdls==mdls_before);
+     lower_pending=0;
+     return 1;
+ }
+ static int saturated_core_waits_instead_of_failing_texture_reads(void)
+ {
+-    enum { RESERVE=16, READS=96 };
++    enum { RESERVE=16, READS=256 };
+     PDEVICE_OBJECT d=make_device(RESERVE);
+     parent_fixture reads[READS];
+     uint8_t *payloads=aligned_alloc(4096,READS*4096);
+@@ -1048,6 +1049,32 @@
+     CHECK(!pthread_join(thread,NULL)&&removal.returned&&removal.status==STATUS_SUCCESS);
+     stamp_read_payloads=0;free(payloads);
+     lower_started=1;cache_property(2,1);
++    return 1;
++}
++static int data_overflow_needs_no_control_buffer_or_mdl(void)
++{
++    PDEVICE_OBJECT d=make_device(1);
++    parent_fixture reads[8];
++    unsigned before_mdl=mdl_calls;
++    lower_pending=1;pending_child_count=0;lower_calls=0;
++    /* Queued data should fit a small envelope and never allocate the 804-byte
++     * READ_TOC output buffer or its private MDL. */
++    pool_request_limit=1200;mdl_fail_call=(int)mdl_calls;
++    for(unsigned i=0;i<8;++i) {
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
++    }
++    CHECK(mdl_calls==before_mdl&&pending_child_count==4);
++    unsigned completed=0;
++    while(pending_child_count && completed<8) {
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++        ++completed;
++    }
++    CHECK(completed==8);
++    for(unsigned i=0;i<8;++i)
++        CHECK(reads[i].irp.host_completed&&reads[i].irp.IoStatus.Status==STATUS_SUCCESS);
++    pool_request_limit=SIZE_MAX;mdl_fail_call=-1;lower_pending=0;
+     return 1;
+ }
+ static int queued_cancel_and_flush_keep_fifo_barriers(void)
+@@ -1083,4 +1110,4 @@
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("34 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("35 adapter groups, %u failures\n",f);return f?1:0;}

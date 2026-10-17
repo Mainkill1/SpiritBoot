@@ -1,0 +1,94 @@
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -933,7 +933,7 @@
+     nx_request request;
+     NTSTATUS result;
+     KIRQL cancel_irql;
+-    unsigned grow=0;
++    unsigned grow=0,cancelled;
+     nx_lcq_observation cache_observation={0};
+     if(!adapter || !parent) return STATUS_INVALID_PARAMETER;
+     port_enter(adapter);
+@@ -1001,12 +1001,18 @@
+         }
+     }
+     port_enter(adapter);
+-    envelope->waiting_request=request;envelope->next_waiting=NULL;envelope->queued=1;
+-    if(adapter->waiting_tail) adapter->waiting_tail->next_waiting=envelope;
+-    else adapter->waiting_head=envelope;
+-    adapter->waiting_tail=envelope;
+-    port_leave(adapter);
+-    admit_waiting_requests(adapter);
++    /* Cancellation can run after installation but before queue insertion.
++     * Resolve that latch without waiting for unrelated transport capacity. */
++    cancelled=envelope->cancel_latched;
++    if(!cancelled) {
++        envelope->waiting_request=request;envelope->next_waiting=NULL;envelope->queued=1;
++        if(adapter->waiting_tail) adapter->waiting_tail->next_waiting=envelope;
++        else adapter->waiting_head=envelope;
++        adapter->waiting_tail=envelope;
++    }
++    port_leave(adapter);
++    if(cancelled) port_complete(adapter,parent,NX_CANCELLED,0);
++    else admit_waiting_requests(adapter);
+     port_enter(adapter);
+     if(!envelope->completed && !envelope->was_pending) port_pending(adapter,parent);
+     result=envelope->was_pending ? STATUS_PENDING:envelope->dispatch_status;
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -22,7 +22,7 @@
+ static int pool_fail_call=-1,irp_fail_call=-1,mdl_fail_call=-1;
+ static unsigned pool_calls,irp_calls,mdl_calls,pool_live;
+ static unsigned invalid_irp_frees,invalid_mdl_frees;
+-static int poison_pool,cancel_during_prepare,cancel_during_submit;
++static int poison_pool,cancel_during_prepare,cancel_during_submit,cancel_before_enqueue;
+ static PIRP cancel_parent;
+ static void *live_irps[512],*live_mdls[512];
+ static uint8_t opcodes[1024],functions[1024];
+@@ -86,7 +86,7 @@
+   --queued_dpc_count;d->Inserted=0;d->DeferredRoutine(d,d->DeferredContext,a1,a2);} }
+ VOID KeFlushQueuedDpcs(VOID){drain_dpcs();}
+ VOID IoAcquireCancelSpinLock(KIRQL *q){*q=0;}
+-VOID IoReleaseCancelSpinLock(KIRQL q){(void)q;}
++VOID IoReleaseCancelSpinLock(KIRQL q){(void)q;if(cancel_before_enqueue){cancel_before_enqueue=0;cancel_now();}}
+ VOID KeInitializeSpinLock(PKSPIN_LOCK l){*l=0;}
+ KIRQL FASTCALL KfAcquireSpinLock(PKSPIN_LOCK l){while(__atomic_exchange_n(l,1,__ATOMIC_ACQUIRE))sched_yield();return 0;}
+ VOID FASTCALL KfReleaseSpinLock(PKSPIN_LOCK l,KIRQL q){(void)q;MUST(__atomic_load_n(l,__ATOMIC_RELAXED));__atomic_store_n(l,0,__ATOMIC_RELEASE);}
+@@ -1077,6 +1077,31 @@
+     pool_request_limit=SIZE_MAX;mdl_fail_call=-1;lower_pending=0;
+     return 1;
+ }
++static int cancelled_before_enqueue_does_not_wait_for_capacity(void)
++{
++    for(unsigned race=0;race<2;++race) {
++        PDEVICE_OBJECT d=make_device(1);
++        parent_fixture reads[5];
++        lower_pending=1;pending_child_count=0;lower_calls=0;cancel_calls=0;
++        for(unsigned i=0;i<4;++i) {
++            init_parent(&reads[i],IRP_MJ_READ,4096);
++            CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
++        }
++        init_parent(&reads[4],IRP_MJ_READ,4096);
++        if(race) { cancel_parent=&reads[4].irp;cancel_before_enqueue=1; }
++        else reads[4].irp.Cancel=TRUE;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[4].irp)==STATUS_CANCELLED);
++        CHECK(reads[4].irp.host_completed&&!reads[4].irp.host_pending&&
++              reads[4].irp.IoStatus.Status==STATUS_CANCELLED&&
++              reads[4].irp.IoStatus.Information==0);
++        CHECK(pending_child_count==4&&lower_calls==4&&cancel_calls==0);
++        while(pending_child_count)
++            CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++                  STATUS_MORE_PROCESSING_REQUIRED);
++        cancel_parent=NULL;lower_pending=0;
++    }
++    return 1;
++}
+ static int queued_cancel_and_flush_keep_fifo_barriers(void)
+ {
+     PDEVICE_OBJECT d=make_device(1);
+@@ -1110,4 +1135,4 @@
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("35 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("36 adapter groups, %u failures\n",f);return f?1:0;}

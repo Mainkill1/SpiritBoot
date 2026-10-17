@@ -16,6 +16,12 @@ OPTICAL_ADMISSION = "patches/roswell/0160-optical-qd12-admission.patch"
 COMPLETION_LIFETIME = "patches/roswell/0161-defer-native-child-completion.patch"
 TRANSIENT_ENVELOPE_GROWTH = "patches/roswell/0162-transient-native-envelope-growth.patch"
 
+QUEUED_ADMISSION = "patches/roswell/0163-queue-saturated-native-admission.patch"
+
+COMPACT_ENVELOPES = "patches/roswell/0164-compact-data-overflow-envelopes.patch"
+
+PRE_ADMISSION_CANCEL = "patches/roswell/0165-cancel-before-native-admission.patch"
+
 
 class ForzaCorruptionRegressionTests(unittest.TestCase):
     def setUp(self):
@@ -24,12 +30,12 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
 
     def test_corrective_patches_are_consecutive_and_hash_locked(self):
         self.assertEqual(
-            [entry["path"] for entry in self.entries[-7:]],
+            [entry["path"] for entry in self.entries[-10:]],
             [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION,
              RESET_MEDIA_LIFETIME, OPTICAL_ADMISSION, COMPLETION_LIFETIME,
-             TRANSIENT_ENVELOPE_GROWTH],
+             TRANSIENT_ENVELOPE_GROWTH, QUEUED_ADMISSION, COMPACT_ENVELOPES, PRE_ADMISSION_CANCEL],
         )
-        for entry in self.entries[-7:]:
+        for entry in self.entries[-10:]:
             self.assertEqual(
                 hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
                 entry["sha256"],

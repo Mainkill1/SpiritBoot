@@ -1,0 +1,281 @@
+diff --git a/hw/ide/core.c b/hw/ide/core.c
+index 26fb5a6e03..d40af27e41 100644
+--- a/hw/ide/core.c
++++ b/hw/ide/core.c
+@@ -791,6 +791,12 @@ static void ide_sector_read_cb(void *opaque, int ret)
+         n = s->req_nb_sectors;
+     }
+ 
++    if (trace_event_get_state_backends(TRACE_IDE_PIO_PAYLOAD)) {
++        g_autofree char *hash = g_compute_checksum_for_data(
++            G_CHECKSUM_SHA256, s->io_buffer, n * BDRV_SECTOR_SIZE);
++        trace_ide_pio_payload(s, s->unit, "read", ide_get_sector(s),
++                              n * BDRV_SECTOR_SIZE, ret, hash);
++    }
+     ide_set_sector(s, ide_get_sector(s) + n);
+     s->nsector -= n;
+     /* Allow the guest to read the io_buffer */
+@@ -884,6 +890,35 @@ int ide_handle_rw_error(IDEState *s, int error, int op)
+     return action != BLOCK_ERROR_ACTION_IGNORE;
+ }
+ 
++/* Diagnostic-only: account for HDD DMA, which bypasses bmdma_rw_buf. */
++static void ide_trace_dma_payload(IDEState *s, const char *stage, int ret)
++{
++    uint64_t offset = (uint64_t)ide_get_sector(s) * BDRV_SECTOR_SIZE;
++    uint8_t data[512];
++
++    if (!trace_event_get_state_backends(TRACE_IDE_DMA_PAYLOAD)) {
++        return;
++    }
++    for (int i = 0; i < s->sg.nsg; i++) {
++        dma_addr_t addr = s->sg.sg[i].base;
++        dma_addr_t left = s->sg.sg[i].len;
++        while (left) {
++            size_t size = MIN(left, sizeof(data));
++            MemTxResult tx = dma_memory_read(s->sg.as, addr, data, size,
++                                             MEMTXATTRS_UNSPECIFIED);
++            g_autofree char *hash = tx == MEMTX_OK ?
++                g_compute_checksum_for_data(G_CHECKSUM_SHA256, data, size) :
++                g_strdup("unreadable");
++            trace_ide_dma_payload(s, s->unit, stage,
++                                  IDE_DMA_CMD_str(s->dma_cmd), offset, addr,
++                                  size, ret, tx, hash);
++            offset += size;
++            addr += size;
++            left -= size;
++        }
++    }
++}
++
+ static void ide_dma_cb(void *opaque, int ret)
+ {
+     IDEState *s = opaque;
+@@ -893,6 +928,10 @@ static void ide_dma_cb(void *opaque, int ret)
+     bool stay_active = false;
+     int32_t prep_size = 0;
+ 
++    if (s->sg.size && s->io_buffer_size) {
++        ide_trace_dma_payload(s, "complete", ret);
++    }
++
+     if (ret == -EINVAL) {
+         ide_dma_error(s);
+         return;
+@@ -965,6 +1004,7 @@ static void ide_dma_cb(void *opaque, int ret)
+         return;
+     }
+ 
++    ide_trace_dma_payload(s, "submit", 0);
+     offset = sector_num << BDRV_SECTOR_BITS;
+     switch (s->dma_cmd) {
+     case IDE_DMA_READ:
+@@ -1094,6 +1134,12 @@ static void ide_sector_write(IDEState *s)
+     }
+ 
+     trace_ide_sector_write(sector_num, n);
++    if (trace_event_get_state_backends(TRACE_IDE_PIO_PAYLOAD)) {
++        g_autofree char *hash = g_compute_checksum_for_data(
++            G_CHECKSUM_SHA256, s->io_buffer, n * BDRV_SECTOR_SIZE);
++        trace_ide_pio_payload(s, s->unit, "write-submit", sector_num,
++                              n * BDRV_SECTOR_SIZE, 0, hash);
++    }
+ 
+     if (!ide_sect_range_ok(s, sector_num, n)) {
+         ide_rw_error(s);
+diff --git a/hw/ide/pci.c b/hw/ide/pci.c
+index 1e50bb9e48..1f485d8566 100644
+--- a/hw/ide/pci.c
++++ b/hw/ide/pci.c
+@@ -249,6 +249,8 @@ static int32_t bmdma_prepare_buf(const IDEDMA *dma, int32_t limit)
+             bm->cur_prd_len = len;
+             bm->cur_prd_addr = prd.addr;
+             bm->cur_prd_last = (prd.size & 0x80000000);
++            trace_bmdma_prd(bm->addr, prd.addr, len,
++                            bm->cur_prd_last != 0, limit, s->sg.size);
+         }
+         l = bm->cur_prd_len;
+         if (l > 0) {
+@@ -305,8 +307,29 @@ static int bmdma_rw_buf(const IDEDMA *dma, bool is_write)
+             l = bm->cur_prd_len;
+         if (l > 0) {
+             if (is_write) {
++                uint32_t hash = 2166136261u;
++                for (int i = 0; i < l; ++i) {
++                    hash ^= s->io_buffer[s->io_buffer_index + i];
++                    hash *= 16777619u;
++                }
++                trace_bmdma_guest_write(bm->cur_prd_addr, l, hash,
++                                        s->io_buffer_index);
+                 pci_dma_write(pci_dev, bm->cur_prd_addr,
+                               s->io_buffer + s->io_buffer_index, l);
++                if (trace_event_get_state_backends(TRACE_BMDMA_PAYLOAD_CHECK)) {
++                    g_autofree uint8_t *check = g_malloc(l);
++                    g_autofree char *expected = g_compute_checksum_for_data(
++                        G_CHECKSUM_SHA256,
++                        s->io_buffer + s->io_buffer_index, l);
++                    MemTxResult tx = pci_dma_read(pci_dev, bm->cur_prd_addr,
++                                                  check, l);
++                    g_autofree char *actual = tx == MEMTX_OK ?
++                        g_compute_checksum_for_data(G_CHECKSUM_SHA256, check, l) :
++                        g_strdup("unreadable");
++                    trace_bmdma_payload_check(s, s->unit, bm->cur_prd_addr,
++                                              l, s->io_buffer_index, tx,
++                                              expected, actual);
++                }
+             } else {
+                 pci_dma_read(pci_dev, bm->cur_prd_addr,
+                              s->io_buffer + s->io_buffer_index, l);
+diff --git a/hw/ide/trace-events b/hw/ide/trace-events
+index 57042cafdd..b5ea2c2614 100644
+--- a/hw/ide/trace-events
++++ b/hw/ide/trace-events
+@@ -32,6 +32,8 @@ bmdma_reset(void) ""
+ bmdma_cmd_writeb(uint32_t val) "val: 0x%08x"
+ bmdma_addr_read(uint64_t data) "data: 0x%016"PRIx64
+ bmdma_addr_write(uint64_t data) "data: 0x%016"PRIx64
++bmdma_prd(uint32_t table, uint32_t addr, uint32_t len, bool last, uint32_t limit, uint32_t sg_offset) "table=0x%08"PRIx32" guest=0x%08"PRIx32" len=%"PRIu32" last=%d limit=%"PRIu32" sg_offset=%"PRIu32
++bmdma_guest_write(uint32_t addr, uint32_t len, uint32_t hash, uint32_t io_index) "guest=0x%08"PRIx32" len=%"PRIu32" fnv1a=0x%08"PRIx32" io_index=%"PRIu32
+ 
+ # piix.c
+ bmdma_read(uint64_t addr, uint8_t val) "bmdma: readb 0x%"PRIx64" : 0x%02x"
+@@ -123,3 +125,7 @@ handle_cmd_fis_dump(void *s, int port, const char *fis) "ahci(%p)[%d]: %s"
+ # ahci-allwinner.c
+ allwinner_ahci_mem_read(void *s, void *a, uint64_t addr, uint64_t val, unsigned size) "ahci(%p): read a=%p addr=0x%"PRIx64" val=0x%"PRIx64", size=%d"
+ allwinner_ahci_mem_write(void *s, void *a, uint64_t addr, uint64_t val, unsigned size) "ahci(%p): write a=%p addr=0x%"PRIx64" val=0x%"PRIx64", size=%d"
++
++ide_dma_payload(void *s, int unit, const char *stage, const char *command, uint64_t offset, uint64_t guest, uint32_t length, int result, int memory_result, const char *sha256) "state=%p unit=%d stage=%s cmd=%s offset=%"PRIu64" guest=0x%08"PRIx64" len=%"PRIu32" result=%d memory_result=%d sha256=%s"
++ide_pio_payload(void *s, int unit, const char *stage, int64_t sector, uint32_t length, int result, const char *sha256) "state=%p unit=%d stage=%s sector=%"PRId64" len=%"PRIu32" result=%d sha256=%s"
++bmdma_payload_check(void *s, int unit, uint32_t guest, uint32_t length, uint32_t io_index, int memory_result, const char *expected, const char *actual) "state=%p unit=%d guest=0x%08"PRIx32" len=%"PRIu32" io_index=%"PRIu32" memory_result=%d expected=%s actual=%s"
+diff --git a/hw/xbox/nv2a/pgraph/vk/texture.c b/hw/xbox/nv2a/pgraph/vk/texture.c
+index d64c96e387..76c4ab9b1c 100644
+--- a/hw/xbox/nv2a/pgraph/vk/texture.c
++++ b/hw/xbox/nv2a/pgraph/vk/texture.c
+@@ -1376,6 +1376,23 @@ static bool create_texture(PGRAPHState *pg, int texture_idx)
+         }
+     }
+ 
++    if (trace_event_get_state(TRACE_NV2A_PGRAPH_TEXTURE_SOURCE)) {
++        uint64_t observed_hash = content_hash;
++
++        if (!surface_to_texture && !possibly_dirty) {
++            observed_hash = fast_hash(texture_data, texture_length);
++            if (is_indexed) {
++                observed_hash ^=
++                    fast_hash(palette_data, texture_palette_data_size);
++            }
++        }
++        trace_nv2a_pgraph_texture_source(
++            texture_idx, texture_vram_offset, texture_length,
++            texture_palette_vram_offset, texture_palette_data_size,
++            binding_found, possibly_dirty, surface_to_texture, observed_hash,
++            binding_found ? snode->hash : 0);
++    }
++
+     if (binding_found) {
+         if (surface_to_texture) {
+             // FIXME: Add draw time tracking
+diff --git a/hw/xbox/nv2a/trace-events b/hw/xbox/nv2a/trace-events
+index c8a82a0d24..7696d1e079 100644
+--- a/hw/xbox/nv2a/trace-events
++++ b/hw/xbox/nv2a/trace-events
+@@ -28,5 +28,6 @@ nv2a_pgraph_surface_render_to_texture(uint32_t addr, uint32_t width, uint32_t he
+ nv2a_pgraph_surface_target(const char *binding, uint32_t addr, const char *layout, uint32_t anti_aliasing, uint32_t clip_x, uint32_t clip_width, uint32_t clip_y, uint32_t clip_height) "      Target: [%-5s @ 0x%08" PRIx32 "] (%s) aa:%d clip:x=%d,w=%d,y=%d,h=%d"
+ nv2a_pgraph_surface_texture_compat_failed(int32_t surface_fmt, int32_t texture_fmt) "Surface->Texture compat failed: %x to %x"
+ nv2a_pgraph_surface_upload(const char *binding, const char *layout, uint32_t addr, uint32_t width, uint32_t height, uint32_t pitch, uint32_t bytes_per_pixel) "[RAM->GPU] %s (%s) surface @ 0x%08" PRIx32 " (w=%d,h=%d,p=%d,bpp=%d)"
++nv2a_pgraph_texture_source(uint32_t index, uint32_t addr, uint32_t length, uint32_t palette_addr, uint32_t palette_length, bool binding_found, bool possibly_dirty, bool surface, uint64_t observed_hash, uint64_t cached_hash) "index=%"PRIu32" guest=0x%08"PRIx32" len=%"PRIu32" palette=0x%08"PRIx32" palette_len=%"PRIu32" bound=%d dirty=%d surface=%d observed=0x%016"PRIx64" cached=0x%016"PRIx64
+ nv2a_pgraph_flip_stall(void) ""
+ nv2a_pgraph_flip_increment_write(uint32_t write3d_old, uint32_t write3d_new) "0x%"PRIx32" -> 0x%"PRIx32
+diff --git a/target/i386/helper.h b/target/i386/helper.h
+index dde92f246d..61bcc504e4 100644
+--- a/target/i386/helper.h
++++ b/target/i386/helper.h
+@@ -233,3 +233,6 @@ DEF_HELPER_1(emms, void, env)
+ #include "tcg/ops_sse_header.h.inc"
+ 
+ DEF_HELPER_1(rdrand, tl, env)
++
++/* Local diagnostic for SpiritBoot f4496a59, never a generic guest ABI. */
++DEF_HELPER_2(spirit_menu_trace, void, env, i32)
+diff --git a/target/i386/tcg/misc_helper.c b/target/i386/tcg/misc_helper.c
+index 2b5f092a23..45c698dd4e 100644
+--- a/target/i386/tcg/misc_helper.c
++++ b/target/i386/tcg/misc_helper.c
+@@ -142,3 +142,57 @@ target_ulong HELPER(rdpid)(CPUX86State *env)
+     return 0;
+ #endif
+ }
++
++/* Local diagnostic. Function PCs and optimized calling conventions were checked
++ * against 6b31d660's xboxkrnl.unstripped.exe. No guest memory is written. */
++static uint32_t spirit_read32(CPUX86State *env, uint32_t address)
++{
++    uint8_t bytes[4];
++    if (!address || cpu_memory_rw_debug(env_cpu(env), address, bytes, 4, false)) {
++        return 0;
++    }
++    return ldl_le_p(bytes);
++}
++
++void helper_spirit_menu_trace(CPUX86State *env, uint32_t pc)
++{
++    if (pc == 0x8404f540 || pc == 0x8404f596 || pc == 0x8404f5bd) {
++        qemu_log_mask(LOG_GUEST_ERROR,
++            "spirit_allocation pc=%08x result=%08x available_pages=%u\n",
++            pc, (uint32_t)env->regs[R_EAX], spirit_read32(env, 0x84062220));
++        return;
++    }
++    uint32_t stack[10];
++    uint32_t irp = 0, mdl = 0, buffer = 0, length = 0;
++    uint32_t esp = env->regs[R_ESP];
++    for (int i = 0; i < 10; i++) {
++        stack[i] = spirit_read32(env, esp + i * 4);
++    }
++    if (pc == 0x840281f4) {
++        /* LTO-localized regparm(3): adapter, parent, operation. */
++        irp = env->regs[R_EDX];
++    } else if (pc == 0x840159f0) {
++        irp = env->regs[R_ECX]; /* exported fastcall */
++    } else if (pc == 0x84051390) {
++        irp = stack[2]; /* port callback: cdecl */
++    }
++    if (irp) {
++        mdl = spirit_read32(env, irp + 0x6c);
++        if (mdl) {
++            buffer = spirit_read32(env, mdl + 0x10) +
++                     spirit_read32(env, mdl + 0x18);
++            length = spirit_read32(env, mdl + 0x14);
++        }
++    }
++    qemu_log_mask(LOG_GUEST_ERROR,
++        "spirit_menu pc=%08x ret=%08x eax=%08x ecx=%08x edx=%08x "
++        "a1=%08x a2=%08x a3=%08x a4=%08x a5=%08x a6=%08x a7=%08x a8=%08x "
++        "irp=%08x status=%08x info=%u iosb=%08x user=%08x "
++        "mdl=%08x buffer=%08x bytes=%u\n",
++        pc, stack[0], (uint32_t)env->regs[R_EAX],
++        (uint32_t)env->regs[R_ECX], (uint32_t)env->regs[R_EDX],
++        stack[1], stack[2], stack[3], stack[4], stack[5], stack[6], stack[7], stack[8],
++        irp, spirit_read32(env, irp + 0x10),
++        spirit_read32(env, irp + 0x14), spirit_read32(env, irp + 0x1c),
++        spirit_read32(env, irp + 0x30), mdl, buffer, length);
++}
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index 690a684385..6154b17bf1 100644
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -4328,6 +4328,15 @@ static void i386_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+     CCOp orig_cc_op = dc->cc_op;
+     target_ulong orig_pc_save = dc->pc_save;
+ 
++    if (getenv("XEMU_SPIRIT_MENU_TRACE")) {
++        uint32_t pc = dc->base.pc_next;
++        if (pc == 0x840281f4 || pc == 0x840159f0 ||
++            pc == 0x84051390 || pc == 0x8404ce74 || pc == 0x8404cec4 ||
++            pc == 0x8404f540 || pc == 0x8404f596 || pc == 0x8404f5bd) {
++            gen_helper_spirit_menu_trace(tcg_env, tcg_constant_i32(pc));
++        }
++    }
++
+ #ifdef TARGET_VSYSCALL_PAGE
+     /*
+      * Detect entry into the vsyscall page and invoke the syscall.
