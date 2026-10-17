@@ -1,0 +1,196 @@
+{
+  "id": "forza-live-latency-20261017-4",
+  "files": [
+    {
+      "Path": "flash.bin",
+      "Length": 524288,
+      "Sha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296",
+      "Executable": false
+    },
+    {
+      "Path": "native-launch.exe",
+      "Length": 78848,
+      "Sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "Executable": true
+    },
+    {
+      "Path": "xemu-real.exe",
+      "Length": 44699470,
+      "Sha256": "e55b16287f2c472ee8f84932c20f37c71688b0b5c95cc6079b3834b274c5118d",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.exe",
+      "Length": 10240,
+      "Sha256": "478d61d90e6474167668cd6e0285eb057b6bde252b89e2b45869e45a415f6005",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.toml",
+      "Length": 697,
+      "Sha256": "432e8a0f90cc6b2385ff7e0f6378a14c2e54112948350600f4bf884701d44336",
+      "Executable": false
+    }
+  ],
+  "job": {
+    "Id": "forza-live-latency-20261017-4",
+    "Executable": "native-launch.exe",
+    "Arguments": [
+      "-config_path",
+      "{packageDir}/xemu.toml",
+      "-m",
+      "64",
+      "-device",
+      "lpc47m157",
+      "-serial",
+      "file:{resultDir}/native-serial.log",
+      "-d",
+      "guest_errors",
+      "-D",
+      "{resultDir}/qemu.log",
+      "-no-shutdown"
+    ],
+    "WorkingDirectory": ".",
+    "Environment": {
+      "XEMU_SPIRIT_MENU_TRACE": "1",
+      "PR248_NATIVE_PACKAGE": "{packageDir}",
+      "PR248_NATIVE_EVIDENCE": "{resultDir}"
+    },
+    "TimeoutSeconds": 7200,
+    "Tags": [
+      "FORZA-WORLD-STREAM",
+      "RELEASE64",
+      "ADD882B6",
+      "USER-POWERSHELL-PIPE",
+      "HUMAN-DRIVING",
+      "TIMESTAMPED-IO-MEMORY",
+      "SAVED-SCENE-REPLAY",
+      "CALLBACK-BOUNDARY"
+    ],
+    "Plan": [
+      {
+        "Type": "wait",
+        "DelayMs": 7000
+      },
+      {
+        "Type": "diagnostic",
+        "DiagnosticId": "restore-user-scene"
+      },
+      {
+        "Type": "diagnostic",
+        "DiagnosticId": "resume-callback-window"
+      },
+      {
+        "Type": "wait",
+        "DelayMs": 8000
+      },
+      {
+        "Type": "diagnostic",
+        "DiagnosticId": "pause-after-callback-window"
+      }
+    ],
+    "TargetOs": "windows",
+    "ExpectedExecutableSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+    "RequiredFiles": [
+      "flash.bin",
+      "native-launch.exe",
+      "xemu-real.exe",
+      "xemu.exe",
+      "xemu.toml"
+    ],
+    "LaunchMode": "direct",
+    "SnapshotName": null,
+    "StartPaused": false,
+    "RequireInput": false,
+    "Diagnostics": [
+      {
+        "Id": "restore-user-scene",
+        "Type": "monitor",
+        "MonitorCommand": "loadvm forza-missing-world",
+        "PauseBefore": true,
+        "PauseAfter": true
+      },
+      {
+        "Id": "resume-callback-window",
+        "Type": "qmp",
+        "QmpCommand": "cont",
+        "QmpArguments": {},
+        "PauseBefore": false,
+        "PauseAfter": false
+      },
+      {
+        "Id": "pause-after-callback-window",
+        "Type": "qmp",
+        "QmpCommand": "stop",
+        "QmpArguments": {},
+        "PauseBefore": false,
+        "PauseAfter": true
+      }
+    ],
+    "RuntimeState": {
+      "Enabled": false
+    },
+    "Inputs": [
+      {
+        "Path": "flash.bin",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296"
+      },
+      {
+        "Path": "native-launch.exe",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c"
+      },
+      {
+        "Path": "xemu-real.exe",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "e55b16287f2c472ee8f84932c20f37c71688b0b5c95cc6079b3834b274c5118d"
+      },
+      {
+        "Path": "xemu.exe",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "478d61d90e6474167668cd6e0285eb057b6bde252b89e2b45869e45a415f6005"
+      },
+      {
+        "Path": "xemu.toml",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "432e8a0f90cc6b2385ff7e0f6378a14c2e54112948350600f4bf884701d44336"
+      }
+    ],
+    "Workload": {
+      "CorrectnessChecks": [],
+      "EvidenceRequirements": [],
+      "ReportedMetrics": [],
+      "MinimumMetricSamples": 0,
+      "RequirePlanCompletion": false
+    },
+    "Experiment": {
+      "Id": "forza-world-stream-20261017",
+      "Variant": "add882b6",
+      "VariedFactors": [],
+      "ControlledFactors": [
+        "bios",
+        "hdd-seed",
+        "eeprom",
+        "64MiB"
+      ],
+      "RequireCorrectnessPass": false,
+      "RequireCompleteEvidence": true,
+      "AllowOperatorIntervention": true,
+      "AllowDiagnostics": true
+    },
+    "Operations": {
+      "Mode": "diagnostic",
+      "AllowPreview": true,
+      "AllowManualInput": true,
+      "AllowPauseResume": true,
+      "AllowDiagnostics": true,
+      "AllowBulkTransfers": true
+    }
+  }
+}

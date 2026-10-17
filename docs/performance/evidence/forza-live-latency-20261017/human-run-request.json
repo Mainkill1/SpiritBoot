@@ -1,0 +1,149 @@
+{
+  "id": "forza-live-latency-20261017-1",
+  "files": [
+    {
+      "Path": "flash.bin",
+      "Length": 524288,
+      "Sha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296",
+      "Executable": false
+    },
+    {
+      "Path": "native-launch.exe",
+      "Length": 78848,
+      "Sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "Executable": true
+    },
+    {
+      "Path": "xemu-real.exe",
+      "Length": 44699470,
+      "Sha256": "99e268c60b48759d07c05a8ce9f98e9c5979d2f1c6ccba8966353a433017ed15",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.exe",
+      "Length": 9728,
+      "Sha256": "28bc0895b0d274e372c0ab8fe86a3bad1052eb63ea64d044f4d24b020a3c5bac",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.toml",
+      "Length": 697,
+      "Sha256": "432e8a0f90cc6b2385ff7e0f6378a14c2e54112948350600f4bf884701d44336",
+      "Executable": false
+    }
+  ],
+  "job": {
+    "Id": "forza-live-latency-20261017-1",
+    "Executable": "native-launch.exe",
+    "Arguments": [
+      "-config_path",
+      "{packageDir}/xemu.toml",
+      "-m",
+      "64",
+      "-device",
+      "lpc47m157",
+      "-serial",
+      "file:{resultDir}/native-serial.log",
+      "-d",
+      "guest_errors",
+      "-D",
+      "{resultDir}/qemu.log",
+      "-no-shutdown"
+    ],
+    "WorkingDirectory": ".",
+    "Environment": {
+      "XEMU_SPIRIT_MENU_TRACE": "1",
+      "PR248_NATIVE_PACKAGE": "{packageDir}",
+      "PR248_NATIVE_EVIDENCE": "{resultDir}"
+    },
+    "TimeoutSeconds": 7200,
+    "Tags": [
+      "FORZA-WORLD-STREAM",
+      "RELEASE64",
+      "ADD882B6",
+      "USER-POWERSHELL-PIPE",
+      "HUMAN-DRIVING",
+      "TIMESTAMPED-IO-MEMORY"
+    ],
+    "Plan": [],
+    "TargetOs": "windows",
+    "ExpectedExecutableSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+    "RequiredFiles": [
+      "flash.bin",
+      "native-launch.exe",
+      "xemu-real.exe",
+      "xemu.exe",
+      "xemu.toml"
+    ],
+    "LaunchMode": "direct",
+    "SnapshotName": null,
+    "StartPaused": false,
+    "RequireInput": false,
+    "Diagnostics": [],
+    "RuntimeState": {
+      "Enabled": false
+    },
+    "Inputs": [
+      {
+        "Path": "flash.bin",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296"
+      },
+      {
+        "Path": "native-launch.exe",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c"
+      },
+      {
+        "Path": "xemu-real.exe",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "99e268c60b48759d07c05a8ce9f98e9c5979d2f1c6ccba8966353a433017ed15"
+      },
+      {
+        "Path": "xemu.exe",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "28bc0895b0d274e372c0ab8fe86a3bad1052eb63ea64d044f4d24b020a3c5bac"
+      },
+      {
+        "Path": "xemu.toml",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "432e8a0f90cc6b2385ff7e0f6378a14c2e54112948350600f4bf884701d44336"
+      }
+    ],
+    "Workload": {
+      "CorrectnessChecks": [],
+      "EvidenceRequirements": [],
+      "ReportedMetrics": [],
+      "MinimumMetricSamples": 0,
+      "RequirePlanCompletion": false
+    },
+    "Experiment": {
+      "Id": "forza-world-stream-20261017",
+      "Variant": "add882b6",
+      "VariedFactors": [],
+      "ControlledFactors": [
+        "bios",
+        "hdd-seed",
+        "eeprom",
+        "64MiB"
+      ],
+      "RequireCorrectnessPass": false,
+      "RequireCompleteEvidence": true,
+      "AllowOperatorIntervention": true,
+      "AllowDiagnostics": true
+    },
+    "Operations": {
+      "Mode": "diagnostic",
+      "AllowPreview": true,
+      "AllowManualInput": true,
+      "AllowPauseResume": true,
+      "AllowDiagnostics": true,
+      "AllowBulkTransfers": true
+    }
+  }
+}
