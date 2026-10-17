@@ -24,6 +24,16 @@ class ReleaseIdentityConfigurationTests(unittest.TestCase):
         self.assertNotIn(f'test "$actual_tree" = {expected}', workflow)
         self.assertNotIn(f"result['source_tree'] == '{expected}'", workflow)
 
+    def test_kernel_coverage_product_pins_match_the_workspace(self):
+        manifest = json.loads((ROOT / "sources/kernel-coverage-inputs.json").read_text())
+        descriptors = manifest["test_sources"] + manifest["supporting_sources"]
+        product = [entry for entry in descriptors if entry["scope"] == "product"]
+        self.assertTrue(product)
+        for entry in product:
+            with self.subTest(path=entry["path"]):
+                data = (ROOT / entry["path"]).read_bytes()
+                self.assertEqual(entry["sha256"], hashlib.sha256(data).hexdigest())
+
 
 class BuildTests(unittest.TestCase):
     def setUp(self):
