@@ -187,7 +187,7 @@ synchronous-only direct optical path. Patch 0158 limits allocation persistence
 to an armed quick launch, verifies actual optical-media changes without a cold-
 mount TEST UNIT READY, and prevents control/data request-envelope double lease.
 It assembles tree
-`ad8641445795b0701ec73c987f1c771d0ac83654`. Release64 reproduces
+`d7e96944c04ec8fffb1a782b6cce327666fdb935`. Release64 reproduces
 SHA-256
 `382956e7bfceaf943e37e90a772963ca7d9d6162959b326135ace533a0cba9ec`.
 Release128 is

@@ -712,3 +712,28 @@ index 0000000000..0cb4892a5e
 +    stop();
 +    return 1;
 +}
+diff --git a/tests/host/reset-frame/cases.c b/tests/host/reset-frame/cases.c
+index 4213499d17..857cc763e4 100644
+--- a/tests/host/reset-frame/cases.c
++++ b/tests/host/reset-frame/cases.c
+@@ -3,7 +3,7 @@ int main(int argc, char **argv) {
+     assert(argc == 2);
+     int test = atoi(argv[1]);
+     static XBE_FIRMWARE_REENTRY routine = XeFwQuickReboot;
+-    static const char *expected = "SFH";
++    static const char *expected = "SFPH";
+     static int action = HalRebootRoutine;
+     poison_frame[0] = UINTPTR_MAX;
+     poison_frame[1] = 0;
+diff --git a/tests/host/reset-frame/shim.h b/tests/host/reset-frame/shim.h
+index ef3db4dae4..aa4078b681 100644
+--- a/tests/host/reset-frame/shim.h
++++ b/tests/host/reset-frame/shim.h
+@@ -40,6 +40,7 @@ _Noreturn VOID NTAPI NxkShutdownAbortPowerRequest(void) {
+ }
+ static void XeStashRebootIntent(void) { record('S'); }
+ static void IoShutdownSystem(int phase) { assert(phase == 1); record('F'); }
++static void NxkMmArmPersistence(void) { record('P'); }
+ static void HalReturnToFirmware(int action) { reset_action = action; record('H'); }
+ #if DBG
+ static void diagnostic(const char *format, ...) { (void)format; }
