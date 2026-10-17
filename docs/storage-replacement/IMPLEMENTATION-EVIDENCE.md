@@ -183,12 +183,15 @@ synchronous XDVDFS direct forwarding in 0153/0156. Patch 0155 rolls back the
 unqualified small-SYSVA local-invalidation experiment from 0154.
 Patch 0157 adds per-request payload association to the randomized 1,024-read
 QD12 adapter stress and corrects the Advanced menu label for the now
-synchronous-only direct optical path. It assembles tree
-`76266ba77fdf73210b3d4dea47ed7922bdc6b0cf`. Release64 reproduces
+synchronous-only direct optical path. Patch 0158 limits allocation persistence
+to an armed quick launch, verifies actual optical-media changes without a cold-
+mount TEST UNIT READY, and prevents control/data request-envelope double lease.
+It assembles tree
+`ad8641445795b0701ec73c987f1c771d0ac83654`. Release64 reproduces
 SHA-256
-`bcc3145cd832beef0918d5ca99244009b56f98b7e59673e074a2b1cebe5f9b33`.
+`382956e7bfceaf943e37e90a772963ca7d9d6162959b326135ace533a0cba9ec`.
 Release128 is
-`15c77c938d11d1dadd8bdd2b9879dd06c11b2319b644482269310b75f59f405b`.
+`15159ed9c3ee4c76c2bec8242c3e3cd15d8f8040b3c8b3b468acabf4bf7e4a72`.
 
 The complete product host suite passes 549 tests with 26 expected
 host-platform skips. Two independent Windows release64 boots completed 32

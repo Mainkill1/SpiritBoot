@@ -4,11 +4,15 @@ No fresh PGR2, Conker or complete DOA save-cycle pass is established on the
 current final PR248 image. A bounded earlier DOA human test is recorded below.
 The independent replacement is installed in the complete-candidate release
 link. Its current safe-default release64 SHA-256 is
-`bcc3145cd832beef0918d5ca99244009b56f98b7e59673e074a2b1cebe5f9b33`
-from assembled tree `76266ba77fdf73210b3d4dea47ed7922bdc6b0cf`.
+`382956e7bfceaf943e37e90a772963ca7d9d6162959b326135ace533a0cba9ec`
+from assembled tree `ad8641445795b0701ec73c987f1c771d0ac83654`.
 Ordinary boots retain the delayed ATA path. Acceleration requires an explicit
 session-only Advanced setting. Repeated race/loading qualification remains
 pending because the original missing-data symptom was sporadic.
+Matched 64 MiB Halo cold-boot isolation reaches a correct live menu on this
+exact image; the failed predecessor differed only by issuing TEST UNIT READY
+during the initial XDVDFS mount. Reset and media-lifetime details are recorded
+in [RESET_MEDIA_LIFETIME_20261016.md](../provenance/RESET_MEDIA_LIFETIME_20261016.md).
 The final pre-extraction image
 `0f6e4f48269e0ef65bb27758e221b4bcdb707ef0cbf57c211d7e969866334d5e`
 is now the historical game-test control; the published reference remains
