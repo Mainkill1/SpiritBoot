@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 SYSVA_REVERT = "patches/roswell/0155-revert-sysva-local-invalidation.patch"
 XDVDFS_REPAIR = "patches/roswell/0156-xdvdfs-preserve-file-position.patch"
+PAYLOAD_QUALIFICATION = "patches/roswell/0157-forza-payload-association-qualification.patch"
 
 
 class ForzaCorruptionRegressionTests(unittest.TestCase):
@@ -19,10 +20,10 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
 
     def test_corrective_patches_are_final_and_hash_locked(self):
         self.assertEqual(
-            [entry["path"] for entry in self.entries[-2:]],
-            [SYSVA_REVERT, XDVDFS_REPAIR],
+            [entry["path"] for entry in self.entries[-3:]],
+            [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION],
         )
-        for entry in self.entries[-2:]:
+        for entry in self.entries[-3:]:
             self.assertEqual(
                 hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
                 entry["sha256"],
@@ -39,6 +40,17 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
         self.assertIn("Sp->FileObject->Flags & FO_SYNCHRONOUS_IO", patch)
         self.assertIn("fo.Flags=0;CHECK(!XdvdPlanForwardRead", patch)
         self.assertIn("completion order and can redirect", patch)
+
+    def test_qd12_stress_verifies_request_to_buffer_association(self):
+        patch = (ROOT / PAYLOAD_QUALIFICATION).read_text()
+        for token in (
+            "stamp_read_payloads",
+            "request_index[WINDOW]",
+            "pending_children[pick]",
+            "CHECK(first==expected&&last==~expected)",
+            'TEXT(label_xdvdfs_async, "Optical direct reads")',
+        ):
+            self.assertIn(token, patch)
 
 
 if __name__ == "__main__":

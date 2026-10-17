@@ -181,13 +181,16 @@ The exact corrected release stack adds the bounded Forza queue and hot-path
 patches 0146 through 0151, safe-default Advanced controls in 0152, and opt-in
 synchronous XDVDFS direct forwarding in 0153/0156. Patch 0155 rolls back the
 unqualified small-SYSVA local-invalidation experiment from 0154.
-It assembles tree `5c4eefef8aea70f20d9615b107a7bfaac67b0bbb`. Release64 reproduces
+Patch 0157 adds per-request payload association to the randomized 1,024-read
+QD12 adapter stress and corrects the Advanced menu label for the now
+synchronous-only direct optical path. It assembles tree
+`76266ba77fdf73210b3d4dea47ed7922bdc6b0cf`. Release64 reproduces
 SHA-256
-`c416cc97dc1d78028a88827692fc3d9e277e66286912d20193b4365c386707b4`.
+`bcc3145cd832beef0918d5ca99244009b56f98b7e59673e074a2b1cebe5f9b33`.
 Release128 is
-`69b36b05e0725911cbd3a735c81abb8c2344c9876d2d5abb6fc9717bec3e6d03`.
+`15c77c938d11d1dadd8bdd2b9879dd06c11b2319b644482269310b75f59f405b`.
 
-The complete product host suite passes 545 tests with 26 expected
+The complete product host suite passes 549 tests with 26 expected
 host-platform skips. Two independent Windows release64 boots completed 32
 Forza-shaped passes and 32,768 asynchronous FATX reads at queue depth 12 and
 900-page pressure, with zero request, oracle, warmup or cleanup failures. The

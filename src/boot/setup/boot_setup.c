@@ -37,7 +37,7 @@ TEXT(label_ac3, "Dolby Digital (AC3)");
 TEXT(label_dts, "DTS");
 TEXT(label_advanced_all, "All advanced settings");
 TEXT(label_contig_cache, "Advanced: contig cache");
-TEXT(label_xdvdfs_async, "Optical async reads");
+TEXT(label_xdvdfs_async, "Optical direct reads");
 TEXT(label_ata_settle, "Emulator ATA acceleration");
 TEXT(label_save, "Save and reboot");
 TEXT(label_continue, "Discard and continue");

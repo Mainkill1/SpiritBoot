@@ -34,7 +34,7 @@ repository's GPL-2.0-or-later terms.
 ## Product boundary
 
 The optimization is session-only and defaults off. Pressing Y from the main
-setup menu opens Advanced, where **Optical async reads** controls bit 2 of
+setup menu opens Advanced, where **Optical direct reads** controls bit 2 of
 `NxkExperimentalFlags`. **All advanced settings** includes the same bit.
 
 Eligible reads:
@@ -46,8 +46,11 @@ Eligible reads:
   internal wait;
 - preserve lower optical segmentation and ATA timing.
 
-Every rejected request executes the prior synchronous route. This includes
-zero-length, past-EOF, unaligned, paging, associated, chained-MDL, insufficient
+Every rejected request executes the prior established route. Patch 0156 also
+restricts direct forwarding to serialized `FO_SYNCHRONOUS_IO` handles because
+asynchronous completion order cannot preserve legacy issue-order file-position
+publication. Other exclusions include zero-length, past-EOF, unaligned,
+paging, associated, chained-MDL, insufficient
 MDL-span, insufficient stack, overflowing, and misaligned-buffer requests.
 
 ## Verification

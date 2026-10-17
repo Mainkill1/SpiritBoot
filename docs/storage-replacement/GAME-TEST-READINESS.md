@@ -4,8 +4,8 @@ No fresh PGR2, Conker or complete DOA save-cycle pass is established on the
 current final PR248 image. A bounded earlier DOA human test is recorded below.
 The independent replacement is installed in the complete-candidate release
 link. Its current safe-default release64 SHA-256 is
-`c416cc97dc1d78028a88827692fc3d9e277e66286912d20193b4365c386707b4`
-from assembled tree `5c4eefef8aea70f20d9615b107a7bfaac67b0bbb`.
+`bcc3145cd832beef0918d5ca99244009b56f98b7e59673e074a2b1cebe5f9b33`
+from assembled tree `76266ba77fdf73210b3d4dea47ed7922bdc6b0cf`.
 Ordinary boots retain the delayed ATA path. Acceleration requires an explicit
 session-only Advanced setting. Repeated race/loading qualification remains
 pending because the original missing-data symptom was sporadic.

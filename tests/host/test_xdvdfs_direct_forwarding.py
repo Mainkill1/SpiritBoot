@@ -73,7 +73,7 @@ class XdvdfsDirectForwardingTests(unittest.TestCase):
         self.assertIn("SB_EXPERIMENT_XDVDFS_ASYNC", header)
         self.assertIn("SB_EXPERIMENT_ADVANCED_ALL_MASK", header)
         self.assertIn("SB_EXPERIMENT_XDVDFS_ASYNC |", header)
-        self.assertIn('TEXT(label_xdvdfs_async, "Optical async reads")', source)
+        self.assertIn('TEXT(label_xdvdfs_async, "Optical direct reads")', source)
 
 
 if __name__ == "__main__":

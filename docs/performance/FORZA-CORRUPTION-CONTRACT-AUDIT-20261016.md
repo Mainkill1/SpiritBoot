@@ -15,6 +15,7 @@ session-only advanced experiments.
 | 0153 | `e7c70bbdc2b766c397bff4119cc65cdc2629dfe4e9f8ff21e922d0e869bf2326` | Optional XDVDFS forwarding |
 | 0154 | `6f4070f788355d88cf44f37b792a6aceb1e9ead91bc441fe04df800c0a0fc077` | Small-SYSVA local invalidation |
 | 0156 | `c416cc97dc1d78028a88827692fc3d9e277e66286912d20193b4365c386707b4` | SYSVA rollback plus ordered XDVDFS forwarding |
+| 0157 | `bcc3145cd832beef0918d5ca99244009b56f98b7e59673e074a2b1cebe5f9b33` | Per-request payload association qualification and accurate Advanced label |
 
 ## Input/output contract review
 
@@ -22,7 +23,7 @@ session-only advanced experiments.
 | --- | --- | --- |
 | 0143 native submit | A command lease continues to name the same active adapter envelope and parent IRP through prepare, submit, cancel, result, and completion. | Retained; exact-envelope and re-entry tests pass. |
 | 0145 scalar pin | Eligibility and pin transition remain under one uninterrupted PFN lock and preserve counts, overflow, and deferred-free state. | Retained; only a repeated predicate was removed. |
-| 0146–0148 queue, pump, SG | Each parent owns its slot, envelope, child IRP, MDL, and buffer through its terminal completion. Out-of-order completion eventually services every runnable slot. | Ownership and status tests pass. Patterned per-request payload association remains a coverage gap. |
+| 0146–0148 queue, pump, SG | Each parent owns its slot, envelope, child IRP, MDL, and buffer through its terminal completion. Out-of-order completion eventually services every runnable slot. | Ownership and status tests pass. Patch 0157 adds distinct first/last payload stamps to every request in the 1,024-read QD12 randomized completion and buffer-reuse stress; plain and ASan/UBSan builds pass. |
 | 0149 FATX extent | A hit maps the requested logical bytes to the same contiguous physical clusters as a fresh FAT walk under `MainResource`; every allocation-chain mutation invalidates it. | Retained; arithmetic, locking, generation, randomized oracle, and full-byte Forza replay pass. |
 | 0150 packet prepare | SRB, stack, CDB, MDL, and scatter outputs equal the prior constructor for accepted and rejected inputs; a zero CDB length never reads its source. | Retained; release disassembly and sanitizer matrices pass. |
 | 0151 ATA cache capture | Ordinary requests have no cache-publication consumer; IDENTIFY requests publish the same writer/result record as before. | Retained; only unused ordinary-request copies were removed. |
@@ -57,11 +58,22 @@ formal performance comparison, but does not alter the recorded guest results.
 Evidence is retained under run
 `20261016-225122514-e3efb56de2884ac586037d96dd371f5d`.
 
-Two clean release64 builds produced identical SHA-256
-`c416cc97dc1d78028a88827692fc3d9e277e66286912d20193b4365c386707b4`.
+After the second audit, two clean release64 builds produced identical SHA-256
+`bcc3145cd832beef0918d5ca99244009b56f98b7e59673e074a2b1cebe5f9b33`.
 Release128 is
-`69b36b05e0725911cbd3a735c81abb8c2344c9876d2d5abb6fc9717bec3e6d03`;
-both assemble source tree `5c4eefef8aea70f20d9615b107a7bfaac67b0bbb`.
+`15c77c938d11d1dadd8bdd2b9879dd06c11b2319b644482269310b75f59f405b`;
+both assemble source tree `76266ba77fdf73210b3d4dea47ed7922bdc6b0cf`.
+The firmware behavior change from 0156 is limited to renaming the Advanced
+option from `Optical async reads` to `Optical direct reads`; 0157 otherwise
+strengthens the host qualification source bundled with the assembled tree.
+
+The second-audit release64 image completed another Windows release replay in
+run `20261017-010257902-098bbb5f2523496a887283394df35e14`: 16 terminal
+batches, 16,384 reads, zero workload failures, zero pointer mismatches, zero
+byte-oracle failures, and complete cleanup. The process exited normally. The
+managed runner again labels correctness `notEvaluated` because its inherited
+plan executes one post-run QMP diagnostic, so this is supporting guest-output
+evidence rather than a formal performance comparison.
 
 ## Release decision
 
