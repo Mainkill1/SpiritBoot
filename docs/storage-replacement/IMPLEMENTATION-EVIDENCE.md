@@ -186,12 +186,14 @@ QD12 adapter stress and corrects the Advanced menu label for the now
 synchronous-only direct optical path. Patch 0158 limits allocation persistence
 to an armed quick launch, verifies actual optical-media changes without a cold-
 mount TEST UNIT READY, and prevents control/data request-envelope double lease.
-It assembles tree
-`319d81cfe9f6e1a524012cbab66d9bd8f5f929d4`. Release64 reproduces
+Patches 0160 through 0162 admit the measured optical burst, defer child-IRP
+retirement until the completion stack unwinds, and add transient storage
+request envelopes above the fixed 16-envelope fast path. The final assembled
+tree is `eb48b3dab7214b799300469da208cf9364408644`. Release64 reproduces
 SHA-256
-`382956e7bfceaf943e37e90a772963ca7d9d6162959b326135ace533a0cba9ec`.
+`f4496a595b1116a6b696c1f2c1a856f0a70239de2e99e98cd46f1fd424f4d635`.
 Release128 is
-`15159ed9c3ee4c76c2bec8242c3e3cd15d8f8040b3c8b3b468acabf4bf7e4a72`.
+`e3bbf023f2843eb3350dda0e2209fe09d0fb1033d54a74893e6693c3b7a24438`.
 
 The complete product host suite passes 549 tests with 26 expected
 host-platform skips. Two independent Windows release64 boots completed 32

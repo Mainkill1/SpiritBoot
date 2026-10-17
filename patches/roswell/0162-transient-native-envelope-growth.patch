@@ -1,0 +1,309 @@
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -26,7 +26,7 @@
+     unsigned active, dispatch_active, cancel_active, cancel_latched;
+     unsigned handle_valid, terminal_ready, completed;
+     unsigned submit_active, result_deferred, packet_live;
+-    unsigned deferred_control;
++    unsigned deferred_control, dynamic;
+     KDPC completion_dpc;
+     PMDL control_mdl;
+     ULONG control_code, control_output;
+@@ -47,10 +47,12 @@
+     nx_device core;
+     nx_slot *slots;
+     NX_NATIVE_ENVELOPE *envelopes;
+-    ULONG count;
++    ULONG count, dynamic_active;
+     NX_NATIVE_ENVELOPE *free_envelopes;
++    NX_NATIVE_ENVELOPE *trim_envelopes;
+     unsigned sealed, quarantined;
+     KEVENT drain_event;
++    KDPC trim_dpc;
+ 
+     uint64_t media_capacity;
+     ULONG media_sector, media_generation;
+@@ -115,6 +117,32 @@
+ static void port_enter(void *context);
+ static void port_leave(void *context);
+ static VOID NTAPI NxNativeCompletionDpc(PKDPC,PVOID,PVOID,PVOID);
++static VOID NTAPI NxNativeTrimDpc(PKDPC,PVOID,PVOID,PVOID);
++
++static void destroy_dynamic_envelope(NX_NATIVE_ENVELOPE *envelope)
++{
++    if(!envelope) return;
++    if(envelope->child) IoFreeIrp(envelope->child);
++    if(envelope->control_mdl) IoFreeMdl(envelope->control_mdl);
++    ExFreePool(envelope);
++}
++
++static NX_NATIVE_ENVELOPE *allocate_dynamic_envelope(NX_NATIVE_ADAPTER *adapter)
++{
++    NX_NATIVE_ENVELOPE *envelope=ExAllocatePool(NonPagedPool,sizeof(*envelope));
++    if(!envelope) return NULL;
++    zero_bytes(envelope,sizeof(*envelope));
++    envelope->adapter=adapter;envelope->dynamic=1;
++    KeInitializeDpc(&envelope->completion_dpc,NxNativeCompletionDpc,envelope);
++    envelope->child=IoAllocateIrp((CCHAR)adapter->lower->StackSize,FALSE);
++    envelope->control_mdl=IoAllocateMdl(envelope->control_data,
++        sizeof(envelope->control_data),FALSE,FALSE,NULL);
++    if(!envelope->child || !envelope->control_mdl) {
++        destroy_dynamic_envelope(envelope);return NULL;
++    }
++    MmBuildMdlForNonPagedPool(envelope->control_mdl);
++    return envelope;
++}
+ 
+ static void quarantine_adapter(NX_NATIVE_ADAPTER *adapter)
+ {
+@@ -368,12 +396,34 @@
+         envelope->parent=NULL;
+         envelope->handle_valid=0;
+         envelope->terminal_ready=0;
+-        envelope->next_free=envelope->adapter->free_envelopes;
+-        envelope->adapter->free_envelopes=envelope;
++        if(envelope->dynamic) {
++            if(envelope->adapter->dynamic_active)
++                --envelope->adapter->dynamic_active;
++            envelope->next_free=envelope->adapter->trim_envelopes;
++            envelope->adapter->trim_envelopes=envelope;
++            (void)KeInsertQueueDpc(&envelope->adapter->trim_dpc,NULL,NULL);
++        } else {
++            envelope->next_free=envelope->adapter->free_envelopes;
++            envelope->adapter->free_envelopes=envelope;
++        }
+         (void)KeSetEvent(&envelope->adapter->drain_event,IO_NO_INCREMENT,FALSE);
+     }
+ }
+ 
++static VOID NTAPI NxNativeTrimDpc(PKDPC dpc,PVOID context,PVOID argument1,PVOID argument2)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    NX_NATIVE_ENVELOPE *envelope;
++    (void)dpc;(void)argument1;(void)argument2;
++    for(;;) {
++        port_enter(adapter);envelope=adapter->trim_envelopes;
++        if(envelope) adapter->trim_envelopes=envelope->next_free;
++        port_leave(adapter);
++        if(!envelope) return;
++        destroy_dynamic_envelope(envelope);
++    }
++}
++
+ static void finish_parent(NX_NATIVE_ENVELOPE *envelope)
+ {
+     PIRP parent=envelope->parent;
+@@ -700,17 +750,20 @@
+                                    ULONG slot_count,const nx_config *config)
+ {
+     nx_port port;
+-    ULONG index;
++    ULONG index,core_count;
+     if(!adapter || !lower || !slot_count || !config || !lower->StackSize)
+         return STATUS_INVALID_PARAMETER;
++    if(slot_count>UINT32_MAX/4u) return STATUS_INVALID_PARAMETER;
++    core_count=slot_count*4u;
+     zero_bytes(adapter,sizeof(*adapter));
+-    adapter->slots=ExAllocatePool(NonPagedPool,(size_t)slot_count*sizeof(*adapter->slots));
++    adapter->slots=ExAllocatePool(NonPagedPool,(size_t)core_count*sizeof(*adapter->slots));
+     adapter->envelopes=ExAllocatePool(NonPagedPool,(size_t)slot_count*sizeof(*adapter->envelopes));
+     if(adapter->envelopes)
+         zero_bytes(adapter->envelopes,(size_t)slot_count*sizeof(*adapter->envelopes));
+     if(!adapter->slots || !adapter->envelopes) goto no_memory;
+     adapter->lower=lower;adapter->count=slot_count;KeInitializeSpinLock(&adapter->lock);
+     KeInitializeEvent(&adapter->drain_event,SynchronizationEvent,FALSE);
++    KeInitializeDpc(&adapter->trim_dpc,NxNativeTrimDpc,adapter);
+     adapter->media_capacity=config->capacity_bytes;adapter->media_sector=config->sector_bytes;
+     adapter->media_capacity_valid=config->capacity_bytes!=0;
+     adapter->media_state=adapter->media_capacity_valid ? NX_MEDIA_PRESENT:NX_MEDIA_UNKNOWN;
+@@ -729,8 +782,8 @@
+     port.context=adapter;port.enter=port_enter;port.leave=port_leave;
+     port.prepare=port_prepare;port.submit=port_submit;port.retire=port_retire;
+     port.cancel=port_cancel;port.mark_pending=port_pending;port.complete=port_complete;
+-    if(nx_device_init(&adapter->core,config,&port,adapter->slots,slot_count,
+-                      (size_t)slot_count*sizeof(*adapter->slots))!=NX_OK)
++    if(nx_device_init(&adapter->core,config,&port,adapter->slots,core_count,
++                      (size_t)core_count*sizeof(*adapter->slots))!=NX_OK)
+         goto invalid;
+     return STATUS_SUCCESS;
+ invalid:
+@@ -761,6 +814,7 @@
+     for(;;) {
+         unsigned active=0;
+         port_enter(adapter);
++        active=adapter->dynamic_active!=0;
+         for(index=0;index<adapter->count;++index)
+             if(adapter->envelopes[index].active) { active=1;break; }
+         if(!active) {
+@@ -799,7 +853,7 @@
+     nx_handle handle;
+     nx_status result;
+     KIRQL cancel_irql;
+-    unsigned cancel_after=0;
++    unsigned cancel_after=0,grow=0;
+     nx_lcq_observation cache_observation={0};
+     if(!adapter || !parent) return STATUS_INVALID_PARAMETER;
+     port_enter(adapter);
+@@ -817,8 +871,18 @@
+     if(!adapter->sealed && adapter->free_envelopes) {
+         envelope=adapter->free_envelopes;
+         adapter->free_envelopes=envelope->next_free;
++    } else if(!adapter->sealed) grow=1;
++    port_leave(adapter);
++    if(!envelope && grow) envelope=allocate_dynamic_envelope(adapter);
++    port_enter(adapter);
++    if(envelope && (adapter->sealed || adapter->quarantined)) {
++        grow=envelope->dynamic;port_leave(adapter);
++        if(grow) destroy_dynamic_envelope(envelope);
++        parent->IoStatus.Status=STATUS_IO_DEVICE_ERROR;parent->IoStatus.Information=0;
++        IofCompleteRequest(parent,IO_NO_INCREMENT);return STATUS_IO_DEVICE_ERROR;
+     }
+     if(envelope) {
++        if(envelope->dynamic) ++adapter->dynamic_active;
+         envelope->active=1;envelope->dispatch_active=1;envelope->parent=parent;
+         envelope->cancel_active=envelope->cancel_latched=envelope->handle_valid=0;
+         envelope->terminal_ready=envelope->completed=envelope->submit_active=0;
+@@ -969,7 +1033,7 @@
+     KIRQL cancel_irql;
+     nx_packet_command command;
+     NTSTATUS dispatched;
+-    unsigned report=0,cached,quarantined;
++    unsigned report=0,cached,quarantined,grow=0;
+     nx_packet_result deferred;
+     nx_packet_status captured=NX_PACKET_OK;
+     if(!extension||!irp||!irp->Tail.Overlay.CurrentStackLocation) return STATUS_INVALID_PARAMETER;
+@@ -1016,8 +1080,19 @@
+     if(!adapter->sealed && adapter->free_envelopes) {
+         envelope=adapter->free_envelopes;
+         adapter->free_envelopes=envelope->next_free;
++    } else if(!adapter->sealed) grow=1;
++    port_leave(adapter);
++    if(!envelope && grow)
++        envelope=allocate_dynamic_envelope(adapter);
++    port_enter(adapter);
++    if(envelope && (adapter->sealed || adapter->quarantined)) {
++        unsigned dynamic=envelope->dynamic;port_leave(adapter);
++        if(dynamic) destroy_dynamic_envelope(envelope);
++        irp->IoStatus.Status=STATUS_IO_DEVICE_ERROR;irp->IoStatus.Information=0;
++        IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_IO_DEVICE_ERROR;
+     }
+     if(envelope) {
++        if(envelope->dynamic) ++adapter->dynamic_active;
+         envelope->active=1;envelope->dispatch_active=1;envelope->control_active=1;
+         envelope->parent=irp;envelope->completed=envelope->terminal_ready=0;
+         envelope->cancel_active=envelope->cancel_latched=0;envelope->packet_live=0;
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -13,7 +13,7 @@
+ 
+ static PDEVICE_OBJECT created_device;
+ static PIRP active_child;
+-static PIRP pending_children[16];
++static PIRP pending_children[64];
+ static unsigned pending_child_count;
+ static unsigned lower_calls, cancel_calls, forward_calls;
+ static unsigned property_calls,free_irps,free_mdls,detaches,deletes;
+@@ -83,6 +83,7 @@
+ { while(queued_dpc_count){PKDPC d=queued_dpcs[0];PVOID a1=queued_dpc_a1[0],a2=queued_dpc_a2[0];
+   for(unsigned i=1;i<queued_dpc_count;++i){queued_dpcs[i-1]=queued_dpcs[i];queued_dpc_a1[i-1]=queued_dpc_a1[i];queued_dpc_a2[i-1]=queued_dpc_a2[i];}
+   --queued_dpc_count;d->Inserted=0;d->DeferredRoutine(d,d->DeferredContext,a1,a2);} }
++VOID KeFlushQueuedDpcs(VOID){drain_dpcs();}
+ VOID IoAcquireCancelSpinLock(KIRQL *q){*q=0;}
+ VOID IoReleaseCancelSpinLock(KIRQL q){(void)q;}
+ VOID KeInitializeSpinLock(PKSPIN_LOCK l){*l=0;}
+@@ -183,7 +184,7 @@
+             MUST(complete_specific_child(pending_children[pick],STATUS_SUCCESS,4096,1)==STATUS_MORE_PROCESSING_REQUIRED);
+         }
+     }
+-    if(lower_pending){active_child=child;MUST(pending_child_count<16);
++    if(lower_pending){active_child=child;MUST(pending_child_count<64);
+         pending_children[pending_child_count++]=child;return STATUS_PENDING;}
+     ULONG bytes=srb->Cdb[0]==0x43 ? 12:srb->DataTransferLength;
+     NTSTATUS status=srb->Cdb[0]==0x35 ? sync_command_status:STATUS_SUCCESS;
+@@ -327,10 +328,12 @@
+ {
+     PDEVICE_OBJECT d=make_device(1);parent_fixture a,b;lower_calls=cancel_calls=0;lower_pending=1;init_parent(&a,IRP_MJ_READ,4096);
+     CHECK(NxNativeDispatchReadWrite(d,&a.irp)==STATUS_PENDING);CHECK(a.irp.host_pending&&!a.irp.host_completed&&a.irp.CancelRoutine);
+-    init_parent(&b,IRP_MJ_READ,4096);CHECK(NxNativeDispatchReadWrite(d,&b.irp)==STATUS_INSUFFICIENT_RESOURCES);CHECK(b.irp.host_completed&&b.irp.IoStatus.Status==STATUS_INSUFFICIENT_RESOURCES);
++    init_parent(&b,IRP_MJ_READ,4096);CHECK(NxNativeDispatchReadWrite(d,&b.irp)==STATUS_PENDING);CHECK(b.irp.host_pending&&!b.irp.host_completed&&b.irp.CancelRoutine);
+     NxNativeSealClassDevice(d);
+     CHECK(cancel_calls==0);a.irp.Cancel=1;a.irp.CancelIrql=0;a.irp.CancelRoutine(d,&a.irp);
+     CHECK(cancel_calls==1&&a.irp.host_completed==1&&a.irp.IoStatus.Status==STATUS_CANCELLED);
++    b.irp.Cancel=1;b.irp.CancelIrql=0;b.irp.CancelRoutine(d,&b.irp);
++    CHECK(cancel_calls==2&&b.irp.host_completed==1&&b.irp.IoStatus.Status==STATUS_CANCELLED);
+     return 1;
+ }
+ /* Completing A may synchronously dispatch B after A's core slot is free while
+@@ -935,6 +938,31 @@
+     lower_pending=0;
+     return 1;
+ }
++static int removal_drains_transient_envelopes(void)
++{
++    PDEVICE_OBJECT device=make_device(1);
++    parent_fixture fixed,transient;
++    init_parent(&fixed,IRP_MJ_READ,4096);init_parent(&transient,IRP_MJ_READ,4096);
++    lower_pending=1;pending_child_count=0;lower_calls=0;
++    CHECK(NxNativeDispatchReadWrite(device,&fixed.irp)==STATUS_PENDING);
++    CHECK(NxNativeDispatchReadWrite(device,&transient.irp)==STATUS_PENDING);
++    CHECK(pending_child_count==2);
++    pnp_thread removal;init_pnp(&removal,NxNativeDispatchPnp,device,IRP_MN_REMOVE_DEVICE);
++    pthread_t removal_id;CHECK(!pthread_create(&removal_id,NULL,run_pnp,&removal));
++    while(!__atomic_load_n(&removal.entered,__ATOMIC_ACQUIRE)) sched_yield();
++    for(unsigned i=0;i<1000;++i) sched_yield();
++    CHECK(!__atomic_load_n(&removal.returned,__ATOMIC_ACQUIRE));
++    CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++          STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned i=0;i<1000;++i) sched_yield();
++    CHECK(!__atomic_load_n(&removal.returned,__ATOMIC_ACQUIRE));
++    CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++          STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(!pthread_join(removal_id,NULL)&&removal.returned&&removal.status==STATUS_SUCCESS);
++    CHECK(fixed.irp.host_completed&&transient.irp.host_completed);
++    lower_pending=0;
++    return 1;
++}
+ static int control_lease_is_removed_from_free_list(void)
+ {
+     PDEVICE_OBJECT d=make_optical();
+@@ -947,11 +975,37 @@
+     CHECK(NxNativeDispatchReadWrite(d,&first.irp)==STATUS_PENDING);
+     CHECK(!first.irp.host_completed&&pending_child_count==2);
+     init_parent(&second,IRP_MJ_READ,2048);
+-    CHECK(NxNativeDispatchReadWrite(d,&second.irp)==STATUS_INSUFFICIENT_RESOURCES);
+-    CHECK(second.irp.host_completed&&second.irp.IoStatus.Status==STATUS_INSUFFICIENT_RESOURCES);
++    CHECK(NxNativeDispatchReadWrite(d,&second.irp)==STATUS_PENDING);
++    CHECK(!second.irp.host_completed&&pending_child_count==3);
+     while(pending_child_count)
+         CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,2048,1)==STATUS_MORE_PROCESSING_REQUIRED);
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!control_lease_is_removed_from_free_list();printf("30 adapter groups, %u failures\n",f);return f?1:0;}
++static int saturated_pool_grows_transiently_instead_of_failing_game_reads(void)
++{
++    enum { SLOTS=16, READS=17 };
++    PDEVICE_OBJECT d=make_device(SLOTS);
++    parent_fixture reads[READS];
++    unsigned pools_before=pool_live,irps_before=free_irps,mdls_before=free_mdls;
++    lower_pending=1;pending_child_count=0;active_child=NULL;lower_calls=0;
++    for(unsigned index=0;index<READS;++index) {
++        init_parent(&reads[index],IRP_MJ_READ,4096);
++        reads[index].stack.Parameters.Read.ByteOffset=(int64_t)index*4096;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[index].irp)==STATUS_PENDING);
++        CHECK(!reads[index].irp.host_completed);
++    }
++    CHECK(lower_calls==READS&&pending_child_count==READS);
++    CHECK(pool_live==pools_before+1);
++    while(pending_child_count)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned index=0;index<READS;++index)
++        CHECK(reads[index].irp.host_completed&&
++              reads[index].irp.IoStatus.Status==STATUS_SUCCESS&&
++              reads[index].irp.IoStatus.Information==4096);
++    CHECK(pool_live==pools_before&&free_irps==irps_before+1&&free_mdls==mdls_before+1);
++    lower_pending=0;
++    return 1;
++}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("32 adapter groups, %u failures\n",f);return f?1:0;}

@@ -2,7 +2,7 @@
 
 The machine-readable [inventory](../../sources/kernel-coverage-report.json) enumerates all 371 declarations in the selected Xbox export definition: 337 callable exports and 34 data exports. It does **not** establish that the entire kernel is covered or that any particular export executed. Its native-execution count is deliberately zero: no native execution receipts are imported by this tool.
 
-The pinned [inputs](../../sources/kernel-coverage-inputs.json) identify the actual CC0 export-definition bytes, public test sources first pinned from reference tree `7e891ec86f42b1313e5cd3453347836ac451ba79`, product-owned XBE sources and independently owned replacement specifications/patches. Those selected source bytes are unchanged in the exact final assembled tree `319d81cfe9f6e1a524012cbab66d9bd8f5f929d4`, which CI supplies and verifies separately before running this inventory. The byte pins do not by themselves establish whole-tree composition, current candidate linkage or native execution. Source paths are relative to the separately supplied assembled checkout or this product; no investigator filesystem paths or excluded driver bodies are exported.
+The pinned [inputs](../../sources/kernel-coverage-inputs.json) identify the actual CC0 export-definition bytes, public test sources first pinned from reference tree `7e891ec86f42b1313e5cd3453347836ac451ba79`, product-owned XBE sources and independently owned replacement specifications/patches. Those selected source bytes are unchanged in the exact final assembled tree recorded by `assembled_source_tree` in [firmware-lock.json](../../sources/firmware-lock.json), which CI supplies and verifies separately before running this inventory. The byte pins do not by themselves establish whole-tree composition, current candidate linkage or native execution. Source paths are relative to the separately supplied assembled checkout or this product; no investigator filesystem paths or excluded driver bodies are exported.
 
 ## What each level means
 
@@ -21,7 +21,7 @@ The lexer removes comments and string/character contents, ignores preprocessor d
 
 ## Reproduce and check
 
-From the product root, supply the exact final assembled source checkout. CI also verifies its tree as `319d81cfe9f6e1a524012cbab66d9bd8f5f929d4`:
+From the product root, supply the exact final assembled source checkout. CI also verifies its tree against the lock:
 
 ```sh
 python3 tools/kernel_coverage.py --source-root /absolute/path/to/final-assembled-source
