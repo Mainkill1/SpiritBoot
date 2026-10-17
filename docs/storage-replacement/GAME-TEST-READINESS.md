@@ -5,7 +5,7 @@ current final PR248 image. A bounded earlier DOA human test is recorded below.
 The independent replacement is installed in the complete-candidate release
 link. Its current safe-default release64 SHA-256 is
 `382956e7bfceaf943e37e90a772963ca7d9d6162959b326135ace533a0cba9ec`
-from assembled tree `d7e96944c04ec8fffb1a782b6cce327666fdb935`.
+from assembled tree `319d81cfe9f6e1a524012cbab66d9bd8f5f929d4`.
 Ordinary boots retain the delayed ATA path. Acceleration requires an explicit
 session-only Advanced setting. Repeated race/loading qualification remains
 pending because the original missing-data symptom was sporadic.

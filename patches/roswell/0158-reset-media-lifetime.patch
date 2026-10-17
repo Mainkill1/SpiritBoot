@@ -737,3 +737,47 @@ index ef3db4dae4..aa4078b681 100644
  static void HalReturnToFirmware(int action) { reset_action = action; record('H'); }
  #if DBG
  static void diagnostic(const char *format, ...) { (void)format; }
+diff --git a/tests/host/boot-layout/check.py b/tests/host/boot-layout/check.py
+index 313c828a6d..de35d3e206 100644
+--- a/tests/host/boot-layout/check.py
++++ b/tests/host/boot-layout/check.py
+@@ -88,6 +88,9 @@ typedef uint8_t UCHAR; typedef UCHAR *PUCHAR;
+ typedef unsigned short USHORT; typedef unsigned long SIZE_T;
+ typedef int BOOLEAN, KIRQL; typedef void VOID; typedef void *PVOID;
+ typedef int32_t LONG;
++static LONG InterlockedExchange(volatile LONG *target, LONG value) {
++ LONG old=*target;*target=value;return old;
++}
+ #define IN
+ #define CODE_SEG(x)
+ #define DATA_SEG(x)
+diff --git a/tests/host/xdvdfs-read-completion/check.py b/tests/host/xdvdfs-read-completion/check.py
+index 2f040af179..54aba55f90 100755
+--- a/tests/host/xdvdfs-read-completion/check.py
++++ b/tests/host/xdvdfs-read-completion/check.py
+@@ -20,6 +20,7 @@ shim=r'''
+ #define STATUS_INVALID_DEVICE_REQUEST ((int32_t)0xc0000010)
+ #define STATUS_INSUFFICIENT_RESOURCES ((int32_t)0xc000009a)
+ #define STATUS_END_OF_FILE ((int32_t)0xc0000011)
++#define STATUS_VOLUME_DISMOUNTED ((int32_t)0xc000026e)
+ #define NT_SUCCESS(s) ((s)>=0)
+ #define IO_NO_INCREMENT 0
+ #define NormalPagePriority 0
+@@ -30,7 +31,7 @@ shim=r'''
+ typedef uint64_t ULONGLONG;typedef uint32_t ULONG;typedef uintptr_t ULONG_PTR;
+ typedef int32_t NTSTATUS;typedef void *PVOID,*PDEVICE_OBJECT;
+ typedef struct {int64_t QuadPart;} LARGE_INTEGER;
+-typedef struct {PDEVICE_OBJECT TargetDevice;} VCB;
++typedef struct {PDEVICE_OBJECT TargetDevice;int Mounted;} VCB;
+ typedef struct {VCB *Vcb;int IsDirectory;ULONG DataSize,DataSector;} FCB,*PXDVD_FCB;
+ typedef struct {void *FsContext;LARGE_INTEGER CurrentByteOffset;ULONG Flags;} FO,*PFILE_OBJECT;
+ typedef struct {PFILE_OBJECT FileObject;struct {struct {LARGE_INTEGER ByteOffset;ULONG Length;} Read;} Parameters;} STACK,*PIO_STACK_LOCATION;
+@@ -49,7 +50,7 @@ func=e.function(legacy,'XdvdCompleteRequest')+e.function(legacy[legacy.rfind('\n
+ tests=r'''
+ static unsigned cases,failures;
+ static void run(int sync,ULONG len,ULONG offset,NTSTATUS backend,ULONG got,NTSTATUS expected,int pending){
+- VCB v={0};FCB f={&v,0,4096,100};FO fo={&f,{0},sync?FO_SYNCHRONOUS_IO:0};
++ VCB v={.Mounted=1};FCB f={&v,0,4096,100};FO fo={&f,{0},sync?FO_SYNCHRONOUS_IO:0};
+  IRP irp={0};irp.Stack.FileObject=&fo;irp.Stack.Parameters.Read.Length=len;irp.Stack.Parameters.Read.ByteOffset.QuadPart=offset;irp.MdlAddress=buffer;
+  completions=pendingCalls=0;readStatus=backend;supplied=got;
+  NTSTATUS status=XdvdDispatchRead(NULL,&irp);
