@@ -49,14 +49,16 @@ jobs:
         run: |
           guest_source=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["source_directory"])')
           guest_build=$(python3 -c 'import json; print(json.load(open("artifacts/firmware-${{ matrix.variant }}-${{ matrix.memory_mib }}mib/build.json"))["build_directory"])')
+          expected_tree=$(python3 -c 'import json; print(json.load(open("sources/firmware-lock.json"))["repositories"]["roswell"]["assembled_source_tree"])')
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" \
-            -e GUEST_SOURCE="$guest_source" -e GUEST_BUILD="$guest_build" -e VARIANT=${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
+            -e GUEST_SOURCE="$guest_source" -e GUEST_BUILD="$guest_build" -e EXPECTED_TREE="$expected_tree" \
+            -e VARIANT=${{ matrix.variant }}-${{ matrix.memory_mib }}mib \
             spiritboot-toolchain sh -ec '
             output="artifacts/kernel-host-$VARIANT"
             mkdir -p "$output"
             i686-w64-mingw32-nm --numeric-sort "$GUEST_BUILD/ntoskrnl/xboxkrnl.unstripped.exe" >"$output/kernel-symbols.txt"
             actual_tree=$(git -c "safe.directory=$GUEST_SOURCE" -C "$GUEST_SOURCE" write-tree)
-            test "$actual_tree" = 319d81cfe9f6e1a524012cbab66d9bd8f5f929d4
+            test "$actual_tree" = "$EXPECTED_TREE"
             python3 /work/tools/check_ata_settle.py --source-root "$GUEST_SOURCE" >"$output/ata-settle.log" 2>&1
             python3 /work/tools/kernel_coverage.py --source-root "$GUEST_SOURCE" --check >"$output/kernel-coverage.log" 2>&1
             python3 /work/tools/check_kernel_semaphore_overflow.py --source-root "$GUEST_SOURCE" --platform xbox --output "$output/semaphore-xbox" >"$output/semaphore-xbox.log" 2>&1
@@ -190,9 +192,10 @@ jobs:
           python3 - <<'PY'
           import json
           result = json.load(open('artifacts/firmware-upper-reserve/build.json'))
+          expected = json.load(open('sources/firmware-lock.json'))['repositories']['roswell']['assembled_source_tree']
           assert result['status'] == 'built' and result['memory_mib'] == 128, result
           assert result['reserve_upper_ram'] is True, result
-          assert result['source_tree'] == '319d81cfe9f6e1a524012cbab66d9bd8f5f929d4', result
+          assert result['source_tree'] == expected, result
           PY
       - name: Verify clean release rebuild
         if: matrix.variant == 'release'

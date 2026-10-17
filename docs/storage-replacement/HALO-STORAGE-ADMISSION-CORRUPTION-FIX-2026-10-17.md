@@ -82,8 +82,10 @@ after:  adapter-plain: 32 adapter groups, 0 failures
         adapter-sanitized: 32 adapter groups, 0 failures
 ```
 
-The repository integration suite passes 70 tests with one environment skip.
-The final release 64 MiB candidate has SHA-256
+The focused firmware and storage integration suite passes 71 tests with one
+environment skip. The complete host suite passes 554 tests with 26 expected
+host-platform skips. The final release 64 MiB candidate comes from assembled
+tree `eb48b3dab7214b799300469da208cf9364408644` and has SHA-256
 `f4496a595b1116a6b696c1f2c1a856f0a70239de2e99e98cd46f1fd424f4d635`.
 
 Live Halo validation used fresh private HDD overlays for every boot:

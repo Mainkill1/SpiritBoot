@@ -12,6 +12,19 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 
+class ReleaseIdentityConfigurationTests(unittest.TestCase):
+    def test_workflow_reads_the_reviewed_source_tree_from_the_firmware_lock(self):
+        lock = json.loads((ROOT / "sources/firmware-lock.json").read_text())
+        expected = lock["repositories"]["roswell"]["assembled_source_tree"]
+        self.assertRegex(expected, r"^[0-9a-f]{40}$")
+
+        workflow = (ROOT / ".github/workflows/firmware.yml").read_text()
+        self.assertIn("assembled_source_tree", workflow)
+        self.assertIn("EXPECTED_TREE", workflow)
+        self.assertNotIn(f'test "$actual_tree" = {expected}', workflow)
+        self.assertNotIn(f"result['source_tree'] == '{expected}'", workflow)
+
+
 class BuildTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="firmware test ")
