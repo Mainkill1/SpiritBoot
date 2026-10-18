@@ -12,6 +12,12 @@ import that exact retained HDD into a second cold process. Reusing a Complex HDD
 an HDD of unknown provenance, or a nominally similar disk invalidates the test.
 PGR2 phase one must show the profile-name, license-plate, helmet, and resulting
 main-menu states and must record HDD writes before its runtime can be imported.
+PGR2 controller input is released only after a bounded difference-hash match on
+the expected static UI region and a 500 ms input-inhibit settle. The cold phase
+must first show the existing-profile prompt, then every menu through pre-race,
+before its 25-second live race window begins. Halo 2 similarly proves the clean
+HDD profile selector and resulting Campaign/Settings menu instead of assuming a
+fixed boot duration. The hashes retain no source screenshots.
 
 Run the source tests from the parent directory:
 

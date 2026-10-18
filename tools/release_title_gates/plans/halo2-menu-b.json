@@ -1,7 +1,7 @@
 [
   {
     "type": "wait",
-    "delayMs": 45000,
+    "delayMs": 60000,
     "button": null,
     "durationMs": 100,
     "name": null,
@@ -22,15 +22,27 @@
     "pollIntervalMs": 100
   },
   {
-    "type": "wait",
-    "delayMs": 8000,
+    "type": "wait_for_scene",
+    "delayMs": 0,
     "button": null,
     "durationMs": 100,
-    "name": null,
+    "name": "halo2-profile-select",
     "diagnosticId": null,
-    "condition": null,
-    "timeoutMs": 10000,
-    "pollIntervalMs": 100
+    "condition": {
+      "name": "halo2-profile-select-scene",
+      "scope": "result",
+      "path": "screenshots/halo2-profile-select.png",
+      "imageRegion": {
+        "x": 0.3,
+        "y": 0.35,
+        "width": 0.15,
+        "height": 0.06
+      },
+      "expectedImageDHash": "1ded7f7f7c15346b",
+      "maximumImageHammingDistance": 5
+    },
+    "timeoutMs": 30000,
+    "pollIntervalMs": 250
   },
   {
     "type": "button",
@@ -66,26 +78,27 @@
     "pollIntervalMs": 100
   },
   {
-    "type": "wait",
-    "delayMs": 10000,
-    "button": null,
-    "durationMs": 100,
-    "name": null,
-    "diagnosticId": null,
-    "condition": null,
-    "timeoutMs": 10000,
-    "pollIntervalMs": 100
-  },
-  {
-    "type": "screenshot",
+    "type": "wait_for_scene",
     "delayMs": 0,
     "button": null,
     "durationMs": 100,
     "name": "halo2-menu-entry",
     "diagnosticId": null,
-    "condition": null,
-    "timeoutMs": 10000,
-    "pollIntervalMs": 100
+    "condition": {
+      "name": "halo2-menu-entry-scene",
+      "scope": "result",
+      "path": "screenshots/halo2-menu-entry.png",
+      "imageRegion": {
+        "x": 0.3,
+        "y": 0.65,
+        "width": 0.4,
+        "height": 0.14
+      },
+      "expectedImageDHash": "161e321717321e16",
+      "maximumImageHammingDistance": 16
+    },
+    "timeoutMs": 30000,
+    "pollIntervalMs": 250
   },
   {
     "type": "wait",

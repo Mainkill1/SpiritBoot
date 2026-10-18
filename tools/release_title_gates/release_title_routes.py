@@ -27,6 +27,64 @@ def step(kind: str, **kwargs: Any) -> dict[str, Any]:
     return row
 
 
+PGR2_SCENES: dict[str, tuple[str, tuple[float, float, float, float], int]] = {
+    # Difference hashes cover small, static UI regions.  The values were
+    # selected from independent captures of the same states so moving menu
+    # backgrounds cannot advance the route and no game image is redistributed.
+    "press": ("8000275773133b00", (.20, .82, .20, .06), 2),
+    "create": ("00006036ae2e2604", (.50, .82, .15, .06), 2),
+    "name": ("99b89b99b38ea6ae", (.20, .45, .20, .10), 5),
+    "plate": ("66626a2662626262", (.40, .25, .30, .06), 2),
+    "license": ("4a4a2c0a2a133662", (.60, .45, .15, .20), 3),
+    "helmet": ("c3db9a9a9acacb9a", (.30, .25, .15, .10), 5),
+    "main": ("eded65442813171a", (.40, .45, .30, .06), 2),
+    "current": ("ada9c2c0d956646c", (.20, .78, .20, .10), 6),
+    "single": ("9ece57ce7616190b", (.40, .18, .15, .10), 5),
+    "series": ("a22a0001594dddd5", (.30, .65, .15, .06), 5),
+    "event": ("2b0b872137cf458d", (.50, .25, .20, .14), 10),
+    "car": ("1e77cb4b83938361", (.50, .45, .20, .20), 10),
+    "transmission": ("739e48989cacd85c", (.40, .45, .40, .10), 6),
+    "difficulty": ("84972e5797bb4c6c", (.60, .35, .20, .50), 6),
+    "prerace": ("9d95999989cbc6c7", (.20, .45, .15, .06), 6),
+}
+
+
+def pgr2_scene(state: str, name: str, timeout_ms: int = 30_000) -> dict[str, Any]:
+    fingerprint, (x, y, width, height), distance = PGR2_SCENES[state]
+    return step(
+        "wait_for_scene", name=name, timeoutMs=timeout_ms, pollIntervalMs=250,
+        condition={
+            "name": f"{name}-scene",
+            "scope": "result",
+            "path": f"screenshots/{name}.png",
+            "imageRegion": {"x": x, "y": y, "width": width, "height": height},
+            "expectedImageDHash": fingerprint,
+            "maximumImageHammingDistance": distance,
+        })
+
+
+def halo2_scene(state: str, name: str) -> dict[str, Any]:
+    scenes = {
+        # The profile selector is opaque and stable.  Halo 2's main-menu
+        # backdrop moves, so its bounded tolerance was measured over nine
+        # independent menu captures while remaining separated from the profile
+        # selector by at least 25 bits.
+        "profile": ("1ded7f7f7c15346b", (.30, .35, .15, .06), 5),
+        "main": ("161e321717321e16", (.30, .65, .40, .14), 16),
+    }
+    fingerprint, (x, y, width, height), distance = scenes[state]
+    return step(
+        "wait_for_scene", name=name, timeoutMs=30_000, pollIntervalMs=250,
+        condition={
+            "name": f"{name}-scene",
+            "scope": "result",
+            "path": f"screenshots/{name}.png",
+            "imageRegion": {"x": x, "y": y, "width": width, "height": height},
+            "expectedImageDHash": fingerprint,
+            "maximumImageHammingDistance": distance,
+        })
+
+
 def build_pgr2_profile_create_plan() -> list[dict[str, Any]]:
     """Create a profile under the candidate BIOS and leave its HDD retained.
 
@@ -35,18 +93,21 @@ def build_pgr2_profile_create_plan() -> list[dict[str, Any]]:
     profile, waits after the final confirmation so pending writes can drain,
     and makes no gameplay-performance claim.
     """
-    plan = [step("wait", delayMs=80_000),
-            step("screenshot", name="pgr2-press-start"),
+    plan = [pgr2_scene("press", "pgr2-press-start", 120_000),
+            step("wait", delayMs=500),
             step("button", button="A", durationMs=25)]
-    for name in ("pgr2-create-menu", "pgr2-name-ready"):
-        plan += [step("wait", delayMs=5_000), step("screenshot", name=name)]
+    for state, name in (("create", "pgr2-create-menu"),
+                        ("name", "pgr2-name-ready")):
+        plan += [pgr2_scene(state, name), step("wait", delayMs=500)]
         if name == "pgr2-name-ready":
             plan.append(step("diagnostic", diagnosticId="pgr2-profile-write-before"))
         plan.append(step("button", button="A", durationMs=25))
-    for name in ("pgr2-plate-style", "pgr2-license-plate", "pgr2-helmet"):
-        plan += [step("wait", delayMs=5_000), step("screenshot", name=name),
+    for state, name in (("plate", "pgr2-plate-style"),
+                        ("license", "pgr2-license-plate"),
+                        ("helmet", "pgr2-helmet")):
+        plan += [pgr2_scene(state, name), step("wait", delayMs=500),
                  step("button", button="A", durationMs=25)]
-    plan += [step("wait", delayMs=5_000), step("screenshot", name="pgr2-created-main")]
+    plan.append(pgr2_scene("main", "pgr2-created-main"))
     plan += [step("diagnostic", diagnosticId="pgr2-profile-write-after"),
              step("wait", delayMs=5_000), step("quit")]
     return plan
@@ -60,17 +121,22 @@ def build_pgr2_cold_race_plan() -> list[dict[str, Any]]:
     choice. The final A leaves the pre-race menu; only then does the 17-second
     loading interval begin.
     """
-    plan = [step("wait", delayMs=80_000),
-            step("screenshot", name="pgr2-press-start"),
+    plan = [pgr2_scene("press", "pgr2-press-start", 120_000),
+            step("wait", delayMs=500),
             step("button", button="A", durationMs=25)]
-    for name in ("pgr2-profile-confirm", "pgr2-mode", "pgr2-car-right",
-                 "pgr2-car-confirm", "pgr2-event", "pgr2-track",
-                 "pgr2-options", "pgr2-grid"):
-        plan += [step("wait", delayMs=5_000), step("screenshot", name=name),
+    for state, name in (("current", "pgr2-profile-confirm"),
+                        ("main", "pgr2-mode"),
+                        ("single", "pgr2-car-right"),
+                        ("series", "pgr2-car-confirm"),
+                        ("event", "pgr2-event"),
+                        ("car", "pgr2-track"),
+                        ("transmission", "pgr2-options"),
+                        ("difficulty", "pgr2-grid")):
+        plan += [pgr2_scene(state, name), step("wait", delayMs=500),
                  step("button", button="A", durationMs=25)]
     plan += [
-        step("wait", delayMs=10_000),
-        step("screenshot", name="pgr2-race-confirm"),
+        pgr2_scene("prerace", "pgr2-race-confirm"),
+        step("wait", delayMs=500),
         step("button", button="A", durationMs=25),
         step("wait", delayMs=17_000),
         step("screenshot", name="pgr2-race-start"),
@@ -86,14 +152,13 @@ def build_pgr2_cold_race_plan() -> list[dict[str, Any]]:
 def build_halo2_menu_plan() -> list[dict[str, Any]]:
     """Enter Halo 2's main menu, then observe its completeness and stability."""
     return [
-        step("wait", delayMs=45_000),
+        step("wait", delayMs=60_000),
         step("button", button="Start", durationMs=25),
-        step("wait", delayMs=8_000),
+        halo2_scene("profile", "halo2-profile-select"),
         step("button", button="DPadDown", durationMs=25),
         step("wait", delayMs=1_000),
         step("button", button="A", durationMs=25),
-        step("wait", delayMs=10_000),
-        step("screenshot", name="halo2-menu-entry"),
+        halo2_scene("main", "halo2-menu-entry"),
         step("wait", delayMs=15_000),
         step("screenshot", name="halo2-menu-15s"),
         step("wait", delayMs=15_000),

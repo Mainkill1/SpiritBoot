@@ -118,6 +118,41 @@ the attributed assembled tree and runs these tests from that tree. The final
 PGR2 race continuity, the Forza R-class world-stream score, two Halo 2 menu
 boots, and DOA save creation/reload using the exact retained HDD.
 
+## Final release64 qualification
+
+The candidate qualified on 2026-10-18 with firmware SHA-256
+`75f0680d7a32e8264c3f496eb48c071bd4a9fe8b7e9285e59461f6e35f194f4e`
+from assembled source tree `067841f59e485858a1a00059184f1b29eeec5d7a`.
+All runs used release xemu `5488be40bf3c1c444b507d084c8d964f8f7d73c2a912970495cf85a4f7239564`,
+64 MiB, a fresh process, private HDD state, and no manual input.
+
+- PGR2 create run `20261018-224154536-f2ff3c2a1a7c4f149043dfb453e9e1a2`
+  wrote 421,888 bytes in 28 operations. Its exact retained HDD, SHA-256
+  `bfbf46e580a4c05e487e3a255e795532455ad7bb3e22fd5e7cff23e0ec1714aa`,
+  cold-reloaded in run `20261018-224414626-937978818dc8414880168a7bef146dd5`.
+  OCR proved the existing `Player` profile prompt and the run reached a changing
+  25-second race window without profile or I/O errors.
+- DOA create run `20261018-224750103-794c4262e4fe4756bc08d8d403448ec5`
+  wrote 83,546,112 bytes in 5,100 operations. Its exact retained HDD, SHA-256
+  `3299219d120de922087df12125e19c40ca124792f936e7a3e0aab0f2acc9de70`,
+  cold-reloaded in run `20261018-225019720-5a138068e6a147b0b9716a0a0a00edd8`
+  without damaged-save text.
+- Forza run `20261018-222750891-ff3f84f9218d44208b571e43c927058f`
+  observed 4,362 reads / 54,033,408 bytes with no invalid read, waited 10.357
+  seconds for race readiness, reached 100 mph, and moved 33.81 minimap pixels.
+- Halo 2 runs `20261018-223143529-98f9faea71d94f63bb56cac93f6e6d4b`
+  and `20261018-223332923-7f93745462aa45e8a3e354fbb4b0e5fe`
+  independently showed Campaign and Settings over three stable observations.
+- Cold-storage XBE runs `20261018-225211542-d198a34978954edb8c731c8779693d10`
+  and `20261018-225222038-747a3ffad17a40aa820af9dca19e6cbe`
+  persisted and re-read all 2,097,152 bytes; both runner correctness contracts
+  and the serial grader passed.
+
+An earlier PGR2 result with uncertain profile provenance is excluded. The final
+route starts from the pinned clean seed, proves every profile-creation screen
+and positive HDD writes, imports only that runner-retained image, and binds each
+reload input to an observed menu state before the race can begin.
+
 ## Limits
 
 The public reference observations specify layout and builder behavior, not the

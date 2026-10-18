@@ -93,6 +93,13 @@ class FinalizeReleaseJobsTests(unittest.TestCase):
         job, _ = build_title_job(self.base, resolved, "pgr2-create", "candidate")
         self.assertEqual({row["id"] for row in job["diagnostics"]}, {
             "pgr2-profile-write-before", "pgr2-profile-write-after"})
+        scene_steps = [row for row in job["plan"]
+                       if row["type"] == "wait_for_scene"]
+        scene_checks = [row for row in job["workload"]["correctnessChecks"]
+                        if row.get("expectedImageDHash")]
+        self.assertEqual(len(scene_checks), len(scene_steps))
+        self.assertEqual({row["path"] for row in scene_checks},
+                         {row["condition"]["path"] for row in scene_steps})
 
     def test_finalize_stages_verified_flash_and_all_phase_one_jobs(self):
         with tempfile.TemporaryDirectory() as td:

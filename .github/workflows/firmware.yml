@@ -249,7 +249,11 @@ jobs:
               -w "$guest_directory" \
               "$nxdk_image" make NXDK_DIR=/usr/src/nxdk
           done
-          cp "$guest_source/tests/xbe/cold-storage-persistence/cold-storage-persistence.iso" \
+          case "$guest_source" in
+            /work/*) guest_source_host="$PWD/${guest_source#/work/}" ;;
+            *) echo "unexpected container source path: $guest_source" >&2; exit 1 ;;
+          esac
+          cp "$guest_source_host/tests/xbe/cold-storage-persistence/cold-storage-persistence.iso" \
             "artifacts/cold-storage-persistence-${{ matrix.variant }}-${{ matrix.memory_mib }}mib.iso"
       - name: Run API, contracts, warm reboot, and performance correctness guests
         if: matrix.variant == 'release'

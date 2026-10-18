@@ -30,6 +30,18 @@ class CandidateReleasePolicyTests(unittest.TestCase):
                 f"- name: {step}\n        if: matrix.variant == 'release'",
                 workflow)
 
+    def test_release_guest_artifact_copy_translates_the_container_work_path(self):
+        workflow = (ROOT / ".github/workflows/firmware.yml").read_text(
+            encoding="utf-8")
+        self.assertIn(
+            'guest_source_host="$PWD/${guest_source#/work/}"', workflow)
+        self.assertIn(
+            'cp "$guest_source_host/tests/xbe/cold-storage-persistence/'
+            'cold-storage-persistence.iso"', workflow)
+        self.assertNotIn(
+            'cp "$guest_source/tests/xbe/cold-storage-persistence/'
+            'cold-storage-persistence.iso"', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,12 +35,30 @@ class ReleaseTitleRouteTests(unittest.TestCase):
         self.assertNotIn("pgr2-race-25s", [row.get("name") for row in plan])
         self.assertTrue(all(row.get("durationMs") == 25 for row in plan
                             if row["type"] == "button"))
-        self.assertLess(sum(row.get("delayMs", 0) for row in plan), 180_000)
+        self.assertEqual(plan[0]["type"], "wait_for_scene")
+        self.assertFalse(any(row["type"] == "screenshot" for row in plan))
+        self.assertFalse(any(row["type"] == "wait" and row["delayMs"] >= 10_000
+                             for row in plan))
+        button_indexes = [i for i, row in enumerate(plan) if row["type"] == "button"]
+        self.assertTrue(all(any(prior["type"] == "wait_for_scene"
+                                for prior in plan[(button_indexes[n - 1] + 1
+                                                   if n else 0):i])
+                            for n, i in enumerate(button_indexes)))
+        self.assertTrue(all(any(prior["type"] == "wait" and
+                                prior["delayMs"] >= 500
+                                for prior in plan[(button_indexes[n - 1] + 1
+                                                   if n else 0):i])
+                            for n, i in enumerate(button_indexes)))
+        self.assertTrue(all(len(row["condition"]["expectedImageDHash"]) == 16
+                            and row["condition"]["maximumImageHammingDistance"] <= 16
+                            for row in plan if row["type"] == "wait_for_scene"))
 
     def test_pgr2_cold_route_is_bounded_and_keeps_25_second_race_window(self):
         plan = build_pgr2_cold_race_plan()
         self.assertEqual(plan[-1]["type"], "quit")
-        self.assertEqual(sum(row.get("delayMs", 0) for row in plan), 172_000)
+        self.assertEqual(plan[0]["type"], "wait_for_scene")
+        self.assertEqual([row["name"] for row in plan if row["type"] == "screenshot"],
+                         ["pgr2-race-start", "pgr2-race-10s", "pgr2-race-25s"])
         self.assertIn("pgr2-race-start", [row.get("name") for row in plan])
         self.assertIn("pgr2-race-25s", [row.get("name") for row in plan])
         start = next(i for i, row in enumerate(plan) if row.get("name") == "pgr2-race-start")
@@ -48,17 +66,30 @@ class ReleaseTitleRouteTests(unittest.TestCase):
         self.assertEqual(sum(row.get("delayMs", 0) for row in plan[start:end + 1]), 25_000)
         prerace = next(i for i, row in enumerate(plan)
                        if row.get("name") == "pgr2-race-confirm")
-        self.assertEqual(plan[prerace + 1]["type"], "button")
-        self.assertEqual(plan[prerace + 1]["button"], "A")
+        self.assertEqual(plan[prerace + 1]["type"], "wait")
+        self.assertEqual(plan[prerace + 2]["type"], "button")
+        self.assertEqual(plan[prerace + 2]["button"], "A")
         self.assertTrue(all(row.get("durationMs") == 25 for row in plan
                             if row["type"] == "button"))
         self.assertFalse(any(row.get("button") == "LStickRight" for row in plan))
         self.assertFalse(any(row["type"] == "diagnostic" for row in plan))
+        button_indexes = [i for i, row in enumerate(plan) if row["type"] == "button"]
+        self.assertTrue(all(any(prior["type"] == "wait_for_scene"
+                                for prior in plan[(button_indexes[n - 1] + 1
+                                                   if n else 0):i])
+                            for n, i in enumerate(button_indexes)))
+        self.assertTrue(all(any(prior["type"] == "wait" and
+                                prior["delayMs"] >= 500
+                                for prior in plan[(button_indexes[n - 1] + 1
+                                                   if n else 0):i])
+                            for n, i in enumerate(button_indexes)))
 
     def test_halo2_menu_route_enters_main_menu_before_three_observations(self):
         plan = build_halo2_menu_plan()
-        shots = [row["name"] for row in plan if row["type"] == "screenshot"]
-        self.assertEqual(shots, ["halo2-menu-entry", "halo2-menu-15s", "halo2-menu-30s"])
+        shots = [row["name"] for row in plan
+                 if row["type"] in ("screenshot", "wait_for_scene")]
+        self.assertEqual(shots, ["halo2-profile-select", "halo2-menu-entry",
+                                 "halo2-menu-15s", "halo2-menu-30s"])
         buttons = [(i, row["button"]) for i, row in enumerate(plan)
                    if row["type"] == "button"]
         self.assertEqual([button for _, button in buttons], ["Start", "DPadDown", "A"])
@@ -66,7 +97,11 @@ class ReleaseTitleRouteTests(unittest.TestCase):
         first_shot = next(i for i, row in enumerate(plan) if row["type"] == "screenshot")
         self.assertLess(buttons[0][0], first_shot)
         self.assertFalse(any(row["type"] == "diagnostic" for row in plan))
-        self.assertEqual(sum(row.get("delayMs", 0) for row in plan), 94_000)
+        self.assertGreaterEqual(plan[0]["delayMs"], 60_000)
+        self.assertEqual(sum(row.get("delayMs", 0) for row in plan), 91_000)
+        self.assertEqual([row["type"] for row in plan if row.get("name") in
+                          ("halo2-profile-select", "halo2-menu-entry")],
+                         ["wait_for_scene", "wait_for_scene"])
         self.assertEqual(plan[-1]["type"], "quit")
 
     def test_doa_create_and_reload_are_separate_fresh_process_plans(self):

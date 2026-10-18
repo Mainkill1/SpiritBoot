@@ -73,7 +73,7 @@ def _replace_firmware(value: Any, old_sha: str, new_sha: str) -> Any:
 
 
 def _shot_checks(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{
+    checks = [{
         "name": f"{row['name']}-visible",
         "scope": "result",
         "path": f"screenshots/{row['name']}.png",
@@ -86,6 +86,18 @@ def _shot_checks(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "containsText": None,
         "equalsText": None,
     } for row in plan if row.get("type") == "screenshot"]
+    # A live scene wait already defines a stronger image contract than the
+    # generic screenshot check.  Preserve that same fingerprint as a post-run
+    # correctness check so a plan made entirely of scene waits cannot finish
+    # with Correctness=NotEvaluated.
+    for row in plan:
+        if row.get("type") != "wait_for_scene":
+            continue
+        check = copy.deepcopy(row["condition"])
+        check["mustExist"] = True
+        check["minimumBytes"] = max(1000, int(check.get("minimumBytes", 0)))
+        checks.append(check)
+    return checks
 
 
 def _refresh_owned_tools(job: dict[str, Any],
