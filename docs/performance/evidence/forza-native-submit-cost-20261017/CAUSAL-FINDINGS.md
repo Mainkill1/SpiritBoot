@@ -144,6 +144,12 @@ Source and reproduction:
   release comparison did not establish a gain. It is not selected in the
   firmware stack. Fewer dispatch instructions did not demonstrate that this
   was the dominant cost; see [the experiment and decision](static-port-binding.md).
+* Isolated candidate0170 removed two more core lock round trips (14 to 12
+  adapter acquisitions), with host lifetime/reentry/removal gates passing. Four
+  consecutive release runs did not establish a consistent gain at the primary
+  450 us deadline. It remains unselected; the [complete paired comparison](../forza-complex-cadence-20261017/candidate0170/README.md) retains every case,
+  including an unexplained 28.03% per-size read-cost regression. Reducing a
+  counted operation is not sufficient evidence that it limits native loading.
 * The old cadence benchmark began its budget after the initial poll. That did
   not match the title's budget boundary. The separate frozen initial-poll
   fixture corrects the experiment without rewriting earlier results.

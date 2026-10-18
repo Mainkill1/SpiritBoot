@@ -1,0 +1,271 @@
+diff --git a/drivers/storage/class/nxstorage/request.c b/drivers/storage/class/nxstorage/request.c
+index d48c1bc1..e04043f8 100644
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -178,15 +178,18 @@ static void record_result(nx_device *d, nx_slot *s)
+     if (s->lower_flags & NX_LOWER_QUEUE_FROZEN) s->recovery=1;
+ }
+ 
+-/* All transport calls occur outside the short state lock. One pump owns all
+- * command mutation. Inline callbacks publish results and return immediately. */
++/* Caller transfers the held state lock after claiming pump ownership. This
++ * function always returns unlocked. Prepare/submit/retire/cancel/complete stay
++ * unlocked; mark_pending retains its historical locked context. Internal state
++ * bookkeeping carries the lock into the next scan instead of handing it off. */
+ static void run_pump(nx_device *d)
+ {
++    unsigned lock_held=1;
+     for (;;) {
+         enum { NONE, SEND, RETIRE, CANCEL, COMPLETE } action=NONE;
+         nx_slot *s=NULL; uint32_t index=0;
+         void *parent=NULL; nx_status final=NX_OK; uint64_t bytes=0;
+-        lock(d);
++        if(!lock_held) { lock(d); lock_held=1; }
+         for (uint32_t remaining=d->count;remaining;) {
+             if(d->count<=64) {
+                 index=nx_active_scan_next(d->active_slots,d->count,&d->cursor,&remaining);
+@@ -235,42 +238,41 @@ static void run_pump(nx_device *d)
+         }
+         if (action==NONE) {
+             /* A command construction failure created a terminal runnable slot. */
+-            if (s && s->active && s->terminal && !s->inflight) { unlock(d); continue; }
++            if (s && s->active && s->terminal && !s->inflight) continue;
+             d->pumping=0; unlock(d); return;
+         }
+-        unlock(d);
++        unlock(d); lock_held=0;
+         if (action==COMPLETE) {
+             d->port.complete(d->port.context,parent,final,bytes);
+         } else if (action==CANCEL) {
+             d->port.cancel(d->port.context,&s->command);
+         } else if (action==RETIRE) {
+             d->port.retire(d->port.context,&s->command);
+-            lock(d); record_result(d,s); d->cursor=index; unlock(d);
++            lock(d); lock_held=1; record_result(d,s); d->cursor=index;
+         } else {
+             nx_status prepared=d->port.prepare(d->port.context,&s->command);
+-            lock(d);
++            lock(d); lock_held=1;
+             if (prepared!=NX_OK) {
+                 preparation_failed(d,s,prepared>NX_OK ? NX_PROTOCOL_ERROR:prepared);
+-                unlock(d); continue;
++                continue;
+             }
+             if (d->quarantined && !s->recovery) {
+-                unlock(d); d->port.retire(d->port.context,&s->command);
+-                lock(d); s->final_status=NX_IO_ERROR; s->terminal=1; unlock(d); continue;
++                unlock(d); lock_held=0; d->port.retire(d->port.context,&s->command);
++                lock(d); lock_held=1; s->final_status=NX_IO_ERROR; s->terminal=1; continue;
+             }
+             if (s->cancelled && !s->recovery) {
+-                unlock(d); d->port.retire(d->port.context,&s->command);
+-                lock(d); s->final_status=NX_CANCELLED; s->terminal=1; unlock(d); continue;
++                unlock(d); lock_held=0; d->port.retire(d->port.context,&s->command);
++                lock(d); lock_held=1; s->final_status=NX_CANCELLED; s->terminal=1; continue;
+             }
+             /* Submission commit: subsequent cancellation may race with the
+              * unlocked port call, so it must cancel/drain committed transport. */
+             s->inflight=1; s->prepared=1;
+-            unlock(d);
++            unlock(d); lock_held=0;
+             int submitted_pending=d->port.submit(d->port.context,&s->command);
+-            lock(d);
++            lock(d); lock_held=1;
+             /* A return value never proves lower ownership ended. A broken
+              * adapter that omits its terminal report keeps the pages live. */
+             if (submitted_pending || !s->done) pending(d,s);
+-            unlock(d);
+         }
+     }
+ }
+@@ -299,8 +301,7 @@ nx_status nx_start(nx_device *d, const nx_request *r, nx_handle *handle)
+     unsigned run=!d->pumping;
+     if (run) { d->pumping=1; d->cursor=index; }
+     else pending(d,s);
+-    unlock(d);
+-    if (run) run_pump(d);
++    if (run) run_pump(d); else unlock(d);
+     lock(d);
+     if (s->active && s->generation==generation && s->dispatch_result==&result) {
+         pending(d,s); s->dispatch_result=NULL; result=NX_PENDING;
+@@ -320,7 +321,7 @@ void nx_lower_done(nx_device *d, nx_token token, nx_status status, uint32_t byte
+     }
+     s->lower_status=status; s->lower_bytes=bytes; s->lower_flags=flags; s->done=1;
+     if (!d->pumping) { d->pumping=1; d->cursor=token.slot; run=1; }
+-    unlock(d); if (run) run_pump(d);
++    if (run) run_pump(d); else unlock(d);
+ }
+ 
+ void nx_cancel(nx_device *d, nx_handle handle)
+@@ -332,7 +333,7 @@ void nx_cancel(nx_device *d, nx_handle handle)
+         s->cancelled=1;
+         if (!d->pumping) { d->pumping=1; d->cursor=handle.slot; run=1; }
+     }
+-    unlock(d); if (run) run_pump(d);
++    if (run) run_pump(d); else unlock(d);
+ }
+ 
+ void nx_quarantine(nx_device *d)
+@@ -341,5 +342,5 @@ void nx_quarantine(nx_device *d)
+     unsigned run;
+     lock(d); d->quarantined=1; run=!d->pumping;
+     if (run) d->pumping=1;
+-    unlock(d); if (run) run_pump(d);
++    if (run) run_pump(d); else unlock(d);
+ }
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 8d498f84..c688654e 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -940,7 +940,7 @@ static int retained_submit_avoids_empty_lock_roundtrips(void)
+     CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS);
+     lower_pending=0;
+     printf("retained pending submit: %u adapter lock entries\n",used);
+-    CHECK(used<=14);
++    CHECK(used<=12);
+     return 1;
+ }
+ static pnp_thread reservation_removal;
+@@ -1002,17 +1002,43 @@ static int seal_during_dynamic_allocation_rejects_and_reclaims(void)
+     CHECK(dispatch_pnp(NxNativeDispatchPnp,device,IRP_MN_REMOVE_DEVICE)==STATUS_SUCCESS);
+     lower_pending=0;return 1;
+ }
++static PIRP late_cancel_expected_parent;
++static unsigned late_cancel_fired;
++static void cancel_expected_late_parent(void)
++{
++    MUST(cancel_parent==late_cancel_expected_parent && cancel_parent);
++    MUST(!cancel_parent->host_completed && lower_calls==1 && active_child);
++    ++late_cancel_fired; cancel_now();
++}
+ /* Break: removing the no-cancel window drops the dispatch/start lifetime
+  * protection before a newly delivered cancellation uses the published handle. */
+ static int cancellation_at_late_submit_unlock_keeps_lease(void)
+ {
+-    PDEVICE_OBJECT device=make_device(2);parent_fixture read;
+-    init_parent(&read,IRP_MJ_READ,512);lower_pending=1;lower_calls=cancel_calls=0;
+-    cancel_parent=&read.irp;after_unlock=cancel_now;unlock_countdown=13;
+-    CHECK(NxNativeDispatchReadWrite(device,&read.irp)==STATUS_PENDING);
+-    CHECK(!after_unlock&&read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_CANCELLED);
++    PDEVICE_OBJECT device=make_device(2);parent_fixture probe,read;
++    init_parent(&probe,IRP_MJ_READ,512);lower_pending=1;
++    unsigned before=__atomic_load_n(&spin_acquires,__ATOMIC_RELAXED);
++    CHECK(NxNativeDispatchReadWrite(device,&probe.irp)==STATUS_PENDING);
++    unsigned releases=__atomic_load_n(&spin_acquires,__ATOMIC_RELAXED)-before;
++    CHECK(releases>=2 && !spin_depth);
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(probe.irp.host_completed && probe.irp.IoStatus.Status==STATUS_SUCCESS);
++    init_parent(&read,IRP_MJ_READ,512);lower_calls=cancel_calls=0;
++    /* The final two adapter releases are admission bookkeeping then submit
++     * cleanup. Core coalescing changes earlier releases, so derive the same
++     * penultimate boundary instead of assuming the old ordinal thirteen. */
++    late_cancel_expected_parent=cancel_parent=&read.irp;late_cancel_fired=0;
++    after_unlock=cancel_expected_late_parent;unlock_countdown=releases-1;
++    NTSTATUS status=NxNativeDispatchReadWrite(device,&read.irp);
++    unsigned fired=late_cancel_fired;int consumed=after_unlock==NULL;
++    /* Disarm even a failed injection before any CHECK can leave this test. */
++    after_unlock=NULL;unlock_countdown=0;cancel_parent=late_cancel_expected_parent=NULL;
++    if(!fired && active_child) (void)complete_child(STATUS_SUCCESS,512,1);
++    lower_pending=0;
++    CHECK(fired==1 && consumed);
++    CHECK(status==STATUS_PENDING);
++    CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_CANCELLED);
+     CHECK(lower_calls==1&&cancel_calls==1&&!active_child);
+-    cancel_parent=NULL;lower_pending=0;return 1;
++    return 1;
+ }
+ /* Break: normal admission/retirement enters the dispatcher for a rundown
+  * event even though no teardown waiter can exist before sealing. */
+diff --git a/tests/host/nxstorage/request_test.c b/tests/host/nxstorage/request_test.c
+index a78b4257..aa2569ab 100644
+--- a/tests/host/nxstorage/request_test.c
++++ b/tests/host/nxstorage/request_test.c
+@@ -33,7 +33,8 @@ typedef struct fixture {
+     nx_command held[4], log[40];
+     unsigned held_live[4], resource_live[4];
+     unsigned commands, prepares, retires, cancels, fail_prepare;
+-    unsigned depth, max_depth, lock_depth;
++    unsigned depth, max_depth, lock_depth, lock_entries;
++    unsigned inject_idle_done;
+     int delayed, pending_inline, cancel_delivers, delay_sync;
+     int omit_terminal, cancel_preparing;
+     unsigned null_completions;
+@@ -65,8 +66,20 @@ static int reentry_index(const fixture *f,const parent *p)
+     return -1;
+ }
+ 
+-static void enter(void *p) { fixture *f=p; MUST(f->lock_depth == 0); f->lock_depth=1; }
+-static void leave(void *p) { fixture *f=p; MUST(f->lock_depth == 1); f->lock_depth=0; }
++static void enter(void *p) { fixture *f=p; MUST(f->lock_depth == 0); f->lock_depth=1; ++f->lock_entries; }
++static void deliver(fixture *, const nx_command *, nx_status, uint32_t, uint32_t);
++static void leave(void *p)
++{
++    fixture *f=p; MUST(f->lock_depth == 1); f->lock_depth=0;
++    /* Deliver at the first release after pending publication, regardless of
++     * pump ownership. A still-active owner must see it; an idle owner must
++     * let the producer take over. Gating on pumping would hide a lost wake. */
++    if(f->inject_idle_done && f->held_live[0] &&
++       ((parent *)f->held[0].parent)->pending) {
++        nx_command done=f->held[0]; f->held_live[0]=0; f->inject_idle_done=0;
++        deliver(f,&done,NX_OK,done.bytes,0);
++    }
++}
+ static nx_status prepare(void *p, const nx_command *c)
+ {
+     fixture *f=p; MUST(!f->lock_depth); ++f->prepares;
+@@ -939,10 +952,55 @@ static int durability_snapshot_is_request_owned(void)
+     cleanup(&f); return 1;
+ }
+ 
++/* Cost invariant: callers transfer pump ownership with the lock they already
++ * hold. The transport lock assertions above independently enforce boundaries. */
++static int owner_handoff_cost(unsigned route)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg)); f.delayed=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,512);
++    unsigned before=f.lock_entries;
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    if(route==0) CHECK(f.lock_entries-before==4);
++    if(route==1) {
++        before=f.lock_entries; finish_held(&f,h.slot,NX_OK,512,0);
++        CHECK(f.lock_entries-before==3);
++        CHECK(p.completions==1 && p.status==NX_OK && p.bytes==512);
++    } else {
++        if(route==2 || route==3) {
++            before=f.lock_entries;
++            if(route==2) nx_cancel(&f.dev,h); else nx_quarantine(&f.dev);
++            CHECK(f.lock_entries-before==2);
++            CHECK(f.cancels==1 && !p.completions && f.held_live[h.slot]);
++        }
++        finish_held(&f,h.slot,NX_OK,512,0);
++        CHECK(p.completions==1 && p.bytes==512);
++    }
++    CHECK(!f.lock_depth && !f.dev.pumping); cleanup(&f); return 1;
++}
++static int start_transfers_owned_lock(void) { return owner_handoff_cost(0); }
++static int lower_done_transfers_owned_lock(void) { return owner_handoff_cost(1); }
++static int cancel_transfers_owned_lock(void) { return owner_handoff_cost(2); }
++static int quarantine_transfers_owned_lock(void) { return owner_handoff_cost(3); }
++static int completion_at_idle_release_is_not_lost(void)
++{
++    fixture f; nx_config cfg=config(); CHECK(init(&f,&cfg));
++    f.delayed=1; f.inject_idle_done=1;
++    parent p=fresh(); nx_handle h; nx_request r=request(&f,&p,NX_READ,0,512);
++    CHECK(nx_start(&f.dev,&r,&h)==NX_PENDING);
++    CHECK(!f.inject_idle_done && p.completions==1 && p.status==NX_OK && p.bytes==512);
++    CHECK(p.pending==1 && !f.lock_depth && !f.dev.pumping);
++    cleanup(&f); return 1;
++}
++
+ int main(void)
+ {
+     struct {const char *name; int (*run)(void);} tests[]={
+         {"zero_domain_write_through",zero_domain_write_through},
++        {"start_transfers_owned_lock",start_transfers_owned_lock},
++        {"lower_done_transfers_owned_lock",lower_done_transfers_owned_lock},
++        {"cancel_transfers_owned_lock",cancel_transfers_owned_lock},
++        {"quarantine_transfers_owned_lock",quarantine_transfers_owned_lock},
++        {"completion_at_idle_release_is_not_lost",completion_at_idle_release_is_not_lost},
+         {"zero_domain_guards",zero_domain_guards},
+         {"rejects_invalid_input",rejects_invalid_input}, {"zero_has_no_transport",zero_has_no_transport},
+         {"one_inline_read_owns_until_return",one_inline_read_owns_until_return},

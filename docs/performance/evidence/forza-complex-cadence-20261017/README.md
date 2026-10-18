@@ -45,6 +45,16 @@ gain. Both 0169 trials regress the 900-page 450 µs case slightly, while other
 cases vary in direction. Direct-call assembly shape is not treated as a
 measured performance improvement.
 
+The [0168 → 0170 → 0168 → 0170 paired sequence](candidate0170/README.md)
+also passes all 32 sustained cases but leaves 0170 **unselected**. The 450 µs
+throughput changes reverse sign between pairs at both memory levels. No
+repeatable gain is established; all read-return costs and eight-case results
+are retained, including a 28.03% per-size read-cost regression in the second
+pair. The selected firmware lock is unchanged. The additive
+[request-position analysis](candidate0170/path-mix-analysis/README.md) establishes
+a whole-case first-size mix change and preserves the distinction between a
+measured per-size mean difference and an intrinsic or causal regression.
+
 ## What ran
 
 The [owned release fixture](../../../../tests/xbe/forza-callback-cadence/README.md)

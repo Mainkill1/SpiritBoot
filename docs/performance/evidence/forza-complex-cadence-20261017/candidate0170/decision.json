@@ -1,0 +1,58 @@
+{
+  "selected": false,
+  "decision": "No repeatable 450 us performance gain; one unexplained per-size cost regression exceeds 20 percent.",
+  "all_four_runs_full_oracle_passed": true,
+  "cases_per_run": 8,
+  "minimum_case_seconds": 10,
+  "primary_450_pairs": [
+    {
+      "target": 783,
+      "paired_changes": {
+        "candidate1": {
+          "control": "control1",
+          "native_return_mean_percent": -7.009703433425763,
+          "reads_per_second_percent": 4.848546640416096,
+          "submit_mean_65536_percent": 0.9741628781883005,
+          "submit_mean_512_percent": -15.242479192974868
+        },
+        "candidate2": {
+          "control": "control2",
+          "native_return_mean_percent": 1.8174383231241542,
+          "reads_per_second_percent": -2.3811072068130934,
+          "submit_mean_65536_percent": 1.6986079961042844,
+          "submit_mean_512_percent": 1.9616255397304938
+        }
+      }
+    },
+    {
+      "target": 900,
+      "paired_changes": {
+        "candidate1": {
+          "control": "control1",
+          "native_return_mean_percent": 2.527608437016937,
+          "reads_per_second_percent": -1.9671069452620538,
+          "submit_mean_65536_percent": -0.17785270250183505,
+          "submit_mean_512_percent": 5.531295933415348
+        },
+        "candidate2": {
+          "control": "control2",
+          "native_return_mean_percent": -5.289621066689754,
+          "reads_per_second_percent": 1.9793080215174008,
+          "submit_mean_65536_percent": -5.986484114475221,
+          "submit_mean_512_percent": -4.523585403578423
+        }
+      }
+    }
+  ],
+  "regressions_over_20_percent": [
+    {
+      "target": 783,
+      "budget_us": 1000,
+      "candidate": "candidate2",
+      "metric": "submit_mean_65536_percent",
+      "change_percent": 28.02579342204128
+    }
+  ],
+  "selected_firmware_lock_changed": false,
+  "overall_Forza_fix_established": false
+}

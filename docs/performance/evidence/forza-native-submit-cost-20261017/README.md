@@ -3,9 +3,9 @@
 The [causal findings](CAUSAL-FINDINGS.md) connect the title's deadline to the
 owned submission path and separate demonstrated causes from remaining work.
 
-Four narrow owned-code experiments investigate avoidable work in the native
-storage adapter. The selected stack ends at 0168; 0169 was not retained after
-native tests failed to establish a repeatable gain. These are not an established
+Five narrow owned-code experiments investigate avoidable work in the native
+storage adapter. The selected stack ends at 0168; 0169 and 0170 remain
+unselected after native tests failed to establish a repeatable gain. These are not an established
 Forza fix. Ordinary generated burst tests
 found no consistent gain from 0166. The repeated 0167 synthetic comparison is mixed; see
 [its full eight-case archive](../forza-complex-cadence-20261017/candidate0167/).
@@ -141,6 +141,17 @@ bound mode. The release 0169/0168/0169 sequence passes all 24 native correctness
 cases but does not establish a repeatable return-cost gain. The patch remains
 archived and is excluded from the selected firmware lock; see
 [the complete comparison](../forza-complex-cadence-20261017/candidate0169/).
+
+## 0170: carry the core lock across internal bookkeeping
+
+The [isolated specification and reproduction tools](core-lock-coalescing-spec.md)
+reduce pending adapter lock acquisitions from fourteen to twelve while keeping
+transport callbacks unlocked and idle ownership publication atomic. Host tests,
+mutation checks and an independent replay pass. The [four-run release comparison](../forza-complex-cadence-20261017/candidate0170/)
+passes all 32 correctness cases, but primary 450 us cost/rate changes reverse
+sign between pairs at both memory targets. A per-size regression also exceeds
+20%. This experiment remains unselected; lower operation counts alone do not
+qualify a performance improvement.
 
 ## Host validation and reproducibility
 

@@ -1,0 +1,44 @@
+{
+  "patch": ".scratch/forza-core-lock-0170/0170-coalesce-core-lock-handoffs.patch",
+  "sha256": "38329a159a3d1c628f7bb6a0899c0d04684ae68b3f3c69f0b175ccfea195753f",
+  "base_tree": "2716b75a7159254904b4c7a9282f2c51961ee510",
+  "assembled_source_tree": "a6f7d46982fca95e85e7b865323302ac217d656b",
+  "selected": false,
+  "native_performance": "unselected_no_repeatable_450us_gain",
+  "core_tests": 55,
+  "pthread_scenarios": 8,
+  "adapter_groups_per_mode": 42,
+  "adapter_modes": [
+    "plain",
+    "ASan/UBSan"
+  ],
+  "baseline_adapter_groups_per_mode": 42,
+  "pending_adapter_lock_entries": {
+    "baseline": 14,
+    "candidate": 12
+  },
+  "review": "Independent reviewer confirmed all four owner transfers and independently rejected reversed idle-publication mutation.",
+  "initial_failure": "Old late-cancel test injected at fixed unlock13 of14; candidate had12 releases, so hook did not fire. Failed CHECK left armed hook and caused later abort. Test now derives penultimate boundary from a completed probe, checks intended parent/firing, and disarms on failure. Baseline and candidate both pass.",
+  "evidence_sha256": {
+    "check_core_lock_candidate.py": "fde87cb805175423c76198a29856ee981fc28acdeaee8cb88a8a73b57232265f",
+    "check_core_lock_mutations.py": "2d6670e93dbd4eef31bb0c237528623f5b32b7cbe579207b8fab29ac40ba7d24",
+    "core-lock-0170-coalesce-core-lock-handoffs.patch": "38329a159a3d1c628f7bb6a0899c0d04684ae68b3f3c69f0b175ccfea195753f",
+    "core-lock-adapter-final.log": "729808100ccf68271c69a368c2d0a7c4c941502f11105278ee818f0c63c25a68",
+    "core-lock-adapter.log": "ae8cc2b702281c6f2de5cd2a40ae5e121715b92ff60a99bac7fbb4982e60bd73",
+    "core-lock-baseline-adapter-observations.log": "545ef17c7f966c86485d5225febeec034b59032cf8ea5aa06d69820713abbbfc",
+    "core-lock-baseline-adapter.log": "729808100ccf68271c69a368c2d0a7c4c941502f11105278ee818f0c63c25a68",
+    "core-lock-baseline-red.log": "da01040816f631639f7eb16b4341f82242984e381ea18ac7fa3edc8c26a471c5",
+    "core-lock-build-lock.json": "c2d89b7988b2378c1d26ad4c6a38dc92733e9bb5853f23f3c564b6e7acc7b548",
+    "core-lock-build-receipt.json": "e83651725e617219e85c35c9d1089041a0b47f7af879ac6e5d28f4d66c70e61c",
+    "core-lock-candidate-adapter-observations.log": "133eaf997f260179e81619057201595ac91be5276717f2d2c1165970d5196955",
+    "core-lock-coalescing-spec.md": "0e8a47bd53a2ac9bfc52531fc0f11cbb9b062aec55986939dc31d33004ca8751",
+    "core-lock-exact-gates.log": "951498846df613395d667f78c8d2fc1dc0c96b33341092d793f60553f2834288",
+    "core-lock-idle_unlock_before_clear.log": "5ac0060f85face0162844ed602d12d493c53813ee473dc1bc61ef840c458090e",
+    "core-lock-locked_prepare.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "core-lock-mutations.json": "3d9e96bdafff0badce71c695357904fbb6f46c8b6ae3edca0bbb23b76b9e3fce",
+    "core-lock-reproduction.log": "6b0a16fd0aceded46673fe7549391a1ab8fb7e92ff00372d06c4118ed3cb0f7a"
+  },
+  "durable_reproducer_passed": true,
+  "native_evidence": "../forza-complex-cadence-20261017/candidate0170/README.md",
+  "independent_reproduction": "Root reran durable host assembler/gates/mutations and native archive reproducer successfully; no firmware rebuild."
+}
