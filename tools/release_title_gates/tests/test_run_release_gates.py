@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -25,6 +27,21 @@ class FakeApi:
 
 
 class RetainedHddImportTests(unittest.TestCase):
+    def test_offline_ocr_bundle_is_available_to_every_title_scorer(self):
+        with tempfile.TemporaryDirectory() as td:
+            dependency_dir = Path(td)
+            (dependency_dir / "rapidocr_onnxruntime.py").write_text(
+                "class RapidOCR:\n    pass\n")
+            environment = os.environ.copy()
+            environment["FORZA_GATE_OCR_DEPS"] = str(dependency_dir)
+            completed = subprocess.run([
+                sys.executable, "-c",
+                "from release_title_analyzer import require_ocr_dependencies; "
+                "print(require_ocr_dependencies().__name__)",
+            ], cwd=ROOT, env=environment, text=True, capture_output=True)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(completed.stdout.strip(), "RapidOCR")
+
     def test_import_is_generic_and_uses_exact_retained_runtime_hdd(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

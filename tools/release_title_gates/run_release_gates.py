@@ -17,7 +17,8 @@ from finalize_release_jobs import _stage_package, build_title_job, sha256_file
 from rclass_gate import ERROR_PATTERNS
 from release_title_analyzer import (score_doa_create, score_doa_reload,
                                     score_halo2, score_halo2_pair,
-                                    score_pgr2_reload)
+                                    score_pgr2_reload,
+                                    require_ocr_dependencies)
 
 
 def require_idle(api: Any) -> None:
@@ -165,12 +166,10 @@ def execute(finalized: Path, evidence: Path, runner_url: str,
     flash = finalized / "packages" / "forza" / "flash.bin"
     if sha256_file(flash) != report["firmware_sha256"]:
         raise RuntimeError("finalized firmware no longer matches finalization.json")
-    dependency_check = subprocess.run(
-        [sys.executable, str(analyzer_dir / "analyze_evidence.py"), "--help"],
-        check=False, text=True, capture_output=True)
-    if dependency_check.returncode != 0:
-        raise RuntimeError("title analyzer dependencies are unavailable: " +
-                           dependency_check.stderr.strip())
+    try:
+        require_ocr_dependencies()
+    except (ImportError, RuntimeError) as error:
+        raise RuntimeError("title analyzer dependencies are unavailable: " + str(error)) from error
     api = RunnerApi(runner_url, timeout=120)
     require_idle(api)
     register_firmware(api, contract["common"]["firmware_asset"], flash)

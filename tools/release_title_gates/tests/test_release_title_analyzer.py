@@ -92,7 +92,7 @@ class ReleaseTitleAnalyzerTests(unittest.TestCase):
     def test_halo2_requires_complete_identity_and_repeat_stability(self):
         with tempfile.TemporaryDirectory() as td:
             root = self._root(td)
-            names = ["halo2-menu-45s", "halo2-menu-60s", "halo2-menu-75s"]
+            names = ["halo2-menu-entry", "halo2-menu-15s", "halo2-menu-30s"]
             for index, name in enumerate(names):
                 self._image(root, name, index)
             (root / "title-ocr.json").write_text(json.dumps({

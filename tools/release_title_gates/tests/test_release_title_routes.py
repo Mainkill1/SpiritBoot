@@ -41,11 +41,18 @@ class ReleaseTitleRouteTests(unittest.TestCase):
         self.assertFalse(any(row.get("button") == "LStickRight" for row in plan))
         self.assertFalse(any(row["type"] == "diagnostic" for row in plan))
 
-    def test_halo2_menu_route_has_three_cold_launch_observations_and_no_input(self):
+    def test_halo2_menu_route_enters_main_menu_before_three_observations(self):
         plan = build_halo2_menu_plan()
         shots = [row["name"] for row in plan if row["type"] == "screenshot"]
-        self.assertEqual(shots, ["halo2-menu-45s", "halo2-menu-60s", "halo2-menu-75s"])
-        self.assertFalse(any(row["type"] in ("button", "diagnostic") for row in plan))
+        self.assertEqual(shots, ["halo2-menu-entry", "halo2-menu-15s", "halo2-menu-30s"])
+        buttons = [(i, row["button"]) for i, row in enumerate(plan)
+                   if row["type"] == "button"]
+        self.assertEqual([button for _, button in buttons], ["Start", "DPadDown", "A"])
+        self.assertTrue(all(plan[i]["durationMs"] == 25 for i, _ in buttons))
+        first_shot = next(i for i, row in enumerate(plan) if row["type"] == "screenshot")
+        self.assertLess(buttons[0][0], first_shot)
+        self.assertFalse(any(row["type"] == "diagnostic" for row in plan))
+        self.assertEqual(sum(row.get("delayMs", 0) for row in plan), 94_000)
         self.assertEqual(plan[-1]["type"], "quit")
 
     def test_doa_create_and_reload_are_separate_fresh_process_plans(self):

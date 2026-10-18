@@ -95,14 +95,20 @@ def build_pgr2_cold_race_plan() -> list[dict[str, Any]]:
 
 
 def build_halo2_menu_plan() -> list[dict[str, Any]]:
-    """Observe Halo 2 menu completeness without input changing the menu state."""
+    """Enter Halo 2's main menu, then observe its completeness and stability."""
     return [
         step("wait", delayMs=45_000),
-        step("screenshot", name="halo2-menu-45s"),
+        step("button", button="Start", durationMs=25),
+        step("wait", delayMs=8_000),
+        step("button", button="DPadDown", durationMs=25),
+        step("wait", delayMs=1_000),
+        step("button", button="A", durationMs=25),
+        step("wait", delayMs=10_000),
+        step("screenshot", name="halo2-menu-entry"),
         step("wait", delayMs=15_000),
-        step("screenshot", name="halo2-menu-60s"),
+        step("screenshot", name="halo2-menu-15s"),
         step("wait", delayMs=15_000),
-        step("screenshot", name="halo2-menu-75s"),
+        step("screenshot", name="halo2-menu-30s"),
         step("quit"),
     ]
 
