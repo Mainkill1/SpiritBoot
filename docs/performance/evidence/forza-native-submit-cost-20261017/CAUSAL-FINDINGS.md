@@ -101,6 +101,54 @@ idle-start and subsequent admission cost as investigation targets, without
 claiming a proven private Complex queue implementation. See
 [the ordinal analysis and next discriminating test](../forza-budget-attribution-20261017/PUBLIC-REQUEST-STATE-PROPOSAL.md).
 
+## Exact request identities in the preserved scene
+
+A subsequent [identity capture](../forza-request-identity-20261017/README.md)
+connects each native IOSB through the original IRP, adapter child IRP and SRB to
+its own PATA start. The complete replay has 498 selected reads with no lost,
+ambiguous or open observations. All have one direct filesystem-to-class dispatch
+and one PATA start over their lifetime; none uses the filesystem worker/partial
+IRP fallback. The optional partial-IRP edge is observed for unrelated I/O and is
+not silently assigned to the title's selected reads.
+
+| Selected request route | Calls | Median instrumented API duration |
+| --- | ---: | ---: |
+| No lower queue return; own drive start before API return | 407 | 176.7 us |
+| Lower queue return, then own drive start before API return | 15 | 210.2 us |
+| Lower queue return; own drive start after API return | 76 | 58.3 us |
+
+No selected API interval starts an older request. The 76 cheap intervals are
+confirmed queued submissions, rather than an inference from missing timing
+scopes. All 498 calls return `STATUS_PENDING`; only 36 have matching parent
+completion entry before API return and matching completed IOSB information.
+Those 36 are 512-byte extent hits. The other calls remain expensive without
+their own parent completion having entered before return.
+
+The immediately previous selected child's completion precedes the next API
+entry in 381 cases; it occurs during the next API before lower dispatch in 23,
+after dispatch but before return in 17, and after return in 76. One call has no
+prior selected read. Thus slower pre-dispatch work is not shown to drain an
+otherwise occupied lower queue on every call: most observed submissions already
+follow the previous child's completion. The lower driver releases its tag and
+can start another command before completing that child, so child lifetime counts
+must not be labeled exact hardware queue occupancy.
+
+All 124 observed filesystem mapping attempts succeed. Ninety-one walk two FAT
+entries, and the maximum walk is 42. Their inclusive median is 28.4 us; a single
+2,277.7 us outlier occurs despite only eight steps. That outlier does not establish
+CPU work proportional to chain length. Long walks or worker fallback do not
+explain this replay's general submission penalty. Mapping and synchronization
+still cost time, and this scene does not characterize every file layout.
+
+This narrows the engineering target to the ordinary synchronous submission
+route: public IRP/MDL setup, filesystem resource/mapping work, class admission and
+packet preparation, lower command/DMA setup, hardware programming and return
+bookkeeping. Completion overlap adds cost in a subset; it is not the whole
+explanation. These instrumented intervals include observer and scheduling effects.
+They identify routes and ordering, not exclusive CPU times or a qualified new
+firmware speedup. The prior release fixture remains the performance acceptance
+measurement.
+
 ## Controlled release evidence
 
 The separate initial-poll fixture charges the first alertable poll to its

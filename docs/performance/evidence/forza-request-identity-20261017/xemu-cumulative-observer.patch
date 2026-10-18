@@ -1,0 +1,753 @@
+diff --git a/target/i386/helper.h b/target/i386/helper.h
+index dde92f246d..61bcc504e4 100644
+--- a/target/i386/helper.h
++++ b/target/i386/helper.h
+@@ -233,3 +233,6 @@ DEF_HELPER_1(emms, void, env)
+ #include "tcg/ops_sse_header.h.inc"
+ 
+ DEF_HELPER_1(rdrand, tl, env)
++
++/* Local diagnostic for SpiritBoot f4496a59, never a generic guest ABI. */
++DEF_HELPER_2(spirit_menu_trace, void, env, i32)
+diff --git a/target/i386/tcg/misc_helper.c b/target/i386/tcg/misc_helper.c
+index 2b5f092a23..796d3a0444 100644
+--- a/target/i386/tcg/misc_helper.c
++++ b/target/i386/tcg/misc_helper.c
+@@ -19,6 +19,7 @@
+ 
+ #include "qemu/osdep.h"
+ #include "qemu/log.h"
++#include "qemu/timer.h"
+ #include "cpu.h"
+ #include "exec/helper-proto.h"
+ #include "exec/cputlb.h"
+@@ -61,6 +62,8 @@ void helper_cpuid(CPUX86State *env)
+     env->regs[R_EDX] = edx;
+ }
+ 
++static uint32_t spirit_read32(CPUX86State *env, uint32_t address);
++
+ void helper_rdtsc(CPUX86State *env)
+ {
+     uint64_t val;
+@@ -73,6 +76,15 @@ void helper_rdtsc(CPUX86State *env)
+     val = cpu_get_tsc(env) + env->tsc_offset;
+     env->regs[R_EAX] = (uint32_t)(val);
+     env->regs[R_EDX] = (uint32_t)(val >> 32);
++    if(getenv("XEMU_FORZA_CLOCK_TRACE") && env->eip<0x80000000) {
++        static unsigned samples;
++        if(samples++<100000) {
++            bool complex_profile=getenv("XEMU_FORZA_COMPLEX")!=NULL;
++            qemu_log_mask(LOG_GUEST_ERROR,"forza_tsc host_ns=%" PRId64 " virtual_ns=%" PRId64 " pc=%08x caller=%08x thread=%08x value=%" PRIu64 "\n",
++              qemu_clock_get_ns(QEMU_CLOCK_HOST),qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),(uint32_t)env->eip,spirit_read32(env,env->regs[R_ESP]),
++              spirit_read32(env,complex_profile?env->segs[R_FS].base+0x28:0xffdff124),val);
++        }
++    }
+ }
+ 
+ G_NORETURN void helper_rdpmc(CPUX86State *env)
+@@ -142,3 +154,553 @@ target_ulong HELPER(rdpid)(CPUX86State *env)
+     return 0;
+ #endif
+ }
++
++/* Local diagnostic. Function PCs and optimized calling conventions were checked
++ * against add882b6's xboxkrnl.unstripped.exe. No guest memory is written. */
++static uint32_t spirit_read32(CPUX86State *env, uint32_t address)
++{
++    uint8_t bytes[4];
++    if (!address || cpu_memory_rw_debug(env_cpu(env), address, bytes, 4, false)) {
++        return 0;
++    }
++    return ldl_le_p(bytes);
++}
++
++/* Local owned-code attribution; aggregate within the title's read call. */
++static void forza_submit_profile(CPUX86State *env, uint32_t pc)
++{
++    static struct {
++        uint32_t thread, iosb, esp, bytes, stalls, stall_us;
++        int64_t start, starts[5], durations[5];
++        uint32_t counts[5];
++    } p;
++    const uint32_t enter[5] = {0x84013cc8,0x84022a0c,0x840281f4,0x840347e4,0x8401f35c};
++    const uint32_t leave[5] = {0x84013ddf,0x84022c23,0x8402880a,0x84034afa,0x8401f46e};
++    uint32_t thread=spirit_read32(env,0xffdff124), esp=env->regs[R_ESP];
++    int64_t now=qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
++    if (pc==0x8404cec4 && spirit_read32(env,esp)==0x0026741a) {
++        memset(&p,0,sizeof(p));p.thread=thread;p.iosb=spirit_read32(env,esp+20);
++        p.bytes=spirit_read32(env,esp+28);p.esp=esp+36;p.start=now;
++    }
++    if (!p.thread || thread!=p.thread) return;
++    if (pc==0x84002f67) {p.stalls++;p.stall_us+=spirit_read32(env,esp+4);}
++    for (unsigned i=0;i<5;i++) {
++        if(pc==enter[i]) {p.starts[i]=now;p.counts[i]++;}
++        if(pc==leave[i] && p.starts[i]) {p.durations[i]+=now-p.starts[i];p.starts[i]=0;}
++    }
++    if(pc==0x0026741a && esp==p.esp) {
++        qemu_log_mask(LOG_GUEST_ERROR,"forza_submit_profile virtual_ns=%" PRId64 " iosb=%08x bytes=%u total_ns=%" PRId64 " stalls=%u stall_us=%u irp_ns=%" PRId64 " pin_ns=%" PRId64 " adapter_ns=%" PRId64 " pata_ns=%" PRId64 " dpc_ns=%" PRId64 " irp_count=%u pin_count=%u adapter_count=%u pata_count=%u dpc_count=%u open=%u%u%u%u%u\n",
++            now,p.iosb,p.bytes,now-p.start,p.stalls,p.stall_us,p.durations[0],p.durations[1],p.durations[2],p.durations[3],p.durations[4],
++            p.counts[0],p.counts[1],p.counts[2],p.counts[3],p.counts[4],!!p.starts[0],!!p.starts[1],!!p.starts[2],!!p.starts[3],!!p.starts[4]);
++        p.thread=0;
++    }
++}
++
++/* Local value-only observation: no allocation, formatting or host writes in
++ * the title pump. Flush after emulation exits, outside every measurement. */
++typedef struct {
++    uint32_t thread,queue,active,reads,bytes,callbacks,checks,deadline,empty;
++    uint32_t limit,outstanding,budget,read_open,wait_open,callback_open;
++    int64_t begin,read_begin,wait_begin,callback_begin,read_ns,wait_ns,initial_ns,callback_ns;
++    uint64_t elapsed,first_elapsed;
++} ForzaBudget;
++typedef struct {
++    ForzaBudget data;
++    int64_t end,host_end;
++    uint32_t outstanding_end;
++} ForzaBudgetRow;
++static ForzaBudgetRow forza_budget_rows[16384];
++static unsigned forza_budget_count,forza_budget_overflow,forza_budget_reentry;
++static void forza_budget_flush(void)
++{
++    const char *path=getenv("XEMU_FORZA_BUDGET_OUTPUT");
++    FILE *f=path?fopen(path,"w"):NULL;
++    if(!f)return;
++    fprintf(f,"forza_budget_meta rows=%u overflow=%u reentry=%u\n",forza_budget_count,forza_budget_overflow,forza_budget_reentry);
++    for(unsigned i=0;i<forza_budget_count;i++){
++        ForzaBudgetRow *row=&forza_budget_rows[i];ForzaBudget *p=&row->data;
++        fprintf(f,"forza_budget host_ns=%" PRId64 " virtual_ns=%" PRId64 " thread=%08x queue=%08x budget=%u limit=%u outstanding_start=%u outstanding_end=%u reads=%u bytes=%u callbacks=%u checks=%u deadline_pc=%08x empty=%u first_elapsed_ticks=%" PRIu64 " elapsed_ticks=%" PRIu64 " total_ns=%" PRId64 " initial_ns=%" PRId64 " read_ns=%" PRId64 " wait_ns=%" PRId64 " callback_ns=%" PRId64 " read_open=%u wait_open=%u callback_open=%u\n",
++          row->host_end,row->end,p->thread,p->queue,p->budget,p->limit,p->outstanding,row->outstanding_end,p->reads,p->bytes,p->callbacks,p->checks,p->deadline,p->empty,p->first_elapsed,p->elapsed,row->end-p->begin,p->initial_ns,p->read_ns,p->wait_ns,p->callback_ns,p->read_open,p->wait_open,p->callback_open);
++    }
++    fclose(f);
++}
++static void forza_budget_summary(CPUX86State *env,uint32_t pc)
++{
++    static ForzaBudget slots[16];
++    static bool registered;
++    if(!registered){atexit(forza_budget_flush);registered=true;}
++    bool complex_profile=getenv("XEMU_FORZA_COMPLEX")!=NULL;
++    uint32_t thread=spirit_read32(env,complex_profile?env->segs[R_FS].base+0x28:0xffdff124);
++    ForzaBudget *p=NULL;
++    for(unsigned i=0;i<16;i++)if(slots[i].thread==thread){p=&slots[i];break;}
++    if(!p)for(unsigned i=0;i<16;i++)if(!slots[i].active){p=&slots[i];break;}
++    if(!p || !thread)return;
++    int64_t now=qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
++    if(pc==0x00110d20){
++        if(p->active)forza_budget_reentry++;
++        memset(p,0,sizeof(*p));p->thread=thread;p->queue=env->regs[R_ECX];p->active=1;p->begin=now;
++        p->budget=spirit_read32(env,0x0059c414);p->limit=spirit_read32(env,p->queue+0x18);
++        p->outstanding=spirit_read32(env,p->queue+0x1c);return;
++    }
++    if(!p->active || p->thread!=thread)return;
++    if(pc==0x8404cec4 || pc==0x80017467){
++        uint32_t esp=env->regs[R_ESP];
++        if(spirit_read32(env,esp)==0x0026741a){p->reads++;p->bytes+=spirit_read32(env,esp+28);p->read_begin=now;p->read_open=1;}
++    }
++    if(pc==0x0026741a && p->read_open){p->read_ns+=now-p->read_begin;p->read_open=0;}
++    if(pc==0x8401989c || pc==0x8001980a){p->wait_begin=now;p->wait_open=1;}
++    if(pc==0x00264e84 && p->wait_open){p->wait_ns+=now-p->wait_begin;p->wait_open=0;}
++    if(pc==0x001103e0){p->callbacks++;p->callback_begin=now;p->callback_open=1;}
++    if(pc==0x00110422 && p->callback_open){p->callback_ns+=now-p->callback_begin;p->callback_open=0;}
++    if(pc==0x00110d60)p->initial_ns=now-p->begin;
++    if(pc==0x00110d9f || pc==0x00110dce){
++        p->elapsed=((uint64_t)(uint32_t)env->regs[R_EDX]<<32)|(uint32_t)env->regs[R_EAX];
++        if(!p->checks)p->first_elapsed=p->elapsed;
++        p->checks++;
++        if(p->elapsed>=p->budget)p->deadline=pc;
++    }
++    if(pc==0x00110ec0)p->empty=1;
++    if(pc==0x00110ec6){
++        if(forza_budget_count<16384){
++            ForzaBudgetRow *row=&forza_budget_rows[forza_budget_count++];
++            row->data=*p;row->end=now;row->host_end=qemu_clock_get_ns(QEMU_CLOCK_HOST);
++            row->outstanding_end=spirit_read32(env,p->queue+0x1c);
++        } else forza_budget_overflow++;
++        p->active=0;
++    }
++}
++
++
++/* Owned-kernel phase localization only. Flush after emulation ends; nested
++ * inclusive times are not additive and include interrupt/scheduling time. */
++typedef struct {
++ uint32_t thread,active,esp,iosb,bytes,handle,status,info,reentry,bad;
++ int64_t begin,end,host_end;
++ int64_t phase_begin[9],phase_ns[9];
++ unsigned depth[9],count[9];
++} ForzaOwned;
++static ForzaOwned owned_rows[16384],owned_slots[16];
++static unsigned owned_count,owned_overflow,owned_lost;
++static void forza_owned_flush(void)
++{
++ const char *path=getenv("XEMU_FORZA_OWNED_OUTPUT");FILE *f=path?fopen(path,"w"):NULL;
++ if(!f)return;
++ fprintf(f,"owned_meta rows=%u overflow=%u lost=%u\n",owned_count,owned_overflow,owned_lost);
++ for(unsigned j=0;j<owned_count;j++){
++  ForzaOwned *r=&owned_rows[j];
++  fprintf(f,"owned_read host_ns=%" PRId64 " virtual_ns=%" PRId64 " thread=%08x handle=%08x bytes=%u total_ns=%" PRId64 " status=%08x info=%u reentry=%u bad=%u",r->host_end,r->end,r->thread,r->handle,r->bytes,r->end-r->begin,r->status,r->info,r->reentry,r->bad);
++  for(unsigned i=0;i<9;i++)fprintf(f," p%u_ns=%" PRId64 " p%u_count=%u p%u_open=%u",i,r->phase_ns[i],i,r->count[i],i,r->depth[i]);
++  fprintf(f,"\n");
++ }
++ fclose(f);
++}
++static void forza_owned_profile(CPUX86State *env,uint32_t pc)
++{
++ static bool registered;
++ if(!registered){atexit(forza_owned_flush);registered=true;}
++ uint32_t thread=spirit_read32(env,0xffdff124),esp=env->regs[R_ESP];
++ ForzaOwned *r=NULL;
++ for(unsigned i=0;i<16;i++)if(owned_slots[i].thread==thread){r=&owned_slots[i];break;}
++ if(!r)for(unsigned i=0;i<16;i++)if(!owned_slots[i].active){r=&owned_slots[i];break;}
++ if(!thread||!r){owned_lost++;return;}
++ if(pc==0x8404cec4){
++  if(spirit_read32(env,esp)!=0x0026741a || spirit_read32(env,esp+16)!=0x001103e0)return;
++  unsigned reentry=r->active;
++  memset(r,0,sizeof(*r));r->reentry=reentry;r->active=1;r->thread=thread;
++  r->begin=qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);r->esp=esp+36;
++  r->iosb=spirit_read32(env,esp+20);r->bytes=spirit_read32(env,esp+28);r->handle=spirit_read32(env,esp+4);return;
++ }
++ if(!r->active||r->thread!=thread)return;
++ int64_t now=qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
++ if(pc==0x0026741a && esp==r->esp){
++  r->end=now;r->host_end=qemu_clock_get_ns(QEMU_CLOCK_HOST);
++  r->status=spirit_read32(env,r->iosb);r->info=spirit_read32(env,r->iosb+4);
++  if(owned_count<16384)owned_rows[owned_count++]=*r;else owned_overflow++;
++  r->active=0;return;
++ }
++ int phase=-1;bool entering=false;
++ switch(pc){
++ case 0x84013cc8:phase=0;entering=true;break;
++ case 0x84013ddf:phase=0;break;
++ case 0x8401f35c:phase=1;entering=true;break;
++ case 0x8401f46e:phase=1;break;
++ case 0x84022a0c:phase=2;entering=true;break;
++ case 0x84022c23:phase=2;break;
++ case 0x840281f4:phase=3;entering=true;break;
++ case 0x8402880a:phase=3;break;
++ case 0x84050ec4:phase=4;entering=true;break;
++ case 0x8405125c:phase=4;break;
++ case 0x84051554:phase=5;entering=true;break;
++ case 0x84051733:phase=5;break;
++ case 0x84051750:phase=6;entering=true;break;
++ case 0x84051830:phase=6;break;
++ case 0x84051c38:phase=7;entering=true;break;
++ case 0x840521a7:phase=7;break;
++ case 0x840347e4:phase=8;entering=true;break;
++ case 0x84034afa:phase=8;break;
++ }
++ if(phase<0)return;
++ if(entering){if(!r->depth[phase]++)r->phase_begin[phase]=now;r->count[phase]++;}
++ else if(!r->depth[phase])r->bad++;
++ else if(!--r->depth[phase])r->phase_ns[phase]+=now-r->phase_begin[phase];
++}
++
++/* SPDX-License-Identifier: MIT
++ * Independently authored, baseline-add882 scalar identity observer.
++ * No guest writes, allocations, formatting or file I/O during emulation.
++ * This is an observation tool, not firmware code. */
++#define FID_CAPACITY 131072u
++#define FID_THREADS 16u
++enum { FID_BEGIN=1, FID_RETURN, FID_BIND, FID_START, FID_COMPLETE,
++       FID_CALLBACK, FID_QUEUE_RETURN, FID_FS_BIND, FID_MAP_BEGIN, FID_MAP_WALK, FID_MAP_END, FID_MAP_READY };
++typedef struct {
++    int64_t host_ns, virtual_ns;
++    uint32_t seq,kind,thread,api,iosb,parent,child,srb,request,envelope;
++    uint32_t bytes,status,info,value0,value1,flags;
++} FidEvent;
++typedef struct { uint32_t thread,api,esp,iosb; } FidCall;
++typedef struct { uint32_t thread,api,frame,walk; } FidMap;
++static FidMap fid_maps[FID_THREADS];
++static unsigned fid_map_reentry,fid_map_lost;
++static FidEvent fid_events[FID_CAPACITY];
++static FidCall fid_calls[FID_THREADS];
++static uint32_t fid_count,fid_overflow,fid_reentry,fid_lost,fid_read_fail;
++static uint32_t fid_generation,fid_seen,fid_enabled;
++static const char *fid_output;
++
++static void forza_identity_flush(void)
++{
++    FILE *file;
++    unsigned open=0,map_open=0;
++    if(!fid_enabled)return;
++    for(unsigned i=0;i<FID_THREADS;i++){open+=fid_calls[i].api!=0;map_open+=fid_maps[i].api!=0;}
++    file=fid_output?fopen(fid_output,"w"):NULL;
++    if(!file){fprintf(stderr,"forza identity output could not be opened\n");return;}
++    fprintf(file,"identity_meta version=1 events=%u overflow=%u reentry=%u lost=%u read_fail=%u open_api=%u map_open=%u map_reentry=%u map_lost=%u\n",
++            fid_count,fid_overflow,fid_reentry,fid_lost,fid_read_fail,open,map_open,fid_map_reentry,fid_map_lost);
++    for(unsigned i=0;i<fid_count;i++){
++        const FidEvent *r=&fid_events[i];
++        fprintf(file,"identity_event seq=%u kind=%u host_ns=%" PRId64 " virtual_ns=%" PRId64
++          " thread=%08x api=%u iosb=%08x parent=%08x child=%08x srb=%08x request=%08x envelope=%08x"
++          " bytes=%u status=%08x info=%u value0=%08x value1=%08x flags=%u\n",
++          r->seq,r->kind,r->host_ns,r->virtual_ns,r->thread,r->api,r->iosb,r->parent,r->child,
++          r->srb,r->request,r->envelope,r->bytes,r->status,r->info,r->value0,r->value1,r->flags);
++    }
++    fprintf(file,"identity_end events=%u\n",fid_count);
++    if(fclose(file))fprintf(stderr,"forza identity output close failed\n");
++}
++
++static uint32_t fid_read(CPUX86State *env,FidEvent *event,uint32_t address)
++{
++    uint8_t bytes[4];
++    if(!address || cpu_memory_rw_debug(env_cpu(env),address,bytes,4,false)){
++        event->flags|=1;fid_read_fail++;return 0;
++    }
++    return ldl_le_p(bytes);
++}
++
++static void fid_append(FidEvent *event)
++{
++    if(fid_count==FID_CAPACITY){fid_overflow++;return;}
++    event->seq=fid_count+1;
++    fid_events[fid_count++]=*event;
++}
++
++static void forza_identity_profile(CPUX86State *env,uint32_t pc)
++{
++    static bool registered;
++    FidEvent event={0};
++    FidCall *call=NULL;
++    uint32_t esp=env->regs[R_ESP];
++    if(!registered){
++        fid_output=getenv("XEMU_FORZA_IDENTITY_OUTPUT");
++        fid_enabled=fid_output&&*fid_output;
++        if(fid_enabled)atexit(forza_identity_flush);
++        registered=true;
++    }
++    if(!fid_enabled)return;
++    event.host_ns=qemu_clock_get_ns(QEMU_CLOCK_HOST);
++    event.virtual_ns=qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
++    if(pc==0x8404cec4){
++        /* NtReadFile stdcall: return address, then eight arguments. APC
++         * context (not APC routine) selects the title's world callback. */
++        if(fid_read(env,&event,esp)!=0x0026741a ||
++           fid_read(env,&event,esp+16)!=0x001103e0)return;
++        event.thread=fid_read(env,&event,0xffdff124);
++        for(unsigned i=0;i<FID_THREADS;i++)
++            if(fid_calls[i].api&&fid_calls[i].thread==event.thread){call=&fid_calls[i];break;}
++        if(call){fid_reentry++;event.flags|=4;}
++        if(!call)for(unsigned i=0;i<FID_THREADS;i++)
++            if(!fid_calls[i].api){call=&fid_calls[i];break;}
++        if(!call||!event.thread){fid_lost++;return;}
++        event.kind=FID_BEGIN;event.api=++fid_generation;
++        event.iosb=fid_read(env,&event,esp+20);
++        event.bytes=fid_read(env,&event,esp+28);
++        event.value0=fid_read(env,&event,esp+4); /* file handle */
++        event.status=fid_read(env,&event,event.iosb);
++        event.info=fid_read(env,&event,event.iosb+4);
++        *call=(FidCall){event.thread,event.api,esp+36,event.iosb};
++        fid_seen=1;fid_append(&event);return;
++    }
++    if(!fid_seen)return;
++    event.thread=fid_read(env,&event,0xffdff124);
++    for(unsigned i=0;i<FID_THREADS;i++)
++        if(fid_calls[i].api&&fid_calls[i].thread==event.thread){call=&fid_calls[i];break;}
++    if(call)event.api=call->api; /* execution context, not request ownership */
++    if(pc==0x84043eac || pc==0x84044030 || pc==0x8404429c){
++        FidMap *map=NULL;
++        for(unsigned i=0;i<FID_THREADS;i++)
++            if(fid_maps[i].api&&fid_maps[i].thread==event.thread){map=&fid_maps[i];break;}
++        if(pc==0x84043eac){
++            if(!call || fid_read(env,&event,esp)!=0x84041e06)return;
++            if(map){fid_map_reentry++;return;}
++            for(unsigned i=0;i<FID_THREADS;i++)if(!fid_maps[i].api){map=&fid_maps[i];break;}
++            if(!map){fid_map_lost++;return;}
++            *map=(FidMap){event.thread,call->api,esp-4,0};
++            event.kind=FID_MAP_BEGIN;event.request=map->frame;
++            /* EBX still holds the caller's VFAT_IRP_CONTEXT at this entry. */
++            event.parent=fid_read(env,&event,env->regs[R_EBX]);
++            event.iosb=fid_read(env,&event,event.parent+0x1c);
++            event.bytes=fid_read(env,&event,esp+4);
++        }else{
++            if(!map)return;
++            if(map->frame!=(uint32_t)env->regs[R_EBP]){fid_map_lost++;return;}
++            event.api=map->api;event.request=map->frame;
++            if(pc==0x84044030){
++                if(map->walk){fid_map_reentry++;return;}
++                map->walk=1;event.kind=FID_MAP_WALK;
++                event.value0=fid_read(env,&event,map->frame-0x6c); /* Skip */
++                event.bytes=fid_read(env,&event,map->frame-0x70); /* Steps */
++                event.info=fid_read(env,&event,map->frame-0x58); /* initialized Step */
++            }else{
++                event.kind=FID_MAP_END;event.value0=map->walk;
++                event.status=fid_read(env,&event,map->frame-0x5d)&0xff;
++                if(map->walk){
++                    event.value1=fid_read(env,&event,map->frame-0x6c);
++                    event.bytes=fid_read(env,&event,map->frame-0x70);
++                    event.info=fid_read(env,&event,map->frame-0x58);
++                }
++                map->api=0;
++            }
++        }
++        fid_append(&event);return;
++    }
++    switch(pc){
++    case 0x8403fa83:
++        event.kind=FID_MAP_READY;event.request=env->regs[R_EBX];
++        event.parent=fid_read(env,&event,event.request);
++        event.iosb=fid_read(env,&event,event.parent+0x1c);
++        event.value0=env->regs[R_ESI]; /* extent hit flag, before it is repurposed */
++        if(event.value0>1)event.flags|=2;
++        break;
++    case 0x0026741a:
++        if(!call || call->esp!=esp)return;
++        event.kind=FID_RETURN;event.iosb=call->iosb;
++        event.status=env->regs[R_EAX]; /* native return status */
++        event.value0=fid_read(env,&event,event.iosb); /* sampled IOSB status */
++        event.info=fid_read(env,&event,event.iosb+4);
++        call->api=0;
++        break;
++    case 0x840435e1:
++        /* VFAT fallback partial IRP: the separate IRP has no UserIosb or
++         * MasterIrp. Capture the owned context's original-parent edge. */
++        event.kind=FID_FS_BIND;event.request=env->regs[R_EBX];
++        event.parent=fid_read(env,&event,event.request);
++        event.child=env->regs[R_EDX];
++        event.iosb=fid_read(env,&event,event.parent+0x1c);
++        event.value0=env->regs[R_ECX];
++        if(event.child!=(uint32_t)env->regs[R_EDI])event.flags|=2;
++        break;
++    case 0x840517ab:
++        /* Immediately before the owned port's IofCallDriver instruction. */
++        event.kind=FID_BIND;event.envelope=env->regs[R_EBX];
++        event.parent=fid_read(env,&event,event.envelope+4);
++        event.child=env->regs[R_EDX];event.srb=event.envelope+12;
++        event.iosb=fid_read(env,&event,event.parent+0x1c);
++        event.bytes=fid_read(env,&event,event.srb+0x10);
++        if(event.child!=fid_read(env,&event,event.envelope+8) ||
++           event.child!=fid_read(env,&event,event.srb+0x24))event.flags|=2;
++        event.value0=env->regs[R_ECX]; /* lower device */
++        break;
++    case 0x840347e4:
++        /* cdecl PataStartIo(ChannelContext, Request), at function entry. */
++        event.kind=FID_START;event.request=fid_read(env,&event,esp+8);
++        event.child=fid_read(env,&event,event.request+0x34);
++        event.srb=fid_read(env,&event,event.request+0x38);
++        event.bytes=fid_read(env,&event,event.request+0x28);
++        event.value0=fid_read(env,&event,event.request+0x44); /* tag */
++        event.value1=fid_read(env,&event,event.request+0x48); /* slot */
++        if(event.srb && event.child!=fid_read(env,&event,event.srb+0x24))event.flags|=2;
++        break;
++    case 0x840083b4:
++        /* Queue helper common epilogue, before EBX is restored. A pending
++         * result identifies this path, not proof that cancellation is absent. */
++        event.kind=FID_QUEUE_RETURN;event.srb=env->regs[R_EBX];
++        event.child=fid_read(env,&event,event.srb+0x24);
++        event.status=env->regs[R_EAX];
++        break;
++    case 0x840159f0:
++        /* IofCompleteRequest fastcall entry, before any retained request reuse. */
++        event.kind=FID_COMPLETE;event.child=env->regs[R_ECX];
++        event.iosb=fid_read(env,&event,event.child+0x1c);
++        event.status=fid_read(env,&event,event.child+0x10);
++        event.info=fid_read(env,&event,event.child+0x14);
++        break;
++    case 0x001103e0:
++        event.kind=FID_CALLBACK;
++        event.iosb=fid_read(env,&event,esp+12);
++        event.status=fid_read(env,&event,esp+4);
++        event.info=fid_read(env,&event,esp+8);
++        break;
++    default:return;
++    }
++    fid_append(&event);
++}
++
++void helper_spirit_menu_trace(CPUX86State *env, uint32_t pc)
++{
++    if(getenv("XEMU_FORZA_IDENTITY")){forza_identity_profile(env,pc);return;}
++    if(getenv("XEMU_FORZA_OWNED_PROFILE")){forza_owned_profile(env,pc);return;}
++    if(getenv("XEMU_FORZA_BUDGET_ONLY")){forza_budget_summary(env,pc);return;}
++
++    switch(pc) {
++    case 0x00110d20: case 0x00110d60: case 0x00110d9f: case 0x00110dce:
++    case 0x00110d90: case 0x00110eb8: case 0x00110ec0: case 0x00110ec6: {
++        bool complex_profile=getenv("XEMU_FORZA_COMPLEX")!=NULL;
++        uint32_t queue=pc==0x00110d20?env->regs[R_ECX]:env->regs[R_ESI];
++        qemu_log_mask(LOG_GUEST_ERROR,"forza_gate host_ns=%" PRId64 " virtual_ns=%" PRId64 " pc=%08x thread=%08x queue=%08x limit=%u outstanding=%u eax=%08x edx=%08x budget=%u\n",
++          qemu_clock_get_ns(QEMU_CLOCK_HOST),qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),pc,
++          spirit_read32(env,complex_profile?env->segs[R_FS].base+0x28:0xffdff124),queue,
++          spirit_read32(env,queue+0x18),spirit_read32(env,queue+0x1c),(uint32_t)env->regs[R_EAX],(uint32_t)env->regs[R_EDX],spirit_read32(env,0x0059c414));
++        return;
++    }}
++    switch(pc) {
++    case 0x8404a868: case 0x80015314:
++    case 0x8404a85c: case 0x80019f48:
++    case 0x8401a9a0: case 0x80019f60: {
++        bool complex_profile=getenv("XEMU_FORZA_COMPLEX")!=NULL;
++        uint32_t caller=spirit_read32(env,env->regs[R_ESP]);
++        if(caller<0x80000000) qemu_log_mask(LOG_GUEST_ERROR,"forza_clock host_ns=%" PRId64 " virtual_ns=%" PRId64 " pc=%08x caller=%08x thread=%08x\n",
++          qemu_clock_get_ns(QEMU_CLOCK_HOST),qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),pc,caller,
++          spirit_read32(env,complex_profile?env->segs[R_FS].base+0x28:0xffdff124));
++        return;
++    }}
++    if(getenv("XEMU_FORZA_SUBMIT_PROFILE")) forza_submit_profile(env,pc);
++    switch(pc) {
++    case 0x84013cc8: case 0x84013ddf: case 0x84022a0c: case 0x84022c23:
++    case 0x8402880a: case 0x840347e4: case 0x84034afa: case 0x8401f35c:
++    case 0x8401f46e: case 0x84002f67:
++        return;
++    }
++
++    uint32_t a[10], esp=env->regs[R_ESP], ctx=0, irp=0, fo=0, sl=0;
++    const char *kind="unknown";
++    bool returning=false;
++    bool complex_profile = getenv("XEMU_FORZA_COMPLEX") != NULL;
++    for (int i=0;i<10;i++) a[i]=spirit_read32(env,esp+i*4);
++    switch (pc) {
++    case 0x8001e547: kind="memory_statistics_query"; break;
++    case 0x0047196f: kind="memory_statistics_return"; break;
++    case 0x8001980a: kind="delay_thread"; break;
++    case 0x80017467: kind="_XeNtReadFile@32"; break;
++    case 0x80017633: kind="_XeNtReadFileScatter@32"; break;
++    case 0x80016a76: kind="title_apc_dispatch"; break;
++    case 0x8001647e: kind="io_complete"; break;
++    case 0x00264e84: kind="title_delay_return"; break;
++    case 0x0026741a: kind="title_read_return"; break;
++    case 0x8402695c: kind="title_apc_dispatch"; break;
++    case 0x001103e0: kind="world_completion_callback"; break;
++    case 0x84022cec: kind="memory_statistics_query"; break;
++    case 0x84026ac8: kind="wait_single_ex"; break;
++    case 0x840269a4: kind="wait_multiple_ex"; break;
++    case 0x8401989c: kind="delay_thread"; break;
++
++    case 0x84027730: kind="_NxMmAllocateContiguousMemory@4"; break;
++    case 0x84027764: kind="_NxMmAllocateContiguousMemoryEx@20"; break;
++    case 0x84043eac: kind="_VfatTryMapRead"; break;
++    case 0x8404b504: kind="_XeNtAllocateVirtualMemory@20"; break;
++    case 0x8404bf4c: kind="_XeNtFreeVirtualMemory@12"; break;
++    case 0x8404cec4: kind="_XeNtReadFile@32"; break;
++    case 0x8404cf14: kind="_XeNtReadFileScatter@32"; break;
++    case 0x840281f4: kind="native_submit"; break;
++    case 0x840159f0: kind="io_complete"; break;
++    case 0x84051400: kind="port_complete"; break;
++    case 0x840517ab: kind="lower_submit"; break;
++    case 0x840162d0: kind="io_apc_delivery"; break;
++    case 0x8403f3f4: kind="fatx_dispatch"; break;
++    case 0x84041cd8: kind="fatx_queue"; break;
++    case 0x84041d42: kind="fatx_overflow"; break;
++    case 0x84041e51: kind="fatx_worker_dispatch"; break;
++    case 0x8404f5a3: kind="envelope_alloc_return"; break;
++    case 0x8404f5f5: kind="child_alloc_return"; break;
++    case 0x8404f622: kind="control_mdl_return"; break;
++    case 0x84027761: kind="_NxMmAllocateContiguousMemory@4"; returning=true; break;
++    case 0x8402790c: kind="_NxMmAllocateContiguousMemoryEx@20"; returning=true; break;
++    case 0x840442a6: kind="_VfatTryMapRead"; returning=true; break;
++    case 0x8404b535: kind="_XeNtAllocateVirtualMemory@20"; returning=true; break;
++    case 0x8404c175: kind="_XeNtFreeVirtualMemory@12"; returning=true; break;
++    case 0x8404cf10: kind="_XeNtReadFile@32"; returning=true; break;
++    case 0x8404cf51: kind="_XeNtReadFileScatter@32"; returning=true; break;
++    }
++    static uint32_t stats_ptr, stats_thread;
++    static uint32_t read_iosb, read_thread, read_return_esp;
++    uint32_t current_thread = spirit_read32(env,complex_profile ? env->segs[R_FS].base+0x28 : 0xffdff124);
++    if ((pc==0x8001e547 || pc==0x84022cec) && a[0]==0x0047196f) {
++        stats_ptr=a[1]; stats_thread=current_thread;
++    }
++    if (pc==0x0047196f && stats_thread==current_thread) {
++        qemu_log_mask(LOG_GUEST_ERROR,"forza_stats host_ns=%" PRId64 " virtual_ns=%" PRId64 " thread=%08x result=%08x length=%u total=%u available=%u committed=%u reserved=%u cache=%u pool=%u stack=%u image=%u\n",
++          qemu_clock_get_ns(QEMU_CLOCK_HOST),qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),current_thread,(uint32_t)env->regs[R_EAX],
++          spirit_read32(env,stats_ptr),spirit_read32(env,stats_ptr+4),spirit_read32(env,stats_ptr+8),spirit_read32(env,stats_ptr+12),spirit_read32(env,stats_ptr+16),spirit_read32(env,stats_ptr+20),spirit_read32(env,stats_ptr+24),spirit_read32(env,stats_ptr+28),spirit_read32(env,stats_ptr+32));
++        stats_ptr=stats_thread=0;
++    }
++    if ((pc==0x80017467 || pc==0x8404cec4) && a[0]==0x0026741a) {
++        read_iosb=a[5];read_thread=current_thread;read_return_esp=esp+36;
++    }
++    if (pc==0x0026741a) {
++        bool matched = read_thread==current_thread && read_return_esp==esp;
++        qemu_log_mask(LOG_GUEST_ERROR,"forza_read_return host_ns=%" PRId64 " virtual_ns=%" PRId64 " thread=%08x matched=%u result=%08x iosb=%08x status=%08x info=%u\n",
++          qemu_clock_get_ns(QEMU_CLOCK_HOST),qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),current_thread,matched,(uint32_t)env->regs[R_EAX],read_iosb,
++          matched?spirit_read32(env,read_iosb):0,matched?spirit_read32(env,read_iosb+4):0);
++        read_iosb=read_thread=read_return_esp=0;
++    }
++    if(pc==0x8403f3f4) ctx=env->regs[R_EAX];
++    if(pc==0x84041cd8 || pc==0x84041d42) ctx=env->regs[R_EBX];
++    if(pc==0x84041e51) ctx=env->regs[R_ESI];
++    if(ctx){irp=spirit_read32(env,ctx);fo=spirit_read32(env,ctx+0x28);sl=spirit_read32(env,ctx+0x20);}
++    if(pc==0x840281f4) irp=env->regs[R_EDX];
++    if(pc==0x840159f0 || pc==0x8001647e) irp=env->regs[R_ECX];
++    if(pc==0x84051400) irp=a[2];
++    if(pc==0x840517ab) irp=spirit_read32(env,env->regs[R_EBX]+4);
++    if(pc==0x840162d0) irp=a[1]-0x3c;
++    uint32_t mdl=irp && !complex_profile?spirit_read32(env,irp+0x6c):0;
++    uint32_t dev=ctx?spirit_read32(env,ctx+8):0;
++    char name[257]={0};
++    if(fo){
++        uint32_t chars=(spirit_read32(env,fo+0x60)&0xffff)/2;
++        uint32_t ptr=spirit_read32(env,fo+0x64);
++        chars=MIN(chars,256);
++        for(unsigned i=0;i<chars;i++){
++            uint32_t ch=spirit_read32(env,ptr+i*2)&0xffff;
++            name[i]=(ch>=33 && ch<127)?ch:'_';
++        }
++    }
++    qemu_log_mask(LOG_GUEST_ERROR,
++      "forza_io kind=%s returning=%u pc=%08x host_ns=%" PRId64 " virtual_ns=%" PRId64
++      " thread=%08x free_pages=%u fatx_queued=%u esp=%08x ret=%08x eax=%08x ecx=%08x edx=%08x"
++      " a1=%08x a2=%08x a3=%08x a4=%08x a5=%08x a6=%08x a7=%08x a8=%08x"
++      " p4=%08x p4hi=%08x p1=%08x p2=%08x p3=%08x p8=%08x p8hi=%08x ctx=%08x flags=%x"
++      " irp=%08x status=%08x info=%u iosb=%08x buffer=%08x bytes=%u child=%08x"
++      " file=%08x name=%s length=%u offset=%08x posted=%u overflow=%u\n",
++      kind,returning,pc,qemu_clock_get_ns(QEMU_CLOCK_HOST),qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL),
++      spirit_read32(env,complex_profile ? env->segs[R_FS].base+0x28 : 0xffdff124),complex_profile ? spirit_read32(env,spirit_read32(env,0x80010d0c)) : spirit_read32(env,0x84062220),complex_profile ? 0 : spirit_read32(env,0x84068f98),
++      esp,a[0],(uint32_t)env->regs[R_EAX],(uint32_t)env->regs[R_ECX],(uint32_t)env->regs[R_EDX],
++      a[1],a[2],a[3],a[4],a[5],a[6],a[7],a[8],spirit_read32(env,a[4]),a[4]?spirit_read32(env,a[4]+4):0,spirit_read32(env,a[1]),spirit_read32(env,a[2]),
++      spirit_read32(env,a[3]),spirit_read32(env,a[8]),a[8]?spirit_read32(env,a[8]+4):0,
++      ctx,ctx?spirit_read32(env,ctx+0xc):0,irp,irp?spirit_read32(env,irp+0x10):0,
++      irp?spirit_read32(env,irp+0x14):0,irp?spirit_read32(env,irp+0x1c):0,
++      mdl?spirit_read32(env,mdl+0x10)+spirit_read32(env,mdl+0x18):0,
++      mdl?spirit_read32(env,mdl+0x14):0,pc==0x840517ab?(uint32_t)env->regs[R_EDX]:0,
++      fo,name,sl?spirit_read32(env,sl+4):0,sl?spirit_read32(env,sl+0xc):0,
++      dev?spirit_read32(env,dev+0x108):0,dev?spirit_read32(env,dev+0x104):0);
++}
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index 690a684385..e79ed9bcdf 100644
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -4328,6 +4328,146 @@ static void i386_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+     CCOp orig_cc_op = dc->cc_op;
+     target_ulong orig_pc_save = dc->pc_save;
+ 
++    if (getenv("XEMU_SPIRIT_MENU_TRACE")) {
++        uint32_t pc = dc->base.pc_next;
++        if(getenv("XEMU_FORZA_IDENTITY")) {
++            switch(pc){
++            case 0x8404cec4:
++            case 0x0026741a:
++            case 0x840517ab:
++            case 0x840347e4:
++            case 0x840159f0:
++            case 0x001103e0:
++            case 0x840083b4:
++            case 0x840435e1:
++            case 0x84043eac:
++            case 0x84044030:
++            case 0x8404429c:
++            case 0x8403fa83:
++                gen_helper_spirit_menu_trace(tcg_env,tcg_constant_i32(pc));break;
++            }
++            goto forza_instrumentation_done;
++        }
++        if(getenv("XEMU_FORZA_OWNED_PROFILE")) {
++            switch(pc){
++            case 0x0026741a:
++            case 0x84013cc8:
++            case 0x84013ddf:
++            case 0x8401f35c:
++            case 0x8401f46e:
++            case 0x84022a0c:
++            case 0x84022c23:
++            case 0x840281f4:
++            case 0x8402880a:
++            case 0x840347e4:
++            case 0x84034afa:
++            case 0x8404cec4:
++            case 0x84050ec4:
++            case 0x8405125c:
++            case 0x84051554:
++            case 0x84051733:
++            case 0x84051750:
++            case 0x84051830:
++            case 0x84051c38:
++            case 0x840521a7:
++                gen_helper_spirit_menu_trace(tcg_env,tcg_constant_i32(pc));break;
++            }
++            goto forza_instrumentation_done;
++        }
++        if(getenv("XEMU_FORZA_BUDGET_ONLY")) {
++            switch(pc) {
++            case 0x00110d20: case 0x00110d60: case 0x00110d9f: case 0x00110dce:
++            case 0x00110ec0: case 0x00110ec6: case 0x001103e0: case 0x00110422:
++            case 0x0026741a: case 0x00264e84:
++            case 0x8404cec4: case 0x80017467: case 0x8401989c: case 0x8001980a:
++                gen_helper_spirit_menu_trace(tcg_env,tcg_constant_i32(pc));
++                break;
++            }
++            goto forza_instrumentation_done;
++        }
++        bool selected = true;
++        if (getenv("XEMU_FORZA_PUBLIC_ONLY")) {
++            switch (pc) {
++            case 0x840159f0: case 0x8001647e:
++            case 0x8404cec4: case 0x80017467:
++            case 0x8404cf14: case 0x80017633:
++            case 0x8402695c: case 0x80016a76:
++            case 0x84022cec: case 0x8001e547:
++            case 0x8401989c: case 0x8001980a:
++            case 0x001103e0: case 0x00264e84:
++            case 0x0026741a: case 0x0047196f:
++                break;
++            default:
++                selected = false;
++            }
++        }
++        if (getenv("XEMU_FORZA_CLOCK_TRACE") || getenv("XEMU_FORZA_BUDGET_ONLY")) switch(pc) {
++        case 0x00110d20: case 0x00110d60: case 0x00110d9f: case 0x00110dce:
++        case 0x00110d90: case 0x00110eb8: case 0x00110ec0: case 0x00110ec6:
++        case 0x8404a868: case 0x80015314:
++        case 0x8404a85c: case 0x80019f48:
++        case 0x8401a9a0: case 0x80019f60:
++            gen_helper_spirit_menu_trace(tcg_env,tcg_constant_i32(pc));
++            selected=false;
++            break;
++        }
++        if (getenv("XEMU_FORZA_SUBMIT_PROFILE")) switch(pc) {
++        case 0x84013cc8: case 0x84013ddf: case 0x84022a0c: case 0x84022c23:
++        case 0x840281f4: case 0x8402880a: case 0x840347e4: case 0x84034afa:
++        case 0x8401f35c: case 0x8401f46e: case 0x84002f67:
++            gen_helper_spirit_menu_trace(tcg_env,tcg_constant_i32(pc));
++            selected=false;
++            break;
++        }
++        if (selected) switch (pc) {
++        case 0x840159f0:
++        case 0x840162d0:
++        case 0x84027730:
++        case 0x84027761:
++        case 0x84027764:
++        case 0x8402790c:
++        case 0x840281f4:
++        case 0x8403f3f4:
++        case 0x84041cd8:
++        case 0x84041d42:
++        case 0x84041e51:
++        case 0x84043eac:
++        case 0x840442a6:
++        case 0x8404b504:
++        case 0x8404b535:
++        case 0x8404bf4c:
++        case 0x8404c175:
++        case 0x8404cec4:
++        case 0x8404cf10:
++        case 0x8404cf14:
++        case 0x8404cf51:
++        case 0x8404f5a3:
++        case 0x8404f5f5:
++        case 0x8404f622:
++        case 0x84051400:
++        case 0x840517ab:
++        case 0x8402695c:
++        case 0x001103e0:
++        case 0x84022cec:
++        case 0x84026ac8:
++        case 0x840269a4:
++        case 0x8401989c:
++        case 0x8001980a:
++        case 0x80017467:
++        case 0x80017633:
++        case 0x80016a76:
++        case 0x8001647e:
++        case 0x00264e84:
++        case 0x0026741a:
++        case 0x8001e547:
++        case 0x0047196f:
++            gen_helper_spirit_menu_trace(tcg_env, tcg_constant_i32(pc));
++            break;
++        }
++    }
++
++forza_instrumentation_done:;
++
+ #ifdef TARGET_VSYSCALL_PAGE
+     /*
+      * Detect entry into the vsyscall page and invoke the syscall.

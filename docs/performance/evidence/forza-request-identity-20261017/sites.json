@@ -1,0 +1,87 @@
+{
+  "created_utc": "2026-10-18T01:20:02.871197+00:00",
+  "baseline": "Spirit add882 baseline restored missing-world snapshot only; not candidate0168/0169 or Complex",
+  "owned_source_tree": "84e1d572b5a3a4ae81c78c28a0855908a909acf1",
+  "owned_artifact_directory": "artifacts/halo-final-queued-release64/work-3y5us6t0 (private audit input; not included)",
+  "owned_sha256": {
+    "source/drivers/storage/class/nxstorage/native_adapter.c": "36d149b0bbca64cc867891460943492a9850f06520080552f6a4dfa4c6e6bda8",
+    "source/drivers/storage/ide/atapi/scsi.c": "db04a0fbced2e0035175cdfdc00cbc80f315e5de025a86db2bf02446bcb87def",
+    "source/drivers/storage/ide/pciidex/chipset/pata_io.c": "b4a3a507ef1a82c73959da60b30353cdffc6a6c09725babfebcef4c46d81e582",
+    "source/sdk/include/reactos/drivers/ata/ata_shared.h": "142d746c4963d69273e8bf93eec1f47529ab9563084bda9caee73d615eb47268",
+    "source/sdk/include/ddk/srb.h": "870c13c119506ecb7e25047c95fbc0e81b8e6c21c83cd6cae34c27540efc5bde",
+    "source/sdk/include/xdk/iotypes.h": "bf27da3b8d8b5fd2d98872c01dc69d32bc3b2f14cd136c74d60bd501e6d1c0d3",
+    "build/ntoskrnl/xboxkrnl.unstripped.exe": "2089f56cb374b73212eb05bf746f3f6230e4bb1e727be2f8be08b2c000783bcc",
+    "source/drivers/filesystems/vfatfs/blockdev.c": "9d163243c2a19c45a875b2f895a698fd465f27588770e8ddc5c34b264cf40d78",
+    "source/drivers/filesystems/vfatfs/rw.c": "0f3611e5e62965068b578a9fc2870e05ae550aa616453acd79b4baefec744f74",
+    "source/drivers/filesystems/vfatfs/vfat.h": "e3286b586eefd19b34b7fc24e6446b16d0d0a119edda3b14376557db6763cfed",
+    "source/drivers/filesystems/vfatfs/fat.c": "7220d5b555f50fd29caa24bd8e12be9fa1227cfd16728d2f538026cca5097a28"
+  },
+  "input_xemu_sha256": {
+    "target/i386/tcg/misc_helper.c": "0d836252758bb28d6f64d4e7d73eff33b022682c527feda6dd6f90e0d447ad73",
+    "target/i386/tcg/translate.c": "5b765c0f5c08d0d22c4310a6fa5f7013e1442703035e0058c48cb842ee67fefa"
+  },
+  "sites": [
+    {
+      "pc": "0x8404cec4",
+      "name": "NtReadFile entry",
+      "contract": "Select [ESP]=0x0026741a and APC context [ESP+16]=0x001103e0. IOSB [ESP+20], bytes [ESP+28], expected returned ESP+36."
+    },
+    {
+      "pc": "0x0026741a",
+      "name": "Title native return",
+      "contract": "Match thread and saved expected ESP. EAX is native status; sample IOSB Status/Information separately."
+    },
+    {
+      "pc": "0x840517ab",
+      "name": "Owned lower child dispatch",
+      "contract": "Before IofCallDriver. EBX envelope; parent [EBX+4], child EDX=[EBX+8], SRB EBX+12. Parent UserIosb +0x1c. Cross-check SRB OriginalRequest +0x24 equals child."
+    },
+    {
+      "pc": "0x840347e4",
+      "name": "PataStartIo entry",
+      "contract": "Request [ESP+8], not first argument. Request Irp +0x34, Srb +0x38, bytes +0x28, tag +0x44, slot +0x48. Cross-check Srb OriginalRequest."
+    },
+    {
+      "pc": "0x840159f0",
+      "name": "IofCompleteRequest entry",
+      "contract": "Fastcall IRP ECX; UserIosb +0x1c, status +0x10, information +0x14. Retire child/parent generation before further reuse."
+    },
+    {
+      "pc": "0x001103e0",
+      "name": "Title completion callback",
+      "contract": "Callback error [ESP+4], bytes [ESP+8], IOSB identity [ESP+12]. Observational ABI only; no title implementation archived."
+    },
+    {
+      "pc": "0x840083b4",
+      "name": "Owned queue-path return",
+      "contract": "Common epilogue before pop EBX. EBX SRB; EAX return status. Pending means queue helper returned pending; not guaranteed uncancelled or still queued."
+    },
+    {
+      "pc": "0x840435e1",
+      "name": "VFAT fallback partial dispatch",
+      "contract": "Before IofCallDriver in VfatReadDiskPartial. EBX VFAT_IRP_CONTEXT, original IRP [EBX+0], partial IRP EDX=EDI, original UserIosb +0x1c. This is required because the partial IRP itself has UserIosb=NULL and no MasterIrp."
+    },
+    {
+      "pc": "0x84043eac",
+      "name": "VfatTryMapRead entry",
+      "contract": "Only caller return 0x84041e06 inside selected native call. Original IRP [EBX] from preserved caller VFAT context; IOSB +0x1c. Length [ESP+4]. Expected mapper EBP=entryESP-4."
+    },
+    {
+      "pc": "0x84044030",
+      "name": "Mapper walk initialized",
+      "contract": "Only active matching thread/EBP. Step [EBP-0x58] now initialized zero; Skip [EBP-0x6c], Steps [EBP-0x70]."
+    },
+    {
+      "pc": "0x8404429c",
+      "name": "Mapper common exit",
+      "contract": "Result byte [EBP-0x5d]. Only read Step/Skip/Steps if initialization hook observed; earlier rejection does not initialize these locals."
+    },
+    {
+      "pc": "0x8403fa83",
+      "name": "Mapping ready merge",
+      "contract": "EBX VFAT_IRP_CONTEXT; root IRP [EBX], IOSB +0x1c. ESI extent-hit flag (0 validated map,1 cached extent). Before user-buffer locking: actual forwarding must also be observed through lower identity edge."
+    }
+  ],
+  "verification": "Owned baseline compiled ABI independently checked against matching permitted source/type declarations; corroborated by wait_contract_review. No proprietary BIOS implementation examined. No code bytes or disassembly included. Envelope SRB +12 is confirmed by owned port_prepare compiled address formation.",
+  "baseline_flash_sha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296"
+}
