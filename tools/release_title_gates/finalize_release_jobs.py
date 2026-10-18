@@ -88,9 +88,10 @@ def _shot_checks(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
     } for row in plan if row.get("type") == "screenshot"]
 
 
-def _refresh_owned_tools(job: dict[str, Any]) -> dict[str, Any]:
+def _refresh_owned_tools(job: dict[str, Any],
+                         sources: dict[str, Path]) -> dict[str, Any]:
     result = job
-    for target, source in OWNED_TOOL_SOURCES.items():
+    for target, source in sources.items():
         if source.is_symlink() or not source.is_file():
             raise ValueError("owned tool source must be a regular, non-linked file: " + target)
         row = next((item for item in result["inputs"] if item["path"] == target), None)
@@ -126,7 +127,9 @@ def _title_definition(contract: dict[str, Any], title: str) -> tuple[list[dict[s
 
 
 def build_title_job(base_job: dict[str, Any], contract: dict[str, Any], title: str,
-                    candidate_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+                    candidate_id: str,
+                    owned_tool_sources: dict[str, Path] | None = None,
+                    ) -> tuple[dict[str, Any], dict[str, Any]]:
     firmware = _require_asset(contract["common"]["firmware_asset"], "common.firmware_asset")
     plan, hdd, disc, retention, timeout = _title_definition(contract, title)
     hdd = _require_asset(hdd, f"{title}.hdd")
@@ -135,7 +138,8 @@ def build_title_job(base_job: dict[str, Any], contract: dict[str, Any], title: s
     old_flash = next(row["expectedSha256"] for row in base_job["inputs"]
                      if row["path"] == "flash.bin")
     job = _replace_firmware(copy.deepcopy(base_job), old_flash, firmware["sha256"])
-    job = _refresh_owned_tools(job)
+    if owned_tool_sources is not None:
+        job = _refresh_owned_tools(job, owned_tool_sources)
     job["id"] = f"sb-{candidate_id}-{title}-release64"
     job["timeoutSeconds"] = timeout
     job["tags"] = ["SPIRITBOOT", "RELEASE64", "FRESH-PROCESS", "PRIVATE-HDD-COPY",
@@ -143,7 +147,10 @@ def build_title_job(base_job: dict[str, Any], contract: dict[str, Any], title: s
     job["plan"] = plan
 
     if title == "forza":
-        diagnostics = job["diagnostics"]
+        referenced = {row.get("diagnosticId") for row in plan
+                      if row.get("type") == "diagnostic"}
+        diagnostics = [row for row in job["diagnostics"]
+                       if row.get("id") in referenced]
         guided = next(row for row in diagnostics if row.get("id") == "forza-guided-route")
         guided["durationMs"] = 105000
     elif title == "doa-create":
@@ -216,13 +223,16 @@ def build_title_job(base_job: dict[str, Any], contract: dict[str, Any], title: s
 
 
 def _stage_package(base_package: Path, target: Path, flash: Path,
-                   job: dict[str, Any], spec: dict[str, Any]) -> None:
+                   job: dict[str, Any], spec: dict[str, Any],
+                   owned_tool_sources: dict[str, Path] | None = None) -> None:
+    overrides = owned_tool_sources or {}
     target.mkdir(parents=True)
     for source in sorted(base_package.rglob("*")):
-        if not source.is_file() or source.name in ("job.json", "flash.bin"):
+        if not source.is_file() or source.name in (
+                "job.json", "flash.bin", "validator-spec.json"):
             continue
         relative = source.relative_to(base_package)
-        if relative.as_posix() in OWNED_TOOL_SOURCES:
+        if relative.as_posix() in overrides:
             continue
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -231,7 +241,7 @@ def _stage_package(base_package: Path, target: Path, flash: Path,
         except OSError:
             shutil.copy2(source, destination)
     declared = {row["path"]: row["expectedSha256"] for row in job["inputs"]}
-    for name, source in OWNED_TOOL_SOURCES.items():
+    for name, source in overrides.items():
         actual = sha256_file(source)
         if declared.get(name) != actual:
             raise ValueError("owned tool differs from finalized job hash: " + name)
@@ -289,8 +299,11 @@ def finalize(*, flash: Path, expected_sha256: str, candidate_id: str,
     ready = []
     try:
         for title in TITLE_ORDER:
-            job, spec = build_title_job(base, contract, title, candidate_id)
-            _stage_package(base_package, output / "packages" / title, flash, job, spec)
+            job, spec = build_title_job(
+                base, contract, title, candidate_id,
+                owned_tool_sources=OWNED_TOOL_SOURCES)
+            _stage_package(base_package, output / "packages" / title, flash, job, spec,
+                           owned_tool_sources=OWNED_TOOL_SOURCES)
             ready.append(title)
         pgr2_reload_template = {
             "candidate_id": candidate_id,

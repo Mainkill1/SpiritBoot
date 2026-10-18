@@ -80,8 +80,16 @@ public static class DoaOwnedInput {
         }
         return weight==0 ? 0 : (int)(total/weight)-bitmap.Width/2;
     }
+    private static int StartMenuPixels(Bitmap bitmap) {
+        int pixels=0, x1=bitmap.Width*25/100, y0=bitmap.Height*65/100;
+        for(int y=y0;y<bitmap.Height;y+=2) for(int x=0;x<x1;x+=2) {
+            Color c=bitmap.GetPixel(x,y);
+            if(c.G>=100 && c.G-c.R>=30 && c.G-c.B>=20) pixels++;
+        }
+        return pixels;
+    }
     public static void DriveGuided(int pid,long ticks,int session,string exe,string outputDir,int durationMs) {
-        const ushort RTrigger=0x18, LStickLeft=0x1f, LStickRight=0x21;
+        const ushort A=0x1e, RTrigger=0x18, LStickLeft=0x1f, LStickRight=0x21;
         const int ReadyTimeoutMs=60000;
         if(durationMs<10000 || durationMs>45000 || String.IsNullOrEmpty(outputDir)) throw new InvalidOperationException("Invalid guided route request");
         outputDir=Path.GetFullPath(outputDir); Directory.CreateDirectory(outputDir);
@@ -91,22 +99,36 @@ public static class DoaOwnedInput {
         int focused; GetWindowThreadProcessId(GetForegroundWindow(),out focused);
         if(focused!=pid || GetForegroundWindow()!=window) throw new InvalidOperationException("Owned child focus was not granted; no route sent");
         string telemetry=Path.Combine(outputDir,"route-telemetry.jsonl");
-        Stopwatch readyTimer=Stopwatch.StartNew(); int readyConsecutive=0,readyPixels=0,readyOffset=0,waitFrame=0; long nextWaitCapture=0;
+        Stopwatch readyTimer=Stopwatch.StartNew(); int readyConsecutive=0,menuConsecutive=0,readyPixels=0,readyOffset=0,waitFrame=0; long nextWaitCapture=0,startMenuWaitMs=-1; bool raceStartSent=false;
         while(readyTimer.ElapsedMilliseconds<ReadyTimeoutMs && readyConsecutive<2) {
+            bool pressStart=false;
             using(Bitmap bitmap=CaptureClient(window)) {
                 int count; int offset=GuideOffset(bitmap,out count);
+                int menuPixels=StartMenuPixels(bitmap);
                 if(readyTimer.ElapsedMilliseconds>=nextWaitCapture) {
                     string path=Path.Combine(outputDir,"load-wait-"+waitFrame.ToString("D2",CultureInfo.InvariantCulture)+".png");
                     bitmap.Save(path,ImageFormat.Png); waitFrame++; nextWaitCapture+=5000;
                 }
                 if(count>=32) { readyConsecutive++; readyPixels=count; readyOffset=offset; }
                 else readyConsecutive=0;
+                if(!raceStartSent && menuPixels>=16) menuConsecutive++; else menuConsecutive=0;
+                if(!raceStartSent && menuConsecutive>=2) pressStart=true;
                 if(readyConsecutive>=2) bitmap.Save(Path.Combine(outputDir,"route-ready.png"),ImageFormat.Png);
+            }
+            if(pressStart) {
+                if(OwnedWindow(pid,ticks,session,exe)!=window) throw new InvalidOperationException("Owned window changed before race start");
+                SetForegroundWindow(window); Thread.Sleep(30); GetWindowThreadProcessId(GetForegroundWindow(),out focused);
+                if(focused!=pid || GetForegroundWindow()!=window) throw new InvalidOperationException("Owned child focus was not granted for race start; no input sent");
+                bool aDown=false;
+                try { Send(A,false,true); aDown=true; Thread.Sleep(100); }
+                finally { if(aDown) Send(A,false,false); }
+                raceStartSent=true; startMenuWaitMs=readyTimer.ElapsedMilliseconds; menuConsecutive=0;
             }
             if(readyConsecutive<2) Thread.Sleep(100);
         }
-        if(readyConsecutive<2) throw new TimeoutException("Forza route guide did not appear within bounded readiness wait");
-        File.AppendAllText(telemetry,String.Format(CultureInfo.InvariantCulture,"{{\"phase\":\"ready\",\"readiness_wait_ms\":{0},\"guide_offset\":{1},\"guide_pixels\":{2}}}\n",readyTimer.ElapsedMilliseconds,readyOffset,readyPixels));
+        long elapsed=readyTimer.ElapsedMilliseconds;
+        if(readyConsecutive<2 || elapsed>ReadyTimeoutMs) throw new TimeoutException("Forza route guide did not appear within bounded readiness wait");
+        File.AppendAllText(telemetry,String.Format(CultureInfo.InvariantCulture,"{{\"phase\":\"ready\",\"readiness_wait_ms\":{0},\"guide_offset\":{1},\"guide_pixels\":{2},\"start_menu_wait_ms\":{3},\"race_start_sent\":{4},\"ready_observations\":{5}}}\n",elapsed,readyOffset,readyPixels,startMenuWaitMs,raceStartSent?"true":"false",readyConsecutive));
         if(OwnedWindow(pid,ticks,session,exe)!=window) throw new InvalidOperationException("Owned window changed during readiness wait");
         SetForegroundWindow(window); Thread.Sleep(30); GetWindowThreadProcessId(GetForegroundWindow(),out focused);
         if(focused!=pid || GetForegroundWindow()!=window) throw new InvalidOperationException("Owned child focus was not granted after readiness wait; no route sent");

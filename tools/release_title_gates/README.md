@@ -51,8 +51,9 @@ intervention, corruption/read-error log patterns, bad or incomplete screenshots,
 failure to recognize the candidate-owned PGR2 profile, a pre-race screen mistaken
 for gameplay, Halo menu identity/launch drift, missing DOA writes, failed DOA
 reload, or the Forza R-class world-stream score. The Forza route waits without
-input for two consecutive in-race guide detections, records the bounded readiness
-delay and load screenshots, and only then starts its 30-second drive. Both
+input for the stable Starting Grid screen, starts the race once, requires two
+consecutive in-race guide detections, records the bounded readiness delay and
+load screenshots, and only then starts its 30-second drive. Both
 phase-two jobs are created only from their exact retained phase-one `hdd.qcow2`.
 
 Run the product-owned persistence XBE in two cold processes after building its

@@ -80,7 +80,7 @@ def map_marker(path: Path) -> tuple[float, float] | None:
 def qmp_checkpoints(root: Path) -> dict[str, dict]:
     found = {}
     for path in root.glob("diagnostics/*blockstats*/qmp-result.json"):
-        for label in ("load-start", "race-ready", "route-start", "route-end"):
+        for label in ("load-start", "route-end"):
             if label in path.parent.name:
                 found[label] = {row["device"]: row["stats"] for row in json.loads(path.read_text())}
     return found
@@ -156,6 +156,7 @@ def main(root: Path) -> int:
         "observations": len(route),
         "readiness_wait_ms": ready.get("readiness_wait_ms"),
         "ready_guide_pixels": ready.get("guide_pixels", 0),
+        "ready_guide_observations": ready.get("ready_observations", 0),
         "speeds": speeds,
         "markers": markers,
     }

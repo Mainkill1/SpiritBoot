@@ -46,16 +46,13 @@ class RouteContractTests(unittest.TestCase):
         confirm = diagnostics.index("forza-A-class-confirm")
         self.assertEqual(diagnostics[class_select + 1:confirm], ["forza-DPadRight"] * 5)
         self.assertEqual(sum(x == "forza-guided-route" for x in diagnostics), 1)
-        self.assertLess(diagnostics.index("forza-blockstats-route-start"),
+        self.assertLess(diagnostics.index("forza-blockstats-load-start"),
                         diagnostics.index("forza-guided-route"))
         self.assertLess(diagnostics.index("forza-guided-route"),
                         diagnostics.index("forza-blockstats-route-end"))
         self.assertNotIn("forza-A-race-confirm", diagnostics)
         self.assertNotIn("forza-blockstats-race-ready", diagnostics)
-        guided = next(i for i, row in enumerate(plan)
-                      if row.get("diagnosticId") == "forza-guided-route")
-        self.assertEqual(plan[guided - 1].get("diagnosticId"),
-                         "forza-blockstats-route-start")
+        self.assertNotIn("forza-blockstats-route-start", diagnostics)
         self.assertFalse(any((row.get("name") or "").startswith("load-")
                              and row.get("name") != "load-start" for row in plan))
         self.assertEqual(plan[-1]["type"], "quit")
@@ -97,6 +94,7 @@ class EvidenceScoreTests(unittest.TestCase):
             "observations": 8,
             "readiness_wait_ms": 4800,
             "ready_guide_pixels": 42,
+            "ready_guide_observations": 2,
         }))
 
     def test_complete_release_run_passes_all_dimensions(self):
@@ -212,6 +210,41 @@ class EvidenceScoreTests(unittest.TestCase):
         finally:
             td.cleanup()
 
+    def test_route_with_missing_or_late_readiness_evidence_is_rejected(self):
+        for readiness in (None, 60001):
+            with self.subTest(readiness=readiness):
+                td, root = self.make()
+                try:
+                    self.write_common(root)
+                    metrics = json.loads((root / "route-metrics.json").read_text())
+                    metrics["readiness_wait_ms"] = readiness
+                    (root / "route-metrics.json").write_text(json.dumps(metrics))
+                    for i in range(8):
+                        image(root / "screenshots" / f"route-{i:02}.png")
+                    report = score_evidence(root)
+                    self.assertFalse(report["checks"]["route_readiness"]["pass"])
+                    self.assertFalse(report["pass"])
+                finally:
+                    td.cleanup()
+
+    def test_short_drive_cannot_be_hidden_by_a_long_readiness_wait(self):
+        td, root = self.make()
+        try:
+            self.write_common(root)
+            metrics = json.loads((root / "route-metrics.json").read_text())
+            metrics["readiness_wait_ms"] = 40000
+            (root / "route-metrics.json").write_text(json.dumps(metrics))
+            actions = json.loads((root / "actions.json").read_text())
+            actions[0]["finished_utc"] = "2026-10-18T00:00:50Z"
+            (root / "actions.json").write_text(json.dumps(actions))
+            for i in range(8):
+                image(root / "screenshots" / f"route-{i:02}.png")
+            report = score_evidence(root)
+            self.assertFalse(report["checks"]["route_timing"]["pass"])
+            self.assertEqual(report["timing"]["drive_seconds"], 10.0)
+        finally:
+            td.cleanup()
+
     def test_crash_corruption_and_read_errors_each_fail(self):
         for kwargs in [
             {"status": "completed", "exit_code": -1073741819},
@@ -244,7 +277,7 @@ class InputAdapterContractTests(unittest.TestCase):
         cs = (ROOT / "route_input.cs").read_text()
         ps = (ROOT / "route_actions.ps1").read_text()
         self.assertIn("DriveGuided", cs)
-        self.assertIn("const ushort RTrigger=0x18", cs)
+        self.assertIn("RTrigger=0x18", cs)
         self.assertIn("finally { if(steerDown)", cs)
         self.assertIn("if(throttleDown) Send(RTrigger,false,false)", cs)
         self.assertIn("route-live-", cs)
@@ -252,6 +285,9 @@ class InputAdapterContractTests(unittest.TestCase):
         self.assertIn("ReadyTimeoutMs=60000", cs)
         self.assertIn("readyConsecutive>=2", cs)
         self.assertIn("if(count>=32)", cs)
+        self.assertIn("StartMenuPixels", cs)
+        self.assertIn("menuConsecutive>=2", cs)
+        self.assertIn("elapsed>ReadyTimeoutMs", cs)
         self.assertIn("readiness_wait_ms", cs)
         self.assertLess(cs.index("readyConsecutive>=2"),
                         cs.index("Send(RTrigger,false,true)"))

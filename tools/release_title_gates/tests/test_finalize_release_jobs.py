@@ -9,7 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from finalize_release_jobs import (build_title_job, finalize, resolve_contract)
+from finalize_release_jobs import (_stage_package, build_title_job, finalize,
+                                   resolve_contract)
 from rclass_gate import build_forza_plan
 from release_job_validator import validate_release_job
 
@@ -68,7 +69,12 @@ class FinalizeReleaseJobsTests(unittest.TestCase):
 
     def test_forza_job_replaces_every_old_firmware_reference(self):
         resolved = resolve_contract(self.contract, "candidate", "c" * 64)
-        job, spec = build_title_job(self.base, resolved, "forza", "candidate")
+        job, spec = build_title_job(
+            self.base, resolved, "forza", "candidate",
+            owned_tool_sources={
+                "owned-child-actions.ps1": ROOT / "route_actions.ps1",
+                "owned-child-input.cs": ROOT / "route_input.cs",
+            })
         text = json.dumps(job)
         self.assertNotIn("2d43d91ca5a4474a365e308b2117a642", text)
         self.assertIn("c" * 64, text)
@@ -92,6 +98,10 @@ class FinalizeReleaseJobsTests(unittest.TestCase):
             base = td / "base"
             base.mkdir()
             self._write_base(base)
+            base_input_before = (base / "owned-child-input.cs").read_bytes()
+            old_input_hash = next(row["expectedSha256"] for row in
+                                  json.loads((base / "job.json").read_text())["inputs"]
+                                  if row["path"] == "owned-child-input.cs")
             contract.write_text(json.dumps(self.contract))
             out = td / "out"
             report = finalize(
@@ -111,6 +121,7 @@ class FinalizeReleaseJobsTests(unittest.TestCase):
                              flash.read_bytes())
             owned_input = out / "packages" / "forza" / "owned-child-input.cs"
             self.assertEqual(owned_input.read_bytes(), (ROOT / "route_input.cs").read_bytes())
+            self.assertEqual((base / "owned-child-input.cs").read_bytes(), base_input_before)
             forza_job = json.loads((out / "packages" / "forza" / "job.json").read_text())
             declared = next(row["expectedSha256"] for row in forza_job["inputs"]
                             if row["path"] == "owned-child-input.cs")
@@ -119,6 +130,25 @@ class FinalizeReleaseJobsTests(unittest.TestCase):
                           if row["id"] == "forza-guided-route")
             self.assertGreaterEqual(guided["durationMs"], 100_000)
             self.assertIn(declared, json.dumps(guided))
+            for diagnostic in forza_job["diagnostics"]:
+                if diagnostic["type"] == "external":
+                    command = json.dumps(diagnostic)
+                    self.assertIn(declared, command)
+                    self.assertNotIn(old_input_hash, command)
+            self.assertNotIn("forza-A-race-confirm",
+                             {row["id"] for row in forza_job["diagnostics"]})
+            self.assertNotIn("forza-blockstats-race-ready",
+                             {row["id"] for row in forza_job["diagnostics"]})
+            phase_two = td / "phase-two"
+            frozen_spec = (out / "packages" / "forza" / "validator-spec.json").read_bytes()
+            _stage_package(out / "packages" / "forza", phase_two, flash,
+                           forza_job, {"phase": 2})
+            self.assertEqual((phase_two / "owned-child-input.cs").read_bytes(),
+                             owned_input.read_bytes())
+            self.assertEqual((out / "packages" / "forza" / "validator-spec.json").read_bytes(),
+                             frozen_spec)
+            self.assertEqual(json.loads((phase_two / "validator-spec.json").read_text()),
+                             {"phase": 2})
             create_job = json.loads((out / "packages" / "pgr2-create" / "job.json").read_text())
             self.assertTrue(create_job["runtimeState"]["keepOnSuccess"])
             self.assertEqual(create_job["runtimeState"]["diskAssets"][0]["assetId"],
