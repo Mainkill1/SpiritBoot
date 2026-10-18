@@ -146,3 +146,16 @@ not locally available when this package was assembled and is explicitly unset.
 
 No firmware code, firmware tests, configuration locks, or commits were changed
 as part of this evidence archive.
+
+## Additional discriminators
+
+[Completion ordering](COMPLETION-ORDER.md) partitions matched v5 requests by
+their parent-completion boundary relative to API return, with per-size controls.
+[Existing ordinal evidence and a proposed public state experiment](PUBLIC-REQUEST-STATE-PROPOSAL.md)
+separate early first-call and later-call costs without claiming hardware queue
+identity. [Storage metadata](STORAGE-MEDIUM.md) establishes Spirit's HDD/FATX
+medium while retaining the unknown Complex medium. The proposed fixture was
+not implemented or run.
+
+Run all archived parser and bounded-reader checks with
+`python -m unittest discover -p 'test_*.py'`.

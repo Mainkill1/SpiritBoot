@@ -1,7 +1,12 @@
 # Native submission-cost candidates, 2026-10-17
 
-Three narrow owned-code candidates address avoidable work in the native storage
-adapter. They are not an established Forza fix. Ordinary generated burst tests
+The [causal findings](CAUSAL-FINDINGS.md) connect the title's deadline to the
+owned submission path and separate demonstrated causes from remaining work.
+
+Four narrow owned-code experiments investigate avoidable work in the native
+storage adapter. The selected stack ends at 0168; 0169 was not retained after
+native tests failed to establish a repeatable gain. These are not an established
+Forza fix. Ordinary generated burst tests
 found no consistent gain from 0166. The repeated 0167 synthetic comparison is mixed; see
 [its full eight-case archive](../forza-complex-cadence-20261017/candidate0167/).
 0168 has passed host, release64 build and one generated native burst run;
@@ -123,6 +128,19 @@ not a title correctness or performance acceptance. The single generated native
 run is archived separately above. The earlier full-host
 suite history below remains scoped to its original stack; no new full-suite
 pass is asserted.
+
+## 0169: bind native port calls at compile time
+
+[The binding specification](static-port-binding.md) records the linked runtime
+dispatch cost and the unchanged callback/IRQL boundaries. The experimental request
+engine supports a native direct binding, while its runtime interface remains
+available for portable tests. All 44 adapter groups pass in runtime and bound
+modes, plain and sanitized, with identical observations. Freestanding i386
+checks show zero indirect engine calls and no lock forwarding wrappers in the
+bound mode. The release 0169/0168/0169 sequence passes all 24 native correctness
+cases but does not establish a repeatable return-cost gain. The patch remains
+archived and is excluded from the selected firmware lock; see
+[the complete comparison](../forza-complex-cadence-20261017/candidate0169/).
 
 ## Host validation and reproducibility
 

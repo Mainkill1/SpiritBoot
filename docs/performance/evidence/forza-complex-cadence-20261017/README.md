@@ -39,6 +39,12 @@ charges the initial alertable wait and compares baseline, 0168 and Complex.
 Its contract and all eight results are archived separately; it remains a
 generated workload, not a world-streaming acceptance test.
 
+The subsequent [0169 → 0168 → 0169 native sequence](candidate0169/README.md)
+passes correctness but does **not** establish a repeatable native return-cost
+gain. Both 0169 trials regress the 900-page 450 µs case slightly, while other
+cases vary in direction. Direct-call assembly shape is not treated as a
+measured performance improvement.
+
 ## What ran
 
 The [owned release fixture](../../../../tests/xbe/forza-callback-cadence/README.md)

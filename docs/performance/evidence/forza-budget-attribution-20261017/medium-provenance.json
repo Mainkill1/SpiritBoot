@@ -1,0 +1,66 @@
+{
+  "created_utc": "2026-10-18T01:08:34.924061+00:00",
+  "relationship": "Read-only interpretation of owned baseline symbols, interface/type declarations and kernel data; no proprietary BIOS implementation inspection. Headers and kernel image are hashed, not copied.",
+  "baseline_artifact": ".scratch/spiritboot-halo-optical-integrity-20261017/artifacts/halo-final-queued-release64/work-3y5us6t0",
+  "sha256": {
+    "source/sdk/include/ndk/extypes.h": "984f1d51eecab3fe2f135aa0961796e98eed330e9d3a5133ea7faff8cc2933cc",
+    "source/sdk/include/ndk/obtypes.h": "007d79b090036d2f1bbd057f548d2c317901b58d911761ef144e0dee6e817d14",
+    "source/sdk/include/xdk/iotypes.h": "bf27da3b8d8b5fd2d98872c01dc69d32bc3b2f14cd136c74d60bd501e6d1c0d3",
+    "source/sdk/include/xdk/extypes.h": "c5d1524034be03c5739cb29f57ffef50611760b0dc54110241fa8e8ee5cc895b",
+    "source/drivers/filesystems/vfatfs/vfat.h": "e3286b586eefd19b34b7fc24e6446b16d0d0a119edda3b14376557db6763cfed",
+    "build/ntoskrnl/xboxkrnl.unstripped.exe": "2089f56cb374b73212eb05bf746f3f6230e4bb1e727be2f8be08b2c000783bcc"
+  },
+  "symbol_addresses": {
+    "ObpKernelHandleTable": "0x840638d4",
+    "IoFileObjectType": "0x8406205c",
+    "IoDeviceObjectType": "0x84062070"
+  },
+  "layout_basis": {
+    "HANDLE_TABLE": "TableCode at 0; level-zero entries 8 bytes; handle index handle>>2.",
+    "OBJECT_HEADER": "Body at 24, Type at 8, NameInfoOffset at 12; name info Unicode string at 4.",
+    "FILE_OBJECT_SARCH_XBOX": "DeviceObject at 4, Vpb at 0x4c, FileName at 0x60. PublishedFlags byte at 3 and native Flags ULONG at 0x5c.",
+    "DEVICE_OBJECT_SARCH_XBOX": "DriverObject at 8, DeviceExtension at 0x18, DeviceType byte at 0x1c, SectorSize at 0x20.",
+    "VPB": "DeviceObject at 8, RealDevice at 12.",
+    "VFAT_DEVICE_EXTENSION": "32-bit ERESOURCE size 0x38 twice; lock/list/hash fields put VolumeDevice at 0x84, StorageDevice at 0x88, FATINFO at 0x90. Both pointers independently match VPB links. FATINFO BytesPerSector +0x30, FatType +0x3c; extension Flags +0xe8.",
+    "constants": "Device types 7 disk, 8 disk filesystem; FATX16=4; VCB_IS_FATX=4 and VCB_GOOD=0x10. Native file flags: SYNCHRONOUS_IO=2, ALERTABLE_IO=4, NO_INTERMEDIATE_BUFFERING=8. Published file flags: synchronous=1, alertable=2, no-intermediate-buffering=4, opened=0x20."
+  },
+  "snapshot_identity_file": "snapshot-metadata.json",
+  "memory_file": "missing-world.bin (private, excluded)",
+  "snapshot_lineage": "Coordinating agent identifies the memory capture with the preserved Spirit missing-world scene. Preserved qcow2 identity is separately recorded; the offline reader binds to the RAM hash directly.",
+  "complex_evidence": {
+    "complex_v5": {
+      "sha256": "5b35c569ad19ecbfa44eaed32e50c14c7984960d5da552ab0291fbe38aff090b",
+      "event_kinds": {
+        "io_complete": 2741,
+        "_XeNtReadFile@32": 798,
+        "delay_thread": 5906,
+        "title_delay_return": 5905,
+        "title_read_return": 381,
+        "title_apc_dispatch": 381,
+        "world_completion_callback": 361,
+        "memory_statistics_query": 1,
+        "memory_statistics_return": 1
+      },
+      "nonempty_name_fields": 0,
+      "nonzero_file_fields": 0,
+      "unique_nonzero_file_field_count": 0,
+      "scope": "Full log field-availability audit only, not timing or replay statistics."
+    },
+    "spirit_v5": {
+      "sha256": "359212fe7be9e256e30b71a059ec8f985938031d6e42aa918178ee1c1f44b5c5",
+      "event_kinds": {
+        "delay_thread": 3874,
+        "io_complete": 7227,
+        "_XeNtReadFile@32": 1061,
+        "title_delay_return": 3599,
+        "title_read_return": 506,
+        "title_apc_dispatch": 509,
+        "world_completion_callback": 501
+      },
+      "nonempty_name_fields": 0,
+      "nonzero_file_fields": 0,
+      "unique_nonzero_file_field_count": 0,
+      "scope": "Full log field-availability audit only, not timing or replay statistics."
+    }
+  }
+}

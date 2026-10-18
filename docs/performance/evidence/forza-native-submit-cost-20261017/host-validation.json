@@ -18,6 +18,11 @@
       "patch": "patches/roswell/0168-coalesce-native-adapter-bookkeeping.patch",
       "sha256": "b20d36f5deab259f398e4a02531c27487fb7507da51049fc1f24c8cb9d5185b2",
       "assembled_source_tree": "2716b75a7159254904b4c7a9282f2c51961ee510"
+    },
+    {
+      "patch": "patches/roswell/0169-static-native-port-binding.patch",
+      "sha256": "fea1c4fd1f2747347ed431351a79dcea74ec82c3ffacc65be8018f7180088d1d",
+      "assembled_source_tree": "261b24f5a7ae667cc8f39670b706112aafe3c285"
     }
   ],
   "adapter_checks": {
@@ -70,7 +75,17 @@
     "irp-reset-baseline.log": "841bb574be1d4fc968e9b34d9d82324f996ed98c25aa9426a72c1130b120f789",
     "irp-reset-truncate-tail.log": "171ed66c1c1bb6daa8a537093fb34781718002fd48248853324e7432690a0ffb",
     "irp-reset-overrun-tail.log": "398134a0b900cdd8aaa0e0c2848cc9a8aa719311d958ed2e2b6923c559513316",
-    "irp-reset-code-shape.json": "e172358d64e1400f603c452cda02456e79d8a694dd3745db653da0510b44efce"
+    "irp-reset-code-shape.json": "e172358d64e1400f603c452cda02456e79d8a694dd3745db653da0510b44efce",
+    "static-ports-missing-guard.log": "e7180884d8ec41b11904ec9166da164310a80fbbc89cd8bfbccd843efbe5d40f",
+    "static-ports-identity.log": "3d5b31a42440f2249149051bcc4ba7e636cdfbb2f2ce2e9c2879ade5c859d829",
+    "static-ports-corrective.log": "f3fad9c3de6c078cae4c72cdbb84a58499515192cb090209a7fb5aeb771014df",
+    "static-ports-clang.log": "7fc185ce02a641ef4a674ca9b9785d5c6e65b4e4250d701b150d9799cf97ba4f",
+    "static-ports-core.log": "75d77a10f368535ca96565d205226feb9c2a769d7fc86215a68d32057365d7f3",
+    "static-ports-locked-production.log": "ffa491a4273ed584c566dfe8a7bc6d5ceaa7e857bd065db79b718d953f882963",
+    "static-ports-baseline-red.log": "fa072753366391ee04e4ad752b21402890d4309da8c09994433ffeb3bca54c32",
+    "static-ports-gcc.log": "48567df880862881d705a27f7de0d1f7870df3b0ed91588801f77e0a0724daff",
+    "static-ports-adapter.log": "fa6acaa6e9683fe0bf994e4b2f5075d1c4041ec5c049d5dd774bf7612cbdc698",
+    "static-ports-linked-assembly.json": "db8d08406590a8745bc993110240d7bb432549a15a4fe0d27a4aaa62b61087ba"
   },
   "candidate0168": {
     "adapter_plain_groups": 42,
@@ -117,5 +132,57 @@
     ],
     "native_abi_test": false,
     "timing_claim": false
+  },
+  "candidate0169": {
+    "status": "host gates, release64 build and three native trials passed correctness; repeatable performance gain not established; patch excluded from selected firmware stack",
+    "adapter_groups": 44,
+    "modes": [
+      "runtime-plain",
+      "runtime-ASan-UBSan",
+      "bound-plain",
+      "bound-ASan-UBSan"
+    ],
+    "failures": 0,
+    "all_mode_stdout_equal": true,
+    "i386_indirect_call_or_jump_sites": {
+      "clang": {
+        "runtime": 44,
+        "bound": 0
+      },
+      "gcc": {
+        "runtime": 11,
+        "bound": 0
+      }
+    },
+    "retained_pending_lock_entries": 14,
+    "binding_guard_mutation_rejected": true,
+    "exact_locked_production": {
+      "tests": 2,
+      "seconds": 13.478,
+      "failures": 0
+    },
+    "firmware_identity": {
+      "tests": 62,
+      "skipped": 1,
+      "seconds": 6.108,
+      "failures": 0
+    },
+    "corrective": {
+      "tests": 6,
+      "failures": 0
+    },
+    "full_host_suite": "not rerun; previous results and their scope retained",
+    "release64": {
+      "flash_sha256": "c7dcfe9214d422ef0477e10a2ff552e08f6c78db0675085ad6cf88eef44a5527",
+      "source_tree": "261b24f5a7ae667cc8f39670b706112aafe3c285",
+      "output": "artifacts/forza-static-ports-release64",
+      "storage_preflight_passed": true
+    },
+    "linked_assembly": {
+      "run_pump_indirect_sites_before": 7,
+      "run_pump_indirect_sites_after": 0,
+      "lock_unlock_forwarding_symbols_absent": true,
+      "native_callbacks_remain_separate_direct_functions": true
+    }
   }
 }
