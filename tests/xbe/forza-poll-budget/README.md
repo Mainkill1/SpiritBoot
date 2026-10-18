@@ -4,7 +4,8 @@ This separate owned release fixture starts a synthetic caller deadline
 **before** its first zero-time alertable wait. It preserves the frozen
 `forza-submit-bursts` fixture and artifacts. It is a generated-data timing
 experiment; neither its budgets nor its caller loop are claimed to reproduce
-Forza's implementation. No native result is claimed until this ISO is run.
+Forza's implementation. The fixture has now passed repeated native release runs;
+see the [fresh-boot validation protocol](VALIDATION.md) and its archived results.
 
 Each pump executes the following contract:
 

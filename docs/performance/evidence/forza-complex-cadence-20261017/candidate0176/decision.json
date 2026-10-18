@@ -1,0 +1,131 @@
+{
+  "selected": true,
+  "decision": "Selected: every paired 450 us target improves cost and throughput, every weighted case cost improves, and all correctness oracles pass.",
+  "all_four_runs_full_oracle_passed": true,
+  "cases_per_run": 8,
+  "minimum_case_seconds": 10,
+  "primary_450_pairs": [
+    {
+      "target": 783,
+      "paired_changes": {
+        "candidate1": {
+          "control": "control1",
+          "native_return_mean_percent": -10.02431923771152,
+          "reads_per_second_percent": 4.045868360767302,
+          "submit_mean_65536_percent": -21.127731457584897,
+          "submit_mean_512_percent": 3.218182682225601
+        },
+        "candidate2": {
+          "control": "control2",
+          "native_return_mean_percent": -15.91648464872767,
+          "reads_per_second_percent": 12.530199300266819,
+          "submit_mean_65536_percent": -15.993594005888479,
+          "submit_mean_512_percent": -15.829977110707304
+        }
+      }
+    },
+    {
+      "target": 900,
+      "paired_changes": {
+        "candidate1": {
+          "control": "control1",
+          "native_return_mean_percent": -15.692118817656088,
+          "reads_per_second_percent": 13.168086321801752,
+          "submit_mean_65536_percent": -12.98189061780668,
+          "submit_mean_512_percent": -18.40381407488746
+        },
+        "candidate2": {
+          "control": "control2",
+          "native_return_mean_percent": -8.993268538588616,
+          "reads_per_second_percent": 2.543123838385042,
+          "submit_mean_65536_percent": -12.1901851346086,
+          "submit_mean_512_percent": -5.0553406177908595
+        }
+      }
+    }
+  ],
+  "primary_450_gate_passed": true,
+  "weighted_cost_all_16_improved": true,
+  "regressions_over_20_percent": [
+    {
+      "target": 900,
+      "budget_us": 1000,
+      "candidate": "candidate1",
+      "metric": "submit_mean_512_percent",
+      "change_percent": 31.251360919160454
+    }
+  ],
+  "position_mix_classifications": [
+    {
+      "regression": {
+        "target": 900,
+        "budget_us": 1000,
+        "candidate": "candidate1",
+        "metric": "submit_mean_512_percent",
+        "change_percent": 31.251360919160454
+      },
+      "classification": "nonrepeatable per-size mean with different first-request position populations",
+      "first_size_frame_counts": {
+        "control1": {
+          "65536": 254,
+          "512": 0
+        },
+        "candidate1": {
+          "65536": 163,
+          "512": 88
+        },
+        "control2": {
+          "65536": 126,
+          "512": 128
+        },
+        "candidate2": {
+          "65536": 163,
+          "512": 88
+        }
+      },
+      "repeat_submit_mean_512_percent": -16.018027614881714
+    }
+  ],
+  "unresolved_repeatable_regressions_over_20_percent": [],
+  "selected_firmware_lock_changed": true,
+  "overall_Forza_fix_established": false,
+  "regressions_over_20_percent_scope": "Weighted/per-size mean read-return costs and throughput; observed maxima are listed separately.",
+  "observed_submit_max_increases_over_20_percent": [
+    {
+      "target": 783,
+      "budget_us": 450,
+      "pair": 2,
+      "bytes": 65536,
+      "control_max_us": 500.22403398678557,
+      "candidate_max_us": 603.0544485563439,
+      "change_percent": 20.556872037914676
+    },
+    {
+      "target": 900,
+      "budget_us": 250,
+      "pair": 2,
+      "bytes": 65536,
+      "control_max_us": 464.9594249557266,
+      "candidate_max_us": 573.1239820677981,
+      "change_percent": 23.263224984066277
+    },
+    {
+      "target": 900,
+      "budget_us": 1000,
+      "pair": 1,
+      "bytes": 512,
+      "control_max_us": 464.36674245100295,
+      "candidate_max_us": 637.1336925779556,
+      "change_percent": 37.20485003190812
+    },
+    {
+      "target": 900,
+      "budget_us": 0,
+      "pair": 2,
+      "bytes": 512,
+      "control_max_us": 443.919196038036,
+      "candidate_max_us": 560.9739907209627,
+      "change_percent": 26.368491321762335
+    }
+  ]
+}

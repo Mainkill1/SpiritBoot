@@ -1,0 +1,136 @@
+{
+  "candidate_source": "artifacts/forza-irp-wide-release64/work-0hku4mqt/source",
+  "source_validation": "built-source-linked-validation.json",
+  "optimization": "Unchanged script defaults: host core/adapter/packet/owner -O1; native primitive compile checks -O2; sense default optimization. No 0171 wrapper. Firmware built separately by root at -Os.",
+  "compiler_versions": {
+    "clang": "Debian clang version 19.1.7 (3+b1)",
+    "gcc": "gcc (Debian 14.2.0-19) 14.2.0",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0"
+  },
+  "suites": [
+    {
+      "name": "core",
+      "command": [
+        "env",
+        "-u",
+        "CC",
+        "-u",
+        "MSAN_CC",
+        "python3",
+        "artifacts/forza-irp-wide-release64/work-0hku4mqt/source/tests/host/nxstorage/check.py",
+        "<private-irp-workdir>/built-host/core"
+      ],
+      "script_sha256": "de2a39469da24b30ec234499e8e2503a6aa4c57e60ae15eb9dc8cea53d35440c",
+      "exit_code": 0,
+      "log": "built-core.log",
+      "log_sha256": "b949542e93d0f7a921295fbc148458be942d92625dbb6ec42596d83ff0f97328",
+      "summary": [
+        "PASS coherent_concurrent_publication",
+        "PASS observation_carries_its_exact_epoch",
+        "PASS sole_owner_completion_and_reclamation",
+        "34 passed; 0 failed",
+        "Owned nxstorage production checks passed; kernel adapter/native qualification remains open"
+      ]
+    },
+    {
+      "name": "adapter",
+      "command": [
+        "env",
+        "-u",
+        "CC",
+        "-u",
+        "MSAN_CC",
+        "python3",
+        "artifacts/forza-irp-wide-release64/work-0hku4mqt/source/tests/host/nxstorage/check_adapter.py",
+        "<private-irp-workdir>/built-host/adapter"
+      ],
+      "script_sha256": "6a8e40edebd707c046cebf1a484e0123125fc6edb3ea20b83df07b209e0c94dc",
+      "exit_code": 0,
+      "log": "built-adapter.log",
+      "log_sha256": "729808100ccf68271c69a368c2d0a7c4c941502f11105278ee818f0c63c25a68",
+      "summary": [
+        "adapter-plain: 42 adapter groups, 0 failures",
+        "adapter-sanitized: 42 adapter groups, 0 failures"
+      ]
+    },
+    {
+      "name": "packet",
+      "command": [
+        "env",
+        "-u",
+        "CC",
+        "-u",
+        "MSAN_CC",
+        "python3",
+        "artifacts/forza-irp-wide-release64/work-0hku4mqt/source/tests/host/nxstorage/check_packet.py",
+        "<private-irp-workdir>/built-host/packet"
+      ],
+      "script_sha256": "5a5aa86f5d81e4f686e0c6de229cefb6467008af744753617c1ca4cbb95ed993",
+      "exit_code": 0,
+      "log": "built-packet.log",
+      "log_sha256": "4c527ca95118b2cdf5168f8e644850b61ae6fa8240a0f7475cd71d87066e7d6f",
+      "summary": [
+        "packet-plain: 10 groups, 0 failures",
+        "packet-sanitized: 10 groups, 0 failures",
+        "packet-msan: 10 groups, 0 failures"
+      ]
+    },
+    {
+      "name": "owner",
+      "command": [
+        "env",
+        "-u",
+        "CC",
+        "-u",
+        "MSAN_CC",
+        "python3",
+        "artifacts/forza-irp-wide-release64/work-0hku4mqt/source/tests/host/nxstorage/check_owner.py",
+        "<private-irp-workdir>/built-host/owner"
+      ],
+      "script_sha256": "6e161585428ef81b4fda13f151a969a45030365e2a2819e2580a88a1c2b492d0",
+      "exit_code": 0,
+      "log": "built-owner.log",
+      "log_sha256": "a1db8e45cd1bfb5b6d8e5a26ea9ba46e7b5ce07cd5cd9e65e4d7a822ae7030e9",
+      "summary": [
+        "nxdisk-owner-plain: 9 groups, 0 failures",
+        "nxdisk-owner-sanitized: 9 groups, 0 failures"
+      ]
+    },
+    {
+      "name": "sense",
+      "command": [
+        "env",
+        "-u",
+        "CC",
+        "-u",
+        "MSAN_CC",
+        "python3",
+        "artifacts/forza-irp-wide-release64/work-0hku4mqt/source/tests/host/nxstorage-sense/check.py"
+      ],
+      "script_sha256": "a4a869fe96cc696d6ed9f3f83d688234bbefdea3a17d7ecdcb5a89ab8c258e47",
+      "exit_code": 0,
+      "log": "built-sense.log",
+      "log_sha256": "bc07acb5ec95e198a71bd1561592d6ff72fe5a89bd9ddc6ac2961625eff52438",
+      "summary": [
+        "sense_header: all tests passed",
+        "sense_header: all tests passed"
+      ]
+    }
+  ],
+  "reset_oracle": {
+    "command": [
+      "python3",
+      "docs/performance/evidence/forza-native-submit-cost-20261017/irp-wide-0172/check_irp_reset.py",
+      "--source-root",
+      "artifacts/forza-irp-wide-release64/work-0hku4mqt/source"
+    ],
+    "exit_code": 0,
+    "log": "built-irp-oracle.log",
+    "log_sha256": "d08937a458cb86b93d6b3d9802b25ff461bed1e75b72150cc904e810887864b0",
+    "summary": [
+      "3072 helper observations; exact range at arbitrary byte alignments matches",
+      "2568 full-reset observations; complete packet, header, reuse flags and surrounding bytes match"
+    ]
+  },
+  "scope": "Exact built-source host tests and final linked initializer/source comparison; no firmware build or hardware execution by this validator."
+}

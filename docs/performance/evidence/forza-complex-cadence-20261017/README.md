@@ -1,6 +1,7 @@
 # Complex / SpiritBoot cadence and submission-burst baselines, 2026-10-17
 
-**Status: comparison completed; the missing-world problem is not fixed.**
+**Status: candidate 0176 is selected by the generated release fixture; a fresh
+whole-game Forza run is still required.**
 Both BIOSes pass the generated-data oracle and the same tested APC wait
 semantics. Complex also exhibits callback occupancy on the roughly 33 ms frame
 scale when the fixture polls at that cadence. The approximately 30 ms delay in
@@ -61,6 +62,18 @@ passes all 32 sustained cases but leaves 0171 **unselected**. The first pair's
 code has offsetting helper-call changes, so the explicitly authorized trial
 tests net behavior; neither inlining nor the first pair establishes a gain.
 All eight cases, per-size costs and whole-case first-size counts are retained.
+
+The [0168 → 0176 → 0168 → 0176 release trial](candidate0176/README.md)
+selects 0176. Every primary 450 µs comparison improves both weighted
+entry-to-return cost and verified throughput: cost falls 8.99–15.92% and rate
+rises 2.54–13.17%. Weighted return cost improves in all sixteen paired cases,
+and every generated-byte, canary, callback, status, count and lifetime oracle
+passes. The change reduces the ordinary retained pending-read route from 14 to
+7 adapter lock/IRQL transitions. One per-size mean over the 20% review
+threshold is retained and resolved by its changed first-request-position
+population plus an improving repeat; there is no unresolved repeatable
+regression over 20%. This qualification does not replace a fresh whole-game
+run.
 
 ## What ran
 
@@ -279,6 +292,7 @@ Recompute and check the owned evidence:
 ```sh
 python3 docs/performance/evidence/forza-complex-cadence-20261017/reproduce.py
 python3 docs/performance/evidence/forza-complex-cadence-20261017/bursts/reproduce.py
+python3 docs/performance/evidence/forza-complex-cadence-20261017/candidate0176/reproduce.py
 python3 -m unittest discover \
   -s docs/performance/evidence/forza-complex-cadence-20261017 -p test_analyze.py
 python3 -m unittest discover \

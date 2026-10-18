@@ -1,0 +1,59 @@
+FFFFFF
+======================================================================
+FAIL: test_boundary_instruction_belongs_to_new_phase (test_join.JoinTests.test_boundary_instruction_belongs_to_new_phase)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_join.py", line 11, in test_boundary_instruction_belongs_to_new_phase
+    self.assertEqual(classify(seq, 1, 3, 5, 7, 9), phase)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != 'entry_to_ready'
+
+======================================================================
+FAIL: test_invalid_or_outside_interval_rejected (test_join.JoinTests.test_invalid_or_outside_interval_rejected) (args=(0, 1, 3, 5, 7, 9))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_join.py", line 18, in test_invalid_or_outside_interval_rejected
+    with self.subTest(args=args), self.assertRaises(ValueError): classify(*args)
+                                  ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_invalid_or_outside_interval_rejected (test_join.JoinTests.test_invalid_or_outside_interval_rejected) (args=(9, 1, 3, 5, 7, 9))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_join.py", line 18, in test_invalid_or_outside_interval_rejected
+    with self.subTest(args=args), self.assertRaises(ValueError): classify(*args)
+                                  ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_invalid_or_outside_interval_rejected (test_join.JoinTests.test_invalid_or_outside_interval_rejected) (args=(4, 1, 5, 3, 7, 9))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_join.py", line 18, in test_invalid_or_outside_interval_rejected
+    with self.subTest(args=args), self.assertRaises(ValueError): classify(*args)
+                                  ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_invalid_or_outside_interval_rejected (test_join.JoinTests.test_invalid_or_outside_interval_rejected) (args=(6, 1, 3, 5, 4, 9))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_join.py", line 18, in test_invalid_or_outside_interval_rejected
+    with self.subTest(args=args), self.assertRaises(ValueError): classify(*args)
+                                  ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_queued_start_after_return_not_in_current_call (test_join.JoinTests.test_queued_start_after_return_not_in_current_call)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_join.py", line 14, in test_queued_start_after_return_not_in_current_call
+    self.assertEqual(classify(8, 1, 3, 5, 11, 9), 'bind_to_return')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != 'bind_to_return'
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+FAILED (failures=6)

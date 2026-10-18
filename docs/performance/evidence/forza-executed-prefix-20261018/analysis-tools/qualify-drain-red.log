@@ -1,0 +1,45 @@
+test_all_calls_and_callbacks_must_be_inside_receipts (test_qualify.QualifyTests.test_all_calls_and_callbacks_must_be_inside_receipts) ... ok
+test_callback_before_return_is_a_valid_completed_lifetime (test_qualify.QualifyTests.test_callback_before_return_is_a_valid_completed_lifetime) ... ok
+test_callback_length_matches_each_requests_actual_size (test_qualify.QualifyTests.test_callback_length_matches_each_requests_actual_size) ... ok
+test_cli_records_input_and_analyzer_hashes (test_qualify.QualifyTests.test_cli_records_input_and_analyzer_hashes) ... ok
+test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) ... ok
+test_exact_complete_cohort_qualifies (test_qualify.QualifyTests.test_exact_complete_cohort_qualifies) ... ok
+test_health_and_truncated_capture_rejects (test_qualify.QualifyTests.test_health_and_truncated_capture_rejects) ... ok
+test_identity_admission_handle_mismatch_rejects (test_qualify.QualifyTests.test_identity_admission_handle_mismatch_rejects) ... ok
+test_identity_issues_and_uncompleted_lifetimes_reject (test_qualify.QualifyTests.test_identity_issues_and_uncompleted_lifetimes_reject) ... ok
+test_incomplete_admission_cannot_qualify (test_qualify.QualifyTests.test_incomplete_admission_cannot_qualify) ... ok
+test_iosb_reuse_after_callback_keeps_distinct_api_generations (test_qualify.QualifyTests.test_iosb_reuse_after_callback_keeps_distinct_api_generations) ... ok
+test_missing_call_prefix_and_unknown_references_reject (test_qualify.QualifyTests.test_missing_call_prefix_and_unknown_references_reject) ... ok
+test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) ... ok
+test_missing_selected_callback_cannot_be_replaced_by_unassigned_event (test_qualify.QualifyTests.test_missing_selected_callback_cannot_be_replaced_by_unassigned_event) ... ok
+test_native_failure_cannot_pass_via_successful_callback (test_qualify.QualifyTests.test_native_failure_cannot_pass_via_successful_callback) ... ok
+test_open_api_and_mapper_state_rejects (test_qualify.QualifyTests.test_open_api_and_mapper_state_rejects) ... ok
+test_post_drain_callbacks_are_explicitly_unassigned (test_qualify.QualifyTests.test_post_drain_callbacks_are_explicitly_unassigned) ... FAIL
+test_post_drain_requires_all_native_returns_too (test_qualify.QualifyTests.test_post_drain_requires_all_native_returns_too) ... ok
+test_translation_reference_cannot_escape_active_api (test_qualify.QualifyTests.test_translation_reference_cannot_escape_active_api) ... ok
+test_unknown_callback_before_full_drain_is_not_ignored (test_qualify.QualifyTests.test_unknown_callback_before_full_drain_is_not_ignored) ... ok
+
+======================================================================
+FAIL: test_post_drain_callbacks_are_explicitly_unassigned (test_qualify.QualifyTests.test_post_drain_callbacks_are_explicitly_unassigned)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 135, in test_post_drain_callbacks_are_explicitly_unassigned
+    result=self.check(rows=rows)
+  File "<private-analysis-workdir>/test_qualify.py", line 68, in check
+    return qualify(prefix() if p is None else p, encode(events() if rows is None else rows, **meta), receipts() if r is None else r, identity)
+  File "<private-analysis-workdir>/qualify.py", line 59, in qualify
+    raise ValueError('Unknown or duplicate callback')
+ValueError: Unknown or duplicate callback
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 137, in test_post_drain_callbacks_are_explicitly_unassigned
+    self.fail(f'Post-drain callbacks must be counted separately: {error}')
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Post-drain callbacks must be counted separately: Unknown or duplicate callback
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.257s
+
+FAILED (failures=1)

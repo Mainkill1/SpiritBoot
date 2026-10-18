@@ -3,10 +3,11 @@
 The [causal findings](CAUSAL-FINDINGS.md) connect the title's deadline to the
 owned submission path and separate demonstrated causes from remaining work.
 
-Six narrow owned-code experiments investigate avoidable work in the native
-storage adapter. The selected stack ends at 0168; 0169, 0170 and 0171 remain
-unselected after native tests failed to establish a repeatable gain. These are not an established
-Forza fix. Ordinary generated burst tests
+A sequence of narrow owned-code experiments investigates avoidable work in the native
+storage adapter. The selected stack ends at 0176; 0169, 0170, 0171 and 0174
+remain unselected after native tests failed to establish a repeatable gain.
+0173 and 0175 are prerequisites of selected 0176, rather than independently
+qualified endpoints. This is not an established whole-game Forza fix. Ordinary generated burst tests
 found no consistent gain from 0166. The repeated 0167 synthetic comparison is mixed; see
 [its full eight-case archive](../forza-complex-cadence-20261017/candidate0167/).
 0168 has passed host, release64 build and one generated native burst run;
@@ -163,6 +164,33 @@ passes all 32 sustained correctness cases, but both memory targets reverse
 their initial 450 us improvement in the second pair. The experiment remains
 unselected. All cases, per-size means and maxima, and frame-position mix are
 retained rather than reporting only the favorable first pair.
+
+## 0173, 0175 and 0176: remove redundant ordinary-read lock transitions
+
+[0173](first-read-start-0173/README.md) fast-starts the already-known first
+read command and uses a private rescan handoff for reentrant work. [0175](admission-handoff-0175/README.md)
+hands queue-publication lock ownership into the sole admission owner and
+returns its final lock to dispatch. [0176](submit-lock-return-0176/README.md)
+arms inline-completion deferral during existing packet publication, then lets a
+no-inline-result submission transfer its final adapter lock into the core
+post-submit update. Inline completion uses the original unlocked result route.
+
+Together these changes reduce the common retained pending-read route from 14
+to 7 adapter lock/IRQL transitions. The exact assembled source passes 50 core
+tests, 1,528,352 active-scan observations, eight pthread ownership tests, 42
+native-adapter groups, ten packet groups, nine owner groups, optical and sense
+checks, including sanitizer variants. The consecutive 0168 → 0176 → 0168 →
+0176 release trial passes every oracle and every primary target: 450 µs cost
+falls 8.99–15.92%, throughput rises 2.54–13.17%, and weighted cost improves in
+all sixteen paired cases. [The complete comparison](../forza-complex-cadence-20261017/candidate0176/README.md)
+retains all results, position populations and outliers. 0176 is selected;
+fresh whole-game Forza qualification remains required.
+
+## 0174: arm submission deferral in prepare
+
+[0174](submit-arm-0174/README.md) reduced the counted lock transitions from 14
+to 10 but did not pass the predeclared repeated native comparison gate. It is
+archived and excluded from the selected firmware lock.
 
 ## Host validation and reproducibility
 

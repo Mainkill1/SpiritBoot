@@ -1,0 +1,114 @@
+[
+  {
+    "unit": "recorder",
+    "sanitizer": "none",
+    "passed": 31
+  },
+  {
+    "unit": "integration",
+    "sanitizer": "none",
+    "passed": 7
+  },
+  {
+    "unit": "recorder",
+    "sanitizer": "-fsanitize=address,undefined",
+    "passed": 31
+  },
+  {
+    "unit": "integration",
+    "sanitizer": "-fsanitize=address,undefined",
+    "passed": 7
+  },
+  {
+    "unit": "actual_identity_admission_and_drain",
+    "sanitizer": "none",
+    "passed": 1
+  },
+  {
+    "unit": "actual_identity_admission_and_drain",
+    "sanitizer": "-fsanitize=address,undefined",
+    "passed": 1
+  },
+  {
+    "unit": "source_order_and_real_output_parser",
+    "passed": 7
+  }
+]
+[
+  {
+    "mutation": "warmup_admission",
+    "returncode": -6,
+    "stderr": "test: /tmp/forza-prefix-mutant-5nvb8nci/test_actual_identity.c:40: int main(void): Assertion `fid_count==0&&px_admitted==0' failed.\n"
+  },
+  {
+    "mutation": "inactive_metadata_allocation",
+    "returncode": -6,
+    "stderr": "test: /tmp/forza-prefix-mutant-3exdfy0j/test_recorder.c:77: int main(int, char **): Assertion `px_allocate(0x00400000,0,0,0)==0&&px_desc_count==0' failed.\n"
+  },
+  {
+    "mutation": "excluded_alias",
+    "returncode": -6,
+    "stderr": "test: /tmp/forza-prefix-mutant-5j732ojz/test_recorder.c:88: int main(int, char **): Assertion `px_reason[PX_I_EXCLUDED_ALIAS]==1' failed.\n"
+  }
+]
+{
+  "public_base": "f3c528eeec86db32c9f96a932267105e83f77375",
+  "exact_staged_sha256": {
+    "target/i386/tcg/misc_helper.c": "18f7bda3ef13962202bf3084de6498bf0e3f1cc72b1b00be23167318b9930312",
+    "target/i386/tcg/translate.c": "c20c3507810e6805c0eb475c0cd77499ff5b375207425c0ffbee9301dbe9a935",
+    "target/i386/helper.h": "dc9801697da60d0b4d32e5840377b7e28665c99590684abc1e96305e6ca6ed63"
+  },
+  "patches_applied": 2,
+  "rebuild_performed": false,
+  "input_repository_unchanged": true,
+  "tests": [
+    {
+      "unit": "recorder",
+      "sanitizer": "none",
+      "passed": 31
+    },
+    {
+      "unit": "integration",
+      "sanitizer": "none",
+      "passed": 7
+    },
+    {
+      "unit": "recorder",
+      "sanitizer": "-fsanitize=address,undefined",
+      "passed": 31
+    },
+    {
+      "unit": "integration",
+      "sanitizer": "-fsanitize=address,undefined",
+      "passed": 7
+    },
+    {
+      "unit": "actual_identity_admission_and_drain",
+      "sanitizer": "none",
+      "passed": 1
+    },
+    {
+      "unit": "actual_identity_admission_and_drain",
+      "sanitizer": "-fsanitize=address,undefined",
+      "passed": 1
+    },
+    {
+      "unit": "source_order_and_real_output_parser",
+      "passed": 7
+    }
+  ],
+  "mutations": [
+    {
+      "mutation": "warmup_admission",
+      "rejected": true
+    },
+    {
+      "mutation": "inactive_metadata_allocation",
+      "rejected": true
+    },
+    {
+      "mutation": "excluded_alias",
+      "rejected": true
+    }
+  ]
+}

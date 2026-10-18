@@ -1,0 +1,45 @@
+--- a/ntoskrnl/io/iomgr/irp.c
++++ b/ntoskrnl/io/iomgr/irp.c
+@@ -1886,6 +1886,33 @@
+ }
+ 
+ /*
++ * Clear every packet byte without rounding past its extent. Use repeated dword
++ * stores for aligned x86 packets, then clear the exact remaining byte tail.
++ */
++static VOID
++IopClearIrpPacket(IN PVOID Buffer,
++                  IN USHORT Length)
++{
++    PUCHAR Bytes = (PUCHAR)Buffer;
++
++#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
++    if (((ULONG_PTR)Bytes & (sizeof(ULONG) - 1)) == 0)
++    {
++        SIZE_T Count = Length / sizeof(ULONG);
++
++        __asm__ __volatile__("rep stosl"
++                             : "+D" (Bytes), "+c" (Count)
++                             : "a" (0)
++                             : "memory");
++        Length %= sizeof(ULONG);
++    }
++#endif
++
++    /* Also handles unaligned destinations and other compiler/CPU targets. */
++    RtlZeroMemory(Bytes, Length);
++}
++
++/*
+  * @implemented
+  */
+ VOID
+@@ -1899,7 +1926,7 @@
+             "%s - Initializing IRP %p\n",
+             __FUNCTION__,
+             Irp);
+-    RtlZeroMemory(Irp, PacketSize);
++    IopClearIrpPacket(Irp, PacketSize);
+ 
+     /* Set the Header and other data */
+     Irp->Type = IO_TYPE_IRP;

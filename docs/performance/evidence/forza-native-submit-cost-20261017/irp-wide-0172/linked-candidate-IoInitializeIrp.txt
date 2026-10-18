@@ -1,0 +1,58 @@
+
+artifacts/forza-irp-wide-release64/work-0hku4mqt/build/ntoskrnl/xboxkrnl.unstripped.exe:     file format pei-i386
+
+
+Disassembly of section .text:
+
+840150a8 <_IoInitializeIrp@12>:
+840150a8:	55                   	push   %ebp
+840150a9:	57                   	push   %edi
+840150aa:	56                   	push   %esi
+840150ab:	53                   	push   %ebx
+840150ac:	8b 54 24 14          	mov    0x14(%esp),%edx
+840150b0:	8b 74 24 18          	mov    0x18(%esp),%esi
+840150b4:	8b 5c 24 1c          	mov    0x1c(%esp),%ebx
+840150b8:	89 d0                	mov    %edx,%eax
+840150ba:	83 e0 03             	and    $0x3,%eax
+840150bd:	75 16                	jne    840150d5 <_IoInitializeIrp@12+0x2d>
+840150bf:	89 f1                	mov    %esi,%ecx
+840150c1:	89 d7                	mov    %edx,%edi
+840150c3:	66 c1 e9 02          	shr    $0x2,%cx
+840150c7:	0f b7 c9             	movzwl %cx,%ecx
+840150ca:	f3 ab                	rep stos %eax,%es:(%edi)
+840150cc:	89 f1                	mov    %esi,%ecx
+840150ce:	89 fd                	mov    %edi,%ebp
+840150d0:	83 e1 03             	and    $0x3,%ecx
+840150d3:	eb 04                	jmp    840150d9 <_IoInitializeIrp@12+0x31>
+840150d5:	89 d5                	mov    %edx,%ebp
+840150d7:	89 f1                	mov    %esi,%ecx
+840150d9:	31 c0                	xor    %eax,%eax
+840150db:	89 ef                	mov    %ebp,%edi
+840150dd:	0f b7 c9             	movzwl %cx,%ecx
+840150e0:	f3 aa                	rep stos %al,%es:(%edi)
+840150e2:	8d 43 01             	lea    0x1(%ebx),%eax
+840150e5:	88 5a 18             	mov    %bl,0x18(%edx)
+840150e8:	0f be db             	movsbl %bl,%ebx
+840150eb:	66 c7 02 06 00       	movw   $0x6,(%edx)
+840150f0:	6b db 24             	imul   $0x24,%ebx,%ebx
+840150f3:	66 89 72 02          	mov    %si,0x2(%edx)
+840150f7:	88 42 19             	mov    %al,0x19(%edx)
+840150fa:	a1 24 f1 df ff       	mov    0xffdff124,%eax
+840150ff:	8a 80 1c 01 00 00    	mov    0x11c(%eax),%al
+84015105:	88 42 7a             	mov    %al,0x7a(%edx)
+84015108:	8d 84 1a 80 00 00 00 	lea    0x80(%edx,%ebx,1),%eax
+8401510f:	89 42 5c             	mov    %eax,0x5c(%edx)
+84015112:	8d 42 08             	lea    0x8(%edx),%eax
+84015115:	89 42 0c             	mov    %eax,0xc(%edx)
+84015118:	89 42 08             	mov    %eax,0x8(%edx)
+8401511b:	5b                   	pop    %ebx
+8401511c:	5e                   	pop    %esi
+8401511d:	5f                   	pop    %edi
+8401511e:	5d                   	pop    %ebp
+8401511f:	c2 0c 00             	ret    $0xc
+84015122:	90                   	nop
+84015123:	90                   	nop
+
+Disassembly of section PAGE:
+
+Disassembly of section INIT:

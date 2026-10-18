@@ -2,7 +2,7 @@
   "schema": 1,
   "date": "2026-10-17",
   "scope": "Owned storage source and generated host tests; no proprietary implementation input.",
-  "native_performance_qualification": "0166 no consistent improvement; 0167 repeated synthetic results mixed; 0168 one generated burst run passed, stable effect/title acceptance not established (see cadence candidate0168 archive)",
+  "native_performance_qualification": "Selected 0176 passes the consecutive 0168/0176/0168/0176 release comparison: all four primary 450 us cost/rate observations and all sixteen weighted costs improve; whole-game Forza acceptance remains open (see cadence candidate0176 archive)",
   "patches": [
     {
       "path": "patches/roswell/0166-sealed-rundown-notifications.patch",
@@ -23,6 +23,21 @@
       "patch": "patches/roswell/0169-static-native-port-binding.patch",
       "sha256": "fea1c4fd1f2747347ed431351a79dcea74ec82c3ffacc65be8018f7180088d1d",
       "assembled_source_tree": "261b24f5a7ae667cc8f39670b706112aafe3c285"
+    },
+    {
+      "patch": "patches/roswell/0173-fast-start-first-read-command.patch",
+      "sha256": "fee98444406d4d8af6641ffbc93d978951bb98eaa77810decdc4343528169197",
+      "assembled_source_tree": "prerequisite of selected 0176"
+    },
+    {
+      "patch": "patches/roswell/0175-handoff-native-admission-lock.patch",
+      "sha256": "4adc7909ca1e1b83926cb169c93726ef9e7de4e1e750f27f132a3214b9c91e78",
+      "assembled_source_tree": "prerequisite of selected 0176"
+    },
+    {
+      "patch": "patches/roswell/0176-transfer-submit-lock-to-core.patch",
+      "sha256": "642df8f38687d97e5602c63f5175f77f4fa18360f8aba3ec38fb3c00c9a5ef0d",
+      "assembled_source_tree": "c30e8e2e9cab57d122040f1cd6a17bb44928ae0a"
     }
   ],
   "adapter_checks": {
@@ -118,6 +133,44 @@
       "status": "built; one generated native burst passed, title acceptance open"
     },
     "full_host_suite": "Not rerun; previous full-suite scope/results retained above; current exact-stack owned checks and identity checks were rerun."
+  },
+  "candidate0176": {
+    "status": "selected by the generated release fixture; fresh whole-game Forza qualification remains open",
+    "pending_retained_lock_entries": {
+      "control0168": 14,
+      "candidate0176": 7
+    },
+    "exact_built_source": {
+      "core_tests": 50,
+      "active_scan_observations": 1528352,
+      "pthread_ownership_tests": 8,
+      "adapter_groups_plain_and_asan_ubsan": 42,
+      "packet_groups_plain_sanitized_msan": 10,
+      "owner_groups_plain_and_sanitized": 9,
+      "failures": 0
+    },
+    "release_abab": {
+      "runs": 4,
+      "cases_per_run": 8,
+      "minimum_case_seconds": 10,
+      "primary_450_cost_change_percent": [-10.0243, -15.6921, -15.9165, -8.9933],
+      "primary_450_rate_change_percent": [4.0459, 13.1681, 12.5302, 2.5431],
+      "all_weighted_cost_comparisons_improved": true,
+      "unresolved_repeatable_regressions_over_20_percent": 0,
+      "all_correctness_oracles_passed": true
+    },
+    "release64": {
+      "flash_sha256": "5be85ddc85f462a0a6ef28ed2ba5fb4ba3e1688c75cab4e2ebcbad556a33c1a2",
+      "source_tree": "c30e8e2e9cab57d122040f1cd6a17bb44928ae0a",
+      "output": "artifacts/forza-submit-lock-selected-release64",
+      "status": "reproducibly rebuilt; byte-identical to the measured candidate"
+    },
+    "full_host_suite": {
+      "tests": 563,
+      "seconds": 442.309,
+      "skipped": 26,
+      "failures": 0
+    }
   },
   "irp_reset_preparatory": {
     "production_change": false,

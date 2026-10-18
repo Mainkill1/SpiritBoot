@@ -1,0 +1,158 @@
+FFFFFFFFFFFFFFFFF
+======================================================================
+FAIL: test_count_formula_is_checked (test_prefix.PrefixTests.test_count_formula_is_checked)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 32, in test_count_formula_is_checked
+    with self.assertRaises(ValueError): parse(CAPTURE.replace('begun=4', 'begun=5'))
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_counters_cannot_be_negative_or_zero_executions (test_prefix.PrefixTests.test_counters_cannot_be_negative_or_zero_executions) (new='executions=0')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 63, in test_counters_cannot_be_negative_or_zero_executions
+    with self.subTest(new=new), self.assertRaises(ValueError): parse(CAPTURE.replace(old, new))
+                                ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_counters_cannot_be_negative_or_zero_executions (test_prefix.PrefixTests.test_counters_cannot_be_negative_or_zero_executions) (new='rep_iterations=-1')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 63, in test_counters_cannot_be_negative_or_zero_executions
+    with self.subTest(new=new), self.assertRaises(ValueError): parse(CAPTURE.replace(old, new))
+                                ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_descriptor_ordinals_must_be_complete (test_prefix.PrefixTests.test_descriptor_ordinals_must_be_complete)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 35, in test_descriptor_ordinals_must_be_complete
+    with self.assertRaises(ValueError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_dropped_footer (test_prefix.PrefixTests.test_dropped_footer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 24, in test_dropped_footer
+    with self.assertRaises(ValueError): parse(CAPTURE.rsplit('prefix_end', 1)[0])
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_duplicate_histogram_keys_reject (test_prefix.PrefixTests.test_duplicate_histogram_keys_reject)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 49, in test_duplicate_histogram_keys_reject
+    with self.assertRaises(ValueError): parse(CAPTURE.replace(row, row+row))
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_fault_counters_reject (test_prefix.PrefixTests.test_fault_counters_reject) (name='overflow')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 28, in test_fault_counters_reject
+    with self.subTest(name=name), self.assertRaises(ValueError):
+                                  ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_fault_counters_reject (test_prefix.PrefixTests.test_fault_counters_reject) (name='reentry')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 28, in test_fault_counters_reject
+    with self.subTest(name=name), self.assertRaises(ValueError):
+                                  ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_fault_counters_reject (test_prefix.PrefixTests.test_fault_counters_reject) (name='thread_mismatch')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 28, in test_fault_counters_reject
+    with self.subTest(name=name), self.assertRaises(ValueError):
+                                  ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_fault_counters_reject (test_prefix.PrefixTests.test_fault_counters_reject) (name='invalid_prefix')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 28, in test_fault_counters_reject
+    with self.subTest(name=name), self.assertRaises(ValueError):
+                                  ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_fault_counters_reject (test_prefix.PrefixTests.test_fault_counters_reject) (name='open_api')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 28, in test_fault_counters_reject
+    with self.subTest(name=name), self.assertRaises(ValueError):
+                                  ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_optional_rep_is_unknown_not_zero (test_prefix.PrefixTests.test_optional_rep_is_unknown_not_zero)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 53, in test_optional_rep_is_unknown_not_zero
+    self.assertEqual(len(result['rows']), 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 2
+
+======================================================================
+FAIL: test_partial_prefix_and_rep_have_distinct_counts (test_prefix.PrefixTests.test_partial_prefix_and_rep_have_distinct_counts)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 19, in test_partial_prefix_and_rep_have_distinct_counts
+    self.assertEqual(len(result['rows']), 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 2
+
+======================================================================
+FAIL: test_row_cannot_escape_descriptor (test_prefix.PrefixTests.test_row_cannot_escape_descriptor)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 39, in test_row_cannot_escape_descriptor
+    with self.assertRaises(ValueError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_translation_reference_must_exist (test_prefix.PrefixTests.test_translation_reference_must_exist)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 57, in test_translation_reference_must_exist
+    with self.assertRaises(ValueError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_unknown_and_duplicate_fields_reject (test_prefix.PrefixTests.test_unknown_and_duplicate_fields_reject) (change='odd=1 ')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 44, in test_unknown_and_duplicate_fields_reject
+    with self.subTest(change=change), self.assertRaises(ValueError):
+                                      ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_unknown_and_duplicate_fields_reject (test_prefix.PrefixTests.test_unknown_and_duplicate_fields_reject) (change='api=2 ')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix.py", line 44, in test_unknown_and_duplicate_fields_reject
+    with self.subTest(change=change), self.assertRaises(ValueError):
+                                      ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.001s
+
+FAILED (failures=17)

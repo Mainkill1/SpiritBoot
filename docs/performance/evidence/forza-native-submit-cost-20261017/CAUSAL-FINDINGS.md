@@ -166,6 +166,32 @@ emulator scheduling have not been distinguished. The next attribution must
 compare executed paths within these state-controlled groups rather than assume
 that the aggregate direct-versus-queued timing difference is one firmware cost.
 
+### Executed work in the common preparation route
+
+The [bounded instruction-prefix capture](../forza-executed-prefix-20261018/README.md)
+qualifies 64 complete reads and callbacks. Of 18 long-gap direct 512-byte extent
+hits, 12 have the same exact pre-bind phase-by-symbol vector: 1,123 instruction
+starts before mapping-ready and 2,401 afterward, totaling 3,524. The other six
+have additive vectors including timer/interrupt entry paths. None of these 18
+calls allocates an owned translation during its API interval. Instruction starts
+are not CPU time, and in-call translation observations do not measure TLB misses
+or host caches.
+
+The profiler changes queue outcomes: no nearby direct or queued-later controls
+remain in this capture. It therefore does not resolve the earlier spacing
+association. The baseline inactive-slot scan occurs after bind/start in the
+representative call, so it cannot explain this pre-bind floor; selected0167
+already removes that scan.
+
+Separate REP-body accounting identifies an actual repeated operation:
+`IoInitializeIrp` clears 416 parent bytes before mapping-ready and 164 child bytes
+afterward, one byte per REP body. Selected0168 has the same initializer code.
+An equivalent full-range wider clear is a bounded partial-cost candidate, with
+all tails, initialized fields and surrounding memory preserved. Its static
+580-to-145 iteration reduction must not be called a measured speedup. New BIOS
+acceptance uses the [fresh-boot synthetic protocol](../../../../tests/xbe/forza-poll-budget/VALIDATION.md),
+never a restored scene containing the old kernel.
+
 ## Controlled release evidence
 
 The separate initial-poll fixture charges the first alertable poll to its
@@ -222,14 +248,24 @@ Source and reproduction:
   reversed in the second pair at both memory levels. It remains unselected;
   see [compiled scope and shape](compiler-0171/README.md) and
   [all paired results](../forza-complex-cadence-20261017/candidate0171/README.md).
-  These three rejected micro-optimizations require a return to dynamic path
+  These rejected micro-optimizations required a return to dynamic path
   attribution before another dispatch, lock or compiler change.
+* Selected0176 addresses the measured common route rather than compiler shape.
+  It fast-starts the known first read command, hands queue publication into the
+  sole admission owner, returns the owner's final lock to dispatch, and
+  transfers a no-inline-completion submit lock into the core epilogue. The
+  ordinary retained read falls from 14 to 7 adapter lock entries. In four
+  consecutive release runs, all 450 µs targets improve: weighted return cost
+  falls 8.99–15.92% and throughput rises 2.54–13.17%. Weighted return cost
+  improves in all sixteen paired cases. The [selected comparison and required
+  over-20% investigation](../forza-complex-cadence-20261017/candidate0176/README.md)
+  retain every case and the one nonrepeatable position-mix outlier.
 * The old cadence benchmark began its budget after the initial poll. That did
   not match the title's budget boundary. The separate frozen initial-poll
   fixture corrects the experiment without rewriting earlier results.
 
-The remaining task is to reduce the measured read-return cost with preserved
-contracts, then qualify a fresh-boot Forza run. Restoring the old saved scene
+The measured read-return cost is now reduced with preserved host and generated
+fixture contracts. The remaining task is a fresh-boot Forza game run. Restoring the old saved scene
 restores the old kernel and cannot validate a new BIOS. No full-game resolution,
 global memory-pressure exclusion, or 90%-of-workloads performance claim follows
 from these results.

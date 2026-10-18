@@ -1,0 +1,53 @@
+test_admission_bounds_drain_and_closed_flag (test_prefix_v2_independent.IndependentV2Tests.test_admission_bounds_drain_and_closed_flag) ... ok
+test_admitted_count_cannot_understate_observed_apis (test_prefix_v2_independent.IndependentV2Tests.test_admitted_count_cannot_understate_observed_apis) ... 
+  test_admitted_count_cannot_understate_observed_apis (test_prefix_v2_independent.IndependentV2Tests.test_admitted_count_cannot_understate_observed_apis) (count=0) ... FAIL
+  test_admitted_count_cannot_understate_observed_apis (test_prefix_v2_independent.IndependentV2Tests.test_admitted_count_cannot_understate_observed_apis) (count=1) ... FAIL
+  test_admitted_count_cannot_understate_observed_apis (test_prefix_v2_independent.IndependentV2Tests.test_admitted_count_cannot_understate_observed_apis) (count=2) ... FAIL
+test_all_health_overflow_and_allocation_underclaims_reject (test_prefix_v2_independent.IndependentV2Tests.test_all_health_overflow_and_allocation_underclaims_reject) ... ok
+test_cli_admission_count_and_handle_match_identity (test_prefix_v2_independent.IndependentV2Tests.test_cli_admission_count_and_handle_match_identity) ... ok
+test_cli_off_receipt_admission_handle_is_not_ignored (test_prefix_v2_independent.IndependentV2Tests.test_cli_off_receipt_admission_handle_is_not_ignored) ... ok
+test_each_v2_singleton_and_range_duplicate_rejects (test_prefix_v2_independent.IndependentV2Tests.test_each_v2_singleton_and_range_duplicate_rejects) ... ok
+test_every_owned_instruction_pc_is_range_checked (test_prefix_v2_independent.IndependentV2Tests.test_every_owned_instruction_pc_is_range_checked) ... ok
+test_excluded_duplicate_rejects_even_with_adjusted_totals (test_prefix_v2_independent.IndependentV2Tests.test_excluded_duplicate_rejects_even_with_adjusted_totals) ... ok
+test_excluded_full_capture_identity_references_must_resolve (test_prefix_v2_independent.IndependentV2Tests.test_excluded_full_capture_identity_references_must_resolve) ... ok
+test_excluded_pc_is_never_promoted_by_static_symbol_map (test_prefix_v2_independent.IndependentV2Tests.test_excluded_pc_is_never_promoted_by_static_symbol_map) ... ok
+test_excluded_phase_counts_and_off_receipt_call_are_retained (test_prefix_v2_independent.IndependentV2Tests.test_excluded_phase_counts_and_off_receipt_call_are_retained) ... ok
+test_health_probe_cap_boundary_and_unemitted_allocations (test_prefix_v2_independent.IndependentV2Tests.test_health_probe_cap_boundary_and_unemitted_allocations) ... ok
+test_invalid_and_bad_records_fail_closed_even_if_count_zero (test_prefix_v2_independent.IndependentV2Tests.test_invalid_and_bad_records_fail_closed_even_if_count_zero) ... ok
+test_overlapping_reversed_and_duplicate_owned_ranges_reject (test_prefix_v2_independent.IndependentV2Tests.test_overlapping_reversed_and_duplicate_owned_ranges_reject) ... ok
+test_owned_and_excluded_range_boundaries_are_half_open (test_prefix_v2_independent.IndependentV2Tests.test_owned_and_excluded_range_boundaries_are_half_open) ... ok
+test_owned_excluded_and_unknown_counts_preserved_separately (test_prefix_v2_independent.IndependentV2Tests.test_owned_excluded_and_unknown_counts_preserved_separately) ... ok
+test_required_v2_records_and_header_footer_counts_are_binding (test_prefix_v2_independent.IndependentV2Tests.test_required_v2_records_and_header_footer_counts_are_binding) ... ok
+test_version_one_cannot_smuggle_v2_metadata_or_records (test_prefix_v2_independent.IndependentV2Tests.test_version_one_cannot_smuggle_v2_metadata_or_records) ... ok
+
+======================================================================
+FAIL: test_admitted_count_cannot_understate_observed_apis (test_prefix_v2_independent.IndependentV2Tests.test_admitted_count_cannot_understate_observed_apis) (count=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix_v2_independent.py", line 69, in test_admitted_count_cannot_understate_observed_apis
+    with self.subTest(count=count), self.assertRaises(ValueError):
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_admitted_count_cannot_understate_observed_apis (test_prefix_v2_independent.IndependentV2Tests.test_admitted_count_cannot_understate_observed_apis) (count=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix_v2_independent.py", line 69, in test_admitted_count_cannot_understate_observed_apis
+    with self.subTest(count=count), self.assertRaises(ValueError):
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_admitted_count_cannot_understate_observed_apis (test_prefix_v2_independent.IndependentV2Tests.test_admitted_count_cannot_understate_observed_apis) (count=2)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_prefix_v2_independent.py", line 69, in test_admitted_count_cannot_understate_observed_apis
+    with self.subTest(count=count), self.assertRaises(ValueError):
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+----------------------------------------------------------------------
+Ran 18 tests in 0.133s
+
+FAILED (failures=3)
