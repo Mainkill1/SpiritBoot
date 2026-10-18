@@ -91,8 +91,7 @@ def blockstats_summary(root: Path) -> dict:
     fields = ("rd_operations", "rd_bytes", "rd_total_time_ns", "failed_rd_operations",
               "invalid_rd_operations", "wr_operations", "wr_bytes")
     deltas = []
-    for start, end in (("load-start", "race-ready"), ("race-ready", "route-start"),
-                       ("route-start", "route-end")):
+    for start, end in (("load-start", "route-end"),):
         devices = {}
         if start in checkpoints and end in checkpoints:
             for device in sorted(set(checkpoints[start]) & set(checkpoints[end])):
@@ -144,11 +143,19 @@ def main(root: Path) -> int:
     if valid_markers:
         origin = valid_markers[0]["point"]
         displacement = max(math.dist(origin, row["point"]) for row in valid_markers)
+    telemetry_path = screenshots / "route-telemetry.jsonl"
+    telemetry = []
+    if telemetry_path.is_file():
+        telemetry = [json.loads(line) for line in telemetry_path.read_text().splitlines()
+                     if line.strip()]
+    ready = next((row for row in telemetry if row.get("phase") == "ready"), {})
     metrics = {
         "schema_version": 1,
         "max_speed_mph": max((row["mph"] for row in speeds if row["mph"] is not None), default=0),
         "minimap_displacement_pixels": displacement,
         "observations": len(route),
+        "readiness_wait_ms": ready.get("readiness_wait_ms"),
+        "ready_guide_pixels": ready.get("guide_pixels", 0),
         "speeds": speeds,
         "markers": markers,
     }

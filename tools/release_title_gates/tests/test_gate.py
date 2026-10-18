@@ -50,6 +50,14 @@ class RouteContractTests(unittest.TestCase):
                         diagnostics.index("forza-guided-route"))
         self.assertLess(diagnostics.index("forza-guided-route"),
                         diagnostics.index("forza-blockstats-route-end"))
+        self.assertNotIn("forza-A-race-confirm", diagnostics)
+        self.assertNotIn("forza-blockstats-race-ready", diagnostics)
+        guided = next(i for i, row in enumerate(plan)
+                      if row.get("diagnosticId") == "forza-guided-route")
+        self.assertEqual(plan[guided - 1].get("diagnosticId"),
+                         "forza-blockstats-route-start")
+        self.assertFalse(any((row.get("name") or "").startswith("load-")
+                             and row.get("name") != "load-start" for row in plan))
         self.assertEqual(plan[-1]["type"], "quit")
         self.assertFalse(any(s["type"] == "wait" and s.get("delayMs", 0) <= 0 for s in plan))
         self.assertLessEqual(sum(s.get("delayMs", 0) for s in plan), 240_000)
@@ -77,8 +85,9 @@ class EvidenceScoreTests(unittest.TestCase):
             }}]
         }))
         actions = [
-            {"action": "press", "button": "A", "label": "race-confirm", "finished_utc": "2026-10-18T00:00:00Z"},
-            {"action": "chord", "label": "route-end", "finished_utc": "2026-10-18T00:00:25Z"},
+            {"action": "guided_route", "label": "route-end",
+             "started_utc": "2026-10-18T00:00:00Z",
+             "finished_utc": "2026-10-18T00:00:35Z"},
         ]
         (root / "actions.json").write_text(json.dumps(actions))
         (root / "ocr.json").write_text(json.dumps({"menu-main": "MAIN MENU ARCADE RACE", "class-r": "SELECT CAR CLASS CLASS R"}))
@@ -86,6 +95,8 @@ class EvidenceScoreTests(unittest.TestCase):
             "max_speed_mph": 96,
             "minimap_displacement_pixels": 28.5,
             "observations": 8,
+            "readiness_wait_ms": 4800,
+            "ready_guide_pixels": 42,
         }))
 
     def test_complete_release_run_passes_all_dimensions(self):
@@ -99,7 +110,8 @@ class EvidenceScoreTests(unittest.TestCase):
             self.assertTrue(report["pass"])
             self.assertTrue(report["checks"]["world_completeness"]["pass"])
             self.assertEqual(report["checks"]["read_errors"]["failed_or_invalid"], 0)
-            self.assertEqual(report["timing"]["route_seconds"], 25.0)
+            self.assertEqual(report["timing"]["route_seconds"], 35.0)
+            self.assertTrue(report["checks"]["route_readiness"]["pass"])
         finally:
             td.cleanup()
 
@@ -157,6 +169,8 @@ class EvidenceScoreTests(unittest.TestCase):
                 "max_speed_mph": 47,
                 "minimap_displacement_pixels": 1.4,
                 "observations": 8,
+                "readiness_wait_ms": 4000,
+                "ready_guide_pixels": 30,
             }))
             for i in range(8): image(root / "screenshots" / f"route-{i:02}.png")
             report = score_evidence(root)
@@ -173,11 +187,28 @@ class EvidenceScoreTests(unittest.TestCase):
                 "max_speed_mph": 39,
                 "minimap_displacement_pixels": 30,
                 "observations": 8,
+                "readiness_wait_ms": 4000,
+                "ready_guide_pixels": 30,
             }))
             for i in range(8): image(root / "screenshots" / f"route-{i:02}.png")
             report = score_evidence(root)
             self.assertFalse(report["pass"])
             self.assertFalse(report["checks"]["route_progress"]["pass"])
+        finally:
+            td.cleanup()
+
+    def test_route_without_strong_consecutive_readiness_evidence_is_rejected(self):
+        td, root = self.make()
+        try:
+            self.write_common(root)
+            metrics = json.loads((root / "route-metrics.json").read_text())
+            metrics["ready_guide_pixels"] = 31
+            (root / "route-metrics.json").write_text(json.dumps(metrics))
+            for i in range(8):
+                image(root / "screenshots" / f"route-{i:02}.png")
+            report = score_evidence(root)
+            self.assertFalse(report["pass"])
+            self.assertFalse(report["checks"]["route_readiness"]["pass"])
         finally:
             td.cleanup()
 
@@ -218,6 +249,12 @@ class InputAdapterContractTests(unittest.TestCase):
         self.assertIn("if(throttleDown) Send(RTrigger,false,false)", cs)
         self.assertIn("route-live-", cs)
         self.assertIn("route-telemetry.jsonl", cs)
+        self.assertIn("ReadyTimeoutMs=60000", cs)
+        self.assertIn("readyConsecutive>=2", cs)
+        self.assertIn("if(count>=32)", cs)
+        self.assertIn("readiness_wait_ms", cs)
+        self.assertLess(cs.index("readyConsecutive>=2"),
+                        cs.index("Send(RTrigger,false,true)"))
         self.assertIn("'guided_route'", ps)
         self.assertIn("[DoaOwnedInput]::DriveGuided", ps)
 

@@ -49,14 +49,8 @@ def build_forza_plan() -> list[dict[str, Any]]:
           step("diagnostic", diagnosticId="forza-A-car-confirm"),
           step("wait", delayMs=7000), step("screenshot", name="assists"),
           step("diagnostic", diagnosticId="forza-A-assists-confirm"),
-          step("diagnostic", diagnosticId="forza-blockstats-load-start")]
-    for i in range(0, 41, 2):
-        if i:
-            p.append(step("wait", delayMs=2000))
-        p.append(step("screenshot", name=f"load-{i:02}"))
-    p += [step("diagnostic", diagnosticId="forza-blockstats-race-ready"),
-          step("diagnostic", diagnosticId="forza-A-race-confirm"),
-          step("wait", delayMs=5000), step("screenshot", name="route-00"),
+          step("diagnostic", diagnosticId="forza-blockstats-load-start"),
+          step("screenshot", name="load-start"),
           step("diagnostic", diagnosticId="forza-blockstats-route-start")]
     # Hold full throttle continuously while a deterministic image-feedback
     # loop applies short digital steering pulses toward Forza's suggested line.
@@ -151,12 +145,19 @@ def score_evidence(root: Path) -> dict[str, Any]:
     # while accepting a conservative R-class pass through the opening sector.
     progress_ok = max_speed >= 40 and map_displacement >= 12 and progress_observations >= 8
 
-    first = next((x for x in actions if x.get("label") == "race-confirm"), None)
-    last = next((x for x in reversed(actions) if x.get("label") == "route-end"), None)
+    readiness_wait = route_metrics.get("readiness_wait_ms")
+    ready_pixels = int(route_metrics.get("ready_guide_pixels", 0) or 0)
+    readiness_ok = (isinstance(readiness_wait, (int, float))
+                    and 0 <= readiness_wait <= 60000 and ready_pixels >= 32)
+
+    route_action = next((x for x in actions
+                         if x.get("action") == "guided_route"
+                         and x.get("label") == "route-end"), None)
     route_seconds = None
-    if first and last:
-        route_seconds = (_parse_time(last["finished_utc"]) - _parse_time(first["finished_utc"])).total_seconds()
-    timing_ok = route_seconds is not None and 10 <= route_seconds <= 90
+    if route_action:
+        route_seconds = (_parse_time(route_action["finished_utc"])
+                         - _parse_time(route_action["started_utc"])).total_seconds()
+    timing_ok = route_seconds is not None and 30 <= route_seconds <= 100
 
     checks = {
         "process_and_crash": {"pass": process_ok, "status": result.get("status"),
@@ -168,6 +169,9 @@ def score_evidence(root: Path) -> dict[str, Any]:
         "route_progress": {"pass": progress_ok, "max_speed_mph": max_speed,
                            "minimap_displacement_pixels": map_displacement,
                            "observations": progress_observations},
+        "route_readiness": {"pass": readiness_ok,
+                            "readiness_wait_ms": readiness_wait,
+                            "ready_guide_pixels": ready_pixels},
         "corruption_and_log_errors": {"pass": not errors, "matches": errors},
         "read_errors": {"pass": failed + invalid == 0 and read_ops > 0,
                         "failed_or_invalid": failed + invalid, "read_operations": read_ops,

@@ -34,13 +34,19 @@ class FinalizeReleaseJobsTests(unittest.TestCase):
 
     def _write_base(self, root):
         job = copy.deepcopy(self.base)
+        replacements = {}
         for row in job["inputs"]:
             if row["path"] == "flash.bin":
                 continue
             path = root / row["path"]
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(("fixture:" + row["path"]).encode())
+            replacements[row["expectedSha256"]] = hashlib.sha256(path.read_bytes()).hexdigest()
             row["expectedSha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        encoded = json.dumps(job)
+        for old, new in replacements.items():
+            encoded = encoded.replace(old, new)
+        job = json.loads(encoded)
         hashes = {row["path"]: row["expectedSha256"] for row in job["inputs"]}
         job["expectedExecutableSha256"] = hashes["native-launch.exe"]
         job["runtimeState"]["files"][0]["expectedSha256"] = hashes["state/eeprom.bin"]
@@ -103,6 +109,16 @@ class FinalizeReleaseJobsTests(unittest.TestCase):
             )
             self.assertEqual((out / "packages" / "forza" / "flash.bin").read_bytes(),
                              flash.read_bytes())
+            owned_input = out / "packages" / "forza" / "owned-child-input.cs"
+            self.assertEqual(owned_input.read_bytes(), (ROOT / "route_input.cs").read_bytes())
+            forza_job = json.loads((out / "packages" / "forza" / "job.json").read_text())
+            declared = next(row["expectedSha256"] for row in forza_job["inputs"]
+                            if row["path"] == "owned-child-input.cs")
+            self.assertEqual(declared, hashlib.sha256(owned_input.read_bytes()).hexdigest())
+            guided = next(row for row in forza_job["diagnostics"]
+                          if row["id"] == "forza-guided-route")
+            self.assertGreaterEqual(guided["durationMs"], 100_000)
+            self.assertIn(declared, json.dumps(guided))
             create_job = json.loads((out / "packages" / "pgr2-create" / "job.json").read_text())
             self.assertTrue(create_job["runtimeState"]["keepOnSuccess"])
             self.assertEqual(create_job["runtimeState"]["diskAssets"][0]["assetId"],

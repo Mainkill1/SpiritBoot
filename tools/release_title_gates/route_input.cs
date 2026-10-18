@@ -82,6 +82,7 @@ public static class DoaOwnedInput {
     }
     public static void DriveGuided(int pid,long ticks,int session,string exe,string outputDir,int durationMs) {
         const ushort RTrigger=0x18, LStickLeft=0x1f, LStickRight=0x21;
+        const int ReadyTimeoutMs=60000;
         if(durationMs<10000 || durationMs>45000 || String.IsNullOrEmpty(outputDir)) throw new InvalidOperationException("Invalid guided route request");
         outputDir=Path.GetFullPath(outputDir); Directory.CreateDirectory(outputDir);
         IntPtr window=OwnedWindow(pid,ticks,session,exe);
@@ -89,8 +90,27 @@ public static class DoaOwnedInput {
         if(OwnedWindow(pid,ticks,session,exe)!=window) throw new InvalidOperationException("Owned window changed before route");
         int focused; GetWindowThreadProcessId(GetForegroundWindow(),out focused);
         if(focused!=pid || GetForegroundWindow()!=window) throw new InvalidOperationException("Owned child focus was not granted; no route sent");
-        Stopwatch timer=Stopwatch.StartNew(); bool throttleDown=false,steerDown=false; ushort steer=0; int frame=0; long nextCapture=0;
         string telemetry=Path.Combine(outputDir,"route-telemetry.jsonl");
+        Stopwatch readyTimer=Stopwatch.StartNew(); int readyConsecutive=0,readyPixels=0,readyOffset=0,waitFrame=0; long nextWaitCapture=0;
+        while(readyTimer.ElapsedMilliseconds<ReadyTimeoutMs && readyConsecutive<2) {
+            using(Bitmap bitmap=CaptureClient(window)) {
+                int count; int offset=GuideOffset(bitmap,out count);
+                if(readyTimer.ElapsedMilliseconds>=nextWaitCapture) {
+                    string path=Path.Combine(outputDir,"load-wait-"+waitFrame.ToString("D2",CultureInfo.InvariantCulture)+".png");
+                    bitmap.Save(path,ImageFormat.Png); waitFrame++; nextWaitCapture+=5000;
+                }
+                if(count>=32) { readyConsecutive++; readyPixels=count; readyOffset=offset; }
+                else readyConsecutive=0;
+                if(readyConsecutive>=2) bitmap.Save(Path.Combine(outputDir,"route-ready.png"),ImageFormat.Png);
+            }
+            if(readyConsecutive<2) Thread.Sleep(100);
+        }
+        if(readyConsecutive<2) throw new TimeoutException("Forza route guide did not appear within bounded readiness wait");
+        File.AppendAllText(telemetry,String.Format(CultureInfo.InvariantCulture,"{{\"phase\":\"ready\",\"readiness_wait_ms\":{0},\"guide_offset\":{1},\"guide_pixels\":{2}}}\n",readyTimer.ElapsedMilliseconds,readyOffset,readyPixels));
+        if(OwnedWindow(pid,ticks,session,exe)!=window) throw new InvalidOperationException("Owned window changed during readiness wait");
+        SetForegroundWindow(window); Thread.Sleep(30); GetWindowThreadProcessId(GetForegroundWindow(),out focused);
+        if(focused!=pid || GetForegroundWindow()!=window) throw new InvalidOperationException("Owned child focus was not granted after readiness wait; no route sent");
+        Stopwatch timer=Stopwatch.StartNew(); bool throttleDown=false,steerDown=false; ushort steer=0; int frame=0; long nextCapture=0;
         try {
             Send(RTrigger,false,true); throttleDown=true;
             while(timer.ElapsedMilliseconds<durationMs) {
@@ -107,7 +127,7 @@ public static class DoaOwnedInput {
                     Send(steer,false,true); steerDown=true; Thread.Sleep(Math.Min(55,25+Math.Abs(offset)/12));
                     Send(steer,false,false); steerDown=false;
                 }
-                File.AppendAllText(telemetry,String.Format(CultureInfo.InvariantCulture,"{{\"elapsed_ms\":{0},\"guide_offset\":{1},\"guide_pixels\":{2},\"steer\":\"{3}\"}}\n",timer.ElapsedMilliseconds,offset,count,action));
+                File.AppendAllText(telemetry,String.Format(CultureInfo.InvariantCulture,"{{\"phase\":\"drive\",\"elapsed_ms\":{0},\"guide_offset\":{1},\"guide_pixels\":{2},\"steer\":\"{3}\"}}\n",timer.ElapsedMilliseconds,offset,count,action));
                 Thread.Sleep(65);
             }
         }

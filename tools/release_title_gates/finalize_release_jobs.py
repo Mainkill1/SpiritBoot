@@ -25,6 +25,11 @@ from release_title_routes import (
 
 TITLE_ORDER = ("pgr2-create", "forza", "halo2-a", "halo2-b", "doa-create")
 SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+TOOL_DIR = Path(__file__).resolve().parent
+OWNED_TOOL_SOURCES = {
+    "owned-child-actions.ps1": TOOL_DIR / "route_actions.ps1",
+    "owned-child-input.cs": TOOL_DIR / "route_input.cs",
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -83,6 +88,20 @@ def _shot_checks(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
     } for row in plan if row.get("type") == "screenshot"]
 
 
+def _refresh_owned_tools(job: dict[str, Any]) -> dict[str, Any]:
+    result = job
+    for target, source in OWNED_TOOL_SOURCES.items():
+        if source.is_symlink() or not source.is_file():
+            raise ValueError("owned tool source must be a regular, non-linked file: " + target)
+        row = next((item for item in result["inputs"] if item["path"] == target), None)
+        if row is None:
+            raise ValueError("base package does not declare owned tool: " + target)
+        old_sha = row["expectedSha256"]
+        new_sha = sha256_file(source)
+        result = _replace_firmware(result, old_sha, new_sha)
+    return result
+
+
 def _title_definition(contract: dict[str, Any], title: str) -> tuple[list[dict[str, Any]], dict, dict, str, int]:
     titles = contract["titles"]
     if title == "pgr2-create":
@@ -93,7 +112,7 @@ def _title_definition(contract: dict[str, Any], title: str) -> tuple[list[dict[s
         return build_pgr2_cold_race_plan(), row["phase_two_hdd"], row["disc"], "deleteAfterEvidence", 210
     if title == "forza":
         row = titles["forza"]
-        return build_forza_plan(), row["hdd"], row["disc"], "deleteAfterEvidence", 330
+        return build_forza_plan(), row["hdd"], row["disc"], "deleteAfterEvidence", 390
     if title in ("halo2-a", "halo2-b"):
         row = titles["halo2"]
         return build_halo2_menu_plan(), row["hdd"], row["disc"], "deleteAfterEvidence", 120
@@ -116,6 +135,7 @@ def build_title_job(base_job: dict[str, Any], contract: dict[str, Any], title: s
     old_flash = next(row["expectedSha256"] for row in base_job["inputs"]
                      if row["path"] == "flash.bin")
     job = _replace_firmware(copy.deepcopy(base_job), old_flash, firmware["sha256"])
+    job = _refresh_owned_tools(job)
     job["id"] = f"sb-{candidate_id}-{title}-release64"
     job["timeoutSeconds"] = timeout
     job["tags"] = ["SPIRITBOOT", "RELEASE64", "FRESH-PROCESS", "PRIVATE-HDD-COPY",
@@ -124,6 +144,8 @@ def build_title_job(base_job: dict[str, Any], contract: dict[str, Any], title: s
 
     if title == "forza":
         diagnostics = job["diagnostics"]
+        guided = next(row for row in diagnostics if row.get("id") == "forza-guided-route")
+        guided["durationMs"] = 105000
     elif title == "doa-create":
         template = next(row for row in job["diagnostics"] if row.get("type") == "qmp")
         diagnostics = []
@@ -200,12 +222,23 @@ def _stage_package(base_package: Path, target: Path, flash: Path,
         if not source.is_file() or source.name in ("job.json", "flash.bin"):
             continue
         relative = source.relative_to(base_package)
+        if relative.as_posix() in OWNED_TOOL_SOURCES:
+            continue
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
             os.link(source, destination)
         except OSError:
             shutil.copy2(source, destination)
+    declared = {row["path"]: row["expectedSha256"] for row in job["inputs"]}
+    for name, source in OWNED_TOOL_SOURCES.items():
+        actual = sha256_file(source)
+        if declared.get(name) != actual:
+            raise ValueError("owned tool differs from finalized job hash: " + name)
+        destination = target / name
+        shutil.copy2(source, destination)
+        if sha256_file(destination) != actual:
+            raise ValueError("staged owned tool failed hash verification: " + name)
     shutil.copy2(flash, target / "flash.bin")
     (target / "job.json").write_text(json.dumps(job, indent=2) + "\n")
     (target / "validator-spec.json").write_text(json.dumps(spec, indent=2) + "\n")
