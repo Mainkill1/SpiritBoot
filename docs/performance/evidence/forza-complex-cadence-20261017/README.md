@@ -34,6 +34,11 @@ original-fixture 250 µs rates by 18.3% / 12.3% versus A2, with every oracle
 passing. It remains below Complex, and one observation does not resolve the
 run-to-run variation.
 
+A [separate initial-poll-budget comparison](initial-poll/README.md) now also
+charges the initial alertable wait and compares baseline, 0168 and Complex.
+Its contract and all eight results are archived separately; it remains a
+generated workload, not a world-streaming acceptance test.
+
 ## What ran
 
 The [owned release fixture](../../../../tests/xbe/forza-callback-cadence/README.md)

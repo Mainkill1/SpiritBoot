@@ -1,0 +1,829 @@
+TAP version 13
+1..10
+# FORZA-PUMP-META version=1 frequency=3374488 seconds=10 cases=8 depth=8 buffers=16 frame_ms=33 route=NtUserIoApcDispatcher budgets=synthetic_hypothesis oracle=full_bytes_before_reuse
+# FORZA-PUMP-MM index=0 input=00000000 status=c000000d length=00000000 total=a5a5a5a5 available=a5a5a5a5 committed=a5a5a5a5 reserved=a5a5a5a5 cache=a5a5a5a5 pool=a5a5a5a5 stack=a5a5a5a5 image=a5a5a5a5 pre0=a5a5a5a5 pre1=a5a5a5a5 pre2=a5a5a5a5 pre3=a5a5a5a5 post0=a5a5a5a5 post1=a5a5a5a5 post2=a5a5a5a5 post3=a5a5a5a5
+# FORZA-PUMP-MM index=1 input=00000001 status=c000000d length=00000001 total=a5a5a5a5 available=a5a5a5a5 committed=a5a5a5a5 reserved=a5a5a5a5 cache=a5a5a5a5 pool=a5a5a5a5 stack=a5a5a5a5 image=a5a5a5a5 pre0=a5a5a5a5 pre1=a5a5a5a5 pre2=a5a5a5a5 pre3=a5a5a5a5 post0=a5a5a5a5 post1=a5a5a5a5 post2=a5a5a5a5 post3=a5a5a5a5
+# FORZA-PUMP-MM index=2 input=00000023 status=c000000d length=00000023 total=a5a5a5a5 available=a5a5a5a5 committed=a5a5a5a5 reserved=a5a5a5a5 cache=a5a5a5a5 pool=a5a5a5a5 stack=a5a5a5a5 image=a5a5a5a5 pre0=a5a5a5a5 pre1=a5a5a5a5 pre2=a5a5a5a5 pre3=a5a5a5a5 post0=a5a5a5a5 post1=a5a5a5a5 post2=a5a5a5a5 post3=a5a5a5a5
+# FORZA-PUMP-MM index=3 input=00000024 status=00000000 length=00000024 total=00004000 available=00003f10 committed=00029000 reserved=00029000 cache=00000010 pool=0000003e stack=00000025 image=00000019 pre0=a5a5a5a5 pre1=a5a5a5a5 pre2=a5a5a5a5 pre3=a5a5a5a5 post0=a5a5a5a5 post1=a5a5a5a5 post2=a5a5a5a5 post3=a5a5a5a5
+# FORZA-PUMP-MM index=4 input=00000025 status=c000000d length=00000025 total=a5a5a5a5 available=a5a5a5a5 committed=a5a5a5a5 reserved=a5a5a5a5 cache=a5a5a5a5 pool=a5a5a5a5 stack=a5a5a5a5 image=a5a5a5a5 pre0=a5a5a5a5 pre1=a5a5a5a5 pre2=a5a5a5a5 pre3=a5a5a5a5 post0=a5a5a5a5 post1=a5a5a5a5 post2=a5a5a5a5 post3=a5a5a5a5
+# FORZA-PUMP-MM index=5 input=c1008c48 status=c000000d length=c1008c48 total=a5a5a5a5 available=a5a5a5a5 committed=a5a5a5a5 reserved=a5a5a5a5 cache=a5a5a5a5 pool=a5a5a5a5 stack=a5a5a5a5 image=a5a5a5a5 pre0=a5a5a5a5 pre1=a5a5a5a5 pre2=a5a5a5a5 pre3=a5a5a5a5 post0=a5a5a5a5 post1=a5a5a5a5 post2=a5a5a5a5 post3=a5a5a5a5
+# FORZA-PUMP-MM index=6 input=ffffffff status=c000000d length=ffffffff total=a5a5a5a5 available=a5a5a5a5 committed=a5a5a5a5 reserved=a5a5a5a5 cache=a5a5a5a5 pool=a5a5a5a5 stack=a5a5a5a5 image=a5a5a5a5 pre0=a5a5a5a5 pre1=a5a5a5a5 pre2=a5a5a5a5 pre3=a5a5a5a5 post0=a5a5a5a5 post1=a5a5a5a5 post2=a5a5a5a5 post3=a5a5a5a5
+ok 1 - statistics queries preserve surrounding canaries; statuses are observations
+ok 2 - private generated file setup
+# FORZA-PUMP-BEGIN id=0 pages=783 budget_us=250 seconds=10
+# FORZA-PUMP-CASE id=0 target=783 before=783 after=783 budget_us=250 operations=677 verified=677 callbacks=677 bytes=22389760 elapsed=33865130 frames=268 high_water=8 failures=0
+# FORZA-PUMP-TIMING id=0 pending=677 budget_stops=265 empty_immediate=479 pair_same=215 pair_split=123 pair_gap_sum=15493259 pair_gap_max=133240 burst_sum=307791 burst_max=8678 poll_sum=9211 initial_sum=10622 initial_max=771 initial_callbacks=402 zero_issue_frames=1
+# FORZA-PUMP-SIZE id=0 bytes=65536 count=339 submit_sum=149641 submit_max=6651 callback_sum=26258814 callback_max=223468
+# FORZA-PUMP-SIZE id=0 bytes=512 count=338 submit_sum=130075 submit_max=1734 callback_sum=24528578 callback_max=139153
+# FORZA-PUMP-OP id=0 seq=0 slot=0 bytes=65536 offset=0 frame=1 issue=13063635 returned=13070286 callback=13071263 burst=13063504 checked=13063523 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=1 slot=1 bytes=512 offset=65536 frame=2 issue=13195621 returned=13196939 callback=13324043 burst=13195569 checked=13195586 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=2 slot=0 bytes=65536 offset=4587520 frame=3 issue=13324081 returned=13325048 callback=13447545 burst=13324018 checked=13324079 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=3 slot=1 bytes=512 offset=4653056 frame=4 issue=13447557 returned=13448897 callback=13571530 burst=13447518 checked=13447556 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=4 slot=0 bytes=65536 offset=851968 frame=5 issue=13571542 returned=13572740 callback=13697088 burst=13571505 checked=13571540 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=5 slot=1 bytes=512 offset=917504 frame=6 issue=13697103 returned=13697687 callback=13698320 burst=13697054 checked=13697100 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=6 slot=2 bytes=65536 offset=5439488 frame=6 issue=13697705 returned=13698312 callback=13820902 burst=13697054 checked=13697705 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=7 slot=0 bytes=512 offset=5505024 frame=7 issue=13820922 returned=13821623 callback=13949176 burst=13820852 checked=13820919 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=8 slot=1 bytes=65536 offset=1703936 frame=8 issue=13949198 returned=13950276 callback=14069669 burst=13949132 checked=13949196 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=9 slot=0 bytes=512 offset=1769472 frame=9 issue=14069690 returned=14070492 callback=14193838 burst=14069631 checked=14069687 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=10 slot=1 bytes=65536 offset=6291456 frame=10 issue=14193852 returned=14194295 callback=14195387 burst=14193812 checked=14193850 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=11 slot=2 bytes=512 offset=6356992 frame=10 issue=14194308 returned=14195379 callback=14316527 burst=14193812 checked=14194307 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=12 slot=0 bytes=65536 offset=2555904 frame=11 issue=14316541 returned=14316940 callback=14438954 burst=14316499 checked=14316540 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=13 slot=3 bytes=512 offset=2621440 frame=11 issue=14316952 returned=14317614 callback=14438961 burst=14316499 checked=14316951 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=14 slot=1 bytes=65536 offset=7143424 frame=12 issue=14438969 returned=14439379 callback=14439787 burst=14438923 checked=14438967 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=15 slot=2 bytes=512 offset=7208960 frame=12 issue=14439423 returned=14439780 callback=14564162 burst=14438923 checked=14439422 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=16 slot=0 bytes=65536 offset=3407872 frame=13 issue=14564171 returned=14565312 callback=14689449 burst=14564139 checked=14564170 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=17 slot=1 bytes=512 offset=3473408 frame=14 issue=14689467 returned=14690400 callback=14690410 burst=14689412 checked=14689465 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=18 slot=0 bytes=65536 offset=7995392 frame=15 issue=14813411 returned=14813841 callback=14814750 burst=14813394 checked=14813409 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=19 slot=2 bytes=512 offset=8060928 frame=15 issue=14813851 returned=14813955 callback=14814756 burst=14813394 checked=14813851 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=20 slot=3 bytes=65536 offset=4259840 frame=15 issue=14813961 returned=14814578 callback=14814758 burst=14813394 checked=14813960 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=21 slot=1 bytes=512 offset=4325376 frame=16 issue=14938236 returned=14938573 callback=14938952 burst=14938219 checked=14938234 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=22 slot=4 bytes=65536 offset=524288 frame=16 issue=14938582 returned=14938940 callback=14939288 burst=14938219 checked=14938581 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=23 slot=5 bytes=512 offset=589824 frame=16 issue=14938962 returned=14939282 callback=15067360 burst=14938219 checked=14938961 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=24 slot=0 bytes=65536 offset=5111808 frame=17 issue=15067376 returned=15067890 callback=15192643 burst=15067327 checked=15067374 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=25 slot=1 bytes=512 offset=5177344 frame=17 issue=15067906 returned=15068012 callback=15192651 burst=15067327 checked=15067905 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=26 slot=2 bytes=65536 offset=1376256 frame=17 issue=15068019 returned=15068096 callback=15192655 burst=15067327 checked=15068018 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=27 slot=3 bytes=512 offset=1441792 frame=17 issue=15068100 returned=15068525 callback=15192658 burst=15067327 checked=15068099 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=28 slot=4 bytes=65536 offset=5963776 frame=18 issue=15192669 returned=15193267 callback=15320223 burst=15192608 checked=15192666 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=29 slot=5 bytes=512 offset=6029312 frame=18 issue=15193281 returned=15193394 callback=15320228 burst=15192608 checked=15193280 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=30 slot=0 bytes=65536 offset=2228224 frame=19 issue=15320240 returned=15320600 callback=15320911 burst=15320197 checked=15320238 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=31 slot=1 bytes=512 offset=2293760 frame=19 issue=15320613 returned=15320905 callback=15321941 burst=15320197 checked=15320612 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=32 slot=2 bytes=65536 offset=6815744 frame=19 issue=15320916 returned=15321935 callback=15447755 burst=15320197 checked=15320916 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=33 slot=0 bytes=512 offset=6881280 frame=20 issue=15447770 returned=15448219 callback=15448650 burst=15447723 checked=15447768 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=34 slot=3 bytes=65536 offset=3080192 frame=20 issue=15448233 returned=15448644 callback=15579745 burst=15447723 checked=15448232 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=35 slot=1 bytes=512 offset=3145728 frame=21 issue=15579763 returned=15581217 callback=15581232 burst=15579700 checked=15579761 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=36 slot=0 bytes=65536 offset=7667712 frame=22 issue=15706457 returned=15707193 callback=15707607 burst=15706441 checked=15706456 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=37 slot=2 bytes=512 offset=7733248 frame=22 issue=15707206 returned=15707592 callback=15829014 burst=15706441 checked=15707205 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=38 slot=1 bytes=65536 offset=3932160 frame=23 issue=15829029 returned=15829506 callback=15830227 burst=15828983 checked=15829025 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=39 slot=3 bytes=512 offset=3997696 frame=23 issue=15829518 returned=15830217 callback=15830231 burst=15828983 checked=15829518 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=40 slot=0 bytes=65536 offset=196608 frame=24 issue=15956294 returned=15956620 callback=16079696 burst=15956278 checked=15956293 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=41 slot=2 bytes=512 offset=262144 frame=24 issue=15956629 returned=15956724 callback=16079705 burst=15956278 checked=15956628 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=42 slot=4 bytes=65536 offset=4784128 frame=24 issue=15956736 returned=15956811 callback=16079708 burst=15956278 checked=15956735 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=43 slot=5 bytes=512 offset=4849664 frame=24 issue=15956815 returned=15956880 callback=16079711 burst=15956278 checked=15956814 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=44 slot=6 bytes=65536 offset=1048576 frame=24 issue=15956884 returned=15956961 callback=16079838 burst=15956278 checked=15956883 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=45 slot=7 bytes=512 offset=1114112 frame=24 issue=15956965 returned=15957035 callback=16079841 burst=15956278 checked=15956964 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=46 slot=8 bytes=65536 offset=5636096 frame=24 issue=15957039 returned=15957111 callback=16079843 burst=15956278 checked=15957039 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=47 slot=9 bytes=512 offset=5701632 frame=24 issue=15957114 returned=15957201 callback=16079846 burst=15956278 checked=15957114 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=48 slot=1 bytes=65536 offset=1900544 frame=25 issue=16079856 returned=16080351 callback=16208278 burst=16079660 checked=16079853 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=49 slot=3 bytes=512 offset=1966080 frame=25 issue=16080368 returned=16080478 callback=16208285 burst=16079660 checked=16080366 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=50 slot=10 bytes=65536 offset=6488064 frame=25 issue=16080483 returned=16080558 callback=16208287 burst=16079660 checked=16080483 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=51 slot=0 bytes=512 offset=6553600 frame=26 issue=16208296 returned=16208679 callback=16209093 burst=16208251 checked=16208295 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=52 slot=2 bytes=65536 offset=2752512 frame=26 issue=16208694 returned=16209087 callback=16334961 burst=16208251 checked=16208694 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=53 slot=1 bytes=512 offset=2818048 frame=27 issue=16334973 returned=16335275 callback=16335601 burst=16334942 checked=16334971 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=54 slot=3 bytes=65536 offset=7340032 frame=27 issue=16335287 returned=16335596 callback=16335859 burst=16334942 checked=16335286 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=55 slot=4 bytes=512 offset=7405568 frame=27 issue=16335606 returned=16335854 callback=16463500 burst=16334942 checked=16335605 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=56 slot=0 bytes=65536 offset=3604480 frame=28 issue=16463520 returned=16464103 callback=16464971 burst=16463466 checked=16463518 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=57 slot=1 bytes=512 offset=3670016 frame=28 issue=16464117 returned=16464225 callback=16464974 burst=16463466 checked=16464117 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=58 slot=2 bytes=65536 offset=8192000 frame=28 issue=16464231 returned=16464304 callback=16464976 burst=16463466 checked=16464230 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=59 slot=5 bytes=512 offset=8257536 frame=28 issue=16464308 returned=16464963 callback=16589731 burst=16463466 checked=16464307 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=60 slot=3 bytes=65536 offset=4456448 frame=29 issue=16589743 returned=16590399 callback=16590738 burst=16589709 checked=16589741 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=61 slot=4 bytes=512 offset=4521984 frame=29 issue=16590412 returned=16590731 callback=16717488 burst=16589709 checked=16590411 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=62 slot=0 bytes=65536 offset=720896 frame=30 issue=16717499 returned=16717858 callback=16718187 burst=16717466 checked=16717498 status=00000103 calls=1
+# FORZA-PUMP-OP id=0 seq=63 slot=1 bytes=512 offset=786432 frame=30 issue=16717872 returned=16718180 callback=16718402 burst=16717466 checked=16717871 status=00000103 calls=1
+# FORZA-PUMP-FRAME id=0 frame=0 begin=12933697 end=12934725 issued=0 before=0 after_initial=0 after=0 budget_hit=1 submit_ticks=0 poll_ticks=0 initial_return=12934468 initial_ticks=771 initial_callbacks=0
+# FORZA-PUMP-FRAME id=0 frame=1 begin=13063504 end=13072182 issued=1 before=0 after_initial=0 after=0 budget_hit=1 submit_ticks=6651 poll_ticks=1558 initial_return=13063521 initial_ticks=17 initial_callbacks=0
+# FORZA-PUMP-FRAME id=0 frame=2 begin=13195569 end=13197293 issued=1 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=1318 poll_ticks=7 initial_return=13195584 initial_ticks=15 initial_callbacks=0
+# FORZA-PUMP-FRAME id=0 frame=3 begin=13324018 end=13325060 issued=1 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=967 poll_ticks=7 initial_return=13324077 initial_ticks=59 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=4 begin=13447518 end=13449165 issued=1 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1340 poll_ticks=189 initial_return=13447554 initial_ticks=36 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=5 begin=13571505 end=13572754 issued=1 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1198 poll_ticks=7 initial_return=13571539 initial_ticks=34 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=6 begin=13697054 end=13698326 issued=2 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1191 poll_ticks=19 initial_return=13697098 initial_ticks=44 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=7 begin=13820852 end=13821931 issued=1 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=701 poll_ticks=299 initial_return=13820917 initial_ticks=65 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=8 begin=13949132 end=13950294 issued=1 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1078 poll_ticks=12 initial_return=13949192 initial_ticks=60 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=9 begin=14069631 end=14070947 issued=1 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=802 poll_ticks=448 initial_return=14069684 initial_ticks=53 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=10 begin=14193812 end=14195421 issued=2 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1514 poll_ticks=17 initial_return=14193848 initial_ticks=36 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=11 begin=14316499 end=14317622 issued=2 before=1 after_initial=0 after=2 budget_hit=1 submit_ticks=1061 poll_ticks=11 initial_return=14316538 initial_ticks=39 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=12 begin=14438923 end=14439793 issued=2 before=2 after_initial=0 after=1 budget_hit=1 submit_ticks=767 poll_ticks=46 initial_return=14438966 initial_ticks=43 initial_callbacks=2
+# FORZA-PUMP-FRAME id=0 frame=13 begin=14564139 end=14565324 issued=1 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1141 poll_ticks=7 initial_return=14564169 initial_ticks=30 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=14 begin=14689412 end=14690421 issued=1 before=1 after_initial=0 after=0 budget_hit=1 submit_ticks=933 poll_ticks=13 initial_return=14689462 initial_ticks=50 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=15 begin=14813394 end=14814765 issued=3 before=0 after_initial=0 after=0 budget_hit=1 submit_ticks=1151 poll_ticks=191 initial_return=14813408 initial_ticks=14 initial_callbacks=0
+# FORZA-PUMP-FRAME id=0 frame=16 begin=14938219 end=14939294 issued=3 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=1015 poll_ticks=32 initial_return=14938233 initial_ticks=14 initial_callbacks=0
+# FORZA-PUMP-FRAME id=0 frame=17 begin=15067327 end=15068531 issued=4 before=1 after_initial=0 after=4 budget_hit=1 submit_ticks=1122 poll_ticks=17 initial_return=15067372 initial_ticks=45 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=18 begin=15192608 end=15193662 issued=2 before=4 after_initial=0 after=2 budget_hit=1 submit_ticks=711 poll_ticks=10 initial_return=15192664 initial_ticks=56 initial_callbacks=4
+# FORZA-PUMP-FRAME id=0 frame=19 begin=15320197 end=15321946 issued=3 before=2 after_initial=0 after=1 budget_hit=1 submit_ticks=1671 poll_ticks=23 initial_return=15320235 initial_ticks=38 initial_callbacks=2
+# FORZA-PUMP-FRAME id=0 frame=20 begin=15447723 end=15448656 issued=2 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=860 poll_ticks=18 initial_return=15447766 initial_ticks=43 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=21 begin=15579700 end=15581245 issued=1 before=1 after_initial=0 after=0 budget_hit=1 submit_ticks=1454 poll_ticks=18 initial_return=15579759 initial_ticks=59 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=22 begin=15706441 end=15707620 issued=2 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=1122 poll_ticks=29 initial_return=15706455 initial_ticks=14 initial_callbacks=0
+# FORZA-PUMP-FRAME id=0 frame=23 begin=15828983 end=15830241 issued=2 before=1 after_initial=0 after=0 budget_hit=1 submit_ticks=1176 poll_ticks=24 initial_return=15829023 initial_ticks=40 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=24 begin=15956278 end=15957338 issued=8 before=0 after_initial=0 after=8 budget_hit=0 submit_ticks=867 poll_ticks=26 initial_return=15956292 initial_ticks=14 initial_callbacks=0
+# FORZA-PUMP-FRAME id=0 frame=25 begin=16079660 end=16080563 issued=3 before=8 after_initial=0 after=3 budget_hit=1 submit_ticks=680 poll_ticks=16 initial_return=16079851 initial_ticks=191 initial_callbacks=8
+# FORZA-PUMP-FRAME id=0 frame=26 begin=16208251 end=16209099 issued=2 before=3 after_initial=0 after=1 budget_hit=1 submit_ticks=776 poll_ticks=17 initial_return=16208293 initial_ticks=42 initial_callbacks=3
+# FORZA-PUMP-FRAME id=0 frame=27 begin=16334942 end=16335864 issued=3 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=859 poll_ticks=21 initial_return=16334970 initial_ticks=28 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=28 begin=16463466 end=16464982 issued=4 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1419 poll_ticks=29 initial_return=16463515 initial_ticks=49 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=29 begin=16589709 end=16590745 issued=2 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=975 poll_ticks=16 initial_return=16589740 initial_ticks=31 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=30 begin=16717466 end=16718406 issued=3 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=801 poll_ticks=93 initial_return=16717497 initial_ticks=31 initial_callbacks=1
+# FORZA-PUMP-FRAME id=0 frame=31 begin=16843441 end=16844292 issued=4 before=1 after_initial=0 after=4 budget_hit=1 submit_ticks=771 poll_ticks=14 initial_return=16843488 initial_ticks=47 initial_callbacks=1
+ok 3 - bounded submission bursts preserve callback and byte contracts
+# FORZA-PUMP-BEGIN id=1 pages=783 budget_us=450 seconds=10
+# FORZA-PUMP-CASE id=1 target=783 before=783 after=783 budget_us=450 operations=1363 verified=1363 callbacks=1363 bytes=45044224 elapsed=33980627 frames=261 high_water=8 failures=0
+# FORZA-PUMP-TIMING id=1 pending=1363 budget_stops=201 empty_immediate=926 pair_same=527 pair_split=154 pair_gap_sum=19981077 pair_gap_max=143889 burst_sum=435899 burst_max=3148 poll_sum=16818 initial_sum=11045 initial_max=100 initial_callbacks=675 zero_issue_frames=0
+# FORZA-PUMP-SIZE id=1 bytes=65536 count=682 submit_sum=211491 submit_max=1885 callback_sum=49510584 callback_max=225985
+# FORZA-PUMP-SIZE id=1 bytes=512 count=681 submit_sum=185034 submit_max=2033 callback_sum=37484039 callback_max=137991
+# FORZA-PUMP-OP id=1 seq=0 slot=0 bytes=65536 offset=0 frame=0 issue=47134209 returned=47135711 callback=47256878 burst=47134188 checked=47134206 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=1 slot=1 bytes=512 offset=65536 frame=1 issue=47256894 returned=47257431 callback=47257900 burst=47256845 checked=47256893 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=2 slot=2 bytes=65536 offset=4587520 frame=1 issue=47257444 returned=47257892 callback=47258197 burst=47256845 checked=47257443 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=3 slot=3 bytes=512 offset=4653056 frame=1 issue=47257906 returned=47258191 callback=47258200 burst=47256845 checked=47257905 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=4 slot=4 bytes=65536 offset=851968 frame=1 issue=47258204 returned=47259172 callback=47385502 burst=47256845 checked=47258203 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=5 slot=0 bytes=512 offset=917504 frame=2 issue=47385516 returned=47385959 callback=47386370 burst=47385477 checked=47385515 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=6 slot=1 bytes=65536 offset=5439488 frame=2 issue=47385973 returned=47386363 callback=47386645 burst=47385477 checked=47385972 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=7 slot=2 bytes=512 offset=5505024 frame=2 issue=47386375 returned=47386639 callback=47386647 burst=47385477 checked=47386374 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=8 slot=3 bytes=65536 offset=1703936 frame=2 issue=47386651 returned=47386768 callback=47387131 burst=47385477 checked=47386650 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=9 slot=5 bytes=512 offset=1769472 frame=2 issue=47386773 returned=47386848 callback=47387133 burst=47385477 checked=47386772 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=10 slot=6 bytes=65536 offset=6291456 frame=2 issue=47386853 returned=47387126 callback=47513819 burst=47385477 checked=47386852 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=11 slot=0 bytes=512 offset=6356992 frame=3 issue=47513840 returned=47515873 callback=47642012 burst=47513773 checked=47513837 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=12 slot=1 bytes=65536 offset=2555904 frame=4 issue=47642031 returned=47642752 callback=47643319 burst=47641970 checked=47642029 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=13 slot=2 bytes=512 offset=2621440 frame=4 issue=47642772 returned=47643311 callback=47643323 burst=47641970 checked=47642771 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=14 slot=3 bytes=65536 offset=7143424 frame=4 issue=47643329 returned=47643484 callback=47768838 burst=47641970 checked=47643328 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=15 slot=0 bytes=512 offset=7208960 frame=5 issue=47768853 returned=47769674 callback=47769684 burst=47768806 checked=47768851 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=16 slot=1 bytes=65536 offset=3407872 frame=5 issue=47769694 returned=47769871 callback=47770202 burst=47768806 checked=47769693 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=17 slot=2 bytes=512 offset=3473408 frame=5 issue=47769880 returned=47769971 callback=47893181 burst=47768806 checked=47769879 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=18 slot=4 bytes=65536 offset=7995392 frame=5 issue=47769976 returned=47770196 callback=47893186 burst=47768806 checked=47769975 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=19 slot=5 bytes=512 offset=8060928 frame=5 issue=47770206 returned=47770283 callback=47893189 burst=47768806 checked=47770205 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=20 slot=6 bytes=65536 offset=4259840 frame=5 issue=47770288 returned=47770357 callback=47893191 burst=47768806 checked=47770287 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=21 slot=0 bytes=512 offset=4325376 frame=6 issue=47893200 returned=47893522 callback=47894704 burst=47893158 checked=47893199 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=22 slot=1 bytes=65536 offset=524288 frame=6 issue=47894542 returned=47894697 callback=48026862 burst=47893158 checked=47893534 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=23 slot=2 bytes=512 offset=589824 frame=7 issue=48026878 returned=48027933 callback=48027943 burst=48026831 checked=48026876 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=24 slot=3 bytes=65536 offset=5111808 frame=7 issue=48027952 returned=48028120 callback=48028543 burst=48026831 checked=48027951 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=25 slot=4 bytes=512 offset=5177344 frame=7 issue=48028129 returned=48028221 callback=48028545 burst=48026831 checked=48028128 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=26 slot=5 bytes=65536 offset=1376256 frame=7 issue=48028226 returned=48028537 callback=48153374 burst=48026831 checked=48028225 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=27 slot=0 bytes=512 offset=1441792 frame=8 issue=48153385 returned=48153734 callback=48154060 burst=48153352 checked=48153383 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=28 slot=1 bytes=65536 offset=5963776 frame=8 issue=48153746 returned=48154054 callback=48154319 burst=48153352 checked=48153746 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=29 slot=2 bytes=512 offset=6029312 frame=8 issue=48154064 returned=48154314 callback=48154321 burst=48153352 checked=48154063 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=30 slot=6 bytes=65536 offset=2228224 frame=8 issue=48154325 returned=48154450 callback=48154760 burst=48153352 checked=48154324 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=31 slot=7 bytes=512 offset=2293760 frame=8 issue=48154456 returned=48154633 callback=48154763 burst=48153352 checked=48154455 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=32 slot=8 bytes=65536 offset=6815744 frame=8 issue=48154767 returned=48154906 callback=48284670 burst=48153352 checked=48154766 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=33 slot=0 bytes=512 offset=6881280 frame=9 issue=48284681 returned=48285681 callback=48285993 burst=48284646 checked=48284680 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=34 slot=1 bytes=65536 offset=3080192 frame=9 issue=48285694 returned=48285987 callback=48286394 burst=48284646 checked=48285693 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=35 slot=2 bytes=512 offset=3145728 frame=9 issue=48285999 returned=48286082 callback=48286397 burst=48284646 checked=48285998 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=36 slot=3 bytes=65536 offset=7667712 frame=9 issue=48286087 returned=48286389 callback=48407748 burst=48284646 checked=48286086 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=37 slot=0 bytes=512 offset=7733248 frame=10 issue=48407761 returned=48408153 callback=48408544 burst=48407722 checked=48407760 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=38 slot=4 bytes=65536 offset=3932160 frame=10 issue=48408166 returned=48408536 callback=48409042 burst=48407722 checked=48408166 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=39 slot=5 bytes=512 offset=3997696 frame=10 issue=48408550 returned=48408635 callback=48409044 burst=48407722 checked=48408549 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=40 slot=6 bytes=65536 offset=196608 frame=10 issue=48408640 returned=48408710 callback=48409316 burst=48407722 checked=48408639 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=41 slot=7 bytes=512 offset=262144 frame=10 issue=48408953 returned=48409037 callback=48409319 burst=48407722 checked=48408952 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=42 slot=8 bytes=65536 offset=4784128 frame=10 issue=48409048 returned=48409311 callback=48539461 burst=48407722 checked=48409047 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=43 slot=0 bytes=512 offset=4849664 frame=11 issue=48539475 returned=48540088 callback=48540097 burst=48539436 checked=48539471 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=44 slot=1 bytes=65536 offset=1048576 frame=11 issue=48540104 returned=48540250 callback=48668911 burst=48539436 checked=48540103 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=45 slot=2 bytes=512 offset=1114112 frame=11 issue=48540258 returned=48540340 callback=48668919 burst=48539436 checked=48540257 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=46 slot=3 bytes=65536 offset=5636096 frame=11 issue=48540345 returned=48540416 callback=48668922 burst=48539436 checked=48540344 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=47 slot=4 bytes=512 offset=5701632 frame=11 issue=48540420 returned=48540505 callback=48668924 burst=48539436 checked=48540419 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=48 slot=5 bytes=65536 offset=1900544 frame=11 issue=48540509 returned=48540590 callback=48668929 burst=48539436 checked=48540509 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=49 slot=9 bytes=512 offset=1966080 frame=11 issue=48540594 returned=48540657 callback=48668932 burst=48539436 checked=48540593 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=50 slot=10 bytes=65536 offset=6488064 frame=11 issue=48540661 returned=48540727 callback=48668934 burst=48539436 checked=48540660 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=51 slot=0 bytes=512 offset=6553600 frame=12 issue=48668942 returned=48669311 callback=48669671 burst=48668886 checked=48668940 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=52 slot=6 bytes=65536 offset=2752512 frame=12 issue=48669325 returned=48669663 callback=48670165 burst=48668886 checked=48669324 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=53 slot=7 bytes=512 offset=2818048 frame=12 issue=48669676 returned=48669763 callback=48670168 burst=48668886 checked=48669675 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=54 slot=8 bytes=65536 offset=7340032 frame=12 issue=48669769 returned=48669837 callback=48670436 burst=48668886 checked=48669768 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=55 slot=11 bytes=512 offset=7405568 frame=12 issue=48669841 returned=48670160 callback=48670438 burst=48668886 checked=48669841 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=56 slot=12 bytes=65536 offset=3604480 frame=12 issue=48670171 returned=48670431 callback=48803464 burst=48668886 checked=48670170 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=57 slot=0 bytes=512 offset=3670016 frame=13 issue=48803476 returned=48803813 callback=48804118 burst=48803442 checked=48803474 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=58 slot=1 bytes=65536 offset=8192000 frame=13 issue=48803825 returned=48804112 callback=48804523 burst=48803442 checked=48803825 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=59 slot=2 bytes=512 offset=8257536 frame=13 issue=48804123 returned=48804207 callback=48804526 burst=48803442 checked=48804122 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=60 slot=3 bytes=65536 offset=4456448 frame=13 issue=48804212 returned=48804518 callback=48804898 burst=48803442 checked=48804212 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=61 slot=4 bytes=512 offset=4521984 frame=13 issue=48804529 returned=48804604 callback=48804900 burst=48803442 checked=48804528 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=62 slot=5 bytes=65536 offset=720896 frame=13 issue=48804608 returned=48804893 callback=48941315 burst=48803442 checked=48804608 status=00000103 calls=1
+# FORZA-PUMP-OP id=1 seq=63 slot=6 bytes=512 offset=786432 frame=13 issue=48804903 returned=48804984 callback=48941324 burst=48803442 checked=48804903 status=00000103 calls=1
+# FORZA-PUMP-FRAME id=1 frame=0 begin=47134188 end=47135724 issued=1 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=1502 poll_ticks=7 initial_return=47134204 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=1 frame=1 begin=47256845 end=47259180 issued=4 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=2238 poll_ticks=30 initial_return=47256891 initial_ticks=46 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=2 begin=47385477 end=47387137 issued=6 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1562 poll_ticks=40 initial_return=47385513 initial_ticks=36 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=3 begin=47513773 end=47515894 issued=1 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=2033 poll_ticks=11 initial_return=47513833 initial_ticks=60 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=4 begin=47641970 end=47643491 issued=3 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1415 poll_ticks=30 initial_return=47642026 initial_ticks=56 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=5 begin=47768806 end=47770361 issued=6 before=1 after_initial=0 after=4 budget_hit=1 submit_ticks=1455 poll_ticks=32 initial_return=47768849 initial_ticks=43 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=6 begin=47893158 end=47894710 issued=2 before=4 after_initial=0 after=1 budget_hit=1 submit_ticks=477 poll_ticks=16 initial_return=47893197 initial_ticks=39 initial_callbacks=4
+# FORZA-PUMP-FRAME id=1 frame=7 begin=48026831 end=48028549 issued=4 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1626 poll_ticks=30 initial_return=48026874 initial_ticks=43 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=8 begin=48153352 end=48154912 issued=6 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1348 poll_ticks=159 initial_return=48153382 initial_ticks=30 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=9 begin=48284646 end=48286400 issued=4 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1678 poll_ticks=27 initial_return=48284678 initial_ticks=32 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=10 begin=48407722 end=48409322 issued=6 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1264 poll_ticks=278 initial_return=48407758 initial_ticks=36 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=11 begin=48539436 end=48540730 issued=8 before=1 after_initial=0 after=7 budget_hit=0 submit_ticks=1207 poll_ticks=26 initial_return=48539470 initial_ticks=34 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=12 begin=48668886 end=48670442 issued=6 before=7 after_initial=0 after=1 budget_hit=1 submit_ticks=1441 poll_ticks=38 initial_return=48668939 initial_ticks=53 initial_callbacks=7
+# FORZA-PUMP-FRAME id=1 frame=13 begin=48803442 end=48804989 issued=7 before=1 after_initial=0 after=2 budget_hit=1 submit_ticks=1455 poll_ticks=37 initial_return=48803473 initial_ticks=31 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=14 begin=48941280 end=48943981 issued=3 before=2 after_initial=0 after=1 budget_hit=1 submit_ticks=2596 poll_ticks=32 initial_return=48941330 initial_ticks=50 initial_callbacks=2
+# FORZA-PUMP-FRAME id=1 frame=15 begin=49072561 end=49074198 issued=3 before=1 after_initial=0 after=0 budget_hit=1 submit_ticks=1542 poll_ticks=29 initial_return=49072609 initial_ticks=48 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=16 begin=49199456 end=49201045 issued=8 before=0 after_initial=0 after=4 budget_hit=0 submit_ticks=1371 poll_ticks=181 initial_return=49199467 initial_ticks=11 initial_callbacks=0
+# FORZA-PUMP-FRAME id=1 frame=17 begin=49327326 end=49329273 issued=1 before=4 after_initial=0 after=1 budget_hit=1 submit_ticks=1845 poll_ticks=12 initial_return=49327400 initial_ticks=74 initial_callbacks=4
+# FORZA-PUMP-FRAME id=1 frame=18 begin=49456447 end=49459232 issued=6 before=1 after_initial=0 after=2 budget_hit=1 submit_ticks=2482 poll_ticks=247 initial_return=49456483 initial_ticks=36 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=19 begin=49586714 end=49588297 issued=6 before=2 after_initial=0 after=1 budget_hit=1 submit_ticks=1487 poll_ticks=37 initial_return=49586751 initial_ticks=37 initial_callbacks=2
+# FORZA-PUMP-FRAME id=1 frame=20 begin=49722869 end=49724554 issued=7 before=1 after_initial=0 after=2 budget_hit=1 submit_ticks=1582 poll_ticks=41 initial_return=49722902 initial_ticks=33 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=21 begin=49853743 end=49854789 issued=8 before=2 after_initial=0 after=8 budget_hit=0 submit_ticks=962 poll_ticks=23 initial_return=49853781 initial_ticks=38 initial_callbacks=2
+# FORZA-PUMP-FRAME id=1 frame=22 begin=49983836 end=49985606 issued=8 before=8 after_initial=0 after=2 budget_hit=0 submit_ticks=1650 poll_ticks=45 initial_return=49983888 initial_ticks=52 initial_callbacks=8
+# FORZA-PUMP-FRAME id=1 frame=23 begin=50122330 end=50124084 issued=7 before=2 after_initial=0 after=1 budget_hit=1 submit_ticks=1645 poll_ticks=42 initial_return=50122371 initial_ticks=41 initial_callbacks=2
+# FORZA-PUMP-FRAME id=1 frame=24 begin=50253330 end=50255299 issued=6 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1879 poll_ticks=38 initial_return=50253361 initial_ticks=31 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=25 begin=50383947 end=50385528 issued=7 before=1 after_initial=0 after=4 budget_hit=1 submit_ticks=1479 poll_ticks=38 initial_return=50383986 initial_ticks=39 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=26 begin=50515575 end=50517116 issued=6 before=4 after_initial=0 after=1 budget_hit=1 submit_ticks=1446 poll_ticks=39 initial_return=50515612 initial_ticks=37 initial_callbacks=4
+# FORZA-PUMP-FRAME id=1 frame=27 begin=50645949 end=50647545 issued=8 before=1 after_initial=0 after=4 budget_hit=0 submit_ticks=1505 poll_ticks=40 initial_return=50645976 initial_ticks=27 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=28 begin=50776610 end=50778152 issued=3 before=4 after_initial=0 after=1 budget_hit=1 submit_ticks=1169 poll_ticks=297 initial_return=50776668 initial_ticks=58 initial_callbacks=4
+# FORZA-PUMP-FRAME id=1 frame=29 begin=50906793 end=50908353 issued=3 before=1 after_initial=0 after=2 budget_hit=1 submit_ticks=1175 poll_ticks=22 initial_return=50906862 initial_ticks=69 initial_callbacks=1
+# FORZA-PUMP-FRAME id=1 frame=30 begin=51032302 end=51033588 issued=8 before=2 after_initial=0 after=8 budget_hit=0 submit_ticks=1154 poll_ticks=26 initial_return=51032382 initial_ticks=80 initial_callbacks=2
+# FORZA-PUMP-FRAME id=1 frame=31 begin=51156588 end=51158137 issued=3 before=8 after_initial=0 after=2 budget_hit=1 submit_ticks=1454 poll_ticks=18 initial_return=51156645 initial_ticks=57 initial_callbacks=8
+ok 4 - bounded submission bursts preserve callback and byte contracts
+# FORZA-PUMP-BEGIN id=2 pages=783 budget_us=1000 seconds=10
+# FORZA-PUMP-CASE id=2 target=783 before=783 after=783 budget_us=1000 operations=1996 verified=1996 callbacks=1996 bytes=65915904 elapsed=33967910 frames=253 high_water=8 failures=0
+# FORZA-PUMP-TIMING id=2 pending=1996 budget_stops=17 empty_immediate=1181 pair_same=929 pair_split=69 pair_gap_sum=9388806 pair_gap_max=140135 burst_sum=587772 burst_max=4643 poll_sum=19085 initial_sum=10931 initial_max=100 initial_callbacks=759 zero_issue_frames=0
+# FORZA-PUMP-SIZE id=2 bytes=65536 count=998 submit_sum=295752 submit_max=2456 callback_sum=49102391 callback_max=220694
+# FORZA-PUMP-SIZE id=2 bytes=512 count=998 submit_sum=249693 submit_max=1668 callback_sum=51243695 callback_max=220484
+# FORZA-PUMP-OP id=2 seq=0 slot=0 bytes=65536 offset=0 frame=0 issue=81449120 returned=81449798 callback=81450323 burst=81449094 checked=81449117 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=1 slot=1 bytes=512 offset=65536 frame=0 issue=81449814 returned=81450310 callback=81450803 burst=81449094 checked=81449813 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=2 slot=2 bytes=65536 offset=4587520 frame=0 issue=81450335 returned=81450440 callback=81450806 burst=81449094 checked=81450334 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=3 slot=3 bytes=512 offset=4653056 frame=0 issue=81450458 returned=81450796 callback=81452193 burst=81449094 checked=81450457 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=4 slot=4 bytes=65536 offset=851968 frame=0 issue=81450811 returned=81452183 callback=81452687 burst=81449094 checked=81450810 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=5 slot=5 bytes=512 offset=917504 frame=0 issue=81452209 returned=81452309 callback=81452689 burst=81449094 checked=81452206 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=6 slot=6 bytes=65536 offset=5439488 frame=0 issue=81452314 returned=81452386 callback=81578641 burst=81449094 checked=81452314 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=7 slot=7 bytes=512 offset=5505024 frame=0 issue=81452390 returned=81452682 callback=81578649 burst=81449094 checked=81452389 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=8 slot=0 bytes=65536 offset=1703936 frame=1 issue=81578660 returned=81579288 callback=81580962 burst=81578606 checked=81578657 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=9 slot=1 bytes=512 offset=1769472 frame=1 issue=81579303 returned=81579402 callback=81580965 burst=81578606 checked=81579302 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=10 slot=2 bytes=65536 offset=6291456 frame=1 issue=81579408 returned=81580955 callback=81581233 burst=81578606 checked=81579408 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=11 slot=3 bytes=512 offset=6356992 frame=1 issue=81580970 returned=81581228 callback=81581673 burst=81578606 checked=81580969 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=12 slot=8 bytes=65536 offset=2555904 frame=1 issue=81581238 returned=81581321 callback=81581675 burst=81578606 checked=81581237 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=13 slot=9 bytes=512 offset=2621440 frame=1 issue=81581325 returned=81581668 callback=81581677 burst=81578606 checked=81581325 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=14 slot=10 bytes=65536 offset=7143424 frame=1 issue=81581682 returned=81581800 callback=81582036 burst=81578606 checked=81581681 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=15 slot=11 bytes=512 offset=7208960 frame=1 issue=81581805 returned=81582031 callback=81582038 burst=81578606 checked=81581804 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=16 slot=0 bytes=65536 offset=3407872 frame=2 issue=81716126 returned=81716656 callback=81717160 burst=81716100 checked=81716124 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=17 slot=1 bytes=512 offset=3473408 frame=2 issue=81716672 returned=81717143 callback=81717167 burst=81716100 checked=81716672 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=18 slot=2 bytes=65536 offset=7995392 frame=2 issue=81717175 returned=81717311 callback=81717852 burst=81716100 checked=81717174 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=19 slot=3 bytes=512 offset=8060928 frame=2 issue=81717317 returned=81717395 callback=81717854 burst=81716100 checked=81717316 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=20 slot=4 bytes=65536 offset=4259840 frame=2 issue=81717400 returned=81717472 callback=81845806 burst=81716100 checked=81717399 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=21 slot=5 bytes=512 offset=4325376 frame=2 issue=81717476 returned=81717539 callback=81845811 burst=81716100 checked=81717475 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=22 slot=6 bytes=65536 offset=524288 frame=2 issue=81717744 returned=81717847 callback=81845813 burst=81716100 checked=81717743 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=23 slot=7 bytes=512 offset=589824 frame=2 issue=81717857 returned=81717924 callback=81845819 burst=81716100 checked=81717857 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=24 slot=0 bytes=65536 offset=5111808 frame=3 issue=81845826 returned=81846123 callback=81846394 burst=81845784 checked=81845825 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=25 slot=1 bytes=512 offset=5177344 frame=3 issue=81846133 returned=81846389 callback=81846623 burst=81845784 checked=81846132 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=26 slot=2 bytes=65536 offset=1376256 frame=3 issue=81846400 returned=81846618 callback=81846819 burst=81845784 checked=81846399 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=27 slot=3 bytes=512 offset=1441792 frame=3 issue=81846627 returned=81846814 callback=81847006 burst=81845784 checked=81846626 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=28 slot=8 bytes=65536 offset=5963776 frame=3 issue=81846823 returned=81847002 callback=81848280 burst=81845784 checked=81846823 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=29 slot=9 bytes=512 offset=6029312 frame=3 issue=81847010 returned=81847082 callback=81848536 burst=81845784 checked=81847009 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=30 slot=10 bytes=65536 offset=2228224 frame=3 issue=81847086 returned=81848273 callback=81981091 burst=81845784 checked=81847086 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=31 slot=11 bytes=512 offset=2293760 frame=3 issue=81848435 returned=81848531 callback=81981096 burst=81845784 checked=81848434 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=32 slot=0 bytes=65536 offset=6815744 frame=4 issue=81981104 returned=81981397 callback=81982101 burst=81981053 checked=81981102 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=33 slot=1 bytes=512 offset=6881280 frame=4 issue=81981408 returned=81981495 callback=81982104 burst=81981053 checked=81981407 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=34 slot=2 bytes=65536 offset=3080192 frame=4 issue=81981501 returned=81981573 callback=81982524 burst=81981053 checked=81981500 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=35 slot=3 bytes=512 offset=3145728 frame=4 issue=81981577 returned=81982094 callback=81982527 burst=81981053 checked=81981576 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=36 slot=4 bytes=65536 offset=7667712 frame=4 issue=81982109 returned=81982518 callback=81982795 burst=81981053 checked=81982107 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=37 slot=5 bytes=512 offset=7733248 frame=4 issue=81982532 returned=81982790 callback=81983864 burst=81981053 checked=81982531 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=38 slot=6 bytes=65536 offset=3932160 frame=4 issue=81982801 returned=81983858 callback=81984145 burst=81981053 checked=81982800 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=39 slot=7 bytes=512 offset=3997696 frame=4 issue=81983870 returned=81984140 callback=81984148 burst=81981053 checked=81983868 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=40 slot=0 bytes=65536 offset=196608 frame=5 issue=82116568 returned=82116956 callback=82240222 burst=82116549 checked=82116566 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=41 slot=1 bytes=512 offset=262144 frame=5 issue=82116969 returned=82117062 callback=82240230 burst=82116549 checked=82116969 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=42 slot=2 bytes=65536 offset=4784128 frame=5 issue=82117067 returned=82117146 callback=82240233 burst=82116549 checked=82117067 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=43 slot=3 bytes=512 offset=4849664 frame=5 issue=82117149 returned=82117212 callback=82240235 burst=82116549 checked=82117149 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=44 slot=4 bytes=65536 offset=1048576 frame=5 issue=82117216 returned=82117299 callback=82240242 burst=82116549 checked=82117215 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=45 slot=5 bytes=512 offset=1114112 frame=5 issue=82117303 returned=82117366 callback=82240244 burst=82116549 checked=82117302 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=46 slot=8 bytes=65536 offset=5636096 frame=5 issue=82117370 returned=82117434 callback=82240246 burst=82116549 checked=82117370 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=47 slot=9 bytes=512 offset=5701632 frame=5 issue=82117438 returned=82117499 callback=82240248 burst=82116549 checked=82117437 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=48 slot=6 bytes=65536 offset=1900544 frame=6 issue=82240256 returned=82240601 callback=82242605 burst=82240195 checked=82240254 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=49 slot=7 bytes=512 offset=1966080 frame=6 issue=82240612 returned=82240700 callback=82242610 burst=82240195 checked=82240611 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=50 slot=10 bytes=65536 offset=6488064 frame=6 issue=82240706 returned=82242595 callback=82242612 burst=82240195 checked=82240705 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=51 slot=11 bytes=512 offset=6553600 frame=6 issue=82242619 returned=82243003 callback=82243522 burst=82240195 checked=82242618 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=52 slot=12 bytes=65536 offset=2752512 frame=6 issue=82243012 returned=82243514 callback=82379271 burst=82240195 checked=82243011 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=53 slot=13 bytes=512 offset=2818048 frame=6 issue=82243529 returned=82243661 callback=82379278 burst=82240195 checked=82243527 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=54 slot=0 bytes=65536 offset=7340032 frame=7 issue=82379286 returned=82379735 callback=82380120 burst=82379244 checked=82379285 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=55 slot=1 bytes=512 offset=7405568 frame=7 issue=82379748 returned=82380113 callback=82380419 burst=82379244 checked=82379747 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=56 slot=2 bytes=65536 offset=3604480 frame=7 issue=82380126 returned=82380412 callback=82380626 burst=82379244 checked=82380125 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=57 slot=3 bytes=512 offset=3670016 frame=7 issue=82380423 returned=82380622 callback=82381068 burst=82379244 checked=82380422 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=58 slot=4 bytes=65536 offset=8192000 frame=7 issue=82380631 returned=82380717 callback=82381070 burst=82379244 checked=82380630 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=59 slot=5 bytes=512 offset=8257536 frame=7 issue=82380722 returned=82381063 callback=82381283 burst=82379244 checked=82380721 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=60 slot=6 bytes=65536 offset=4456448 frame=7 issue=82381074 returned=82381152 callback=82381470 burst=82379244 checked=82381073 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=61 slot=7 bytes=512 offset=4521984 frame=7 issue=82381287 returned=82381465 callback=82514350 burst=82379244 checked=82381286 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=62 slot=0 bytes=65536 offset=720896 frame=8 issue=82514362 returned=82514806 callback=82515160 burst=82514319 checked=82514361 status=00000103 calls=1
+# FORZA-PUMP-OP id=2 seq=63 slot=1 bytes=512 offset=786432 frame=8 issue=82514820 returned=82515153 callback=82515672 burst=82514319 checked=82514819 status=00000103 calls=1
+# FORZA-PUMP-FRAME id=2 frame=0 begin=81449094 end=81452693 issued=8 before=0 after_initial=0 after=2 budget_hit=0 submit_ticks=3453 poll_ticks=84 initial_return=81449114 initial_ticks=20 initial_callbacks=0
+# FORZA-PUMP-FRAME id=2 frame=1 begin=81578606 end=81582042 issued=8 before=2 after_initial=0 after=0 budget_hit=0 submit_ticks=3302 poll_ticks=57 initial_return=81578654 initial_ticks=48 initial_callbacks=2
+# FORZA-PUMP-FRAME id=2 frame=2 begin=81716100 end=81717928 issued=8 before=0 after_initial=0 after=4 budget_hit=0 submit_ticks=1520 poll_ticks=258 initial_return=81716121 initial_ticks=21 initial_callbacks=0
+# FORZA-PUMP-FRAME id=2 frame=3 begin=81845784 end=81848539 issued=8 before=4 after_initial=0 after=2 budget_hit=0 submit_ticks=2492 poll_ticks=198 initial_return=81845824 initial_ticks=40 initial_callbacks=4
+# FORZA-PUMP-FRAME id=2 frame=4 begin=81981053 end=81984151 issued=8 before=2 after_initial=0 after=0 budget_hit=0 submit_ticks=2963 poll_ticks=57 initial_return=81981101 initial_ticks=48 initial_callbacks=2
+# FORZA-PUMP-FRAME id=2 frame=5 begin=82116549 end=82117502 issued=8 before=0 after_initial=0 after=8 budget_hit=0 submit_ticks=894 poll_ticks=24 initial_return=82116565 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=2 frame=6 begin=82240195 end=82243669 issued=6 before=8 after_initial=0 after=2 budget_hit=1 submit_ticks=3340 poll_ticks=49 initial_return=82240253 initial_ticks=58 initial_callbacks=8
+# FORZA-PUMP-FRAME id=2 frame=7 begin=82379244 end=82381473 issued=8 before=2 after_initial=0 after=1 budget_hit=0 submit_ticks=1982 poll_ticks=181 initial_return=82379283 initial_ticks=39 initial_callbacks=2
+# FORZA-PUMP-FRAME id=2 frame=8 begin=82514319 end=82516300 issued=8 before=1 after_initial=0 after=2 budget_hit=0 submit_ticks=1741 poll_ticks=170 initial_return=82514359 initial_ticks=40 initial_callbacks=1
+# FORZA-PUMP-FRAME id=2 frame=9 begin=82647621 end=82650743 issued=8 before=2 after_initial=0 after=2 budget_hit=0 submit_ticks=2989 poll_ticks=49 initial_return=82647675 initial_ticks=54 initial_callbacks=2
+# FORZA-PUMP-FRAME id=2 frame=10 begin=82778972 end=82781015 issued=8 before=2 after_initial=0 after=0 budget_hit=0 submit_ticks=1914 poll_ticks=53 initial_return=82779019 initial_ticks=47 initial_callbacks=2
+# FORZA-PUMP-FRAME id=2 frame=11 begin=82913937 end=82915769 issued=8 before=0 after_initial=0 after=3 budget_hit=0 submit_ticks=1651 poll_ticks=142 initial_return=82913952 initial_ticks=15 initial_callbacks=0
+# FORZA-PUMP-FRAME id=2 frame=12 begin=83046015 end=83049202 issued=8 before=3 after_initial=0 after=1 budget_hit=0 submit_ticks=3057 poll_ticks=55 initial_return=83046060 initial_ticks=45 initial_callbacks=3
+# FORZA-PUMP-FRAME id=2 frame=13 begin=83180599 end=83182791 issued=8 before=1 after_initial=0 after=1 budget_hit=0 submit_ticks=1955 poll_ticks=160 initial_return=83180644 initial_ticks=45 initial_callbacks=1
+# FORZA-PUMP-FRAME id=2 frame=14 begin=83313937 end=83315671 issued=8 before=1 after_initial=0 after=4 budget_hit=0 submit_ticks=1631 poll_ticks=43 initial_return=83313974 initial_ticks=37 initial_callbacks=1
+# FORZA-PUMP-FRAME id=2 frame=15 begin=83443771 end=83447241 issued=8 before=4 after_initial=0 after=0 budget_hit=0 submit_ticks=3327 poll_ticks=59 initial_return=83443825 initial_ticks=54 initial_callbacks=4
+# FORZA-PUMP-FRAME id=2 frame=16 begin=83580381 end=83581353 issued=8 before=0 after_initial=0 after=8 budget_hit=0 submit_ticks=910 poll_ticks=22 initial_return=83580396 initial_ticks=15 initial_callbacks=0
+# FORZA-PUMP-FRAME id=2 frame=17 begin=83704141 end=83706102 issued=8 before=8 after_initial=0 after=2 budget_hit=0 submit_ticks=1770 poll_ticks=51 initial_return=83704195 initial_ticks=54 initial_callbacks=8
+# FORZA-PUMP-FRAME id=2 frame=18 begin=83844242 end=83846828 issued=8 before=2 after_initial=0 after=1 budget_hit=0 submit_ticks=2209 poll_ticks=303 initial_return=83844285 initial_ticks=43 initial_callbacks=2
+# FORZA-PUMP-FRAME id=2 frame=19 begin=83976854 end=83978852 issued=8 before=1 after_initial=0 after=1 budget_hit=0 submit_ticks=1892 poll_ticks=49 initial_return=83976884 initial_ticks=30 initial_callbacks=1
+# FORZA-PUMP-FRAME id=2 frame=20 begin=84112392 end=84114409 issued=8 before=1 after_initial=0 after=0 budget_hit=0 submit_ticks=1803 poll_ticks=53 initial_return=84112430 initial_ticks=38 initial_callbacks=1
+# FORZA-PUMP-FRAME id=2 frame=21 begin=84244380 end=84246013 issued=8 before=0 after_initial=0 after=4 budget_hit=0 submit_ticks=1544 poll_ticks=52 initial_return=84244394 initial_ticks=14 initial_callbacks=0
+# FORZA-PUMP-FRAME id=2 frame=22 begin=84378476 end=84380973 issued=8 before=4 after_initial=0 after=1 budget_hit=0 submit_ticks=2371 poll_ticks=55 initial_return=84378519 initial_ticks=43 initial_callbacks=4
+# FORZA-PUMP-FRAME id=2 frame=23 begin=84514602 end=84517607 issued=8 before=1 after_initial=0 after=0 budget_hit=0 submit_ticks=2888 poll_ticks=52 initial_return=84514638 initial_ticks=36 initial_callbacks=1
+# FORZA-PUMP-FRAME id=2 frame=24 begin=84649775 end=84651882 issued=8 before=0 after_initial=0 after=6 budget_hit=0 submit_ticks=1844 poll_ticks=144 initial_return=84649855 initial_ticks=80 initial_callbacks=0
+# FORZA-PUMP-FRAME id=2 frame=25 begin=84777886 end=84780829 issued=8 before=6 after_initial=0 after=2 budget_hit=0 submit_ticks=2775 poll_ticks=55 initial_return=84777970 initial_ticks=84 initial_callbacks=6
+# FORZA-PUMP-FRAME id=2 frame=26 begin=84917655 end=84919747 issued=8 before=2 after_initial=0 after=3 budget_hit=0 submit_ticks=1956 poll_ticks=56 initial_return=84917706 initial_ticks=51 initial_callbacks=2
+# FORZA-PUMP-FRAME id=2 frame=27 begin=85048663 end=85051889 issued=8 before=3 after_initial=0 after=0 budget_hit=0 submit_ticks=3083 poll_ticks=57 initial_return=85048716 initial_ticks=53 initial_callbacks=3
+# FORZA-PUMP-FRAME id=2 frame=28 begin=85186764 end=85188579 issued=8 before=0 after_initial=0 after=2 budget_hit=0 submit_ticks=1643 poll_ticks=128 initial_return=85186780 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=2 frame=29 begin=85318527 end=85320356 issued=8 before=2 after_initial=0 after=3 budget_hit=0 submit_ticks=1713 poll_ticks=47 initial_return=85318567 initial_ticks=40 initial_callbacks=2
+# FORZA-PUMP-FRAME id=2 frame=30 begin=85446649 end=85447702 issued=8 before=3 after_initial=0 after=8 budget_hit=0 submit_ticks=959 poll_ticks=22 initial_return=85446694 initial_ticks=45 initial_callbacks=3
+# FORZA-PUMP-FRAME id=2 frame=31 begin=85573743 end=85577777 issued=7 before=8 after_initial=0 after=0 budget_hit=1 submit_ticks=3752 poll_ticks=69 initial_return=85573796 initial_ticks=53 initial_callbacks=8
+ok 5 - bounded submission bursts preserve callback and byte contracts
+# FORZA-PUMP-BEGIN id=3 pages=783 budget_us=0 seconds=10
+# FORZA-PUMP-CASE id=3 target=783 before=783 after=783 budget_us=0 operations=2024 verified=2024 callbacks=2024 bytes=66840576 elapsed=33838993 frames=253 high_water=8 failures=0
+# FORZA-PUMP-TIMING id=3 pending=2024 budget_stops=0 empty_immediate=1132 pair_same=1012 pair_split=0 pair_gap_sum=337713 pair_gap_max=1803 burst_sum=608286 burst_max=5054 poll_sum=20429 initial_sum=10578 initial_max=101 initial_callbacks=686 zero_issue_frames=0
+# FORZA-PUMP-SIZE id=3 bytes=65536 count=1012 submit_sum=324580 submit_max=1789 callback_sum=39110968 callback_max=149166
+# FORZA-PUMP-SIZE id=3 bytes=512 count=1012 submit_sum=240074 submit_max=1940 callback_sum=50706918 callback_max=148965
+# FORZA-PUMP-OP id=3 seq=0 slot=0 bytes=65536 offset=0 frame=0 issue=115749501 returned=115750736 callback=115871858 burst=115749477 checked=115749497 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=1 slot=1 bytes=512 offset=65536 frame=0 issue=115750751 returned=115750893 callback=115871865 burst=115749477 checked=115750750 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=2 slot=2 bytes=65536 offset=4587520 frame=0 issue=115750899 returned=115750976 callback=115871868 burst=115749477 checked=115750898 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=3 slot=3 bytes=512 offset=4653056 frame=0 issue=115750980 returned=115751047 callback=115871871 burst=115749477 checked=115750979 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=4 slot=4 bytes=65536 offset=851968 frame=0 issue=115751052 returned=115751127 callback=115871877 burst=115749477 checked=115751051 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=5 slot=5 bytes=512 offset=917504 frame=0 issue=115751131 returned=115751194 callback=115871879 burst=115749477 checked=115751130 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=6 slot=6 bytes=65536 offset=5439488 frame=0 issue=115751198 returned=115751266 callback=115871882 burst=115749477 checked=115751198 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=7 slot=7 bytes=512 offset=5505024 frame=0 issue=115751270 returned=115751334 callback=115871884 burst=115749477 checked=115751270 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=8 slot=8 bytes=65536 offset=1703936 frame=1 issue=115871893 returned=115872266 callback=115872862 burst=115871830 checked=115871892 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=9 slot=9 bytes=512 offset=1769472 frame=1 issue=115872280 returned=115872372 callback=115872864 burst=115871830 checked=115872279 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=10 slot=10 bytes=65536 offset=6291456 frame=1 issue=115872378 returned=115872854 callback=115873067 burst=115871830 checked=115872378 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=11 slot=11 bytes=512 offset=6356992 frame=1 issue=115872869 returned=115873062 callback=115873489 burst=115871830 checked=115872868 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=12 slot=12 bytes=65536 offset=2555904 frame=1 issue=115873071 returned=115873166 callback=115873491 burst=115871830 checked=115873070 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=13 slot=13 bytes=512 offset=2621440 frame=1 issue=115873182 returned=115873484 callback=115874962 burst=115871830 checked=115873182 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=14 slot=14 bytes=65536 offset=7143424 frame=1 issue=115873495 returned=115874956 callback=116020487 burst=115871830 checked=115873494 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=15 slot=15 bytes=512 offset=7208960 frame=1 issue=115874967 returned=115875065 callback=116020496 burst=115871830 checked=115874966 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=16 slot=0 bytes=65536 offset=3407872 frame=2 issue=116020507 returned=116021508 callback=116021935 burst=116020447 checked=116020505 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=17 slot=1 bytes=512 offset=3473408 frame=2 issue=116021524 returned=116021929 callback=116022188 burst=116020447 checked=116021523 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=18 slot=2 bytes=65536 offset=7995392 frame=2 issue=116021941 returned=116022182 callback=116022500 burst=116020447 checked=116021940 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=19 slot=3 bytes=512 offset=8060928 frame=2 issue=116022193 returned=116022285 callback=116022853 burst=116020447 checked=116022193 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=20 slot=4 bytes=65536 offset=4259840 frame=2 issue=116022290 returned=116022495 callback=116022855 burst=116020447 checked=116022289 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=21 slot=5 bytes=512 offset=4325376 frame=2 issue=116022504 returned=116022848 callback=116022857 burst=116020447 checked=116022503 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=22 slot=6 bytes=65536 offset=524288 frame=2 issue=116022862 returned=116022985 callback=116023257 burst=116020447 checked=116022861 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=23 slot=7 bytes=512 offset=589824 frame=2 issue=116022991 returned=116023253 callback=116023260 burst=116020447 checked=116022990 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=24 slot=0 bytes=65536 offset=5111808 frame=3 issue=116156084 returned=116156386 callback=116156711 burst=116156071 checked=116156083 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=25 slot=1 bytes=512 offset=5177344 frame=3 issue=116156396 returned=116156698 callback=116156961 burst=116156071 checked=116156396 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=26 slot=2 bytes=65536 offset=1376256 frame=3 issue=116156724 returned=116156956 callback=116157152 burst=116156071 checked=116156723 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=27 slot=3 bytes=512 offset=1441792 frame=3 issue=116156965 returned=116157147 callback=116157365 burst=116156071 checked=116156964 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=28 slot=4 bytes=65536 offset=5963776 frame=3 issue=116157156 returned=116157361 callback=116157659 burst=116156071 checked=116157155 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=29 slot=5 bytes=512 offset=6029312 frame=3 issue=116157368 returned=116157444 callback=116287895 burst=116156071 checked=116157368 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=30 slot=8 bytes=65536 offset=2228224 frame=3 issue=116157449 returned=116157650 callback=116287901 burst=116156071 checked=116157449 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=31 slot=9 bytes=512 offset=2293760 frame=3 issue=116157662 returned=116157739 callback=116287904 burst=116156071 checked=116157661 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=32 slot=0 bytes=65536 offset=6815744 frame=4 issue=116287912 returned=116288361 callback=116288834 burst=116287862 checked=116287911 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=33 slot=1 bytes=512 offset=6881280 frame=4 issue=116288374 returned=116288466 callback=116289149 burst=116287862 checked=116288373 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=34 slot=2 bytes=65536 offset=3080192 frame=4 issue=116288472 returned=116288828 callback=116289463 burst=116287862 checked=116288472 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=35 slot=3 bytes=512 offset=3145728 frame=4 issue=116288840 returned=116289143 callback=116289465 burst=116287862 checked=116288839 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=36 slot=4 bytes=65536 offset=7667712 frame=4 issue=116289154 returned=116289458 callback=116289671 burst=116287862 checked=116289153 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=37 slot=6 bytes=512 offset=7733248 frame=4 issue=116289469 returned=116289666 callback=116289863 burst=116287862 checked=116289468 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=38 slot=7 bytes=65536 offset=3932160 frame=4 issue=116289675 returned=116289858 callback=116290047 burst=116287862 checked=116289674 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=39 slot=10 bytes=512 offset=3997696 frame=4 issue=116289866 returned=116290042 callback=116423886 burst=116287862 checked=116289866 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=40 slot=0 bytes=65536 offset=196608 frame=5 issue=116423905 returned=116424532 callback=116426204 burst=116423838 checked=116423903 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=41 slot=1 bytes=512 offset=262144 frame=5 issue=116424547 returned=116426197 callback=116426503 burst=116423838 checked=116424547 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=42 slot=2 bytes=65536 offset=4784128 frame=5 issue=116426210 returned=116426497 callback=116427078 burst=116423838 checked=116426209 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=43 slot=3 bytes=512 offset=4849664 frame=5 issue=116426508 returned=116426594 callback=116427080 burst=116423838 checked=116426507 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=44 slot=4 bytes=65536 offset=1048576 frame=5 issue=116426599 returned=116426674 callback=116427278 burst=116423838 checked=116426598 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=45 slot=5 bytes=512 offset=1114112 frame=5 issue=116426678 returned=116427071 callback=116427578 burst=116423838 checked=116426677 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=46 slot=6 bytes=65536 offset=5636096 frame=5 issue=116427084 returned=116427273 callback=116427581 burst=116423838 checked=116427083 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=47 slot=8 bytes=512 offset=5701632 frame=5 issue=116427281 returned=116427574 callback=116556417 burst=116423838 checked=116427280 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=48 slot=0 bytes=65536 offset=1900544 frame=6 issue=116556429 returned=116556787 callback=116558746 burst=116556394 checked=116556427 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=49 slot=1 bytes=512 offset=1966080 frame=6 issue=116556799 returned=116558739 callback=116559276 burst=116556394 checked=116556799 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=50 slot=2 bytes=65536 offset=6488064 frame=6 issue=116558753 returned=116558858 callback=116559278 burst=116556394 checked=116558752 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=51 slot=3 bytes=512 offset=6553600 frame=6 issue=116558863 returned=116559269 callback=116559280 burst=116556394 checked=116558862 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=52 slot=4 bytes=65536 offset=2752512 frame=6 issue=116559285 returned=116559409 callback=116559833 burst=116556394 checked=116559283 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=53 slot=7 bytes=512 offset=2818048 frame=6 issue=116559414 returned=116559488 callback=116559836 burst=116556394 checked=116559414 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=54 slot=9 bytes=65536 offset=7340032 frame=6 issue=116559492 returned=116559826 callback=116560084 burst=116556394 checked=116559492 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=55 slot=10 bytes=512 offset=7405568 frame=6 issue=116559840 returned=116560079 callback=116560086 burst=116556394 checked=116559839 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=56 slot=0 bytes=65536 offset=3604480 frame=7 issue=116693038 returned=116693760 callback=116694157 burst=116693014 checked=116693035 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=57 slot=1 bytes=512 offset=3670016 frame=7 issue=116693771 returned=116694142 callback=116694486 burst=116693014 checked=116693770 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=58 slot=2 bytes=65536 offset=8192000 frame=7 issue=116694169 returned=116694480 callback=116694488 burst=116693014 checked=116694168 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=59 slot=3 bytes=512 offset=8257536 frame=7 issue=116694491 returned=116694606 callback=116694849 burst=116693014 checked=116694491 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=60 slot=4 bytes=65536 offset=4456448 frame=7 issue=116694612 returned=116694844 callback=116695030 burst=116693014 checked=116694611 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=61 slot=5 bytes=512 offset=4521984 frame=7 issue=116694852 returned=116695025 callback=116827265 burst=116693014 checked=116694852 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=62 slot=6 bytes=65536 offset=720896 frame=7 issue=116695034 returned=116695111 callback=116827277 burst=116693014 checked=116695033 status=00000103 calls=1
+# FORZA-PUMP-OP id=3 seq=63 slot=7 bytes=512 offset=786432 frame=7 issue=116695115 returned=116695180 callback=116827279 burst=116693014 checked=116695114 status=00000103 calls=1
+# FORZA-PUMP-FRAME id=3 frame=0 begin=115749477 end=115751338 issued=8 before=0 after_initial=0 after=8 budget_hit=0 submit_ticks=1791 poll_ticks=23 initial_return=115749495 initial_ticks=18 initial_callbacks=0
+# FORZA-PUMP-FRAME id=3 frame=1 begin=115871830 end=115875069 issued=8 before=8 after_initial=0 after=2 budget_hit=0 submit_ticks=3090 poll_ticks=59 initial_return=115871890 initial_ticks=60 initial_callbacks=8
+# FORZA-PUMP-FRAME id=3 frame=2 begin=116020447 end=116023263 issued=8 before=2 after_initial=0 after=0 budget_hit=0 submit_ticks=2673 poll_ticks=57 initial_return=116020503 initial_ticks=56 initial_callbacks=2
+# FORZA-PUMP-FRAME id=3 frame=3 begin=116156071 end=116157742 issued=8 before=0 after_initial=0 after=3 budget_hit=0 submit_ticks=1577 poll_ticks=55 initial_return=116156082 initial_ticks=11 initial_callbacks=0
+# FORZA-PUMP-FRAME id=3 frame=4 begin=116287862 end=116290050 issued=8 before=3 after_initial=0 after=1 budget_hit=0 submit_ticks=2060 poll_ticks=54 initial_return=116287909 initial_ticks=47 initial_callbacks=3
+# FORZA-PUMP-FRAME id=3 frame=5 begin=116423838 end=116427584 issued=8 before=1 after_initial=0 after=1 budget_hit=0 submit_ticks=3600 poll_ticks=57 initial_return=116423901 initial_ticks=63 initial_callbacks=1
+# FORZA-PUMP-FRAME id=3 frame=6 begin=116556394 end=116560089 issued=8 before=1 after_initial=0 after=0 budget_hit=0 submit_ticks=3580 poll_ticks=55 initial_return=116556426 initial_ticks=32 initial_callbacks=1
+# FORZA-PUMP-FRAME id=3 frame=7 begin=116693014 end=116695184 issued=8 before=0 after_initial=0 after=3 budget_hit=0 submit_ticks=2066 poll_ticks=57 initial_return=116693033 initial_ticks=19 initial_callbacks=0
+# FORZA-PUMP-FRAME id=3 frame=8 begin=116827219 end=116828722 issued=8 before=3 after_initial=0 after=8 budget_hit=0 submit_ticks=1388 poll_ticks=24 initial_return=116827287 initial_ticks=68 initial_callbacks=3
+# FORZA-PUMP-FRAME id=3 frame=9 begin=116952833 end=116954261 issued=8 before=8 after_initial=0 after=6 budget_hit=0 submit_ticks=1320 poll_ticks=31 initial_return=116952886 initial_ticks=53 initial_callbacks=8
+# FORZA-PUMP-FRAME id=3 frame=10 begin=117085562 end=117090616 issued=8 before=6 after_initial=0 after=0 budget_hit=0 submit_ticks=4854 poll_ticks=86 initial_return=117085633 initial_ticks=71 initial_callbacks=6
+# FORZA-PUMP-FRAME id=3 frame=11 begin=117226928 end=117229040 issued=8 before=0 after_initial=0 after=1 budget_hit=0 submit_ticks=1871 poll_ticks=72 initial_return=117226941 initial_ticks=13 initial_callbacks=0
+# FORZA-PUMP-FRAME id=3 frame=12 begin=117360066 end=117363214 issued=8 before=1 after_initial=0 after=2 budget_hit=0 submit_ticks=3028 poll_ticks=52 initial_return=117360103 initial_ticks=37 initial_callbacks=1
+# FORZA-PUMP-FRAME id=3 frame=13 begin=117492430 end=117493893 issued=8 before=2 after_initial=0 after=6 budget_hit=0 submit_ticks=1371 poll_ticks=34 initial_return=117492464 initial_ticks=34 initial_callbacks=2
+# FORZA-PUMP-FRAME id=3 frame=14 begin=117620414 end=117624447 issued=8 before=6 after_initial=0 after=1 budget_hit=0 submit_ticks=3877 poll_ticks=74 initial_return=117620460 initial_ticks=46 initial_callbacks=6
+# FORZA-PUMP-FRAME id=3 frame=15 begin=117760441 end=117763982 issued=8 before=1 after_initial=0 after=3 budget_hit=0 submit_ticks=3412 poll_ticks=48 initial_return=117760493 initial_ticks=52 initial_callbacks=1
+# FORZA-PUMP-FRAME id=3 frame=16 begin=117892450 end=117893511 issued=8 before=3 after_initial=0 after=8 budget_hit=0 submit_ticks=970 poll_ticks=21 initial_return=117892494 initial_ticks=44 initial_callbacks=3
+# FORZA-PUMP-FRAME id=3 frame=17 begin=118016259 end=118017369 issued=8 before=8 after_initial=0 after=7 budget_hit=0 submit_ticks=1015 poll_ticks=25 initial_return=118016307 initial_ticks=48 initial_callbacks=8
+# FORZA-PUMP-FRAME id=3 frame=18 begin=118149225 end=118151657 issued=8 before=7 after_initial=0 after=2 budget_hit=0 submit_ticks=2138 poll_ticks=205 initial_return=118149285 initial_ticks=60 initial_callbacks=7
+# FORZA-PUMP-FRAME id=3 frame=19 begin=118288510 end=118291165 issued=8 before=2 after_initial=0 after=3 budget_hit=0 submit_ticks=2539 poll_ticks=44 initial_return=118288553 initial_ticks=43 initial_callbacks=2
+# FORZA-PUMP-FRAME id=3 frame=20 begin=118422091 end=118425847 issued=8 before=3 after_initial=0 after=0 budget_hit=0 submit_ticks=3574 poll_ticks=64 initial_return=118422179 initial_ticks=88 initial_callbacks=3
+# FORZA-PUMP-FRAME id=3 frame=21 begin=118559073 end=118561966 issued=8 before=0 after_initial=0 after=5 budget_hit=0 submit_ticks=2656 poll_ticks=187 initial_return=118559094 initial_ticks=21 initial_callbacks=0
+# FORZA-PUMP-FRAME id=3 frame=22 begin=118689818 end=118691181 issued=8 before=5 after_initial=0 after=8 budget_hit=0 submit_ticks=1265 poll_ticks=21 initial_return=118689871 initial_ticks=53 initial_callbacks=5
+# FORZA-PUMP-FRAME id=3 frame=23 begin=118820066 end=118823264 issued=8 before=8 after_initial=0 after=3 budget_hit=0 submit_ticks=3060 poll_ticks=48 initial_return=118820128 initial_ticks=62 initial_callbacks=8
+# FORZA-PUMP-FRAME id=3 frame=24 begin=118958682 end=118959571 issued=8 before=3 after_initial=0 after=8 budget_hit=0 submit_ticks=806 poll_ticks=22 initial_return=118958719 initial_ticks=37 initial_callbacks=3
+# FORZA-PUMP-FRAME id=3 frame=25 begin=119083273 end=119085337 issued=8 before=8 after_initial=0 after=0 budget_hit=0 submit_ticks=1926 poll_ticks=53 initial_return=119083334 initial_ticks=61 initial_callbacks=8
+# FORZA-PUMP-FRAME id=3 frame=26 begin=119223888 end=119226137 issued=8 before=0 after_initial=0 after=2 budget_hit=0 submit_ticks=2146 poll_ticks=63 initial_return=119223904 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=3 frame=27 begin=119358568 end=119362253 issued=8 before=2 after_initial=0 after=1 budget_hit=0 submit_ticks=3552 poll_ticks=59 initial_return=119358614 initial_ticks=46 initial_callbacks=2
+# FORZA-PUMP-FRAME id=3 frame=28 begin=119493565 end=119496112 issued=8 before=1 after_initial=0 after=0 budget_hit=0 submit_ticks=2423 poll_ticks=53 initial_return=119493609 initial_ticks=44 initial_callbacks=1
+# FORZA-PUMP-FRAME id=3 frame=29 begin=119625384 end=119627279 issued=8 before=0 after_initial=0 after=2 budget_hit=0 submit_ticks=1533 poll_ticks=135 initial_return=119625400 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=3 frame=30 begin=119763459 end=119766601 issued=8 before=2 after_initial=0 after=2 budget_hit=0 submit_ticks=2634 poll_ticks=50 initial_return=119763500 initial_ticks=41 initial_callbacks=2
+# FORZA-PUMP-FRAME id=3 frame=31 begin=119895524 end=119898616 issued=8 before=2 after_initial=0 after=3 budget_hit=0 submit_ticks=2954 poll_ticks=57 initial_return=119895573 initial_ticks=49 initial_callbacks=2
+ok 6 - bounded submission bursts preserve callback and byte contracts
+# FORZA-PUMP-BEGIN id=4 pages=900 budget_us=250 seconds=10
+# FORZA-PUMP-CASE id=4 target=900 before=900 after=900 budget_us=250 operations=671 verified=671 callbacks=671 bytes=22191616 elapsed=33794585 frames=268 high_water=8 failures=0
+# FORZA-PUMP-TIMING id=4 pending=671 budget_stops=266 empty_immediate=467 pair_same=196 pair_split=139 pair_gap_sum=17552367 pair_gap_max=135132 burst_sum=303917 burst_max=2507 poll_sum=7025 initial_sum=9809 initial_max=80 initial_callbacks=381 zero_issue_frames=0
+# FORZA-PUMP-SIZE id=4 bytes=65536 count=336 submit_sum=144309 submit_max=1924 callback_sum=26231843 callback_max=134783
+# FORZA-PUMP-SIZE id=4 bytes=512 count=335 submit_sum=132169 submit_max=2023 callback_sum=21805355 callback_max=132870
+# FORZA-PUMP-OP id=4 seq=0 slot=0 bytes=65536 offset=0 frame=0 issue=149921413 returned=149922042 callback=149922686 burst=149921389 checked=149921410 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=1 slot=1 bytes=512 offset=65536 frame=0 issue=149922054 returned=149922156 callback=149922696 burst=149921389 checked=149922054 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=2 slot=2 bytes=65536 offset=4587520 frame=0 issue=149922162 returned=149922667 callback=150047570 burst=149921389 checked=149922162 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=3 slot=3 bytes=512 offset=4653056 frame=1 issue=150047582 returned=150048184 callback=150174247 burst=150047545 checked=150047581 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=4 slot=4 bytes=65536 offset=851968 frame=1 issue=150048199 returned=150048311 callback=150174254 burst=150047545 checked=150048198 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=5 slot=5 bytes=512 offset=917504 frame=1 issue=150048316 returned=150048389 callback=150174256 burst=150047545 checked=150048316 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=6 slot=0 bytes=65536 offset=5439488 frame=2 issue=150174264 returned=150174675 callback=150175137 burst=150174216 checked=150174262 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=7 slot=1 bytes=512 offset=5505024 frame=2 issue=150174689 returned=150175130 callback=150175140 burst=150174216 checked=150174688 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=8 slot=2 bytes=65536 offset=1703936 frame=3 issue=150301534 returned=150302199 callback=150425007 burst=150301506 checked=150301531 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=9 slot=3 bytes=512 offset=1769472 frame=3 issue=150302212 returned=150302322 callback=150425014 burst=150301506 checked=150302211 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=10 slot=0 bytes=65536 offset=6291456 frame=4 issue=150425021 returned=150425313 callback=150425601 burst=150424985 checked=150425020 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=11 slot=1 bytes=512 offset=6356992 frame=4 issue=150425325 returned=150425596 callback=150425824 burst=150424985 checked=150425324 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=12 slot=4 bytes=65536 offset=2555904 frame=4 issue=150425606 returned=150425819 callback=150552508 burst=150424985 checked=150425606 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=13 slot=5 bytes=512 offset=2621440 frame=4 issue=150425828 returned=150425903 callback=150552518 burst=150424985 checked=150425827 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=14 slot=0 bytes=65536 offset=7143424 frame=5 issue=150552528 returned=150553151 callback=150553712 burst=150552469 checked=150552526 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=15 slot=1 bytes=512 offset=7208960 frame=5 issue=150553167 returned=150553705 callback=150553715 burst=150552469 checked=150553166 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=16 slot=2 bytes=65536 offset=3407872 frame=6 issue=150677781 returned=150678363 callback=150678916 burst=150677763 checked=150677779 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=17 slot=3 bytes=512 offset=3473408 frame=6 issue=150678375 returned=150678901 callback=150678923 burst=150677763 checked=150678374 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=18 slot=0 bytes=65536 offset=7995392 frame=7 issue=150802983 returned=150803920 callback=150927497 burst=150802969 checked=150802982 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=19 slot=1 bytes=512 offset=8060928 frame=8 issue=150927510 returned=150927873 callback=150928346 burst=150927471 checked=150927507 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=20 slot=2 bytes=65536 offset=4259840 frame=8 issue=150927884 returned=150928339 callback=150928348 burst=150927471 checked=150927884 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=21 slot=0 bytes=512 offset=4325376 frame=9 issue=151051745 returned=151052568 callback=151174888 burst=151051727 checked=151051743 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=22 slot=1 bytes=65536 offset=524288 frame=10 issue=151174901 returned=151175525 callback=151175892 burst=151174865 checked=151174900 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=23 slot=2 bytes=512 offset=589824 frame=10 issue=151175536 returned=151175885 callback=151298735 burst=151174865 checked=151175535 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=24 slot=0 bytes=65536 offset=5111808 frame=11 issue=151298749 returned=151299157 callback=151299936 burst=151298708 checked=151298748 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=25 slot=3 bytes=512 offset=5177344 frame=11 issue=151299169 returned=151299262 callback=151299939 burst=151298708 checked=151299169 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=26 slot=4 bytes=65536 offset=1376256 frame=11 issue=151299267 returned=151299347 callback=151425073 burst=151298708 checked=151299267 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=27 slot=5 bytes=512 offset=1441792 frame=11 issue=151299357 returned=151299431 callback=151425077 burst=151298708 checked=151299355 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=28 slot=6 bytes=65536 offset=5963776 frame=11 issue=151299435 returned=151299929 callback=151425083 burst=151298708 checked=151299435 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=29 slot=1 bytes=512 offset=6029312 frame=12 issue=151425090 returned=151425494 callback=151425834 burst=151425051 checked=151425089 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=30 slot=2 bytes=65536 offset=2228224 frame=12 issue=151425506 returned=151425829 callback=151552673 burst=151425051 checked=151425506 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=31 slot=7 bytes=512 offset=2293760 frame=12 issue=151425840 returned=151425926 callback=151552678 burst=151425051 checked=151425839 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=32 slot=0 bytes=65536 offset=6815744 frame=13 issue=151552684 returned=151552984 callback=151553514 burst=151552652 checked=151552683 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=33 slot=1 bytes=512 offset=6881280 frame=13 issue=151552996 returned=151553088 callback=151553517 burst=151552652 checked=151552995 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=34 slot=3 bytes=65536 offset=3080192 frame=13 issue=151553093 returned=151553507 callback=151676753 burst=151552652 checked=151553092 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=35 slot=2 bytes=512 offset=3145728 frame=14 issue=151676767 returned=151677251 callback=151677728 burst=151676727 checked=151676764 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=36 slot=4 bytes=65536 offset=7667712 frame=14 issue=151677266 returned=151677721 callback=151677730 burst=151676727 checked=151677265 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=37 slot=0 bytes=512 offset=7733248 frame=15 issue=151803232 returned=151803542 callback=151804088 burst=151803216 checked=151803230 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=38 slot=1 bytes=65536 offset=3932160 frame=15 issue=151803551 returned=151803637 callback=151804093 burst=151803216 checked=151803550 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=39 slot=3 bytes=512 offset=3997696 frame=15 issue=151803641 returned=151804075 callback=151927546 burst=151803216 checked=151803640 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=40 slot=2 bytes=65536 offset=196608 frame=16 issue=151927557 returned=151927917 callback=151929165 burst=151927496 checked=151927555 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=41 slot=4 bytes=512 offset=262144 frame=16 issue=151927929 returned=151929158 callback=151929168 burst=151927496 checked=151927928 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=42 slot=0 bytes=65536 offset=4784128 frame=17 issue=152053863 returned=152054389 callback=152054925 burst=152053842 checked=152053860 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=43 slot=1 bytes=512 offset=4849664 frame=17 issue=152054399 returned=152054495 callback=152179933 burst=152053842 checked=152054399 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=44 slot=3 bytes=65536 offset=1048576 frame=17 issue=152054501 returned=152054907 callback=152179944 burst=152053842 checked=152054500 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=45 slot=2 bytes=512 offset=1114112 frame=18 issue=152179956 returned=152181058 callback=152306373 burst=152179884 checked=152179954 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=46 slot=0 bytes=65536 offset=5636096 frame=19 issue=152306390 returned=152307086 callback=152307582 burst=152306330 checked=152306388 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=47 slot=1 bytes=512 offset=5701632 frame=19 issue=152307106 returned=152307574 callback=152429055 burst=152306330 checked=152307105 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=48 slot=2 bytes=65536 offset=1900544 frame=20 issue=152429068 returned=152429521 callback=152429915 burst=152429032 checked=152429066 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=49 slot=3 bytes=512 offset=1966080 frame=20 issue=152429535 returned=152429909 callback=152555440 burst=152429032 checked=152429534 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=50 slot=0 bytes=65536 offset=6488064 frame=21 issue=152555451 returned=152556189 callback=152556514 burst=152555422 checked=152555449 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=51 slot=1 bytes=512 offset=6553600 frame=21 issue=152556200 returned=152556508 callback=152680477 burst=152555422 checked=152556199 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=52 slot=2 bytes=65536 offset=2752512 frame=22 issue=152680492 returned=152681136 callback=152681684 burst=152680445 checked=152680490 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=53 slot=3 bytes=512 offset=2818048 frame=22 issue=152681151 returned=152681677 callback=152681686 burst=152680445 checked=152681150 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=54 slot=0 bytes=65536 offset=7340032 frame=23 issue=152809621 returned=152810020 callback=152810494 burst=152809602 checked=152809619 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=55 slot=1 bytes=512 offset=7405568 frame=23 issue=152810030 returned=152810479 callback=152810500 burst=152809602 checked=152810030 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=56 slot=2 bytes=65536 offset=3604480 frame=24 issue=152936447 returned=152936778 callback=152937184 burst=152936433 checked=152936446 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=57 slot=3 bytes=512 offset=3670016 frame=24 issue=152936787 returned=152937088 callback=152937189 burst=152936433 checked=152936786 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=58 slot=4 bytes=65536 offset=8192000 frame=24 issue=152937195 returned=152937333 callback=153067476 burst=152936433 checked=152937195 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=59 slot=0 bytes=512 offset=8257536 frame=25 issue=153067492 returned=153068471 callback=153190117 burst=153067447 checked=153067490 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=60 slot=1 bytes=65536 offset=4456448 frame=26 issue=153190127 returned=153190481 callback=153190880 burst=153190092 checked=153190126 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=61 slot=2 bytes=512 offset=4521984 frame=26 issue=153190492 returned=153190874 callback=153190883 burst=153190092 checked=153190491 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=62 slot=3 bytes=65536 offset=720896 frame=26 issue=153190888 returned=153191713 callback=153314989 burst=153190092 checked=153190888 status=00000103 calls=1
+# FORZA-PUMP-OP id=4 seq=63 slot=0 bytes=512 offset=786432 frame=27 issue=153315000 returned=153315354 callback=153437718 burst=153314968 checked=153314998 status=00000103 calls=1
+# FORZA-PUMP-FRAME id=4 frame=0 begin=149921389 end=149922703 issued=3 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=1236 poll_ticks=43 initial_return=149921407 initial_ticks=18 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=1 begin=150047545 end=150048394 issued=3 before=1 after_initial=0 after=3 budget_hit=1 submit_ticks=787 poll_ticks=12 initial_return=150047580 initial_ticks=35 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=2 begin=150174216 end=150175146 issued=2 before=3 after_initial=0 after=0 budget_hit=1 submit_ticks=852 poll_ticks=20 initial_return=150174260 initial_ticks=44 initial_callbacks=3
+# FORZA-PUMP-FRAME id=4 frame=3 begin=150301506 end=150303935 issued=2 before=0 after_initial=0 after=2 budget_hit=1 submit_ticks=775 poll_ticks=8 initial_return=150301529 initial_ticks=23 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=4 begin=150424985 end=150425907 issued=4 before=2 after_initial=0 after=2 budget_hit=1 submit_ticks=851 poll_ticks=23 initial_return=150425019 initial_ticks=34 initial_callbacks=2
+# FORZA-PUMP-FRAME id=4 frame=5 begin=150552469 end=150553719 issued=2 before=2 after_initial=0 after=0 budget_hit=1 submit_ticks=1161 poll_ticks=21 initial_return=150552524 initial_ticks=55 initial_callbacks=2
+# FORZA-PUMP-FRAME id=4 frame=6 begin=150677763 end=150678931 issued=2 before=0 after_initial=0 after=0 budget_hit=1 submit_ticks=1108 poll_ticks=32 initial_return=150677777 initial_ticks=14 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=7 begin=150802969 end=150803935 issued=1 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=937 poll_ticks=8 initial_return=150802981 initial_ticks=12 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=8 begin=150927471 end=150928353 issued=2 before=1 after_initial=0 after=0 budget_hit=1 submit_ticks=818 poll_ticks=17 initial_return=150927506 initial_ticks=35 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=9 begin=151051727 end=151052579 issued=1 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=823 poll_ticks=6 initial_return=151051741 initial_ticks=14 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=10 begin=151174865 end=151175897 issued=2 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=973 poll_ticks=16 initial_return=151174899 initial_ticks=34 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=11 begin=151298708 end=151299943 issued=5 before=1 after_initial=0 after=3 budget_hit=1 submit_ticks=1149 poll_ticks=28 initial_return=151298746 initial_ticks=38 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=12 begin=151425051 end=151425932 issued=3 before=3 after_initial=0 after=2 budget_hit=1 submit_ticks=813 poll_ticks=17 initial_return=151425087 initial_ticks=36 initial_callbacks=3
+# FORZA-PUMP-FRAME id=4 frame=13 begin=151552652 end=151553522 issued=3 before=2 after_initial=0 after=1 budget_hit=1 submit_ticks=806 poll_ticks=20 initial_return=151552682 initial_ticks=30 initial_callbacks=2
+# FORZA-PUMP-FRAME id=4 frame=14 begin=151676727 end=151677735 issued=2 before=1 after_initial=0 after=0 budget_hit=1 submit_ticks=939 poll_ticks=19 initial_return=151676762 initial_ticks=35 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=15 begin=151803216 end=151804103 issued=3 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=830 poll_ticks=31 initial_return=151803229 initial_ticks=13 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=16 begin=151927496 end=151929174 issued=2 before=1 after_initial=0 after=0 budget_hit=1 submit_ticks=1589 poll_ticks=18 initial_return=151927554 initial_ticks=58 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=17 begin=152053842 end=152054938 issued=3 before=0 after_initial=0 after=2 budget_hit=1 submit_ticks=1028 poll_ticks=36 initial_return=152053858 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=18 begin=152179884 end=152181397 issued=1 before=2 after_initial=0 after=1 budget_hit=1 submit_ticks=1102 poll_ticks=331 initial_return=152179950 initial_ticks=66 initial_callbacks=2
+# FORZA-PUMP-FRAME id=4 frame=19 begin=152306330 end=152307589 issued=2 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1164 poll_ticks=21 initial_return=152306386 initial_ticks=56 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=20 begin=152429032 end=152429922 issued=2 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=827 poll_ticks=17 initial_return=152429064 initial_ticks=32 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=21 begin=152555422 end=152556520 issued=2 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1046 poll_ticks=15 initial_return=152555447 initial_ticks=25 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=22 begin=152680445 end=152681693 issued=2 before=1 after_initial=0 after=0 budget_hit=1 submit_ticks=1170 poll_ticks=20 initial_return=152680488 initial_ticks=43 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=23 begin=152809602 end=152810508 issued=2 before=0 after_initial=0 after=0 budget_hit=1 submit_ticks=848 poll_ticks=29 initial_return=152809618 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=24 begin=152936433 end=152937338 issued=3 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=770 poll_ticks=112 initial_return=152936444 initial_ticks=11 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=25 begin=153067447 end=153068485 issued=1 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=979 poll_ticks=9 initial_return=153067488 initial_ticks=41 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=26 begin=153190092 end=153191720 issued=3 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1561 poll_ticks=21 initial_return=153190124 initial_ticks=32 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=27 begin=153314968 end=153315831 issued=7 before=1 after_initial=0 after=7 budget_hit=1 submit_ticks=795 poll_ticks=18 initial_return=153314997 initial_ticks=29 initial_callbacks=1
+# FORZA-PUMP-FRAME id=4 frame=28 begin=153437690 end=153438590 issued=7 before=7 after_initial=0 after=7 budget_hit=1 submit_ticks=802 poll_ticks=20 initial_return=153437748 initial_ticks=58 initial_callbacks=7
+# FORZA-PUMP-FRAME id=4 frame=29 begin=153565868 end=153566975 issued=3 before=7 after_initial=0 after=0 budget_hit=1 submit_ticks=1012 poll_ticks=24 initial_return=153565924 initial_ticks=56 initial_callbacks=7
+# FORZA-PUMP-FRAME id=4 frame=30 begin=153699601 end=153701747 issued=2 before=0 after_initial=0 after=0 budget_hit=1 submit_ticks=2080 poll_ticks=34 initial_return=153699618 initial_ticks=17 initial_callbacks=0
+# FORZA-PUMP-FRAME id=4 frame=31 begin=153827323 end=153828546 issued=3 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=1153 poll_ticks=36 initial_return=153827339 initial_ticks=16 initial_callbacks=0
+ok 7 - bounded submission bursts preserve callback and byte contracts
+# FORZA-PUMP-BEGIN id=5 pages=900 budget_us=450 seconds=10
+# FORZA-PUMP-CASE id=5 target=900 before=900 after=900 budget_us=450 operations=1360 verified=1360 callbacks=1360 bytes=44912640 elapsed=33863878 frames=261 high_water=8 failures=0
+# FORZA-PUMP-TIMING id=5 pending=1360 budget_stops=202 empty_immediate=905 pair_same=551 pair_split=129 pair_gap_sum=16714562 pair_gap_max=136830 burst_sum=437758 burst_max=2817 poll_sum=12981 initial_sum=11679 initial_max=1185 initial_callbacks=632 zero_issue_frames=0
+# FORZA-PUMP-SIZE id=5 bytes=65536 count=680 submit_sum=220250 submit_max=1898 callback_sum=44768352 callback_max=140922
+# FORZA-PUMP-SIZE id=5 bytes=512 count=680 submit_sum=182829 submit_max=1741 callback_sum=36772311 callback_max=140545
+# FORZA-PUMP-OP id=5 seq=0 slot=0 bytes=65536 offset=0 frame=0 issue=184048935 returned=184049624 callback=184050195 burst=184048913 checked=184048932 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=1 slot=1 bytes=512 offset=65536 frame=0 issue=184049636 returned=184050176 callback=184050206 burst=184048913 checked=184049636 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=2 slot=2 bytes=65536 offset=4587520 frame=0 issue=184050214 returned=184050356 callback=184175359 burst=184048913 checked=184050213 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=3 slot=3 bytes=512 offset=4653056 frame=0 issue=184050362 returned=184050445 callback=184175365 burst=184048913 checked=184050361 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=4 slot=0 bytes=65536 offset=851968 frame=1 issue=184175372 returned=184175738 callback=184176323 burst=184175335 checked=184175371 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=5 slot=1 bytes=512 offset=917504 frame=1 issue=184175749 returned=184175841 callback=184176325 burst=184175335 checked=184175748 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=6 slot=4 bytes=65536 offset=5439488 frame=1 issue=184175846 returned=184175945 callback=184176640 burst=184175335 checked=184175845 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=7 slot=5 bytes=512 offset=5505024 frame=1 issue=184175949 returned=184176317 callback=184176643 burst=184175335 checked=184175949 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=8 slot=6 bytes=65536 offset=1703936 frame=1 issue=184176329 returned=184176635 callback=184177075 burst=184175335 checked=184176328 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=9 slot=7 bytes=512 offset=1769472 frame=1 issue=184176647 returned=184176722 callback=184177077 burst=184175335 checked=184176646 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=10 slot=8 bytes=65536 offset=6291456 frame=1 issue=184176727 returned=184176793 callback=184304778 burst=184175335 checked=184176726 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=11 slot=9 bytes=512 offset=6356992 frame=1 issue=184176799 returned=184177070 callback=184304787 burst=184175335 checked=184176799 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=12 slot=0 bytes=65536 offset=2555904 frame=2 issue=184304796 returned=184305382 callback=184305894 burst=184304746 checked=184304795 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=13 slot=1 bytes=512 offset=2621440 frame=2 issue=184305395 returned=184305884 callback=184305897 burst=184304746 checked=184305395 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=14 slot=2 bytes=65536 offset=7143424 frame=2 issue=184305928 returned=184306072 callback=184306338 burst=184304746 checked=184305928 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=15 slot=3 bytes=512 offset=7208960 frame=2 issue=184306078 returned=184306333 callback=184306341 burst=184304746 checked=184306078 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=16 slot=0 bytes=65536 offset=3407872 frame=3 issue=184435661 returned=184436673 callback=184437354 burst=184435642 checked=184435659 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=17 slot=1 bytes=512 offset=3473408 frame=3 issue=184436686 returned=184436795 callback=184437361 burst=184435642 checked=184436685 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=18 slot=4 bytes=65536 offset=7995392 frame=3 issue=184436801 returned=184437336 callback=184560568 burst=184435642 checked=184436800 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=19 slot=2 bytes=512 offset=8060928 frame=4 issue=184560583 returned=184561007 callback=184561397 burst=184560541 checked=184560581 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=20 slot=3 bytes=65536 offset=4259840 frame=4 issue=184561019 returned=184561390 callback=184561760 burst=184560541 checked=184561019 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=21 slot=5 bytes=512 offset=4325376 frame=4 issue=184561402 returned=184561754 callback=184561763 burst=184560541 checked=184561401 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=22 slot=6 bytes=65536 offset=524288 frame=4 issue=184561767 returned=184561905 callback=184690020 burst=184560541 checked=184561767 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=23 slot=7 bytes=512 offset=589824 frame=4 issue=184561911 returned=184561985 callback=184690026 burst=184560541 checked=184561910 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=24 slot=8 bytes=65536 offset=5111808 frame=4 issue=184561989 returned=184562061 callback=184690028 burst=184560541 checked=184561989 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=25 slot=0 bytes=512 offset=5177344 frame=5 issue=184690035 returned=184690459 callback=184690872 burst=184689995 checked=184690034 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=26 slot=1 bytes=65536 offset=1376256 frame=5 issue=184690471 returned=184690865 callback=184691323 burst=184689995 checked=184690470 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=27 slot=2 bytes=512 offset=1441792 frame=5 issue=184690878 returned=184690973 callback=184691325 burst=184689995 checked=184690877 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=28 slot=3 bytes=65536 offset=5963776 frame=5 issue=184690979 returned=184691318 callback=184691759 burst=184689995 checked=184690978 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=29 slot=4 bytes=512 offset=6029312 frame=5 issue=184691329 returned=184691406 callback=184691761 burst=184689995 checked=184691328 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=30 slot=5 bytes=65536 offset=2228224 frame=5 issue=184691411 returned=184691482 callback=184820509 burst=184689995 checked=184691410 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=31 slot=9 bytes=512 offset=2293760 frame=5 issue=184691486 returned=184691754 callback=184820514 burst=184689995 checked=184691485 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=32 slot=0 bytes=65536 offset=6815744 frame=6 issue=184820521 returned=184820856 callback=184821381 burst=184820488 checked=184820520 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=33 slot=1 bytes=512 offset=6881280 frame=6 issue=184820866 returned=184820954 callback=184821383 burst=184820488 checked=184820865 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=34 slot=2 bytes=65536 offset=3080192 frame=6 issue=184820960 returned=184821374 callback=184821591 burst=184820488 checked=184820959 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=35 slot=6 bytes=512 offset=3145728 frame=6 issue=184821388 returned=184821586 callback=184821781 burst=184820488 checked=184821387 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=36 slot=7 bytes=65536 offset=7667712 frame=6 issue=184821595 returned=184821777 callback=184822041 burst=184820488 checked=184821594 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=37 slot=8 bytes=512 offset=7733248 frame=6 issue=184821785 returned=184822036 callback=184822043 burst=184820488 checked=184821784 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=38 slot=0 bytes=65536 offset=3932160 frame=7 issue=184955133 returned=184955563 callback=184956325 burst=184955113 checked=184955130 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=39 slot=1 bytes=512 offset=3997696 frame=7 issue=184955576 returned=184955669 callback=184956330 burst=184955113 checked=184955576 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=40 slot=2 bytes=65536 offset=196608 frame=7 issue=184955674 returned=184956309 callback=185088856 burst=184955113 checked=184955674 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=41 slot=3 bytes=512 offset=262144 frame=7 issue=184956337 returned=184956446 callback=185088862 burst=184955113 checked=184956336 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=42 slot=4 bytes=65536 offset=4784128 frame=7 issue=184956467 returned=184956545 callback=185088864 burst=184955113 checked=184956464 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=43 slot=5 bytes=512 offset=4849664 frame=7 issue=184956549 returned=184956613 callback=185088866 burst=184955113 checked=184956548 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=44 slot=6 bytes=65536 offset=1048576 frame=7 issue=184956618 returned=184956695 callback=185088871 burst=184955113 checked=184956617 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=45 slot=0 bytes=512 offset=1114112 frame=8 issue=185088878 returned=185089486 callback=185089830 burst=185088835 checked=185088877 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=46 slot=1 bytes=65536 offset=5636096 frame=8 issue=185089498 returned=185089823 callback=185220150 burst=185088835 checked=185089497 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=47 slot=7 bytes=512 offset=5701632 frame=8 issue=185089836 returned=185089917 callback=185220155 burst=185088835 checked=185089835 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=48 slot=8 bytes=65536 offset=1900544 frame=8 issue=185089922 returned=185089991 callback=185220157 burst=185088835 checked=185089922 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=49 slot=9 bytes=512 offset=1966080 frame=8 issue=185090000 returned=185090081 callback=185220159 burst=185088835 checked=185089997 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=50 slot=10 bytes=65536 offset=6488064 frame=8 issue=185090084 returned=185090152 callback=185220167 burst=185088835 checked=185090084 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=51 slot=0 bytes=512 offset=6553600 frame=9 issue=185220176 returned=185221288 callback=185221663 burst=185220126 checked=185220174 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=52 slot=2 bytes=65536 offset=2752512 frame=9 issue=185221301 returned=185221656 callback=185350144 burst=185220126 checked=185221300 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=53 slot=1 bytes=512 offset=2818048 frame=10 issue=185350153 returned=185350908 callback=185351230 burst=185350122 checked=185350152 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=54 slot=3 bytes=65536 offset=7340032 frame=10 issue=185350922 returned=185351223 callback=185351708 burst=185350122 checked=185350921 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=55 slot=4 bytes=512 offset=7405568 frame=10 issue=185351235 returned=185351320 callback=185351710 burst=185350122 checked=185351234 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=56 slot=5 bytes=65536 offset=3604480 frame=10 issue=185351325 returned=185351397 callback=185475650 burst=185350122 checked=185351324 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=57 slot=6 bytes=512 offset=3670016 frame=10 issue=185351401 returned=185351703 callback=185475657 burst=185350122 checked=185351401 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=58 slot=0 bytes=65536 offset=8192000 frame=11 issue=185475666 returned=185476081 callback=185476420 burst=185475625 checked=185475664 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=59 slot=1 bytes=512 offset=8257536 frame=11 issue=185476093 returned=185476414 callback=185477508 burst=185475625 checked=185476092 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=60 slot=2 bytes=65536 offset=4456448 frame=11 issue=185476426 returned=185477501 callback=185601628 burst=185475625 checked=185476425 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=61 slot=0 bytes=512 offset=4521984 frame=12 issue=185601642 returned=185602102 callback=185602866 burst=185601600 checked=185601640 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=62 slot=3 bytes=65536 offset=720896 frame=12 issue=185602116 returned=185602213 callback=185602869 burst=185601600 checked=185602116 status=00000103 calls=1
+# FORZA-PUMP-OP id=5 seq=63 slot=4 bytes=512 offset=786432 frame=12 issue=185602218 returned=185602290 callback=185602871 burst=185601600 checked=185602217 status=00000103 calls=1
+# FORZA-PUMP-FRAME id=5 frame=0 begin=184048913 end=184050450 issued=4 before=0 after_initial=0 after=2 budget_hit=1 submit_ticks=1454 poll_ticks=48 initial_return=184048930 initial_ticks=17 initial_callbacks=0
+# FORZA-PUMP-FRAME id=5 frame=1 begin=184175335 end=184177080 issued=8 before=2 after_initial=0 after=2 budget_hit=0 submit_ticks=1643 poll_ticks=44 initial_return=184175370 initial_ticks=35 initial_callbacks=2
+# FORZA-PUMP-FRAME id=5 frame=2 begin=184304746 end=184306346 issued=4 before=2 after_initial=0 after=0 budget_hit=1 submit_ticks=1474 poll_ticks=35 initial_return=184304792 initial_ticks=46 initial_callbacks=2
+# FORZA-PUMP-FRAME id=5 frame=3 begin=184435642 end=184437367 issued=3 before=0 after_initial=0 after=1 budget_hit=1 submit_ticks=1656 poll_ticks=36 initial_return=184435657 initial_ticks=15 initial_callbacks=0
+# FORZA-PUMP-FRAME id=5 frame=4 begin=184560541 end=184562066 issued=6 before=1 after_initial=0 after=3 budget_hit=1 submit_ticks=1431 poll_ticks=35 initial_return=184560578 initial_ticks=37 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=5 begin=184689995 end=184691765 issued=7 before=3 after_initial=0 after=2 budget_hit=1 submit_ticks=1668 poll_ticks=40 initial_return=184690032 initial_ticks=37 initial_callbacks=3
+# FORZA-PUMP-FRAME id=5 frame=6 begin=184820488 end=184822047 issued=6 before=2 after_initial=0 after=0 budget_hit=1 submit_ticks=1468 poll_ticks=40 initial_return=184820518 initial_ticks=30 initial_callbacks=2
+# FORZA-PUMP-FRAME id=5 frame=7 begin=184955113 end=184956699 issued=7 before=0 after_initial=0 after=5 budget_hit=1 submit_ticks=1486 poll_ticks=51 initial_return=184955128 initial_ticks=15 initial_callbacks=0
+# FORZA-PUMP-FRAME id=5 frame=8 begin=185088835 end=185090371 issued=6 before=5 after_initial=0 after=5 budget_hit=1 submit_ticks=1232 poll_ticks=240 initial_return=185088875 initial_ticks=40 initial_callbacks=5
+# FORZA-PUMP-FRAME id=5 frame=9 begin=185220126 end=185221668 issued=2 before=5 after_initial=0 after=1 budget_hit=1 submit_ticks=1467 poll_ticks=16 initial_return=185220173 initial_ticks=47 initial_callbacks=5
+# FORZA-PUMP-FRAME id=5 frame=10 begin=185350122 end=185351714 issued=5 before=1 after_initial=0 after=2 budget_hit=1 submit_ticks=1515 poll_ticks=28 initial_return=185350150 initial_ticks=28 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=11 begin=185475625 end=185477514 issued=3 before=2 after_initial=0 after=1 budget_hit=1 submit_ticks=1811 poll_ticks=24 initial_return=185475662 initial_ticks=37 initial_callbacks=2
+# FORZA-PUMP-FRAME id=5 frame=12 begin=185601600 end=185603284 issued=6 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1584 poll_ticks=38 initial_return=185601638 initial_ticks=38 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=13 begin=185732192 end=185733716 issued=4 before=1 after_initial=0 after=3 budget_hit=1 submit_ticks=1454 poll_ticks=22 initial_return=185732221 initial_ticks=29 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=14 begin=185858617 end=185861385 issued=5 before=3 after_initial=0 after=1 budget_hit=1 submit_ticks=2657 poll_ticks=47 initial_return=185858658 initial_ticks=41 initial_callbacks=3
+# FORZA-PUMP-FRAME id=5 frame=15 begin=185986228 end=185989045 issued=4 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=2709 poll_ticks=31 initial_return=185986282 initial_ticks=54 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=16 begin=186117077 end=186118039 issued=8 before=1 after_initial=0 after=8 budget_hit=0 submit_ticks=888 poll_ticks=21 initial_return=186117109 initial_ticks=32 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=17 begin=186240963 end=186241924 issued=8 before=8 after_initial=0 after=8 budget_hit=0 submit_ticks=862 poll_ticks=21 initial_return=186241016 initial_ticks=53 initial_callbacks=8
+# FORZA-PUMP-FRAME id=5 frame=18 begin=186381909 end=186383716 issued=1 before=8 after_initial=0 after=1 budget_hit=1 submit_ticks=1716 poll_ticks=11 initial_return=186381976 initial_ticks=67 initial_callbacks=8
+# FORZA-PUMP-FRAME id=5 frame=19 begin=186514848 end=186516520 issued=6 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1573 poll_ticks=41 initial_return=186514885 initial_ticks=37 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=20 begin=186641161 end=186642590 issued=8 before=1 after_initial=0 after=8 budget_hit=0 submit_ticks=1336 poll_ticks=24 initial_return=186641204 initial_ticks=43 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=21 begin=186769385 end=186770894 issued=8 before=8 after_initial=0 after=5 budget_hit=0 submit_ticks=1396 poll_ticks=34 initial_return=186769436 initial_ticks=51 initial_callbacks=8
+# FORZA-PUMP-FRAME id=5 frame=22 begin=186906415 end=186907987 issued=6 before=5 after_initial=0 after=1 budget_hit=1 submit_ticks=1467 poll_ticks=40 initial_return=186906457 initial_ticks=42 initial_callbacks=5
+# FORZA-PUMP-FRAME id=5 frame=23 begin=187037708 end=187039774 issued=5 before=1 after_initial=0 after=1 budget_hit=1 submit_ticks=1958 poll_ticks=37 initial_return=187037756 initial_ticks=48 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=24 begin=187167835 end=187169357 issued=7 before=1 after_initial=0 after=3 budget_hit=1 submit_ticks=1432 poll_ticks=36 initial_return=187167865 initial_ticks=30 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=25 begin=187300563 end=187302733 issued=4 before=3 after_initial=0 after=1 budget_hit=1 submit_ticks=1840 poll_ticks=259 initial_return=187300616 initial_ticks=53 initial_callbacks=3
+# FORZA-PUMP-FRAME id=5 frame=26 begin=187431743 end=187433493 issued=5 before=1 after_initial=0 after=0 budget_hit=1 submit_ticks=1645 poll_ticks=39 initial_return=187431784 initial_ticks=41 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=27 begin=187561806 end=187563624 issued=6 before=0 after_initial=0 after=4 budget_hit=1 submit_ticks=1746 poll_ticks=37 initial_return=187561821 initial_ticks=15 initial_callbacks=0
+# FORZA-PUMP-FRAME id=5 frame=28 begin=187690444 end=187692246 issued=5 before=4 after_initial=0 after=1 budget_hit=1 submit_ticks=1675 poll_ticks=34 initial_return=187690507 initial_ticks=63 initial_callbacks=4
+# FORZA-PUMP-FRAME id=5 frame=29 begin=187824000 end=187826279 issued=4 before=1 after_initial=0 after=2 budget_hit=1 submit_ticks=2048 poll_ticks=184 initial_return=187824030 initial_ticks=30 initial_callbacks=1
+# FORZA-PUMP-FRAME id=5 frame=30 begin=187954952 end=187956690 issued=4 before=2 after_initial=0 after=1 budget_hit=1 submit_ticks=1639 poll_ticks=32 initial_return=187955001 initial_ticks=49 initial_callbacks=2
+# FORZA-PUMP-FRAME id=5 frame=31 begin=188082459 end=188084003 issued=5 before=1 after_initial=0 after=2 budget_hit=1 submit_ticks=1444 poll_ticks=31 initial_return=188082507 initial_ticks=48 initial_callbacks=1
+ok 8 - bounded submission bursts preserve callback and byte contracts
+# FORZA-PUMP-BEGIN id=6 pages=900 budget_us=1000 seconds=10
+# FORZA-PUMP-CASE id=6 target=900 before=900 after=900 budget_us=1000 operations=2014 verified=2014 callbacks=2014 bytes=66510336 elapsed=33910535 frames=253 high_water=8 failures=0
+# FORZA-PUMP-TIMING id=6 pending=2014 budget_stops=6 empty_immediate=1317 pair_same=962 pair_split=45 pair_gap_sum=6254541 pair_gap_max=141909 burst_sum=563592 burst_max=4364 poll_sum=21205 initial_sum=10969 initial_max=92 initial_callbacks=819 zero_issue_frames=0
+# FORZA-PUMP-SIZE id=6 bytes=65536 count=1007 submit_sum=319011 submit_max=1732 callback_sum=54207201 callback_max=222606
+# FORZA-PUMP-SIZE id=6 bytes=512 count=1007 submit_sum=200630 submit_max=2146 callback_sum=54093770 callback_max=221254
+# FORZA-PUMP-OP id=6 seq=0 slot=0 bytes=65536 offset=0 frame=0 issue=218252684 returned=218253324 callback=218253798 burst=218252660 checked=218252682 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=1 slot=1 bytes=512 offset=65536 frame=0 issue=218253337 returned=218253778 callback=218254026 burst=218252660 checked=218253337 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=2 slot=2 bytes=65536 offset=4587520 frame=0 issue=218253813 returned=218254021 callback=218254300 burst=218252660 checked=218253812 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=3 slot=3 bytes=512 offset=4653056 frame=0 issue=218254031 returned=218254295 callback=218254302 burst=218252660 checked=218254030 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=4 slot=4 bytes=65536 offset=851968 frame=0 issue=218254307 returned=218254433 callback=218255734 burst=218252660 checked=218254306 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=5 slot=5 bytes=512 offset=917504 frame=0 issue=218254439 returned=218254517 callback=218255736 burst=218252660 checked=218254438 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=6 slot=6 bytes=65536 offset=5439488 frame=0 issue=218254521 returned=218255727 callback=218256069 burst=218252660 checked=218254521 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=7 slot=7 bytes=512 offset=5505024 frame=0 issue=218255740 returned=218256060 callback=218256071 burst=218252660 checked=218255739 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=8 slot=0 bytes=65536 offset=1703936 frame=1 issue=218386352 returned=218387824 callback=218388541 burst=218386326 checked=218386350 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=9 slot=1 bytes=512 offset=1769472 frame=1 issue=218387836 returned=218387942 callback=218388547 burst=218386326 checked=218387835 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=10 slot=2 bytes=65536 offset=6291456 frame=1 issue=218387948 returned=218388526 callback=218388946 burst=218386326 checked=218387947 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=11 slot=3 bytes=512 offset=6356992 frame=1 issue=218388554 returned=218388648 callback=218388949 burst=218386326 checked=218388553 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=12 slot=4 bytes=65536 offset=2555904 frame=1 issue=218388653 returned=218388941 callback=218389139 burst=218386326 checked=218388653 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=13 slot=5 bytes=512 offset=2621440 frame=1 issue=218388952 returned=218389135 callback=218389334 burst=218386326 checked=218388952 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=14 slot=8 bytes=65536 offset=7143424 frame=1 issue=218389143 returned=218389329 callback=218390466 burst=218386326 checked=218389142 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=15 slot=9 bytes=512 offset=7208960 frame=1 issue=218389338 returned=218390459 callback=218390469 burst=218386326 checked=218389337 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=16 slot=0 bytes=65536 offset=3407872 frame=2 issue=218519350 returned=218519879 callback=218520504 burst=218519336 checked=218519349 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=17 slot=1 bytes=512 offset=3473408 frame=2 issue=218519891 returned=218519997 callback=218520499 burst=218519336 checked=218519890 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=18 slot=2 bytes=65536 offset=7995392 frame=2 issue=218520003 returned=218520077 callback=218520882 burst=218519336 checked=218520002 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=19 slot=3 bytes=512 offset=8060928 frame=2 issue=218520080 returned=218520486 callback=218520885 burst=218519336 checked=218520080 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=20 slot=4 bytes=65536 offset=4259840 frame=2 issue=218520510 returned=218520813 callback=218520887 burst=218519336 checked=218520509 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=21 slot=5 bytes=512 offset=4325376 frame=2 issue=218520890 returned=218521004 callback=218521210 burst=218519336 checked=218520889 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=22 slot=6 bytes=65536 offset=524288 frame=2 issue=218521014 returned=218521205 callback=218649917 burst=218519336 checked=218521013 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=23 slot=7 bytes=512 offset=589824 frame=2 issue=218521214 returned=218521292 callback=218649924 burst=218519336 checked=218521214 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=24 slot=0 bytes=65536 offset=5111808 frame=3 issue=218649934 returned=218650377 callback=218650967 burst=218649889 checked=218649931 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=25 slot=1 bytes=512 offset=5177344 frame=3 issue=218650390 returned=218650482 callback=218650969 burst=218649889 checked=218650390 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=26 slot=2 bytes=65536 offset=1376256 frame=3 issue=218650488 returned=218650960 callback=218777684 burst=218649889 checked=218650487 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=27 slot=3 bytes=512 offset=1441792 frame=3 issue=218650974 returned=218651062 callback=218777689 burst=218649889 checked=218650973 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=28 slot=4 bytes=65536 offset=5963776 frame=3 issue=218651067 returned=218651144 callback=218777692 burst=218649889 checked=218651066 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=29 slot=5 bytes=512 offset=6029312 frame=3 issue=218651153 returned=218651228 callback=218777694 burst=218649889 checked=218651153 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=30 slot=8 bytes=65536 offset=2228224 frame=3 issue=218651232 returned=218651310 callback=218777701 burst=218649889 checked=218651232 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=31 slot=9 bytes=512 offset=2293760 frame=3 issue=218651313 returned=218651379 callback=218777703 burst=218649889 checked=218651313 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=32 slot=0 bytes=65536 offset=6815744 frame=4 issue=218777710 returned=218778996 callback=218909496 burst=218777664 checked=218777709 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=33 slot=1 bytes=512 offset=6881280 frame=4 issue=218779008 returned=218779111 callback=218909503 burst=218777664 checked=218779008 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=34 slot=6 bytes=65536 offset=3080192 frame=4 issue=218779116 returned=218779188 callback=218909505 burst=218777664 checked=218779116 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=35 slot=7 bytes=512 offset=3145728 frame=4 issue=218779193 returned=218779254 callback=218909508 burst=218777664 checked=218779192 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=36 slot=10 bytes=65536 offset=7667712 frame=4 issue=218779258 returned=218779328 callback=218909514 burst=218777664 checked=218779258 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=37 slot=11 bytes=512 offset=7733248 frame=4 issue=218779332 returned=218779412 callback=218909517 burst=218777664 checked=218779331 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=38 slot=12 bytes=65536 offset=3932160 frame=4 issue=218779415 returned=218779478 callback=218909519 burst=218777664 checked=218779415 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=39 slot=13 bytes=512 offset=3997696 frame=4 issue=218779482 returned=218779545 callback=218909521 burst=218777664 checked=218779481 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=40 slot=2 bytes=65536 offset=196608 frame=5 issue=218909529 returned=218909927 callback=218910381 burst=218909470 checked=218909527 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=41 slot=3 bytes=512 offset=262144 frame=5 issue=218909939 returned=218910280 callback=218910384 burst=218909470 checked=218909939 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=42 slot=4 bytes=65536 offset=4784128 frame=5 issue=218910389 returned=218910537 callback=218911202 burst=218909470 checked=218910388 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=43 slot=5 bytes=512 offset=4849664 frame=5 issue=218910542 returned=218910619 callback=218911205 burst=218909470 checked=218910542 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=44 slot=8 bytes=65536 offset=1048576 frame=5 issue=218910623 returned=218910694 callback=219044142 burst=218909470 checked=218910622 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=45 slot=9 bytes=512 offset=1114112 frame=5 issue=218910698 returned=218910760 callback=219044150 burst=218909470 checked=218910697 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=46 slot=14 bytes=65536 offset=5636096 frame=5 issue=218910764 returned=218910829 callback=219044159 burst=218909470 checked=218910763 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=47 slot=15 bytes=512 offset=5701632 frame=5 issue=218910833 returned=218911085 callback=219044161 burst=218909470 checked=218910832 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=48 slot=0 bytes=65536 offset=1900544 frame=6 issue=219044171 returned=219044642 callback=219172010 burst=219044109 checked=219044169 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=49 slot=1 bytes=512 offset=1966080 frame=6 issue=219044655 returned=219044752 callback=219172017 burst=219044109 checked=219044655 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=50 slot=2 bytes=65536 offset=6488064 frame=6 issue=219044758 returned=219044859 callback=219172019 burst=219044109 checked=219044758 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=51 slot=3 bytes=512 offset=6553600 frame=6 issue=219044862 returned=219044927 callback=219172022 burst=219044109 checked=219044862 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=52 slot=6 bytes=65536 offset=2752512 frame=6 issue=219044931 returned=219045006 callback=219172027 burst=219044109 checked=219044931 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=53 slot=7 bytes=512 offset=2818048 frame=6 issue=219045009 returned=219045072 callback=219172029 burst=219044109 checked=219045009 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=54 slot=10 bytes=65536 offset=7340032 frame=6 issue=219045075 returned=219045139 callback=219172031 burst=219044109 checked=219045075 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=55 slot=11 bytes=512 offset=7405568 frame=6 issue=219045143 returned=219045206 callback=219172033 burst=219044109 checked=219045142 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=56 slot=4 bytes=65536 offset=3604480 frame=7 issue=219172040 returned=219172458 callback=219172775 burst=219171989 checked=219172039 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=57 slot=5 bytes=512 offset=3670016 frame=7 issue=219172471 returned=219172769 callback=219173041 burst=219171989 checked=219172470 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=58 slot=8 bytes=65536 offset=8192000 frame=7 issue=219172782 returned=219173034 callback=219173386 burst=219171989 checked=219172781 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=59 slot=9 bytes=512 offset=8257536 frame=7 issue=219173045 returned=219173302 callback=219173388 burst=219171989 checked=219173044 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=60 slot=12 bytes=65536 offset=4456448 frame=7 issue=219173393 returned=219173520 callback=219173766 burst=219171989 checked=219173392 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=61 slot=13 bytes=512 offset=4521984 frame=7 issue=219173526 returned=219173761 callback=219173768 burst=219171989 checked=219173525 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=62 slot=14 bytes=65536 offset=720896 frame=7 issue=219173772 returned=219173885 callback=219174127 burst=219171989 checked=219173771 status=00000103 calls=1
+# FORZA-PUMP-OP id=6 seq=63 slot=15 bytes=512 offset=786432 frame=7 issue=219173890 returned=219174123 callback=219174129 burst=219171989 checked=219173890 status=00000103 calls=1
+# FORZA-PUMP-FRAME id=6 frame=0 begin=218252660 end=218256075 issued=8 before=0 after_initial=0 after=0 budget_hit=0 submit_ticks=3283 poll_ticks=80 initial_return=218252679 initial_ticks=19 initial_callbacks=0
+# FORZA-PUMP-FRAME id=6 frame=1 begin=218386326 end=218390473 issued=8 before=0 after_initial=0 after=0 budget_hit=0 submit_ticks=4028 poll_ticks=67 initial_return=218386347 initial_ticks=21 initial_callbacks=0
+# FORZA-PUMP-FRAME id=6 frame=2 begin=218519336 end=218521296 issued=8 before=0 after_initial=0 after=2 budget_hit=0 submit_ticks=1801 poll_ticks=123 initial_return=218519348 initial_ticks=12 initial_callbacks=0
+# FORZA-PUMP-FRAME id=6 frame=3 begin=218649889 end=218651382 issued=8 before=2 after_initial=0 after=6 budget_hit=0 submit_ticks=1391 poll_ticks=35 initial_return=218649929 initial_ticks=40 initial_callbacks=2
+# FORZA-PUMP-FRAME id=6 frame=4 begin=218777664 end=218779548 issued=8 before=6 after_initial=0 after=8 budget_hit=0 submit_ticks=1798 poll_ticks=21 initial_return=218777708 initial_ticks=44 initial_callbacks=6
+# FORZA-PUMP-FRAME id=6 frame=5 begin=218909470 end=218911208 issued=8 before=8 after_initial=0 after=4 budget_hit=0 submit_ticks=1414 poll_ticks=136 initial_return=218909526 initial_ticks=56 initial_callbacks=8
+# FORZA-PUMP-FRAME id=6 frame=6 begin=219044109 end=219045210 issued=8 before=4 after_initial=0 after=8 budget_hit=0 submit_ticks=999 poll_ticks=23 initial_return=219044166 initial_ticks=57 initial_callbacks=4
+# FORZA-PUMP-FRAME id=6 frame=7 begin=219171989 end=219174132 issued=8 before=8 after_initial=0 after=0 budget_hit=0 submit_ticks=1933 poll_ticks=136 initial_return=219172038 initial_ticks=49 initial_callbacks=8
+# FORZA-PUMP-FRAME id=6 frame=8 begin=219312784 end=219314727 issued=8 before=0 after_initial=0 after=1 budget_hit=0 submit_ticks=1774 poll_ticks=130 initial_return=219312800 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=6 frame=9 begin=219443479 end=219444470 issued=8 before=1 after_initial=0 after=8 budget_hit=0 submit_ticks=912 poll_ticks=23 initial_return=219443512 initial_ticks=33 initial_callbacks=1
+# FORZA-PUMP-FRAME id=6 frame=10 begin=219568960 end=219570718 issued=8 before=8 after_initial=0 after=2 budget_hit=0 submit_ticks=1634 poll_ticks=41 initial_return=219569016 initial_ticks=56 initial_callbacks=8
+# FORZA-PUMP-FRAME id=6 frame=11 begin=219708571 end=219711047 issued=8 before=2 after_initial=0 after=1 budget_hit=0 submit_ticks=2369 poll_ticks=47 initial_return=219708605 initial_ticks=34 initial_callbacks=2
+# FORZA-PUMP-FRAME id=6 frame=12 begin=219843941 end=219845890 issued=8 before=1 after_initial=0 after=5 budget_hit=0 submit_ticks=1380 poll_ticks=495 initial_return=219843989 initial_ticks=48 initial_callbacks=1
+# FORZA-PUMP-FRAME id=6 frame=13 begin=219974095 end=219976084 issued=8 before=5 after_initial=0 after=1 budget_hit=0 submit_ticks=1860 poll_ticks=44 initial_return=219974150 initial_ticks=55 initial_callbacks=5
+# FORZA-PUMP-FRAME id=6 frame=14 begin=220109247 end=220112637 issued=7 before=1 after_initial=0 after=3 budget_hit=1 submit_ticks=3269 poll_ticks=42 initial_return=220109298 initial_ticks=51 initial_callbacks=1
+# FORZA-PUMP-FRAME id=6 frame=15 begin=220242362 end=220245222 issued=8 before=3 after_initial=0 after=3 budget_hit=0 submit_ticks=2738 poll_ticks=48 initial_return=220242409 initial_ticks=47 initial_callbacks=3
+# FORZA-PUMP-FRAME id=6 frame=16 begin=220374424 end=220377545 issued=8 before=3 after_initial=0 after=3 budget_hit=0 submit_ticks=3002 poll_ticks=43 initial_return=220374472 initial_ticks=48 initial_callbacks=3
+# FORZA-PUMP-FRAME id=6 frame=17 begin=220508531 end=220510300 issued=8 before=3 after_initial=0 after=3 budget_hit=0 submit_ticks=1473 poll_ticks=42 initial_return=220508576 initial_ticks=45 initial_callbacks=3
+# FORZA-PUMP-FRAME id=6 frame=18 begin=220644010 end=220647409 issued=8 before=3 after_initial=0 after=1 budget_hit=0 submit_ticks=2772 poll_ticks=550 initial_return=220644053 initial_ticks=43 initial_callbacks=3
+# FORZA-PUMP-FRAME id=6 frame=19 begin=220778695 end=220780524 issued=8 before=1 after_initial=0 after=5 budget_hit=0 submit_ticks=1719 poll_ticks=43 initial_return=220778736 initial_ticks=41 initial_callbacks=1
+# FORZA-PUMP-FRAME id=6 frame=20 begin=220908194 end=220910048 issued=8 before=5 after_initial=0 after=8 budget_hit=0 submit_ticks=1755 poll_ticks=24 initial_return=220908244 initial_ticks=50 initial_callbacks=5
+# FORZA-PUMP-FRAME id=6 frame=21 begin=221038015 end=221039632 issued=8 before=8 after_initial=0 after=5 budget_hit=0 submit_ticks=1494 poll_ticks=42 initial_return=221038069 initial_ticks=54 initial_callbacks=8
+# FORZA-PUMP-FRAME id=6 frame=22 begin=221172822 end=221174392 issued=8 before=5 after_initial=0 after=7 budget_hit=0 submit_ticks=1444 poll_ticks=31 initial_return=221172890 initial_ticks=68 initial_callbacks=5
+# FORZA-PUMP-FRAME id=6 frame=23 begin=221311446 end=221314822 issued=5 before=7 after_initial=0 after=0 budget_hit=1 submit_ticks=3245 poll_ticks=46 initial_return=221311505 initial_ticks=59 initial_callbacks=7
+# FORZA-PUMP-FRAME id=6 frame=24 begin=221448112 end=221451347 issued=8 before=0 after_initial=0 after=0 budget_hit=0 submit_ticks=2773 poll_ticks=415 initial_return=221448131 initial_ticks=19 initial_callbacks=0
+# FORZA-PUMP-FRAME id=6 frame=25 begin=221585246 end=221587405 issued=8 before=0 after_initial=0 after=0 budget_hit=0 submit_ticks=2051 poll_ticks=66 initial_return=221585259 initial_ticks=13 initial_callbacks=0
+# FORZA-PUMP-FRAME id=6 frame=26 begin=221720097 end=221722025 issued=8 before=0 after_initial=0 after=2 budget_hit=0 submit_ticks=1831 poll_ticks=57 initial_return=221720111 initial_ticks=14 initial_callbacks=0
+# FORZA-PUMP-FRAME id=6 frame=27 begin=221851251 end=221852109 issued=8 before=2 after_initial=0 after=8 budget_hit=0 submit_ticks=786 poll_ticks=21 initial_return=221851281 initial_ticks=30 initial_callbacks=2
+# FORZA-PUMP-FRAME id=6 frame=28 begin=221977450 end=221980226 issued=8 before=8 after_initial=0 after=0 budget_hit=0 submit_ticks=2566 poll_ticks=114 initial_return=221977516 initial_ticks=66 initial_callbacks=8
+# FORZA-PUMP-FRAME id=6 frame=29 begin=222118112 end=222119000 issued=8 before=0 after_initial=0 after=8 budget_hit=0 submit_ticks=834 poll_ticks=20 initial_return=222118127 initial_ticks=15 initial_callbacks=0
+# FORZA-PUMP-FRAME id=6 frame=30 begin=222249030 end=222250732 issued=8 before=8 after_initial=0 after=2 budget_hit=0 submit_ticks=1582 poll_ticks=45 initial_return=222249080 initial_ticks=50 initial_callbacks=8
+# FORZA-PUMP-FRAME id=6 frame=31 begin=222394127 end=222396513 issued=8 before=2 after_initial=0 after=0 budget_hit=0 submit_ticks=2240 poll_ticks=56 initial_return=222394186 initial_ticks=59 initial_callbacks=2
+ok 9 - bounded submission bursts preserve callback and byte contracts
+# FORZA-PUMP-BEGIN id=7 pages=900 budget_us=0 seconds=10
+# FORZA-PUMP-CASE id=7 target=900 before=900 after=900 budget_us=0 operations=2024 verified=2024 callbacks=2024 bytes=66840576 elapsed=33970347 frames=253 high_water=8 failures=0
+# FORZA-PUMP-TIMING id=7 pending=2024 budget_stops=0 empty_immediate=1266 pair_same=1012 pair_split=0 pair_gap_sum=351696 pair_gap_max=1958 burst_sum=594870 burst_max=4711 poll_sum=20726 initial_sum=10123 initial_max=128 initial_callbacks=715 zero_issue_frames=0
+# FORZA-PUMP-SIZE id=7 bytes=65536 count=1012 submit_sum=339532 submit_max=1916 callback_sum=43248982 callback_max=223226
+# FORZA-PUMP-SIZE id=7 bytes=512 count=1012 submit_sum=211149 submit_max=1990 callback_sum=51271548 callback_max=222850
+# FORZA-PUMP-OP id=7 seq=0 slot=0 bytes=65536 offset=0 frame=0 issue=252498000 returned=252498733 callback=252499260 burst=252497969 checked=252497997 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=1 slot=1 bytes=512 offset=65536 frame=0 issue=252498749 returned=252499245 callback=252499493 burst=252497969 checked=252498748 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=2 slot=2 bytes=65536 offset=4587520 frame=0 issue=252499271 returned=252499488 callback=252499761 burst=252497969 checked=252499269 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=3 slot=3 bytes=512 offset=4653056 frame=0 issue=252499497 returned=252499755 callback=252499763 burst=252497969 checked=252499497 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=4 slot=4 bytes=65536 offset=851968 frame=0 issue=252499768 returned=252499891 callback=252500156 burst=252497969 checked=252499767 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=5 slot=5 bytes=512 offset=917504 frame=0 issue=252499897 returned=252500152 callback=252500159 burst=252497969 checked=252499896 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=6 slot=6 bytes=65536 offset=5439488 frame=0 issue=252500162 returned=252500329 callback=252501413 burst=252497969 checked=252500161 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=7 slot=7 bytes=512 offset=5505024 frame=0 issue=252500336 returned=252501403 callback=252627341 burst=252497969 checked=252500335 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=8 slot=0 bytes=65536 offset=1703936 frame=1 issue=252627355 returned=252627761 callback=252628229 burst=252627317 checked=252627354 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=9 slot=1 bytes=512 offset=1769472 frame=1 issue=252627774 returned=252627870 callback=252628534 burst=252627317 checked=252627773 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=10 slot=2 bytes=65536 offset=6291456 frame=1 issue=252628117 returned=252628222 callback=252628536 burst=252627317 checked=252628116 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=11 slot=3 bytes=512 offset=6356992 frame=1 issue=252628232 returned=252628529 callback=252628745 burst=252627317 checked=252628232 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=12 slot=4 bytes=65536 offset=2555904 frame=1 issue=252628540 returned=252628740 callback=252628978 burst=252627317 checked=252628539 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=13 slot=5 bytes=512 offset=2621440 frame=1 issue=252628749 returned=252628973 callback=252628980 burst=252627317 checked=252628748 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=14 slot=8 bytes=65536 offset=7143424 frame=1 issue=252628984 returned=252629100 callback=252759055 burst=252627317 checked=252628983 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=15 slot=9 bytes=512 offset=7208960 frame=1 issue=252629105 returned=252629176 callback=252759061 burst=252627317 checked=252629104 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=16 slot=0 bytes=65536 offset=3407872 frame=2 issue=252759069 returned=252759392 callback=252883047 burst=252759034 checked=252759067 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=17 slot=1 bytes=512 offset=3473408 frame=2 issue=252759402 returned=252759497 callback=252883054 burst=252759034 checked=252759402 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=18 slot=2 bytes=65536 offset=7995392 frame=2 issue=252759503 returned=252759577 callback=252883056 burst=252759034 checked=252759503 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=19 slot=3 bytes=512 offset=8060928 frame=2 issue=252759582 returned=252759646 callback=252883059 burst=252759034 checked=252759581 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=20 slot=4 bytes=65536 offset=4259840 frame=2 issue=252759650 returned=252759725 callback=252883065 burst=252759034 checked=252759649 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=21 slot=5 bytes=512 offset=4325376 frame=2 issue=252759729 returned=252759792 callback=252883067 burst=252759034 checked=252759729 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=22 slot=6 bytes=65536 offset=524288 frame=2 issue=252759795 returned=252759864 callback=252883071 burst=252759034 checked=252759795 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=23 slot=7 bytes=512 offset=589824 frame=2 issue=252759868 returned=252759931 callback=252883073 burst=252759034 checked=252759867 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=24 slot=8 bytes=65536 offset=5111808 frame=3 issue=252883082 returned=252883471 callback=252883900 burst=252883019 checked=252883080 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=25 slot=9 bytes=512 offset=5177344 frame=3 issue=252883485 returned=252883894 callback=252883903 burst=252883019 checked=252883485 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=26 slot=10 bytes=65536 offset=1376256 frame=3 issue=252883908 returned=252884042 callback=252884282 burst=252883019 checked=252883907 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=27 slot=11 bytes=512 offset=1441792 frame=3 issue=252884047 returned=252884277 callback=252884284 burst=252883019 checked=252884046 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=28 slot=12 bytes=65536 offset=5963776 frame=3 issue=252884288 returned=252884405 callback=252884758 burst=252883019 checked=252884287 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=29 slot=13 bytes=512 offset=6029312 frame=3 issue=252884410 returned=252884483 callback=252884760 burst=252883019 checked=252884410 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=30 slot=14 bytes=65536 offset=2228224 frame=3 issue=252884487 returned=252884753 callback=252885040 burst=252883019 checked=252884486 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=31 slot=15 bytes=512 offset=2293760 frame=3 issue=252884763 returned=252885034 callback=252885043 burst=252883019 checked=252884762 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=32 slot=0 bytes=65536 offset=6815744 frame=4 issue=253022299 returned=253022722 callback=253023575 burst=253022279 checked=253022297 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=33 slot=1 bytes=512 offset=6881280 frame=4 issue=253022733 returned=253022826 callback=253023582 burst=253022279 checked=253022733 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=34 slot=2 bytes=65536 offset=3080192 frame=4 issue=253022832 returned=253022905 callback=253023584 burst=253022279 checked=253022832 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=35 slot=3 bytes=512 offset=3145728 frame=4 issue=253022909 returned=253023473 callback=253023586 burst=253022279 checked=253022908 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=36 slot=4 bytes=65536 offset=7667712 frame=4 issue=253023593 returned=253024844 callback=253025454 burst=253022279 checked=253023592 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=37 slot=5 bytes=512 offset=7733248 frame=4 issue=253024851 returned=253024945 callback=253025457 burst=253022279 checked=253024850 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=38 slot=6 bytes=65536 offset=3932160 frame=4 issue=253024950 returned=253025447 callback=253156336 burst=253022279 checked=253024949 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=39 slot=7 bytes=512 offset=3997696 frame=4 issue=253025461 returned=253025542 callback=253156342 burst=253022279 checked=253025459 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=40 slot=0 bytes=65536 offset=196608 frame=5 issue=253156351 returned=253157263 callback=253157851 burst=253156310 checked=253156350 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=41 slot=1 bytes=512 offset=262144 frame=5 issue=253157283 returned=253157842 callback=253158249 burst=253156310 checked=253157282 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=42 slot=2 bytes=65536 offset=4784128 frame=5 issue=253157862 returned=253158240 callback=253158915 burst=253156310 checked=253157860 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=43 slot=3 bytes=512 offset=4849664 frame=5 issue=253158256 returned=253158374 callback=253158910 burst=253156310 checked=253158255 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=44 slot=4 bytes=65536 offset=1048576 frame=5 issue=253158381 returned=253158902 callback=253159271 burst=253156310 checked=253158380 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=45 slot=5 bytes=512 offset=1114112 frame=5 issue=253158920 returned=253159262 callback=253288574 burst=253156310 checked=253158919 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=46 slot=8 bytes=65536 offset=5636096 frame=5 issue=253159278 returned=253159403 callback=253288580 burst=253156310 checked=253159277 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=47 slot=9 bytes=512 offset=5701632 frame=5 issue=253159409 returned=253159503 callback=253288582 burst=253156310 checked=253159408 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=48 slot=0 bytes=65536 offset=1900544 frame=6 issue=253288590 returned=253288944 callback=253289527 burst=253288550 checked=253288589 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=49 slot=1 bytes=512 offset=1966080 frame=6 issue=253288957 returned=253289046 callback=253289529 burst=253288550 checked=253288956 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=50 slot=2 bytes=65536 offset=6488064 frame=6 issue=253289052 returned=253289519 callback=253289720 burst=253288550 checked=253289051 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=51 slot=3 bytes=512 offset=6553600 frame=6 issue=253289533 returned=253289715 callback=253289910 burst=253288550 checked=253289532 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=52 slot=4 bytes=65536 offset=2752512 frame=6 issue=253289724 returned=253289906 callback=253290243 burst=253288550 checked=253289723 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=53 slot=6 bytes=512 offset=2818048 frame=6 issue=253289913 returned=253289985 callback=253290245 burst=253288550 checked=253289913 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=54 slot=7 bytes=65536 offset=7340032 frame=6 issue=253289990 returned=253290237 callback=253290420 burst=253288550 checked=253289989 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=55 slot=10 bytes=512 offset=7405568 frame=6 issue=253290248 returned=253290415 callback=253423489 burst=253288550 checked=253290248 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=56 slot=0 bytes=65536 offset=3604480 frame=7 issue=253423504 returned=253424182 callback=253424797 burst=253423454 checked=253423502 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=57 slot=1 bytes=512 offset=3670016 frame=7 issue=253424197 returned=253424315 callback=253424799 burst=253423454 checked=253424196 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=58 slot=2 bytes=65536 offset=8192000 frame=7 issue=253424320 returned=253424790 callback=253424868 burst=253423454 checked=253424320 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=59 slot=3 bytes=512 offset=8257536 frame=7 issue=253424874 returned=253425008 callback=253425208 burst=253423454 checked=253424873 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=60 slot=4 bytes=65536 offset=4456448 frame=7 issue=253425014 returned=253425203 callback=253425440 burst=253423454 checked=253425013 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=61 slot=5 bytes=512 offset=4521984 frame=7 issue=253425213 returned=253425436 callback=253425442 burst=253423454 checked=253425212 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=62 slot=6 bytes=65536 offset=720896 frame=7 issue=253425446 returned=253425557 callback=253425787 burst=253423454 checked=253425445 status=00000103 calls=1
+# FORZA-PUMP-OP id=7 seq=63 slot=8 bytes=512 offset=786432 frame=7 issue=253425562 returned=253425783 callback=253425790 burst=253423454 checked=253425561 status=00000103 calls=1
+# FORZA-PUMP-FRAME id=7 frame=0 begin=252497969 end=252501419 issued=8 before=0 after_initial=0 after=1 budget_hit=0 submit_ticks=3316 poll_ticks=72 initial_return=252497994 initial_ticks=25 initial_callbacks=0
+# FORZA-PUMP-FRAME id=7 frame=1 begin=252627317 end=252629180 issued=8 before=1 after_initial=0 after=2 budget_hit=0 submit_ticks=1515 poll_ticks=289 initial_return=252627352 initial_ticks=35 initial_callbacks=1
+# FORZA-PUMP-FRAME id=7 frame=2 begin=252759034 end=252759935 issued=8 before=2 after_initial=0 after=8 budget_hit=0 submit_ticks=826 poll_ticks=21 initial_return=252759066 initial_ticks=32 initial_callbacks=2
+# FORZA-PUMP-FRAME id=7 frame=3 begin=252883019 end=252885046 issued=8 before=8 after_initial=0 after=0 budget_hit=0 submit_ticks=1889 poll_ticks=53 initial_return=252883078 initial_ticks=59 initial_callbacks=8
+# FORZA-PUMP-FRAME id=7 frame=4 begin=253022279 end=253025546 issued=8 before=0 after_initial=0 after=2 budget_hit=0 submit_ticks=3076 poll_ticks=148 initial_return=253022295 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=7 frame=5 begin=253156310 end=253159508 issued=8 before=2 after_initial=0 after=3 budget_hit=0 submit_ticks=3049 poll_ticks=72 initial_return=253156348 initial_ticks=38 initial_callbacks=2
+# FORZA-PUMP-FRAME id=7 frame=6 begin=253288550 end=253290424 issued=8 before=3 after_initial=0 after=1 budget_hit=0 submit_ticks=1760 poll_ticks=52 initial_return=253288587 initial_ticks=37 initial_callbacks=3
+# FORZA-PUMP-FRAME id=7 frame=7 begin=253423454 end=253425793 issued=8 before=1 after_initial=0 after=0 budget_hit=0 submit_ticks=2144 poll_ticks=122 initial_return=253423500 initial_ticks=46 initial_callbacks=1
+# FORZA-PUMP-FRAME id=7 frame=8 begin=253556297 end=253559051 issued=8 before=0 after_initial=0 after=0 budget_hit=0 submit_ticks=2455 poll_ticks=80 initial_return=253556316 initial_ticks=19 initial_callbacks=0
+# FORZA-PUMP-FRAME id=7 frame=9 begin=253690692 end=253692462 issued=8 before=0 after_initial=0 after=4 budget_hit=0 submit_ticks=1555 poll_ticks=176 initial_return=253690706 initial_ticks=14 initial_callbacks=0
+# FORZA-PUMP-FRAME id=7 frame=10 begin=253820463 end=253822248 issued=8 before=4 after_initial=0 after=2 budget_hit=0 submit_ticks=1676 poll_ticks=49 initial_return=253820502 initial_ticks=39 initial_callbacks=4
+# FORZA-PUMP-FRAME id=7 frame=11 begin=253955747 end=253958529 issued=8 before=2 after_initial=0 after=2 budget_hit=0 submit_ticks=2670 poll_ticks=50 initial_return=253955783 initial_ticks=36 initial_callbacks=2
+# FORZA-PUMP-FRAME id=7 frame=12 begin=254092371 end=254096455 issued=8 before=2 after_initial=0 after=0 budget_hit=0 submit_ticks=3732 poll_ticks=185 initial_return=254092408 initial_ticks=37 initial_callbacks=2
+# FORZA-PUMP-FRAME id=7 frame=13 begin=254226650 end=254229988 issued=8 before=0 after_initial=0 after=2 budget_hit=0 submit_ticks=3228 poll_ticks=62 initial_return=254226670 initial_ticks=20 initial_callbacks=0
+# FORZA-PUMP-FRAME id=7 frame=14 begin=254362157 end=254363822 issued=8 before=2 after_initial=0 after=8 budget_hit=0 submit_ticks=1581 poll_ticks=24 initial_return=254362193 initial_ticks=36 initial_callbacks=2
+# FORZA-PUMP-FRAME id=7 frame=15 begin=254485985 end=254486900 issued=8 before=8 after_initial=0 after=8 budget_hit=0 submit_ticks=821 poll_ticks=22 initial_return=254486035 initial_ticks=50 initial_callbacks=8
+# FORZA-PUMP-FRAME id=7 frame=16 begin=254614837 end=254617150 issued=8 before=8 after_initial=0 after=6 budget_hit=0 submit_ticks=2201 poll_ticks=37 initial_return=254614891 initial_ticks=54 initial_callbacks=8
+# FORZA-PUMP-FRAME id=7 frame=17 begin=254749645 end=254750743 issued=8 before=6 after_initial=0 after=8 budget_hit=0 submit_ticks=992 poll_ticks=21 initial_return=254749704 initial_ticks=59 initial_callbacks=6
+# FORZA-PUMP-FRAME id=7 frame=18 begin=254876256 end=254878665 issued=8 before=8 after_initial=0 after=7 budget_hit=0 submit_ticks=2297 poll_ticks=30 initial_return=254876315 initial_ticks=59 initial_callbacks=8
+# FORZA-PUMP-FRAME id=7 frame=19 begin=255011471 end=255014618 issued=8 before=7 after_initial=0 after=1 budget_hit=0 submit_ticks=3003 poll_ticks=48 initial_return=255011539 initial_ticks=68 initial_callbacks=7
+# FORZA-PUMP-FRAME id=7 frame=20 begin=255150795 end=255154871 issued=8 before=1 after_initial=0 after=0 budget_hit=0 submit_ticks=3903 poll_ticks=84 initial_return=255150848 initial_ticks=53 initial_callbacks=1
+# FORZA-PUMP-FRAME id=7 frame=21 begin=255287050 end=255290987 issued=8 before=0 after_initial=0 after=1 budget_hit=0 submit_ticks=3797 poll_ticks=92 initial_return=255287066 initial_ticks=16 initial_callbacks=0
+# FORZA-PUMP-FRAME id=7 frame=22 begin=255421222 end=255424515 issued=8 before=1 after_initial=0 after=0 budget_hit=0 submit_ticks=3177 poll_ticks=61 initial_return=255421251 initial_ticks=29 initial_callbacks=1
+# FORZA-PUMP-FRAME id=7 frame=23 begin=255555640 end=255557448 issued=8 before=0 after_initial=0 after=4 budget_hit=0 submit_ticks=1712 poll_ticks=52 initial_return=255555655 initial_ticks=15 initial_callbacks=0
+# FORZA-PUMP-FRAME id=7 frame=24 begin=255687349 end=255688274 issued=8 before=4 after_initial=0 after=8 budget_hit=0 submit_ticks=821 poll_ticks=20 initial_return=255687412 initial_ticks=63 initial_callbacks=4
+# FORZA-PUMP-FRAME id=7 frame=25 begin=255815343 end=255816584 issued=8 before=8 after_initial=0 after=7 budget_hit=0 submit_ticks=1130 poll_ticks=31 initial_return=255815399 initial_ticks=56 initial_callbacks=8
+# FORZA-PUMP-FRAME id=7 frame=26 begin=255951022 end=255953935 issued=8 before=7 after_initial=0 after=2 budget_hit=0 submit_ticks=2777 poll_ticks=51 initial_return=255951082 initial_ticks=60 initial_callbacks=7
+# FORZA-PUMP-FRAME id=7 frame=27 begin=256091143 end=256092975 issued=8 before=2 after_initial=0 after=2 budget_hit=0 submit_ticks=1728 poll_ticks=43 initial_return=256091178 initial_ticks=35 initial_callbacks=2
+# FORZA-PUMP-FRAME id=7 frame=28 begin=256225519 end=256228894 issued=8 before=2 after_initial=0 after=2 budget_hit=0 submit_ticks=3210 poll_ticks=55 initial_return=256225594 initial_ticks=75 initial_callbacks=2
+# FORZA-PUMP-FRAME id=7 frame=29 begin=256358576 end=256360359 issued=8 before=2 after_initial=0 after=6 budget_hit=0 submit_ticks=1672 poll_ticks=38 initial_return=256358622 initial_ticks=46 initial_callbacks=2
+# FORZA-PUMP-FRAME id=7 frame=30 begin=256488617 end=256489856 issued=8 before=6 after_initial=0 after=8 budget_hit=0 submit_ticks=1150 poll_ticks=19 initial_return=256488664 initial_ticks=47 initial_callbacks=6
+# FORZA-PUMP-FRAME id=7 frame=31 begin=256617195 end=256618260 issued=8 before=8 after_initial=0 after=8 budget_hit=0 submit_ticks=959 poll_ticks=23 initial_return=256617257 initial_ticks=62 initial_callbacks=8
+ok 10 - bounded submission bursts preserve callback and byte contracts
+# FORZA-PUMP-END failures=0
