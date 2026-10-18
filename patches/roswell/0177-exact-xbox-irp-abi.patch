@@ -1,6 +1,6 @@
-From e2610d488262dda11ddb2d505a6ea97af35d9c97 Mon Sep 17 00:00:00 2001
+From 895bf3333ffb23758ada0d7a1cd32059df805689 Mon Sep 17 00:00:00 2001
 From: Codex <codex@openai.com>
-Date: Sun, 18 Oct 2026 13:53:13 -0700
+Date: Sun, 18 Oct 2026 14:08:32 -0700
 Subject: [PATCH] fix: restore exact Xbox IRP ABI and lifetime
 
 Restore the exact title-visible packet shape, isolate kernel-private lifetime state, reject zero-length direct-I/O MDLs, and add cold-restart persistence coverage.
@@ -61,6 +61,7 @@ Restore the exact title-visible packet shape, isolate kernel-private lifetime st
  .../host/cold-storage-persistence/.gitignore  |    1 +
  tests/host/cold-storage-persistence/check.py  |   62 +
  .../cold-storage-persistence/contract_test.c  |   67 +
+ tests/host/dma-lifetime/fixture.c             |    5 +
  tests/host/fatx/check-async-read.py           |    4 +
  tests/host/fatx/check-read-eof.py             |    2 +
  tests/host/io-apc-order/check.py              |   64 +-
@@ -98,7 +99,7 @@ Restore the exact title-visible packet shape, isolate kernel-private lifetime st
  tests/xbe/cold-storage-persistence/contract.h |   85 +
  tests/xbe/cold-storage-persistence/grade.py   |   77 +
  tests/xbe/cold-storage-persistence/main.c     |  367 ++++
- 93 files changed, 7597 insertions(+), 650 deletions(-)
+ 94 files changed, 7602 insertions(+), 650 deletions(-)
  create mode 100644 tests/host/cold-storage-persistence/.gitignore
  create mode 100644 tests/host/cold-storage-persistence/check.py
  create mode 100644 tests/host/cold-storage-persistence/contract_test.c
@@ -6970,6 +6971,29 @@ index 00000000..63fbb25b
 +    puts("PASS: deterministic multi-request payload and manifest contract");
 +    return 0;
 +}
+diff --git a/tests/host/dma-lifetime/fixture.c b/tests/host/dma-lifetime/fixture.c
+index 228fe407..27ddfb7f 100644
+--- a/tests/host/dma-lifetime/fixture.c
++++ b/tests/host/dma-lifetime/fixture.c
+@@ -31,6 +31,10 @@ typedef struct _IRP {
+     ULONG Flags; PMDL MdlAddress; IO_STACK_LOCATION Stack; IO_STATUS_BLOCK IoStatus;
+     BOOLEAN PendingReturned; NTSTATUS (*Complete)(PDEVICE_OBJECT, struct _IRP *, PVOID); PVOID Context;
+ } IRP, *PIRP;
++static PMDL IopIrpMdlAddress(PIRP Irp) { return Irp->MdlAddress; }
++static void IopSetIrpMdlAddress(PIRP Irp, PMDL Mdl) { Irp->MdlAddress = Mdl; }
++static void IopSetIrpRequestorMode(PIRP Irp, KPROCESSOR_MODE Mode) { Irp->RequestorMode = Mode; }
++static void IopSetIrpInternalFlags(PIRP Irp, ULONG Flags) { Irp->Flags = Flags; }
+ #define IN
+ #define OUT
+ #define UNREFERENCED_PARAMETER(x) (void)(x)
+@@ -69,6 +73,7 @@ typedef struct _IRP {
+ #define IRP_NOCACHE 1
+ #define IRP_DEFER_IO_COMPLETION 2
+ #define IRP_XB_SG_COMPLETION 4
++#define IOP_IRP_XB_SG_COMPLETION IRP_XB_SG_COMPLETION
+ #define IRP_WRITE_OPERATION 8
+ #define IRP_READ_OPERATION 16
+ #define IRP_MJ_WRITE 4
 diff --git a/tests/host/fatx/check-async-read.py b/tests/host/fatx/check-async-read.py
 index dba089b0..aadfd2ab 100644
 --- a/tests/host/fatx/check-async-read.py
