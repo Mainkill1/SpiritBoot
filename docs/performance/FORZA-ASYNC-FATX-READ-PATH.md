@@ -2,15 +2,18 @@
 
 ## Scope and provenance
 
-This note maps the current PR 248 release64 source assembled through Roswell
-patch 0146. Source locations below are the upstream paths and line numbers in
-that assembled tree.
+This note maps the release64 source selected through Roswell patches 0180 and
+0181 in PR 253. Patch 0180 introduced the bounded one-command route; transaction
+review rejected it because its direct requests were not fully joined to the
+generic quarantine and cancellation lifetime. Patch 0181 is the corrected
+port. Source locations below are the upstream paths and line numbers in its
+assembled tree. The original selected-0168 route remains the fallback.
 
-The comparison boundary is strict behavior-only separation. No prior
-known-good ClassPnP, Disk, or nxcdrom implementation body was inspected.
-Comparisons use only retained release-build measurements, public I/O
-contracts, and existing original-prose notes. The known-good implementation's
-internal design is unknown and is not inferred here.
+The comparison boundary is strict behavior-only separation. No Complex,
+ClassPnP, Disk, or nxcdrom implementation body was inspected. The work uses
+public I/O contracts, SpiritBoot's GPL source, retained release-build
+measurements, and black-box behavior/timing observations. Complex's internal
+design is unknown and is not inferred here.
 
 Statements are labeled as:
 
@@ -88,21 +91,32 @@ enter the serial overflow list.
 
 ### nxstorage submission
 
-12. `NxNativeDispatchReadWrite` in
-    `drivers/storage/class/nxstorage/native_adapter.c:882`.
-13. `NxNativeAdapterSubmit` at `native_adapter.c:763` locks the adapter,
-    linearly searches 16 envelopes, installs the cancel routine, and clears a
-    local `nx_request`.
-14. `nx_start` in `request.c:268` independently searches 16 core slots,
-    clears the entire selected slot, and copies the request.
-15. `pump` at `request.c:180` obtains pump ownership and circularly scans as
-    many as 16 slots.
-16. `build_command` creates one READ10 for a 4 KiB fixture request.
-17. `port_prepare` at `native_adapter.c:253` calls `nx_packet_prepare`.
-18. `nx_packet_prepare` in `native_packet.c:46` reinitializes the retained
-    child IRP, clears its SRB, 32-byte sense buffer and next stack location,
-    copies the CDB, and creates a completion ticket.
-19. `port_submit` at `native_adapter.c:313` calls the ATA stack.
+12. `NxNativeDispatchReadWrite` reaches `NxNativeAdapterSubmit` in
+    `drivers/storage/class/nxstorage/native_adapter.c`. The adapter consumes
+    and clears FATX's private one-hop marker while reserving the same retained
+    envelope and installing the same synchronized cancel routine used by the
+    general route.
+13. `nx_plan_single_read` in `request.c` shares the generic validator and
+    command planner. The direct route is admitted only if the complete request
+    fits one READ(10) under every MDL-page, adapter-byte, ATA-block and command
+    limit.
+14. An admitted direct read prepares the retained child packet and calls the
+    ATA stack from its FIFO admission owner. It retains submit-active completion
+    deferral, exact byte/status publication, queue-frozen recovery, shared
+    quarantine, cancellation and removal rundown. A quarantine transition is
+    published outside the core lock, cancels live direct peers outside the
+    adapter lock, and prevents a prepared packet from committing afterward.
+    Cancellation holds the child's external-operation lease through
+    `IoCancelIrp`, including inline completion. The route does not allocate a
+    core slot or run the generic pump/retire/complete work.
+15. Every unmarked or multi-command request follows selected-0168: `nx_start`
+    reserves a core slot, and `pump` performs generic admission, command,
+    retirement and completion bookkeeping. This includes dynamic and split
+    reads, writes, flushes, controls, optical I/O and non-FATX reads.
+16. Both routes call `nx_packet_prepare` in `native_packet.c`, which
+    reinitializes the retained child IRP, SRB, sense buffer and next stack
+    location, copies the CDB, and creates a completion ticket before calling
+    the ATA stack.
 
 The adapter retains 16 slots, envelopes, child IRPs, and control MDLs. Current
 build accounting is approximately 39,360 bytes. No pool allocation occurs in
@@ -138,9 +152,11 @@ nxstorage for an ordinary read.
     `scsi.c:262` release DMA/queue state and start the next PATA request.
 32. Child `IofCompleteRequest` calls `NxNativeAdapterChildComplete`
     (`native_adapter.c:624`) and `nx_packet_capture`.
-33. `report_result` calls `nx_lower_done`; `pump` performs separate RETIRE
+33. The generic route calls `nx_lower_done`; `pump` performs separate RETIRE
     and COMPLETE passes through `port_retire`, `record_result`,
-    `port_complete`, and `finish_parent`.
+    `port_complete`, and `finish_parent`. The corrected direct route instead checks
+    the captured lower result, performs bounded RELEASE QUEUE recovery if
+    required, and completes the same parent envelope directly.
 34. Parent `IofCompleteRequest` invokes `VfatAsyncReadComplete`
     (`vfatfs/rw.c:916`), which releases the tagged `MainResource`.
 35. `IofCompleteRequest` (`iomgr/irp.c:1345`) unlocks the MDL and queues
@@ -160,11 +176,10 @@ an idle nx pump.
 | I/O manager/FATX | Parent IRP, MDL, and VFAT context allocations |
 | FATX locks | One retained `MainResource`; three `LastMutex` pairs; one `FatResource` pair per 256 FAT links |
 | FATX scans | 16 seek checkpoints; one entry per FAT link; map/unpin per FAT cache chunk |
-| nx submit | At least 13 adapter spinlock pairs and one cancel-spin pair |
-| nx submit scans | Up to 64 inspections across four 16-entry scans |
-| nx completion | At least nine adapter spinlock pairs and one cancel-spin pair |
-| nx completion scans | Up to 48 inspections across RETIRE, COMPLETE, and no-work passes |
-| nx writes | 256-byte slot clear; retained child IRP reset; SRB, sense, stack and result clears; request/CDB/ticket copies |
+| nx direct submit | Retained-envelope FIFO/cancel synchronization, command validation/planning, and packet preparation; no core-slot or pump scan |
+| nx direct completion | Submit-active deferral, exact result validation, optional RELEASE QUEUE recovery, and retained-envelope completion |
+| nx generic fallback | Selected-0168 core-slot, pump, retire and completion scans remain for every request outside the bounded direct-read contract |
+| nx writes | Direct route clears one command and resets the retained child packet; generic route also clears its core slot/command state |
 | ATA | Device, port, and interrupt critical sections; queue insertion; scatter/gather and PRD construction |
 | Completion | Child and parent unwinds, one kernel APC and one title APC |
 
@@ -182,11 +197,12 @@ inference alone.
 1. **Unify nx envelope and slot ownership.** Use one retained context and an
    O(1) free bitmap/list. This removes one allocation scan and duplicated
    lifetime state while retaining 16 accepted parents.
-2. **Add a direct one-command read state path.** Transition an aligned READ10
-   through `FREE -> PREPARING -> LOWER_OWNED -> RETIRING -> COMPLETING ->
-   FREE`. Submit accepted reads to ATA and leave PATA's existing queue as the
-   only physical depth-one scheduler. Keep the generic pump for writes, flush,
-   barriers, and recovery until separately proven.
+2. **Direct one-command read state path: corrected in 0181.** A FATX-qualified
+   request now uses the retained envelope and lower packet directly. PATA's
+   existing queue remains the physical depth-one scheduler, and the generic
+   pump remains responsible for writes, flushes, barriers, dynamic/split I/O,
+   optical traffic and controls. The direct and generic routes share one
+   adapter quarantine boundary.
 3. **Use explicit initialization/templates.** Initialize fixed READ10 SRB and
    stack fields once, overwrite all mutable lower-visible fields on reuse, and
    avoid full slot/IRP/sense/result clears where poison tests prove safety.
@@ -247,3 +263,26 @@ inference alone.
 6. Record fast-hit reason, fallback reason, FAT links walked, FAT cache chunks,
    and extent-cache hits in a release-build QD12 pressure run.
 7. Finish with human-driven Forza streaming beyond the initial load region.
+
+## Patch 0181 outcome
+
+Patch 0180 was rejected after review reproduced four quarantine/cancellation
+lifetime failures. Patch 0181 corrects those contracts. Its exact release64
+image has SHA-256
+`6bcee57b071f1fbae103b25ec66e33093dd8c78597f7d050d787ee45f0c23323`.
+
+In a fresh-process selected-0168/candidate/selected-0168/candidate sequence,
+the candidate's two-run mean submission cost improved in all eight
+memory/budget cells by 0.57–9.13%. The 250 us verified-read rate improved by
+6.01–11.72%. Saturated rates varied slightly, and one request-size result was
+composition-sensitive; the evidence reports it rather than claiming a device
+bandwidth increase.
+
+Two alternating Forza control/candidate pairs completed the automated race
+route with intact retained screenshots. Both candidates first showed the grid
+one one-second sample before their controls, which is descriptive rather than
+a general streaming claim. Three independent PGR2 candidate runs completed the
+race route at 30 FPS with p99 frame intervals below 35 ms; the reported early
+crash was not reproduced in those clean processes. Exact builds, raw synthetic
+serial, measurements, title run IDs, exclusions and limitations are in
+[`forza-direct-native-read-20261018`](evidence/forza-direct-native-read-20261018/README.md).

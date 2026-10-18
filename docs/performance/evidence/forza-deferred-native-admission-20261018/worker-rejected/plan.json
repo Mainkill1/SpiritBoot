@@ -1,0 +1,29 @@
+{
+  "order": [
+    "control1",
+    "candidate1",
+    "control2",
+    "candidate2"
+  ],
+  "condition": "Exact FATX issuer/worker, lifetime, coupled mapping, native adapter and sanitizer gates must pass before launch. Each full native oracle must pass before the next fresh-process run.",
+  "fixture_sha256": "8d94b0c6fa4699de29959e0bdc5ddd63b6b518ea7c65fcf22cf4da9e1f9b4630",
+  "emulator_sha256": "5488be40bf3c1c444b507d084c8d964f8f7d73c2a912970495cf85a4f7239564",
+  "control0168_sha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
+  "primary_observations": [
+    "Native NtReadFile entry-to-return mean by request size and weighted over all operations",
+    "450 us verified reads/s at both 783 and 900 free pages"
+  ],
+  "reporting": "Each candidate versus its immediately preceding control; report all eight cases, including 250 us regressions. No other runner job interleaves the sequence.",
+  "acceptance_scope": "Repeatable measured gain with all full oracles passing and no unexplained regression exceeding 20 percent; code shape alone is insufficient.",
+  "limits": [
+    "two observations per variant are not statistical significance",
+    "shared private state is reseeded only for the generated fixture file",
+    "synthetic blocking frame cadence and deadlines",
+    "no overall Forza fix claim",
+    "Per-size means can be confounded by first-request ordinal mix; report whole-case derived first-size counts and retain weighted costs."
+  ],
+  "candidate_scope": "0179: selected0168 plus handoff of asynchronous noncached FATX reads to the existing critical worker before mapping and native transport submission. The worker retains the allocation-free direct read and selected0168 native adapter paths.",
+  "snapshot_policy": "Every run launches a fresh emulator process; SnapshotName null, RuntimeState disabled, no diagnostic plan or loadvm arguments. Disk state contains generated fixture file only, no RAM restoration.",
+  "candidate0179_sha256": "4699680c31f768a9f03c8e06a87d479bef70d510dd96a1e88557883becd3747e",
+  "candidate0179_source_tree": "4cf679222eb993cbc0e3233b605ef96343a9de23"
+}
