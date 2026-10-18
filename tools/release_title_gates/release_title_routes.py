@@ -35,7 +35,7 @@ def build_pgr2_profile_create_plan() -> list[dict[str, Any]]:
     profile, waits after the final confirmation so pending writes can drain,
     and makes no gameplay-performance claim.
     """
-    plan = [step("wait", delayMs=65_000),
+    plan = [step("wait", delayMs=80_000),
             step("screenshot", name="pgr2-press-start"),
             step("button", button="A", durationMs=25)]
     for name in ("pgr2-create-menu", "pgr2-name-ready"):
@@ -60,7 +60,7 @@ def build_pgr2_cold_race_plan() -> list[dict[str, Any]]:
     choice. The final A leaves the pre-race menu; only then does the 17-second
     loading interval begin.
     """
-    plan = [step("wait", delayMs=65_000),
+    plan = [step("wait", delayMs=80_000),
             step("screenshot", name="pgr2-press-start"),
             step("button", button="A", durationMs=25)]
     for name in ("pgr2-profile-confirm", "pgr2-mode", "pgr2-car-right",

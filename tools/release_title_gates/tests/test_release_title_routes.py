@@ -40,7 +40,7 @@ class ReleaseTitleRouteTests(unittest.TestCase):
     def test_pgr2_cold_route_is_bounded_and_keeps_25_second_race_window(self):
         plan = build_pgr2_cold_race_plan()
         self.assertEqual(plan[-1]["type"], "quit")
-        self.assertEqual(sum(row.get("delayMs", 0) for row in plan), 157_000)
+        self.assertEqual(sum(row.get("delayMs", 0) for row in plan), 172_000)
         self.assertIn("pgr2-race-start", [row.get("name") for row in plan])
         self.assertIn("pgr2-race-25s", [row.get("name") for row in plan])
         start = next(i for i, row in enumerate(plan) if row.get("name") == "pgr2-race-start")

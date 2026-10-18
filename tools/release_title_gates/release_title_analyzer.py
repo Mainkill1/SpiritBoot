@@ -139,9 +139,10 @@ def score_pgr2_create(root: Path) -> dict[str, Any]:
     }
     text = " ".join(ocr.values())
     error = bool(re.search(r"(?i)damaged|corrupt|cannot.{0,24}(?:load|use)", text))
-    visible = all(not row.get("missing", False) and row["entropy"] >= 3.0
-                  and row["quantized_colors"] >= 16 and row["dark_ratio"] < .88
-                  for row in frames.values())
+    for row in frames.values():
+        row["pass"] = (not row.get("missing", False) and row["entropy"] >= 3.0
+                       and row["quantized_colors"] >= 16 and row["dark_ratio"] < .88)
+    visible = all(row["pass"] for row in frames.values())
     passed = visible and all(identity.values()) and not error
     return {"pass": passed, "frames": frames, "identity": identity,
             "frames_visible": visible, "ocr": ocr, "profile_error_text": error}
