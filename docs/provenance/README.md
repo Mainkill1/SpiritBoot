@@ -37,6 +37,7 @@ Do not store proprietary dumps, disassembly, secret material, or copied propriet
 
 Current compatibility records include:
 
+- [Exact Xbox IRP ABI and lifetime](EXACT_XBOX_IRP_ABI.md): public packet layout, public builder shapes, private NT bookkeeping, completion/cancellation ownership, and the PGR2/Forza rejection that required the port.
 - [Current-main performance and compatibility integration](OPEN_PR_INTEGRATION_2026-10-13.md): the exact composed 64 MiB baseline and the write-sensitive drafts excluded from save testing.
 - [Saved transition images](SAVED_TRANSITION_IMAGE.md)
 - [Public title interrupt objects](TITLE_INTERRUPT_PUBLIC_ABI.md)

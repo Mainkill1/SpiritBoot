@@ -24,6 +24,7 @@ PRE_ADMISSION_CANCEL = "patches/roswell/0165-cancel-before-native-admission.patc
 SEALED_RUNDOWN = "patches/roswell/0166-sealed-rundown-notifications.patch"
 ACTIVE_SCAN = "patches/roswell/0167-skip-inactive-native-slots.patch"
 ADAPTER_BOOKKEEPING = "patches/roswell/0168-coalesce-native-adapter-bookkeeping.patch"
+EXACT_XBOX_IRP_ABI = "patches/roswell/0177-exact-xbox-irp-abi.patch"
 REJECTED_READ_PATHS = (
     "patches/roswell/0173-fast-start-first-read-command.patch",
     "patches/roswell/0175-handoff-native-admission-lock.patch",
@@ -46,18 +47,32 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
 
     def test_corrective_patches_are_consecutive_and_hash_locked(self):
         self.assertEqual(
-            [entry["path"] for entry in self.entries[-13:]],
+            [entry["path"] for entry in self.entries[-14:]],
             [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION,
              RESET_MEDIA_LIFETIME, OPTICAL_ADMISSION, COMPLETION_LIFETIME,
              TRANSIENT_ENVELOPE_GROWTH, QUEUED_ADMISSION, COMPACT_ENVELOPES,
              PRE_ADMISSION_CANCEL, SEALED_RUNDOWN, ACTIVE_SCAN,
-             ADAPTER_BOOKKEEPING],
+             ADAPTER_BOOKKEEPING, EXACT_XBOX_IRP_ABI],
         )
-        for entry in self.entries[-13:]:
+        for entry in self.entries[-14:]:
             self.assertEqual(
                 hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
                 entry["sha256"],
             )
+
+    def test_exact_irp_abi_patch_carries_executable_contracts(self):
+        patch = (ROOT / EXACT_XBOX_IRP_ABI).read_text()
+        for token in (
+            "IOP_XBOX_IRP_PRIVATE_SIZE",
+            "IopEnsureCallerIrpSidecar",
+            "IopBuildXboxPublicFsdRequest",
+            "tests/host/irp-xbox-abi/check.py",
+            "tests/host/irp-direct-builder/fixture.c",
+            "tests/host/io-special-completion/fixture.c",
+            "if (Length != 0)",
+            "tests/xbe/cold-storage-persistence/main.c",
+        ):
+            self.assertIn(token, patch)
 
     def test_rejected_read_shortcuts_stay_out_of_selected_firmware(self):
         selected = {entry["path"] for entry in self.entries}
