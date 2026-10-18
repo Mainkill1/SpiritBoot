@@ -19,9 +19,16 @@ class ReleaseTitleRouteTests(unittest.TestCase):
     def test_pgr2_create_route_authors_candidate_profile_without_claiming_race(self):
         plan = build_pgr2_profile_create_plan()
         self.assertEqual(plan[-1]["type"], "quit")
-        self.assertIn("LStickRight", [row.get("button") for row in plan])
-        self.assertIn("pgr2-profile-confirm", [row.get("name") for row in plan])
-        self.assertIn("pgr2-race-confirm", [row.get("name") for row in plan])
+        self.assertNotIn("LStickRight", [row.get("button") for row in plan])
+        self.assertIn("pgr2-name-ready", [row.get("name") for row in plan])
+        self.assertIn("pgr2-license-plate", [row.get("name") for row in plan])
+        self.assertIn("pgr2-helmet", [row.get("name") for row in plan])
+        self.assertIn("pgr2-created-main", [row.get("name") for row in plan])
+        diagnostics = [row.get("diagnosticId") for row in plan
+                       if row["type"] == "diagnostic"]
+        self.assertEqual(diagnostics,
+                         ["pgr2-profile-write-before", "pgr2-profile-write-after"])
+        self.assertNotIn("pgr2-race-confirm", [row.get("name") for row in plan])
         self.assertNotIn("pgr2-race-25s", [row.get("name") for row in plan])
         self.assertLess(sum(row.get("delayMs", 0) for row in plan), 180_000)
 

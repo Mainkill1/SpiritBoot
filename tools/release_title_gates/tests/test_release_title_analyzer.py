@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from release_title_analyzer import (score_doa_reload, score_halo2,
                                     score_halo2_pair, score_pgr2,
+                                    score_pgr2_create,
                                     score_pgr2_reload)
 
 
@@ -36,6 +37,25 @@ class ReleaseTitleAnalyzerTests(unittest.TestCase):
             self.assertTrue(score_pgr2(root)["pass"])
             (root / "screenshots" / "pgr2-race-25s.png").unlink()
             self.assertFalse(score_pgr2(root)["pass"])
+
+    def test_pgr2_create_requires_the_completed_profile_flow(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = self._root(td)
+            names = ("pgr2-name-ready", "pgr2-license-plate", "pgr2-helmet",
+                     "pgr2-created-main")
+            for index, name in enumerate(names):
+                self._image(root, name, index)
+            good = {
+                "pgr2-name-ready": "PROFILE NAME Player DONE",
+                "pgr2-license-plate": "LICENSE PLATE TEXT PGR 2 DONE",
+                "pgr2-helmet": "HELMET SELECT Continue",
+                "pgr2-created-main": "MAIN MENU Single Player Multiplayer Options",
+            }
+            (root / "title-ocr.json").write_text(json.dumps(good))
+            self.assertTrue(score_pgr2_create(root)["pass"])
+            good["pgr2-created-main"] = "PROFILE NAME 111111 DONE"
+            (root / "title-ocr.json").write_text(json.dumps(good))
+            self.assertFalse(score_pgr2_create(root)["pass"])
 
     def test_pgr2_rejects_a_damaged_profile_dialog_before_the_race(self):
         with tempfile.TemporaryDirectory() as td:

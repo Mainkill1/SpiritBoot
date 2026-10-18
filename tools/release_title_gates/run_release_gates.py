@@ -17,7 +17,7 @@ from finalize_release_jobs import _stage_package, build_title_job, sha256_file
 from rclass_gate import ERROR_PATTERNS
 from release_title_analyzer import (score_doa_create, score_doa_reload,
                                     score_halo2, score_halo2_pair,
-                                    score_pgr2_reload,
+                                    score_pgr2_create, score_pgr2_reload,
                                     require_ocr_dependencies)
 
 
@@ -110,14 +110,18 @@ def _qmp_stats(root: Path, diagnostic_id: str) -> dict[str, dict[str, Any]]:
     return {str(row.get("device")): row.get("stats", {}) for row in value}
 
 
-def doa_write_score(root: Path) -> dict[str, Any]:
-    before = _qmp_stats(root, "doa-save-write-before")
-    after = _qmp_stats(root, "doa-save-write-after")
+def qmp_write_score(root: Path, before_id: str, after_id: str) -> dict[str, Any]:
+    before = _qmp_stats(root, before_id)
+    after = _qmp_stats(root, after_id)
     writes = bytes_written = 0
     for device in set(before) & set(after):
         writes += int(after[device].get("wr_operations", 0) or 0) - int(before[device].get("wr_operations", 0) or 0)
         bytes_written += int(after[device].get("wr_bytes", 0) or 0) - int(before[device].get("wr_bytes", 0) or 0)
     return {"write_operations": writes, "write_bytes": bytes_written, "pass": writes > 0 and bytes_written > 0}
+
+
+def doa_write_score(root: Path) -> dict[str, Any]:
+    return qmp_write_score(root, "doa-save-write-before", "doa-save-write-after")
 
 
 def import_retained_hdd(api: Any, create_root: Path, candidate_id: str,
@@ -184,7 +188,13 @@ def execute(finalized: Path, evidence: Path, runner_url: str,
         result, root = run_one(work, finalized / "packages" / title, evidence / title)
         roots[title] = root
         score = common_score(root)
-        if title == "forza":
+        if title == "pgr2-create":
+            score["title"] = score_pgr2_create(root)
+            score["hdd_writes"] = qmp_write_score(
+                root, "pgr2-profile-write-before", "pgr2-profile-write-after")
+            score["pass"] = (score["pass"] and score["title"]["pass"]
+                             and score["hdd_writes"]["pass"])
+        elif title == "forza":
             completed = subprocess.run(
                 [sys.executable, str(analyzer_dir / "analyze_evidence.py"), str(root)],
                 check=False, text=True, capture_output=True)

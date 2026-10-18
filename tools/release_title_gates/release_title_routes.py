@@ -40,19 +40,17 @@ def build_pgr2_profile_create_plan() -> list[dict[str, Any]]:
         (0, "A", "pgr2-continue"),
         (12_000, "A", "pgr2-profile"),
         (4_000, "A", "pgr2-profile-confirm"),
-        (4_000, "A", "pgr2-mode"),
-        (4_000, "LStickRight", "pgr2-car-right"),
-        (4_000, "A", "pgr2-car-confirm"),
-        (4_000, "A", "pgr2-event"),
-        (4_000, "A", "pgr2-track"),
-        (4_000, "A", "pgr2-options"),
-        (4_000, "A", "pgr2-grid"),
-        (10_000, "A", "pgr2-race-confirm"),
+        (4_000, "A", "pgr2-name-ready"),
     ):
         if wait:
             plan.append(step("wait", delayMs=wait))
         plan += [step("button", button=button), step("screenshot", name=name)]
-    plan += [step("wait", delayMs=5_000), step("quit")]
+    plan += [step("diagnostic", diagnosticId="pgr2-profile-write-before")]
+    for name in ("pgr2-license-plate", "pgr2-helmet", "pgr2-created-main"):
+        plan += [step("wait", delayMs=4_000), step("button", button="A"),
+                 step("screenshot", name=name)]
+    plan += [step("diagnostic", diagnosticId="pgr2-profile-write-after"),
+             step("wait", delayMs=5_000), step("quit")]
     return plan
 
 

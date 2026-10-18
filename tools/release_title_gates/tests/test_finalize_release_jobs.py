@@ -88,6 +88,12 @@ class FinalizeReleaseJobsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"halo2-a\.disc"):
             build_title_job(self.base, resolved, "halo2-a", "candidate")
 
+    def test_pgr2_create_job_has_only_its_write_checkpoints(self):
+        resolved = resolve_contract(self.contract, "candidate", "c" * 64)
+        job, _ = build_title_job(self.base, resolved, "pgr2-create", "candidate")
+        self.assertEqual({row["id"] for row in job["diagnostics"]}, {
+            "pgr2-profile-write-before", "pgr2-profile-write-after"})
+
     def test_finalize_stages_verified_flash_and_all_phase_one_jobs(self):
         with tempfile.TemporaryDirectory() as td:
             td = Path(td)

@@ -153,10 +153,13 @@ def build_title_job(base_job: dict[str, Any], contract: dict[str, Any], title: s
                        if row.get("id") in referenced]
         guided = next(row for row in diagnostics if row.get("id") == "forza-guided-route")
         guided["durationMs"] = 105000
-    elif title == "doa-create":
+    elif title in ("pgr2-create", "doa-create"):
         template = next(row for row in job["diagnostics"] if row.get("type") == "qmp")
         diagnostics = []
-        for diagnostic_id in ("doa-save-write-before", "doa-save-write-after"):
+        diagnostic_ids = (("pgr2-profile-write-before", "pgr2-profile-write-after")
+                          if title == "pgr2-create" else
+                          ("doa-save-write-before", "doa-save-write-after"))
+        for diagnostic_id in diagnostic_ids:
             row = copy.deepcopy(template)
             row["id"] = diagnostic_id
             row["qmpCommand"] = "query-blockstats"

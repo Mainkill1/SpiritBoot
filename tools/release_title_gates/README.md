@@ -10,6 +10,8 @@ Every phase uses release xemu, a fresh process, a private HDD materialization,
 each create state under the exact candidate BIOS and EEPROM in phase one, then
 import that exact retained HDD into a second cold process. Reusing a Complex HDD,
 an HDD of unknown provenance, or a nominally similar disk invalidates the test.
+PGR2 phase one must show the profile-name, license-plate, helmet, and resulting
+main-menu states and must record HDD writes before its runtime can be imported.
 
 Run the source tests from the parent directory:
 

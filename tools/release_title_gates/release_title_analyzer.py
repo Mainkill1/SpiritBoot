@@ -117,6 +117,29 @@ def score_pgr2_reload(root: Path) -> dict[str, Any]:
     return result
 
 
+def score_pgr2_create(root: Path) -> dict[str, Any]:
+    """Require every profile-creation state and the resulting main menu."""
+    names = ["pgr2-name-ready", "pgr2-license-plate", "pgr2-helmet",
+             "pgr2-created-main"]
+    frames = {name: _visual(root / "screenshots" / f"{name}.png")
+              for name in names}
+    ocr = _ocr(root, names)
+    normalized = {name: re.sub(r"\s+", "", text).upper()
+                  for name, text in ocr.items()}
+    identity = {
+        "profile_name": "PROFILENAME" in normalized["pgr2-name-ready"],
+        "license_plate": "LICENSEPLATETEXT" in normalized["pgr2-license-plate"],
+        "helmet": "HELMETSELECT" in normalized["pgr2-helmet"],
+        "created_main": ("MAINMENU" in normalized["pgr2-created-main"]
+                         and "SINGLEPLAYER" in normalized["pgr2-created-main"]),
+    }
+    text = " ".join(ocr.values())
+    error = bool(re.search(r"(?i)damaged|corrupt|cannot.{0,24}(?:load|use)", text))
+    passed = all(row["pass"] for row in frames.values()) and all(identity.values()) and not error
+    return {"pass": passed, "frames": frames, "identity": identity,
+            "ocr": ocr, "profile_error_text": error}
+
+
 def score_halo2(root: Path) -> dict[str, Any]:
     names = ["halo2-menu-entry", "halo2-menu-15s", "halo2-menu-30s"]
     frames = {name: _visual(root / "screenshots" / f"{name}.png") for name in names}
@@ -168,7 +191,8 @@ def score_doa_reload(root: Path) -> dict[str, Any]:
             "save_error_text": rejected, "slot_to_loaded_rms_difference": change}
 
 
-SCORERS = {"pgr2": score_pgr2, "pgr2-reload": score_pgr2_reload,
+SCORERS = {"pgr2": score_pgr2, "pgr2-create": score_pgr2_create,
+           "pgr2-reload": score_pgr2_reload,
            "halo2": score_halo2,
            "doa-create": score_doa_create, "doa-reload": score_doa_reload}
 
