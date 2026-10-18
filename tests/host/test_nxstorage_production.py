@@ -44,10 +44,7 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0165-cancel-before-native-admission.patch",
                      "0166-sealed-rundown-notifications.patch",
                      "0167-skip-inactive-native-slots.patch",
-                     "0168-coalesce-native-adapter-bookkeeping.patch",
-                     "0173-fast-start-first-read-command.patch",
-                     "0175-handoff-native-admission-lock.patch",
-                     "0176-transfer-submit-lock-to-core.patch"):
+                     "0168-coalesce-native-adapter-bookkeeping.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()

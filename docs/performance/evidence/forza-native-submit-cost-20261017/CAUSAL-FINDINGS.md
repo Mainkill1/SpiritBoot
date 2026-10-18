@@ -250,7 +250,7 @@ Source and reproduction:
   [all paired results](../forza-complex-cadence-20261017/candidate0171/README.md).
   These rejected micro-optimizations required a return to dynamic path
   attribution before another dispatch, lock or compiler change.
-* Selected0176 addresses the measured common route rather than compiler shape.
+* Rejected0176 addresses the measured common route rather than compiler shape.
   It fast-starts the known first read command, hands queue publication into the
   sole admission owner, returns the owner's final lock to dispatch, and
   transfers a no-inline-completion submit lock into the core epilogue. The
@@ -259,13 +259,16 @@ Source and reproduction:
   falls 8.99–15.92% and throughput rises 2.54–13.17%. Weighted return cost
   improves in all sixteen paired cases. The [selected comparison and required
   over-20% investigation](../forza-complex-cadence-20261017/candidate0176/README.md)
-  retain every case and the one nonrepeatable position-mix outlier.
+  retain every case and the one nonrepeatable position-mix outlier. A fresh
+  game run found no visible Forza improvement and separate PGR2 testing reported
+  an early crash, so title acceptance overrides the synthetic result and the
+  three-patch stack is no longer selected.
 * The old cadence benchmark began its budget after the initial poll. That did
   not match the title's budget boundary. The separate frozen initial-poll
   fixture corrects the experiment without rewriting earlier results.
 
-The measured read-return cost is now reduced with preserved host and generated
-fixture contracts. The remaining task is a fresh-boot Forza game run. Restoring the old saved scene
+The generated fixture's measured read-return cost was reduced, but that result
+did not transfer to the fresh game run. Restoring the old saved scene
 restores the old kernel and cannot validate a new BIOS. No full-game resolution,
 global memory-pressure exclusion, or 90%-of-workloads performance claim follows
 from these results.

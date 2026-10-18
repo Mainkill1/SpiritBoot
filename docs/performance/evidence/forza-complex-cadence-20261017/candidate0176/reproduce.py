@@ -112,19 +112,21 @@ for row in rows:
             if change>20:maxima.append({'target':row['target'],'budget_us':row['budget_us'],'pair':pair,'bytes':a['bytes'],
                 'control_max_us':a['submit_max_us'],'candidate_max_us':b['submit_max_us'],'change_percent':change})
 if '--write' in sys.argv:
-    decision={'selected':True,'decision':'Selected: every paired 450 us target improves cost and throughput, every weighted case cost improves, and all correctness oracles pass.',
+    decision={'selected':False,'synthetic_fixture_gate_passed':True,
+              'decision':'Rejected by title acceptance after the generated fixture passed: no visible Forza improvement and an early PGR2 crash were reported.',
               'all_four_runs_full_oracle_passed':True,'cases_per_run':8,'minimum_case_seconds':10,
               'primary_450_pairs':primary,'primary_450_gate_passed':primary_pass,
               'weighted_cost_all_16_improved':weighted_cost_all_improved,
               'regressions_over_20_percent':regressions,
               'position_mix_classifications':position_mix_classifications,
               'unresolved_repeatable_regressions_over_20_percent':unresolved_regressions,
-              'selected_firmware_lock_changed':True,'overall_Forza_fix_established':False,
+              'selected_firmware_lock_changed':False,'overall_Forza_fix_established':False,
               'regressions_over_20_percent_scope':'Weighted/per-size mean read-return costs and throughput; observed maxima are listed separately.',
               'observed_submit_max_increases_over_20_percent':maxima}
     (root/'decision.json').write_text(json.dumps(decision,indent=2)+'\n')
 decision=json.loads((root/'decision.json').read_text())
-if (decision['selected'] is not True or decision['selected_firmware_lock_changed'] is not True or
+if (decision['selected'] is not False or decision['synthetic_fixture_gate_passed'] is not True or
+    decision['selected_firmware_lock_changed'] is not False or
     decision['overall_Forza_fix_established'] is not False or decision['regressions_over_20_percent']!=regressions or
     decision['primary_450_pairs']!=primary or decision['primary_450_gate_passed']!=primary_pass or
     decision['weighted_cost_all_16_improved']!=weighted_cost_all_improved or
@@ -132,8 +134,8 @@ if (decision['selected'] is not True or decision['selected_firmware_lock_changed
     decision['unresolved_repeatable_regressions_over_20_percent']!=unresolved_regressions or
     decision['observed_submit_max_increases_over_20_percent']!=maxima or not decision['all_four_runs_full_oracle_passed'] or
     decision['cases_per_run']!=8 or decision['minimum_case_seconds']!=10):raise SystemExit('decision evidence mismatch')
-if not primary_pass or not weighted_cost_all_improved or unresolved_regressions:raise SystemExit('selected performance gate failed')
-result={'status':'selected_paired_synthetic_qualification_not_overall_Forza_fix','order':order,'cases':rows}
+if not primary_pass or not weighted_cost_all_improved or unresolved_regressions:raise SystemExit('synthetic performance gate failed')
+result={'status':'rejected_after_paired_synthetic_qualification','order':order,'cases':rows}
 encoded=json.dumps(result,indent=2)+'\n'
 saved=root/'comparison.json'
 if '--write' in sys.argv:saved.write_text(encoded)

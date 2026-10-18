@@ -1,9 +1,10 @@
 # Candidate 0176 paired native qualification
 
-**Generated-fixture qualification only; whole-game Forza validation remains
-required.**
+**Product decision: rejected after game acceptance.** See
+[GAME-ACCEPTANCE.md](GAME-ACCEPTANCE.md). The measurements below preserve the
+earlier generated-fixture decision; they do not select product firmware.
 
-**Decision: select 0176.** Every 450 µs target improves in both consecutive
+**Synthetic decision at capture time: select 0176 for the generated fixture.** Every 450 µs target improves in both consecutive
 pairs and at both memory-pressure levels. Weighted `NtReadFile` entry-to-return
 cost falls **8.99–15.92%**, while verified throughput rises **2.54–13.17%**.
 Weighted return cost improves in all sixteen paired case observations. All four

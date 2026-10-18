@@ -7,9 +7,10 @@ handling.
 
 Host correctness passed, but the repeated release comparison did not satisfy
 the predeclared all-primary improvement gate. The experiment is rejected and
-its patch is excluded from the selected firmware lock. Selected 0176 uses a
-narrower lock-transfer contract that explicitly separates no-inline-result
-submission from the original inline-result fallback.
+its patch is excluded from the selected firmware lock. The later 0176
+experiment used a narrower lock-transfer contract that explicitly separated
+no-inline-result submission from the original inline-result fallback; title
+acceptance also rejected that experiment.
 
 Patch: `0174-arm-inline-completion-during-prepare.patch`.
 

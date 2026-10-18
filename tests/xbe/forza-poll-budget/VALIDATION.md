@@ -1,13 +1,14 @@
 # Fresh-boot BIOS validation protocol
 
 This fixture is built and has been run repeatedly on release64 firmware. The
-[selected four-run 0176 comparison](../../../docs/performance/evidence/forza-complex-cadence-20261017/candidate0176/README.md)
+[four-run 0176 comparison](../../../docs/performance/evidence/forza-complex-cadence-20261017/candidate0176/README.md)
 contains 32 passing sustained cases and improves every primary 450 µs pair.
 The earlier [0171 comparison](../../../docs/performance/evidence/forza-complex-cadence-20261017/candidate0171/README.md)
 demonstrates rejection when an apparent gain does not repeat. The
 [baseline/0168/Complex comparison](../../../docs/performance/evidence/forza-complex-cadence-20261017/initial-poll/README.md)
 contains 24 passing cases. These are generated-workload results, not proof of a
-Forza gameplay fix. `release-identity.json` records the historical freeze before
+Forza gameplay fix. Candidate 0176 was later rejected by title acceptance; the
+fixture is no longer sufficient to select firmware by itself. `release-identity.json` records the historical freeze before
 those native runs; its source and artifact hashes remain the pinned identity.
 
 ## Required procedure
@@ -60,10 +61,11 @@ callback identity/status/length/count, alertable-phase ownership and delayed
 buffer reuse are checked. Memory pressure and read sizes are controlled. The
 same release fixture and analyzer must be used on both BIOS images.
 
-A function-level change also needs its own contract regression. Candidate0176
-has request-core, threaded ownership, native-adapter, packet, owner, optical and
-sense tests, including sanitized variants and a strict 14-to-7 lock-transition
-bound. A native throughput pass does not replace those contract tests.
+A function-level change also needs its own contract regression and automated
+fresh-process title gates. Candidate0176 passed request-core, threaded ownership,
+native-adapter, packet, owner, optical and sense tests, including sanitized
+variants and a strict 14-to-7 lock-transition bound, yet failed title acceptance.
+A native throughput pass does not replace those contract or title tests.
 
 ## Remaining coverage
 

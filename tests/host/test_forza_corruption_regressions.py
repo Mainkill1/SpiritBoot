@@ -24,9 +24,11 @@ PRE_ADMISSION_CANCEL = "patches/roswell/0165-cancel-before-native-admission.patc
 SEALED_RUNDOWN = "patches/roswell/0166-sealed-rundown-notifications.patch"
 ACTIVE_SCAN = "patches/roswell/0167-skip-inactive-native-slots.patch"
 ADAPTER_BOOKKEEPING = "patches/roswell/0168-coalesce-native-adapter-bookkeeping.patch"
-FIRST_READ_START = "patches/roswell/0173-fast-start-first-read-command.patch"
-ADMISSION_HANDOFF = "patches/roswell/0175-handoff-native-admission-lock.patch"
-SUBMIT_LOCK_RETURN = "patches/roswell/0176-transfer-submit-lock-to-core.patch"
+REJECTED_READ_PATHS = (
+    "patches/roswell/0173-fast-start-first-read-command.patch",
+    "patches/roswell/0175-handoff-native-admission-lock.patch",
+    "patches/roswell/0176-transfer-submit-lock-to-core.patch",
+)
 
 
 class ForzaCorruptionRegressionTests(unittest.TestCase):
@@ -36,19 +38,22 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
 
     def test_corrective_patches_are_consecutive_and_hash_locked(self):
         self.assertEqual(
-            [entry["path"] for entry in self.entries[-16:]],
+            [entry["path"] for entry in self.entries[-13:]],
             [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION,
              RESET_MEDIA_LIFETIME, OPTICAL_ADMISSION, COMPLETION_LIFETIME,
              TRANSIENT_ENVELOPE_GROWTH, QUEUED_ADMISSION, COMPACT_ENVELOPES,
              PRE_ADMISSION_CANCEL, SEALED_RUNDOWN, ACTIVE_SCAN,
-             ADAPTER_BOOKKEEPING, FIRST_READ_START, ADMISSION_HANDOFF,
-             SUBMIT_LOCK_RETURN],
+             ADAPTER_BOOKKEEPING],
         )
-        for entry in self.entries[-16:]:
+        for entry in self.entries[-13:]:
             self.assertEqual(
                 hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
                 entry["sha256"],
             )
+
+    def test_rejected_read_shortcuts_stay_out_of_selected_firmware(self):
+        selected = {entry["path"] for entry in self.entries}
+        self.assertTrue(selected.isdisjoint(REJECTED_READ_PATHS))
 
     def test_sysva_candidate_is_rolled_back_to_global_invalidation(self):
         patch = (ROOT / SYSVA_REVERT).read_text()
@@ -94,33 +99,6 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
             "pool_live==pools_before",
         ):
             self.assertIn(token, patch)
-
-    def test_selected_read_path_keeps_single_owners_and_lock_handoffs(self):
-        first = (ROOT / FIRST_READ_START).read_text()
-        admission = (ROOT / ADMISSION_HANDOFF).read_text()
-        submit = (ROOT / SUBMIT_LOCK_RETURN).read_text()
-        for token in (
-            "rescan_requested",
-            "r->operation==NX_READ",
-            "!s->done && !s->cancelled && !d->quarantined",
-            "single-command pending submit",
-        ):
-            self.assertIn(token, first)
-        for token in (
-            "admit_waiting_requests_locked",
-            "adapter->admission_active",
-            "admit_waiting_requests_locked(adapter,envelope)",
-            "CHECK(used<=9)",
-        ):
-            self.assertIn(token, admission)
-        for token in (
-            "NX_SUBMIT_LOCK_HELD",
-            "if (!(submitted & NX_SUBMIT_LOCK_HELD)) lock(d)",
-            "return (status==STATUS_PENDING ? NX_SUBMIT_PENDING:0)|NX_SUBMIT_LOCK_HELD",
-            "CHECK(used<=7)",
-        ):
-            self.assertIn(token, submit)
-
 
 if __name__ == "__main__":
     unittest.main()

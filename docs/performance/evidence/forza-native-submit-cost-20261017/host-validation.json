@@ -2,7 +2,7 @@
   "schema": 1,
   "date": "2026-10-17",
   "scope": "Owned storage source and generated host tests; no proprietary implementation input.",
-  "native_performance_qualification": "Selected 0176 passes the consecutive 0168/0176/0168/0176 release comparison: all four primary 450 us cost/rate observations and all sixteen weighted costs improve; whole-game Forza acceptance remains open (see cadence candidate0176 archive)",
+  "native_performance_qualification": "0176 passed the consecutive generated 0168/0176/0168/0176 release comparison, but later failed title acceptance: no visible Forza improvement and an early PGR2 crash were reported. A conservative lock-continuation retry then tied 0168 in four alternating fresh-process Forza map-load runs, so it was also discarded. The product lock is restored to 0168.",
   "patches": [
     {
       "path": "patches/roswell/0166-sealed-rundown-notifications.patch",
@@ -27,12 +27,12 @@
     {
       "patch": "patches/roswell/0173-fast-start-first-read-command.patch",
       "sha256": "fee98444406d4d8af6641ffbc93d978951bb98eaa77810decdc4343528169197",
-      "assembled_source_tree": "prerequisite of selected 0176"
+      "assembled_source_tree": "rejected prerequisite of experimental 0176 tree c30e8e2e9cab57d122040f1cd6a17bb44928ae0a"
     },
     {
       "patch": "patches/roswell/0175-handoff-native-admission-lock.patch",
       "sha256": "4adc7909ca1e1b83926cb169c93726ef9e7de4e1e750f27f132a3214b9c91e78",
-      "assembled_source_tree": "prerequisite of selected 0176"
+      "assembled_source_tree": "rejected prerequisite of experimental 0176 tree c30e8e2e9cab57d122040f1cd6a17bb44928ae0a"
     },
     {
       "patch": "patches/roswell/0176-transfer-submit-lock-to-core.patch",
@@ -129,13 +129,19 @@
     "release64": {
       "flash_sha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
       "source_tree": "2716b75a7159254904b4c7a9282f2c51961ee510",
-      "output": "artifacts/forza-bookkeeping-release64",
-      "status": "built; one generated native burst passed, title acceptance open"
+      "output": "artifacts/rollback-0168-release64",
+      "status": "rebuilt from the final selected lock; byte-identical to the two accepted Forza control runs and the fresh-process PGR2 run"
     },
-    "full_host_suite": "Not rerun; previous full-suite scope/results retained above; current exact-stack owned checks and identity checks were rerun."
+    "full_host_suite": {
+      "command": "python3 -m unittest discover -s tests/host -v",
+      "tests": 563,
+      "seconds": 455.231,
+      "skipped": 26,
+      "failures": 0
+    }
   },
   "candidate0176": {
-    "status": "selected by the generated release fixture; fresh whole-game Forza qualification remains open",
+    "status": "rejected by title acceptance after passing the generated fixture",
     "pending_retained_lock_entries": {
       "control0168": 14,
       "candidate0176": 7
@@ -153,8 +159,18 @@
       "runs": 4,
       "cases_per_run": 8,
       "minimum_case_seconds": 10,
-      "primary_450_cost_change_percent": [-10.0243, -15.6921, -15.9165, -8.9933],
-      "primary_450_rate_change_percent": [4.0459, 13.1681, 12.5302, 2.5431],
+      "primary_450_cost_change_percent": [
+        -10.0243,
+        -15.6921,
+        -15.9165,
+        -8.9933
+      ],
+      "primary_450_rate_change_percent": [
+        4.0459,
+        13.1681,
+        12.5302,
+        2.5431
+      ],
       "all_weighted_cost_comparisons_improved": true,
       "unresolved_repeatable_regressions_over_20_percent": 0,
       "all_correctness_oracles_passed": true
@@ -163,7 +179,7 @@
       "flash_sha256": "5be85ddc85f462a0a6ef28ed2ba5fb4ba3e1688c75cab4e2ebcbad556a33c1a2",
       "source_tree": "c30e8e2e9cab57d122040f1cd6a17bb44928ae0a",
       "output": "artifacts/forza-submit-lock-selected-release64",
-      "status": "reproducibly rebuilt; byte-identical to the measured candidate"
+      "status": "reproducibly rebuilt; byte-identical to the measured but rejected candidate"
     },
     "full_host_suite": {
       "tests": 563,
@@ -171,6 +187,28 @@
       "skipped": 26,
       "failures": 0
     }
+  },
+  "conservative_followup": {
+    "status": "rejected because no game-level improvement was observed",
+    "firmware_sha256": "1b5b5829b80d5127d4a67ec9ce853c4ea1eb8252421e0d24a2b741c14f9dc753",
+    "selected0168_sha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
+    "forza_map_load_runs": [
+      "20261018-094150006-605d8d5cbfba4d1ca8179723e0471d18",
+      "20261018-094557986-06cede4fad0e4808ae4a2db33575967e",
+      "20261018-095027183-aa43babd1f70486daf72baaf2ae5fa69",
+      "20261018-095415439-5ce9044dc9f5435ea778685e19234847"
+    ],
+    "first_grid_sample": [
+      4,
+      4,
+      4,
+      4
+    ],
+    "all_execution_completed": true,
+    "all_correctness_passed": true,
+    "all_evidence_complete": true,
+    "all_driven_scenes_rendered": true,
+    "selected": false
   },
   "irp_reset_preparatory": {
     "production_change": false,
@@ -236,6 +274,34 @@
       "run_pump_indirect_sites_after": 0,
       "lock_unlock_forwarding_symbols_absent": true,
       "native_callbacks_remain_separate_direct_functions": true
+    }
+  },
+  "selected_rollback": {
+    "selected": true,
+    "reason": "Reject alternate read-state and lock-ownership protocols that did not improve the automated Forza route after the operator reported an early PGR2 crash.",
+    "rejected_patch_paths": [
+      "patches/roswell/0173-fast-start-first-read-command.patch",
+      "patches/roswell/0175-handoff-native-admission-lock.patch",
+      "patches/roswell/0176-transfer-submit-lock-to-core.patch"
+    ],
+    "release64_sha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
+    "assembled_source_tree": "2716b75a7159254904b4c7a9282f2c51961ee510",
+    "forza_runs": [
+      "20261018-094557986-06cede4fad0e4808ae4a2db33575967e",
+      "20261018-095415439-5ce9044dc9f5435ea778685e19234847"
+    ],
+    "pgr2_run": "20261018-100317063-6b5d031c1d284d69919a871879db7dc4",
+    "title_outcomes": {
+      "all_execution_completed": true,
+      "all_correctness_passed": true,
+      "all_evidence_complete": true
+    },
+    "full_host_suite": {
+      "command": "python3 -m unittest discover -s tests/host -v",
+      "tests": 563,
+      "seconds": 455.231,
+      "skipped": 26,
+      "failures": 0
     }
   }
 }
