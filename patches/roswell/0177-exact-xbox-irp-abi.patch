@@ -1,6 +1,6 @@
-From cb643a347a2528b91a7b8a294f576c5633cafd42 Mon Sep 17 00:00:00 2001
+From e2610d488262dda11ddb2d505a6ea97af35d9c97 Mon Sep 17 00:00:00 2001
 From: Codex <codex@openai.com>
-Date: Sun, 18 Oct 2026 13:27:01 -0700
+Date: Sun, 18 Oct 2026 13:53:13 -0700
 Subject: [PATCH] fix: restore exact Xbox IRP ABI and lifetime
 
 Restore the exact title-visible packet shape, isolate kernel-private lifetime state, reject zero-length direct-I/O MDLs, and add cold-restart persistence coverage.
@@ -2381,7 +2381,7 @@ index 77b396d2..4a0a2e79 100644
      {
          return STATUS_INFO_LENGTH_MISMATCH;
 diff --git a/ntoskrnl/CMakeLists.txt b/ntoskrnl/CMakeLists.txt
-index 9113682a..0163db00 100644
+index 9113682a..78e4c7de 100644
 --- a/ntoskrnl/CMakeLists.txt
 +++ b/ntoskrnl/CMakeLists.txt
 @@ -191,8 +191,13 @@ endif()
@@ -2394,7 +2394,7 @@ index 9113682a..0163db00 100644
 +# packets without reading before a caller pointer.
  option(NXK_MM_POOLPAGES "Use the nxmm pool page window instead of ARM3" ON)
 +if(NOT NXK_MM_POOLPAGES)
-+    message(FATAL_ERROR "The exact Xbox IRP ABI requires NXK_MM_POOLPAGES")
++    message(FATAL_ERROR "NXK_MM_PHYS requires NXK_MM_POOLPAGES; the exact Xbox IRP ABI also requires it")
 +endif()
  if(NXK_MM_POOLPAGES)
      add_definitions(-DNXK_MM_POOLPAGES)
