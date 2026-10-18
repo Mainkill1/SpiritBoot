@@ -20,7 +20,10 @@ class ReleaseTitleRouteTests(unittest.TestCase):
         plan = build_pgr2_profile_create_plan()
         self.assertEqual(plan[-1]["type"], "quit")
         self.assertNotIn("LStickRight", [row.get("button") for row in plan])
+        self.assertIn("pgr2-press-start", [row.get("name") for row in plan])
+        self.assertIn("pgr2-create-menu", [row.get("name") for row in plan])
         self.assertIn("pgr2-name-ready", [row.get("name") for row in plan])
+        self.assertIn("pgr2-plate-style", [row.get("name") for row in plan])
         self.assertIn("pgr2-license-plate", [row.get("name") for row in plan])
         self.assertIn("pgr2-helmet", [row.get("name") for row in plan])
         self.assertIn("pgr2-created-main", [row.get("name") for row in plan])
@@ -30,12 +33,14 @@ class ReleaseTitleRouteTests(unittest.TestCase):
                          ["pgr2-profile-write-before", "pgr2-profile-write-after"])
         self.assertNotIn("pgr2-race-confirm", [row.get("name") for row in plan])
         self.assertNotIn("pgr2-race-25s", [row.get("name") for row in plan])
+        self.assertTrue(all(row.get("durationMs") == 25 for row in plan
+                            if row["type"] == "button"))
         self.assertLess(sum(row.get("delayMs", 0) for row in plan), 180_000)
 
     def test_pgr2_cold_route_is_bounded_and_keeps_25_second_race_window(self):
         plan = build_pgr2_cold_race_plan()
         self.assertEqual(plan[-1]["type"], "quit")
-        self.assertEqual(sum(row.get("delayMs", 0) for row in plan), 129_000)
+        self.assertEqual(sum(row.get("delayMs", 0) for row in plan), 157_000)
         self.assertIn("pgr2-race-start", [row.get("name") for row in plan])
         self.assertIn("pgr2-race-25s", [row.get("name") for row in plan])
         start = next(i for i, row in enumerate(plan) if row.get("name") == "pgr2-race-start")
@@ -45,6 +50,8 @@ class ReleaseTitleRouteTests(unittest.TestCase):
                        if row.get("name") == "pgr2-race-confirm")
         self.assertEqual(plan[prerace + 1]["type"], "button")
         self.assertEqual(plan[prerace + 1]["button"], "A")
+        self.assertTrue(all(row.get("durationMs") == 25 for row in plan
+                            if row["type"] == "button"))
         self.assertFalse(any(row.get("button") == "LStickRight" for row in plan))
         self.assertFalse(any(row["type"] == "diagnostic" for row in plan))
 

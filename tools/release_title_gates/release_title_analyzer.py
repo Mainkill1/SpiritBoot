@@ -119,7 +119,8 @@ def score_pgr2_reload(root: Path) -> dict[str, Any]:
 
 def score_pgr2_create(root: Path) -> dict[str, Any]:
     """Require every profile-creation state and the resulting main menu."""
-    names = ["pgr2-name-ready", "pgr2-license-plate", "pgr2-helmet",
+    names = ["pgr2-press-start", "pgr2-create-menu", "pgr2-name-ready",
+             "pgr2-plate-style", "pgr2-license-plate", "pgr2-helmet",
              "pgr2-created-main"]
     frames = {name: _visual(root / "screenshots" / f"{name}.png")
               for name in names}
@@ -127,7 +128,10 @@ def score_pgr2_create(root: Path) -> dict[str, Any]:
     normalized = {name: re.sub(r"\s+", "", text).upper()
                   for name, text in ocr.items()}
     identity = {
+        "press_start": "PRESSSTART" in normalized["pgr2-press-start"],
+        "create_menu": "CREATENEWPROFILE" in normalized["pgr2-create-menu"],
         "profile_name": "PROFILENAME" in normalized["pgr2-name-ready"],
+        "plate_style": "PLATESELECT" in normalized["pgr2-plate-style"],
         "license_plate": "LICENSEPLATETEXT" in normalized["pgr2-license-plate"],
         "helmet": "HELMETSELECT" in normalized["pgr2-helmet"],
         "created_main": ("MAINMENU" in normalized["pgr2-created-main"]
@@ -135,9 +139,12 @@ def score_pgr2_create(root: Path) -> dict[str, Any]:
     }
     text = " ".join(ocr.values())
     error = bool(re.search(r"(?i)damaged|corrupt|cannot.{0,24}(?:load|use)", text))
-    passed = all(row["pass"] for row in frames.values()) and all(identity.values()) and not error
+    visible = all(not row.get("missing", False) and row["entropy"] >= 3.0
+                  and row["quantized_colors"] >= 16 and row["dark_ratio"] < .88
+                  for row in frames.values())
+    passed = visible and all(identity.values()) and not error
     return {"pass": passed, "frames": frames, "identity": identity,
-            "ocr": ocr, "profile_error_text": error}
+            "frames_visible": visible, "ocr": ocr, "profile_error_text": error}
 
 
 def score_halo2(root: Path) -> dict[str, Any]:

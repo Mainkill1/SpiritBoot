@@ -35,20 +35,18 @@ def build_pgr2_profile_create_plan() -> list[dict[str, Any]]:
     profile, waits after the final confirmation so pending writes can drain,
     and makes no gameplay-performance claim.
     """
-    plan = [step("wait", delayMs=33_000), step("screenshot", name="pgr2-boot-33s")]
-    for wait, button, name in (
-        (0, "A", "pgr2-continue"),
-        (12_000, "A", "pgr2-profile"),
-        (4_000, "A", "pgr2-profile-confirm"),
-        (4_000, "A", "pgr2-name-ready"),
-    ):
-        if wait:
-            plan.append(step("wait", delayMs=wait))
-        plan += [step("button", button=button), step("screenshot", name=name)]
-    plan += [step("diagnostic", diagnosticId="pgr2-profile-write-before")]
-    for name in ("pgr2-license-plate", "pgr2-helmet", "pgr2-created-main"):
-        plan += [step("wait", delayMs=4_000), step("button", button="A"),
-                 step("screenshot", name=name)]
+    plan = [step("wait", delayMs=65_000),
+            step("screenshot", name="pgr2-press-start"),
+            step("button", button="A", durationMs=25)]
+    for name in ("pgr2-create-menu", "pgr2-name-ready"):
+        plan += [step("wait", delayMs=5_000), step("screenshot", name=name)]
+        if name == "pgr2-name-ready":
+            plan.append(step("diagnostic", diagnosticId="pgr2-profile-write-before"))
+        plan.append(step("button", button="A", durationMs=25))
+    for name in ("pgr2-plate-style", "pgr2-license-plate", "pgr2-helmet"):
+        plan += [step("wait", delayMs=5_000), step("screenshot", name=name),
+                 step("button", button="A", durationMs=25)]
+    plan += [step("wait", delayMs=5_000), step("screenshot", name="pgr2-created-main")]
     plan += [step("diagnostic", diagnosticId="pgr2-profile-write-after"),
              step("wait", delayMs=5_000), step("quit")]
     return plan
@@ -62,25 +60,18 @@ def build_pgr2_cold_race_plan() -> list[dict[str, Any]]:
     choice. The final A leaves the pre-race menu; only then does the 17-second
     loading interval begin.
     """
-    plan = [step("wait", delayMs=33_000), step("screenshot", name="pgr2-boot-33s")]
-    for wait, button, name in (
-        (0, "A", "pgr2-continue"),
-        (12_000, "A", "pgr2-profile"),
-        (4_000, "A", "pgr2-profile-confirm"),
-        (4_000, "A", "pgr2-mode"),
-        (4_000, "A", "pgr2-car-right"),
-        (4_000, "A", "pgr2-car-confirm"),
-        (4_000, "A", "pgr2-event"),
-        (4_000, "A", "pgr2-track"),
-        (4_000, "A", "pgr2-options"),
-        (4_000, "A", "pgr2-grid"),
-        (10_000, "A", "pgr2-race-confirm"),
-    ):
-        if wait:
-            plan.append(step("wait", delayMs=wait))
-        plan += [step("button", button=button), step("screenshot", name=name)]
+    plan = [step("wait", delayMs=65_000),
+            step("screenshot", name="pgr2-press-start"),
+            step("button", button="A", durationMs=25)]
+    for name in ("pgr2-profile-confirm", "pgr2-mode", "pgr2-car-right",
+                 "pgr2-car-confirm", "pgr2-event", "pgr2-track",
+                 "pgr2-options", "pgr2-grid"):
+        plan += [step("wait", delayMs=5_000), step("screenshot", name=name),
+                 step("button", button="A", durationMs=25)]
     plan += [
-        step("button", button="A"),
+        step("wait", delayMs=10_000),
+        step("screenshot", name="pgr2-race-confirm"),
+        step("button", button="A", durationMs=25),
         step("wait", delayMs=17_000),
         step("screenshot", name="pgr2-race-start"),
         step("wait", delayMs=10_000),

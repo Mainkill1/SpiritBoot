@@ -41,12 +41,16 @@ class ReleaseTitleAnalyzerTests(unittest.TestCase):
     def test_pgr2_create_requires_the_completed_profile_flow(self):
         with tempfile.TemporaryDirectory() as td:
             root = self._root(td)
-            names = ("pgr2-name-ready", "pgr2-license-plate", "pgr2-helmet",
+            names = ("pgr2-press-start", "pgr2-create-menu", "pgr2-name-ready",
+                     "pgr2-plate-style", "pgr2-license-plate", "pgr2-helmet",
                      "pgr2-created-main")
             for index, name in enumerate(names):
                 self._image(root, name, index)
             good = {
+                "pgr2-press-start": "PRESS START",
+                "pgr2-create-menu": "Create New Profile Profile Manager",
                 "pgr2-name-ready": "PROFILE NAME Player DONE",
+                "pgr2-plate-style": "PLATE SELECT Washington D.C.",
                 "pgr2-license-plate": "LICENSE PLATE TEXT PGR 2 DONE",
                 "pgr2-helmet": "HELMET SELECT Continue",
                 "pgr2-created-main": "MAIN MENU Single Player Multiplayer Options",
