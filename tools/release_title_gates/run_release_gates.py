@@ -73,7 +73,21 @@ def common_score(root: Path) -> dict[str, Any]:
     activity = result.get("operatorActivity") or {}
     process = (result.get("status") == "completed" and result.get("exitCode") == 0
                and not (result.get("crash") or {}).get("Crashed", False))
-    unattended = not activity.get("Intervened", False) and int(activity.get("ManualInputs", 0) or 0) == 0
+    job = json.loads((root / "job.json").read_text()) if (root / "job.json").is_file() else {}
+    planned_diagnostics = sum(row.get("type", row.get("Type")) == "diagnostic"
+                              for row in job.get("plan", job.get("Plan", [])))
+    completed_diagnostics = result.get("diagnostics") or []
+    diagnostic_count = int(activity.get("Diagnostics", 0) or 0)
+    diagnostics_are_planned = (
+        diagnostic_count == planned_diagnostics == len(completed_diagnostics)
+        and all(row.get("Status", row.get("status")) == "completed"
+                for row in completed_diagnostics)
+    )
+    non_diagnostic_activity = any(int(activity.get(name, 0) or 0) != 0 for name in (
+        "ManualInputs", "Pauses", "Screenshots", "PreviewCaptures",
+        "BulkTransfers", "HostStateChanges"))
+    unattended = (not non_diagnostic_activity and
+                  (not activity.get("Intervened", False) or diagnostics_are_planned))
     workload = result.get("workload") or {}
     correctness = workload.get("Correctness", result.get("correctnessStatus")) == "passed"
     complete = workload.get("Evidence", result.get("evidenceStatus")) == "complete"
@@ -151,6 +165,12 @@ def execute(finalized: Path, evidence: Path, runner_url: str,
     flash = finalized / "packages" / "forza" / "flash.bin"
     if sha256_file(flash) != report["firmware_sha256"]:
         raise RuntimeError("finalized firmware no longer matches finalization.json")
+    dependency_check = subprocess.run(
+        [sys.executable, str(analyzer_dir / "analyze_evidence.py"), "--help"],
+        check=False, text=True, capture_output=True)
+    if dependency_check.returncode != 0:
+        raise RuntimeError("title analyzer dependencies are unavailable: " +
+                           dependency_check.stderr.strip())
     api = RunnerApi(runner_url, timeout=120)
     require_idle(api)
     register_firmware(api, contract["common"]["firmware_asset"], flash)
@@ -169,6 +189,8 @@ def execute(finalized: Path, evidence: Path, runner_url: str,
             completed = subprocess.run(
                 [sys.executable, str(analyzer_dir / "analyze_evidence.py"), str(root)],
                 check=False, text=True, capture_output=True)
+            (root / "forza-analyzer.stdout.log").write_text(completed.stdout)
+            (root / "forza-analyzer.stderr.log").write_text(completed.stderr)
             score["forza_qualification_exit"] = completed.returncode
             score["pass"] = score["pass"] and completed.returncode == 0
         elif title.startswith("halo2-"):
