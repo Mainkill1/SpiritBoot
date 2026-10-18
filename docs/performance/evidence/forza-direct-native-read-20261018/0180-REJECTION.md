@@ -1,6 +1,6 @@
 # Patch 0180 transaction review
 
-Patch 0180 must not be used without patch 0181. Independent host
+Patch 0180 must not be used. Patch 0181 repaired these four defects, but the entire 0180–0184 direct-read architecture was later rejected after an early PGR2 crash and no material Forza improvement. Independent host
 reproductions found four priority-one failures that its original 48 adapter
 groups did not cover.
 
@@ -21,7 +21,7 @@ device, retained envelope, and exactly one command from the shared planner.
 Split reads and dynamic overflow remain in the generic core, along with writes,
 flushes, controls, optical requests, and non-FATX reads. This avoids a second
 active-list implementation and leaves those requests within the core's
-existing cancel/drain machinery.
+existing cancel/drain machinery. These corrections were necessary but did not qualify the direct-route design.
 
 The exact assembled source ran 54 adapter groups in both plain and ASan/UBSan
 configurations. The broader core, concurrency, packet, ownership, cache and

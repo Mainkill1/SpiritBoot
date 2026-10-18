@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "source_tree": "db688cb9904450b6a1c513a87f3233877b01f543",
+  "patch_sha256": "c76e7fc8507c9d1d15cfe93a6178fe85afdc4fd03563f9e57d707346239fed36",
+  "firmware_sha256": "368df6a4f9683d1af8eb9f659fffd7f867a4d149346b1406827b2205d188f91a",
+  "full_unittest": {
+    "command": "python3 -m unittest discover -s tests/host -v",
+    "tests": 564,
+    "passed": 564,
+    "skipped": 26,
+    "failures": 0,
+    "errors": 0,
+    "elapsed_seconds": 447.157,
+    "log": "full-host-tests.log",
+    "log_sha256": "4391c12017c6d7f3738b381d451ed847e0401124cf19d57f79c1a7ba8d0a48f1"
+  },
+  "native_adapter": {
+    "command": "python3 tests/host/nxstorage/check_adapter.py <output-directory>",
+    "plain_groups": 53,
+    "sanitized_groups": 53,
+    "failures": 0,
+    "includes_fixed_seed_batch_state_machine_rounds": 64
+  },
+  "targeted_product_tests": {
+    "command": "python3 -m unittest -v tests.host.test_forza_corruption_regressions tests.host.test_nxstorage_production",
+    "tests": 10,
+    "passed": 10,
+    "failures": 0,
+    "elapsed_seconds": 10.544
+  },
+  "firmware_and_coverage_tests": {
+    "command": "python3 -m unittest -v tests.host.test_firmware tests.host.test_kernel_coverage",
+    "tests": 75,
+    "passed": 75,
+    "skipped": 1,
+    "failures": 0,
+    "elapsed_seconds": 6.007
+  }
+}

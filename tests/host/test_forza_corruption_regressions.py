@@ -24,12 +24,18 @@ PRE_ADMISSION_CANCEL = "patches/roswell/0165-cancel-before-native-admission.patc
 SEALED_RUNDOWN = "patches/roswell/0166-sealed-rundown-notifications.patch"
 ACTIVE_SCAN = "patches/roswell/0167-skip-inactive-native-slots.patch"
 ADAPTER_BOOKKEEPING = "patches/roswell/0168-coalesce-native-adapter-bookkeeping.patch"
-DIRECT_NATIVE_READ = "patches/roswell/0180-fatx-direct-native-read.patch"
-DIRECT_READ_QUARANTINE = "patches/roswell/0181-unify-direct-read-quarantine.patch"
 REJECTED_READ_PATHS = (
     "patches/roswell/0173-fast-start-first-read-command.patch",
     "patches/roswell/0175-handoff-native-admission-lock.patch",
     "patches/roswell/0176-transfer-submit-lock-to-core.patch",
+    "patches/roswell/0180-fatx-direct-native-read.patch",
+    "patches/roswell/0181-unify-direct-read-quarantine.patch",
+    "patches/roswell/0182-close-direct-read-quarantine-handoff.patch",
+    "patches/roswell/0183-close-bypass-request-lifetimes.patch",
+    "patches/roswell/0184-plan-qualified-read-once.patch",
+    "patches/roswell/0185-batch-fatx-read-admission.patch",
+    "patches/roswell/0186-defer-fatx-read-window.patch",
+    "patches/roswell/0187-defer-inline-fatx-completion.patch",
 )
 
 
@@ -40,14 +46,14 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
 
     def test_corrective_patches_are_consecutive_and_hash_locked(self):
         self.assertEqual(
-            [entry["path"] for entry in self.entries[-15:]],
+            [entry["path"] for entry in self.entries[-13:]],
             [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION,
              RESET_MEDIA_LIFETIME, OPTICAL_ADMISSION, COMPLETION_LIFETIME,
              TRANSIENT_ENVELOPE_GROWTH, QUEUED_ADMISSION, COMPACT_ENVELOPES,
              PRE_ADMISSION_CANCEL, SEALED_RUNDOWN, ACTIVE_SCAN,
-             ADAPTER_BOOKKEEPING, DIRECT_NATIVE_READ, DIRECT_READ_QUARANTINE],
+             ADAPTER_BOOKKEEPING],
         )
-        for entry in self.entries[-15:]:
+        for entry in self.entries[-13:]:
             self.assertEqual(
                 hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
                 entry["sha256"],
@@ -56,30 +62,6 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
     def test_rejected_read_shortcuts_stay_out_of_selected_firmware(self):
         selected = {entry["path"] for entry in self.entries}
         self.assertTrue(selected.isdisjoint(REJECTED_READ_PATHS))
-
-    def test_direct_read_keeps_full_completion_contract(self):
-        patch = (ROOT / DIRECT_NATIVE_READ).read_text()
-        for token in (
-            "nx_plan_single_read",
-            "qualified_qd12_bursts_preserve_1024_payloads",
-            "qualified_read_cancellation_keeps_pending_contract",
-            "qualified_read_recovers_or_quarantines_frozen_queue",
-            "qualified_split_read_falls_back_to_core",
-            "qualified_read_bounds_terminal_byte_counts",
-        ):
-            self.assertIn(token, patch)
-
-    def test_direct_read_shares_generic_quarantine_and_cancel_lifetime(self):
-        patch = (ROOT / DIRECT_READ_QUARANTINE).read_text()
-        for token in (
-            "generic_quarantine_rejects_later_qualified_read",
-            "direct_quarantine_cancels_live_qualified_peer",
-            "qualified_commit_rechecks_quarantine",
-            "qualified_cancel_holds_child_until_cancel_returns",
-            "dynamic_marked_peers_remain_in_generic_quarantine_domain",
-            "qualified_cancel_without_callback_blocks_removal_until_terminal",
-        ):
-            self.assertIn(token, patch)
 
     def test_sysva_candidate_is_rolled_back_to_global_invalidation(self):
         patch = (ROOT / SYSVA_REVERT).read_text()

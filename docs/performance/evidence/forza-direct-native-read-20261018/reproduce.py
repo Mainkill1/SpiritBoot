@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recompute patch-0181 comparisons and enforce the archived acceptance gates."""
+"""Recompute historical 0181 evidence for the rejected direct-read stack."""
 
 import hashlib
 import json
@@ -195,4 +195,4 @@ def validate_titles():
 if __name__ == "__main__":
     recompute()
     validate_titles()
-    print("0181 evidence: raw bindings and oracles pass; 8/8 mean submit costs improve; Forza A/B/A/B and PGR2 x3 pass")
+    print("Historical 0181 archive verifies; the direct-read stack remains rejected by the later operator title result")

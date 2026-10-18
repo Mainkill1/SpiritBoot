@@ -1,0 +1,1079 @@
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index 6508bbb0..0094e606 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -9,6 +9,9 @@
+ /* INCLUDES *****************************************************************/
+ 
+ #include "vfat.h"
++#ifdef SARCH_XBOX
++#include <reactos/xb-io.h>
++#endif
+ 
+ #define NDEBUG
+ #include <debug.h>
+@@ -1052,6 +1055,7 @@ VfatAsyncReadComplete(
+     PERESOURCE Resource = Context;
+ 
+     UNREFERENCED_PARAMETER(DeviceObject);
++    Irp->Flags &= ~IRP_XB_FATX_BATCHED_READ;
+     if (Irp->PendingReturned)
+         IoMarkIrpPending(Irp);
+     ExReleaseResourceForThreadLite(Resource,
+@@ -1159,6 +1163,8 @@ VfatTryAsyncRead(
+     IoSetCompletionRoutine(Irp, VfatAsyncReadComplete, Resource, TRUE, TRUE, TRUE);
+     IoMarkIrpPending(Irp);
+     IrpContext->Flags &= ~IRPCONTEXT_COMPLETE;
++    if (NxkExperimentalFlags & NXK_EXPERIMENT_FATX_READ_BATCH)
++        Irp->Flags |= IRP_XB_FATX_BATCHED_READ;
+     IoCallDriver(IrpContext->DeviceExt->StorageDevice, Irp);
+     /* The lower driver may already have completed and released the lease. */
+     return TRUE;
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index 8800c675..2acee182 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -1,11 +1,15 @@
+ /* SPDX-License-Identifier: GPL-2.0-or-later */
+ #include "native_adapter.h"
+ #include "cache_property.h"
++#ifndef NX_NATIVE_ADAPTER_HOST
++#include <reactos/xb-io.h>
++#endif
+ 
+ enum { NX_NATIVE_SENSE_BYTES=32, NX_NATIVE_TIMEOUT_SECONDS=30,
+        NX_NATIVE_TIMEOUT_LIMIT_SECONDS=120, NX_SRB_SUCCESS=1,
+        NX_CONTROL_BYTES=804, NX_MEDIA_UNKNOWN, NX_MEDIA_ABSENT,
+-       NX_MEDIA_PRESENT };
++       NX_MEDIA_PRESENT, NX_NATIVE_BATCH_WINDOW_LIMIT=12,
++       NX_NATIVE_BATCH_DRAIN_LIMIT=4 };
+ 
+ 
+ typedef struct NX_NATIVE_ENVELOPE {
+@@ -22,7 +26,7 @@ typedef struct NX_NATIVE_ENVELOPE {
+     nx_handle handle;
+     nx_request waiting_request;
+     struct NX_NATIVE_ENVELOPE *next_waiting;
+-    unsigned queued, start_active, admitted, was_pending;
++    unsigned queued, start_active, admitted, was_pending, batch_wait;
+     nx_status terminal_status;
+     NTSTATUS dispatch_status;
+     uint64_t terminal_bytes;
+@@ -55,6 +59,9 @@ struct NX_NATIVE_ADAPTER {
+     NX_NATIVE_ENVELOPE *waiting_head, *waiting_tail;
+     unsigned admission_active;
+     KDPC admission_dpc;
++    KTIMER batch_timer;
++    KDPC batch_dpc;
++    unsigned batch_timer_armed, batch_callback_active, batch_waiting;
+     NX_NATIVE_ENVELOPE *free_envelopes;
+     NX_NATIVE_ENVELOPE *trim_envelopes;
+     unsigned sealed, quarantined;
+@@ -126,6 +133,7 @@ static void port_leave(void *context);
+ static VOID NTAPI NxNativeCompletionDpc(PKDPC,PVOID,PVOID,PVOID);
+ static VOID NTAPI NxNativeTrimDpc(PKDPC,PVOID,PVOID,PVOID);
+ static VOID NTAPI NxNativeAdmissionDpc(PKDPC,PVOID,PVOID,PVOID);
++static VOID NTAPI NxNativeBatchDpc(PKDPC,PVOID,PVOID,PVOID);
+ 
+ static void destroy_dynamic_envelope(NX_NATIVE_ENVELOPE *envelope)
+ {
+@@ -763,6 +771,8 @@ void NTAPI NxNativeAdapterCancel(PDEVICE_OBJECT device,PIRP parent)
+             previous=cursor;cursor=cursor->next_waiting;
+         }
+         if(cursor) {
++            if(cursor->batch_wait && adapter->batch_waiting)
++                --adapter->batch_waiting;
+             if(previous) previous->next_waiting=cursor->next_waiting;
+             else adapter->waiting_head=cursor->next_waiting;
+             if(adapter->waiting_tail==cursor) adapter->waiting_tail=previous;
+@@ -801,6 +811,8 @@ NTSTATUS NxNativeAdapterInitialize(NX_NATIVE_ADAPTER *adapter,PDEVICE_OBJECT low
+     KeInitializeEvent(&adapter->drain_event,SynchronizationEvent,FALSE);
+     KeInitializeDpc(&adapter->trim_dpc,NxNativeTrimDpc,adapter);
+     KeInitializeDpc(&adapter->admission_dpc,NxNativeAdmissionDpc,adapter);
++    KeInitializeTimer(&adapter->batch_timer);
++    KeInitializeDpc(&adapter->batch_dpc,NxNativeBatchDpc,adapter);
+     adapter->data_limit=core_count;
+     adapter->media_capacity=config->capacity_bytes;adapter->media_sector=config->sector_bytes;
+     adapter->media_capacity_valid=config->capacity_bytes!=0;
+@@ -852,7 +864,8 @@ static void unbind_cache_publication(NX_NATIVE_ADAPTER *adapter)
+     for(;;) {
+         unsigned active=0;
+         port_enter(adapter);
+-        active=adapter->dynamic_active!=0 || adapter->admission_active;
++        active=adapter->dynamic_active!=0 || adapter->admission_active ||
++               adapter->batch_timer_armed || adapter->batch_callback_active;
+         for(index=0;index<adapter->count;++index)
+             if(adapter->envelopes[index].active) { active=1;break; }
+         if(!active) {
+@@ -895,7 +908,8 @@ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+         nx_handle handle={UINT32_MAX,0};
+         unsigned cancel_after=0,quarantined;
+         envelope=adapter->waiting_head;
+-        if(!envelope || (adapter->data_active==adapter->data_limit &&
++        if(!envelope || envelope->batch_wait ||
++           (adapter->data_active==adapter->data_limit &&
+                          !adapter->quarantined)) {
+             adapter->admission_active=0;
+             if(adapter->sealed)
+@@ -933,6 +947,46 @@ static VOID NTAPI NxNativeAdmissionDpc(PKDPC dpc,PVOID context,PVOID argument1,P
+     admit_waiting_requests(context);
+ }
+ 
++/* Open a bounded prefix of the marked tail already owned by the ordinary
++ * FIFO.  A finite limit keeps each timer callback short; UINT32_MAX is used by
++ * an ordering boundary that must expose the complete preceding read prefix. */
++static void release_waiting_batch_locked(NX_NATIVE_ADAPTER *adapter,unsigned limit)
++{
++    NX_NATIVE_ENVELOPE *cursor;
++    unsigned released=0;
++    for(cursor=adapter->waiting_head;cursor && released<limit;
++        cursor=cursor->next_waiting) {
++        if(!cursor->batch_wait) continue;
++        cursor->batch_wait=0;
++        ++released;
++    }
++    if(released>adapter->batch_waiting) adapter->batch_waiting=0;
++    else adapter->batch_waiting-=released;
++}
++
++static VOID NTAPI NxNativeBatchDpc(PKDPC dpc,PVOID context,PVOID argument1,PVOID argument2)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    (void)dpc;(void)argument1;(void)argument2;
++    port_enter(adapter);
++    LARGE_INTEGER due;
++    adapter->batch_callback_active=1;
++    adapter->batch_timer_armed=0;
++    release_waiting_batch_locked(adapter,NX_NATIVE_BATCH_DRAIN_LIMIT);
++    if(adapter->batch_waiting) {
++        adapter->batch_timer_armed=1;
++        due.QuadPart=-20000;
++        (void)KeSetTimer(&adapter->batch_timer,due,&adapter->batch_dpc);
++    }
++    port_leave(adapter);
++    admit_waiting_requests(adapter);
++    port_enter(adapter);
++    adapter->batch_callback_active=0;
++    if(adapter->sealed)
++        (void)KeSetEvent(&adapter->drain_event,IO_NO_INCREMENT,FALSE);
++    port_leave(adapter);
++}
++
+ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operation operation,
+                                int64_t byte_offset,uint64_t byte_count,uint32_t flags)
+ {
+@@ -940,9 +994,12 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     nx_request request;
+     NTSTATUS result;
+     KIRQL cancel_irql;
+-    unsigned grow=0,cancelled;
++    unsigned grow=0,cancelled,batch_requested,defer_admission=0,force_admission=0;
+     nx_lcq_observation cache_observation={0};
+     if(!adapter || !parent) return STATUS_INVALID_PARAMETER;
++    batch_requested=operation==NX_READ && !adapter->core.config.optical &&
++        (parent->Flags&IRP_XB_FATX_BATCHED_READ)!=0;
++    parent->Flags&=~IRP_XB_FATX_BATCHED_READ;
+     port_enter(adapter);
+     if(adapter->quarantined) {
+         port_leave(adapter);parent->IoStatus.Status=STATUS_IO_DEVICE_ERROR;
+@@ -979,6 +1036,7 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+         envelope->terminal_ready=envelope->completed=envelope->submit_active=0;
+         envelope->result_deferred=envelope->packet_live=0;
+         envelope->queued=envelope->start_active=envelope->admitted=envelope->was_pending=0;
++        envelope->batch_wait=0;
+         envelope->dispatch_status=STATUS_PENDING;
+         envelope->cache_guard=!adapter->core.config.optical&&
+             ((operation==NX_FLUSH)||
+@@ -1017,13 +1075,34 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     cancelled=envelope->cancel_latched;
+     if(!cancelled) {
+         envelope->waiting_request=request;envelope->next_waiting=NULL;envelope->queued=1;
++        defer_admission=batch_requested &&
++            adapter->batch_waiting<NX_NATIVE_BATCH_WINDOW_LIMIT;
++        envelope->batch_wait=defer_admission;
+         if(adapter->waiting_tail) adapter->waiting_tail->next_waiting=envelope;
+         else adapter->waiting_head=envelope;
+         adapter->waiting_tail=envelope;
++        if(defer_admission) ++adapter->batch_waiting;
++        if(defer_admission && !adapter->batch_timer_armed) {
++            LARGE_INTEGER due;
++            adapter->batch_timer_armed=1;
++            port_pending(adapter,parent);
++            due.QuadPart=-20000;
++            (void)KeSetTimer(&adapter->batch_timer,due,&adapter->batch_dpc);
++        } else if(defer_admission) {
++            port_pending(adapter,parent);
++        }
++        /* Let a complete small title burst return before transport work.
++         * The waiting window is capped; its first overflow request and any
++         * ordinary data/flush I/O become FIFO boundaries that expose every
++         * preceding marked read through the established admission path. */
++        if(!defer_admission && adapter->batch_waiting) {
++            release_waiting_batch_locked(adapter,UINT32_MAX);
++            force_admission=1;
++        }
+     }
+     port_leave(adapter);
+     if(cancelled) port_complete(adapter,parent,NX_CANCELLED,0);
+-    else admit_waiting_requests(adapter);
++    else if(!defer_admission || force_admission) admit_waiting_requests(adapter);
+     port_enter(adapter);
+     if(!envelope->completed && !envelope->was_pending) port_pending(adapter,parent);
+     result=envelope->was_pending ? STATUS_PENDING:envelope->dispatch_status;
+diff --git a/ntoskrnl/xb/boot_setup.c b/ntoskrnl/xb/boot_setup.c
+index e19094f1..c944226e 100644
+--- a/ntoskrnl/xb/boot_setup.c
++++ b/ntoskrnl/xb/boot_setup.c
+@@ -38,6 +38,7 @@ TEXT(label_dts, "DTS");
+ TEXT(label_advanced_all, "All advanced settings");
+ TEXT(label_contig_cache, "Advanced: contig cache");
+ TEXT(label_xdvdfs_async, "Optical direct reads");
++TEXT(label_fatx_batch, "FATX read batching");
+ TEXT(label_ata_settle, "Emulator ATA acceleration");
+ TEXT(label_save, "Save and reboot");
+ TEXT(label_continue, "Discard and continue");
+@@ -74,6 +75,7 @@ static const char *const labels[SB_ROW_COUNT] SB_INIT_DATA = {
+     label_pal60, label_audio, label_ac3, label_dts, label_advanced_all,
+     label_contig_cache,
+     label_xdvdfs_async,
++    label_fatx_batch,
+     label_ata_settle,
+     label_save, label_continue
+ };
+@@ -134,6 +136,10 @@ SB_INIT_CODE static void edit(SbSetup *s, int direction)
+         s->edited.experimental ^= SB_EXPERIMENT_XDVDFS_ASYNC;
+         return;
+     }
++    if (s->row == SB_FATX_READ_BATCH) {
++        s->edited.experimental ^= SB_EXPERIMENT_FATX_READ_BATCH;
++        return;
++    }
+     if (s->row == SB_ATA_STATUS_SETTLE) {
+         static const uint32_t modes[] SB_INIT_DATA = {
+             0, SB_EXPERIMENT_ATA_FORCE_ALL
+@@ -302,6 +308,8 @@ void sb_setup_field_value(const SbSetup *s, SbSetupRow row, char *out, size_t si
+             text=(s->edited.experimental & SB_EXPERIMENT_CONTIG_CACHE_ALIAS) ? text_on : text_off;
+         else if (row == SB_XDVDFS_ASYNC)
+             text=(s->edited.experimental & SB_EXPERIMENT_XDVDFS_ASYNC) ? text_on : text_off;
++        else if (row == SB_FATX_READ_BATCH)
++            text=(s->edited.experimental & SB_EXPERIMENT_FATX_READ_BATCH) ? text_on : text_off;
+         else if (row == SB_ATA_STATUS_SETTLE) {
+             value = s->edited.experimental & SB_EXPERIMENT_ATA_MODE_MASK;
+             text = value == SB_EXPERIMENT_ATA_FORCE_ALL ? text_ata_all :
+diff --git a/ntoskrnl/xb/boot_setup.h b/ntoskrnl/xb/boot_setup.h
+index 200e60e5..b55ae61a 100644
+--- a/ntoskrnl/xb/boot_setup.h
++++ b/ntoskrnl/xb/boot_setup.h
+@@ -35,10 +35,12 @@ typedef struct { uint32_t language, video, audio, experimental; } SbSettings;
+ enum {
+     SB_EXPERIMENT_CONTIG_CACHE_ALIAS=1u,
+     SB_EXPERIMENT_XDVDFS_ASYNC=2u,
++    SB_EXPERIMENT_FATX_READ_BATCH=4u,
+     SB_EXPERIMENT_ATA_FORCE_ALL=8u,
+     SB_EXPERIMENT_ATA_MODE_MASK=8u,
+     SB_EXPERIMENT_ADVANCED_ALL_MASK=
+         SB_EXPERIMENT_CONTIG_CACHE_ALIAS | SB_EXPERIMENT_XDVDFS_ASYNC |
++        SB_EXPERIMENT_FATX_READ_BATCH |
+         SB_EXPERIMENT_ATA_FORCE_ALL
+ };
+ enum { SB_LANGUAGE_WORD=1u, SB_VIDEO_WORD=2u, SB_AUDIO_WORD=4u };
+@@ -46,7 +48,7 @@ typedef enum {
+     SB_LANGUAGE, SB_ASPECT, SB_480P, SB_720P, SB_1080I, SB_PAL60,
+     SB_AUDIO_MODE, SB_AC3, SB_DTS, SB_STANDARD_FIELD_COUNT,
+     SB_ADVANCED_ALL=SB_STANDARD_FIELD_COUNT, SB_CONTIG_CACHE_ALIAS,
+-    SB_XDVDFS_ASYNC, SB_ATA_STATUS_SETTLE,
++    SB_XDVDFS_ASYNC, SB_FATX_READ_BATCH, SB_ATA_STATUS_SETTLE,
+     SB_FIELD_COUNT,
+     SB_SAVE=SB_FIELD_COUNT, SB_CONTINUE, SB_ROW_COUNT
+ } SbSetupRow;
+diff --git a/ntoskrnl/xb/bootsetup_native.c b/ntoskrnl/xb/bootsetup_native.c
+index 6a0aaed9..be44fd09 100644
+--- a/ntoskrnl/xb/bootsetup_native.c
++++ b/ntoskrnl/xb/bootsetup_native.c
+@@ -1033,6 +1033,7 @@ NxkBootSetupRun(VOID)
+     NxkExperimentalFlags = Setup.edited.experimental &
+                            (NXK_EXPERIMENT_CONTIG_CACHE_ALIAS |
+                             NXK_EXPERIMENT_XDVDFS_ASYNC |
++                            NXK_EXPERIMENT_FATX_READ_BATCH |
+                             NXK_EXPERIMENT_ATA_FORCE_ALL);
+     if (NxkExperimentalFlags)
+         DbgPrint("SpiritBoot experimental flags: %08lx\n",
+diff --git a/ntoskrnl/xb/mm/mm.h b/ntoskrnl/xb/mm/mm.h
+index e5f6ecde..84348410 100644
+--- a/ntoskrnl/xb/mm/mm.h
++++ b/ntoskrnl/xb/mm/mm.h
+@@ -55,6 +55,7 @@
+  * zero so ordinary boots retain the reference-compatible behavior. */
+ #define NXK_EXPERIMENT_CONTIG_CACHE_ALIAS 0x00000001UL
+ #define NXK_EXPERIMENT_XDVDFS_ASYNC       0x00000002UL
++#define NXK_EXPERIMENT_FATX_READ_BATCH    0x00000004UL
+ #define NXK_EXPERIMENT_ATA_FORCE_ALL      0x00000008UL
+ #define NXK_EXPERIMENT_ATA_MODE_MASK      0x00000008UL
+ extern ULONG NxkExperimentalFlags;
+diff --git a/sdk/include/reactos/xb-io.h b/sdk/include/reactos/xb-io.h
+index dcd5153d..e4eb0a7a 100644
+--- a/sdk/include/reactos/xb-io.h
++++ b/sdk/include/reactos/xb-io.h
+@@ -3,6 +3,14 @@
+ /* Native private IRP flag: Xbox SG always publishes a final result, including
+  * inline errors, synchronous-file errors and cancellation. Not a title flag. */
+ #define IRP_XB_SG_COMPLETION 0x00010000UL
++#define IRP_XB_FATX_BATCHED_READ 0x00020000UL
++#if (IRP_XB_SG_COMPLETION & IRP_XB_FATX_BATCHED_READ)
++#error Xbox private IRP flags overlap
++#endif
++
++/* Session-only storage experiment selected by the SpiritBoot setup menu. */
++#define NXK_EXPERIMENT_FATX_READ_BATCH 0x00000004UL
++extern ULONG NxkExperimentalFlags;
+ 
+ /* Xbox Win32 I/O-completion trampoline; unlike a raw kernel APC routine,
+  * this callback must execute only at an alertable user wait. */
+diff --git a/tests/host/boot-menu-render/check.py b/tests/host/boot-menu-render/check.py
+index 9f76994b..73657e5a 100644
+--- a/tests/host/boot-menu-render/check.py
++++ b/tests/host/boot-menu-render/check.py
+@@ -41,6 +41,13 @@ root = Path(sys.argv[1]).resolve()
+ out = Path(sys.argv[2]).resolve()
+ out.mkdir(parents=True, exist_ok=True)
+ native = (root / "ntoskrnl/xb/bootsetup_native.c").read_text()
++setup_header = (root / "ntoskrnl/xb/boot_setup.h").read_text()
++setup_source = (root / "ntoskrnl/xb/boot_setup.c").read_text()
++
++assert "SB_EXPERIMENT_FATX_READ_BATCH=4u" in setup_header
++assert "SB_FATX_READ_BATCH" in setup_header
++assert 'TEXT(label_fatx_batch, "FATX read batching")' in setup_source
++assert "NXK_EXPERIMENT_FATX_READ_BATCH" in native
+ 
+ required = {
+     "BS_LEFT": "32u",
+@@ -100,8 +107,8 @@ typedef enum {
+     SB_MENU_ADVANCED
+ } SbMenuState;
+ typedef unsigned SbSetupRow;
+-enum { SB_STANDARD_FIELD_COUNT = 9, SB_FIELD_COUNT = 12,
+-       SB_ROW_COUNT = 14, SB_CREDITS_PAGE_COUNT = 3 };
++enum { SB_STANDARD_FIELD_COUNT = 9, SB_FIELD_COUNT = 14,
++       SB_ROW_COUNT = 16, SB_CREDITS_PAGE_COUNT = 3 };
+ typedef struct {
+     SbSetupRow row;
+     SbMenuState state;
+@@ -140,7 +147,8 @@ static const char * const BsCreditsPages[] = { "core", "testing", "research" };
+ static const char * const Labels[SB_ROW_COUNT] = {
+     "Language", "Aspect ratio", "480p", "720p", "1080i",
+     "PAL-60", "Audio mode", "AC-3", "DTS", "All advanced",
+-    "Contig cache", "ATA acceleration", "Save settings", "Continue boot"
++    "Contig cache", "Optical reads", "FATX batching", "ATA acceleration",
++    "Save settings", "Continue boot"
+ };
+ 
+ typedef struct { ULONG l, t, r, b; } Fill;
+@@ -266,7 +274,7 @@ int main(void)
+     after.state = SB_MENU_ADVANCED;
+     after.row = SB_STANDARD_FIELD_COUNT;
+     BsRenderMenuContent(&after);
+-    assert(blit_count == 0 && string_count == 4);
++    assert(blit_count == 0 && string_count == 6);
+     assert(strstr(strings[0], "Advanced") != NULL);
+     assert_no_logo_fill();
+     return 0;
+diff --git a/tests/host/fatx/check-async-read.py b/tests/host/fatx/check-async-read.py
+index dba089b0..d9b37091 100644
+--- a/tests/host/fatx/check-async-read.py
++++ b/tests/host/fatx/check-async-read.py
+@@ -45,6 +45,9 @@ shim = r'''
+ #define STATUS_CANCELLED ((NTSTATUS)0xc0000120)
+ #define IRP_PAGING_IO 1
+ #define IRP_NOCACHE 2
++#define IRP_XB_SG_COMPLETION 0x00010000UL
++#define IRP_XB_FATX_BATCHED_READ 0x00020000UL
++#define NXK_EXPERIMENT_FATX_READ_BATCH 0x00000004UL
+ #define IRPCONTEXT_CANWAIT 1
+ #define IRPCONTEXT_COMPLETE 2
+ #define FCB_IS_PAGE_FILE 1
+@@ -81,6 +84,7 @@ typedef __typeof__(((DEVICE_EXTENSION*)0)->FatInfo) *PFATINFO;
+ static struct { DEVICE *DeviceObject; } global,*VfatGlobalData=&global;
+ static uintptr_t current=0x1000;
+ static unsigned submitted,queued,freed,allocated,completed,lock_calls,stats_calls,stats_sum;
++static ULONG NxkExperimentalFlags,seen_flags;
+ static int immediate,allocation_fail,lock_fail,mapping_fail,checkpoint;
+ static unsigned stack_size=0x4000;
+ static NTSTATUS backend;
+@@ -108,13 +112,15 @@ static STACK *IoGetNextIrpStackLocation(IRP*i){return &i->lower;}
+ static void IoMarkIrpPending(IRP*i){i->pending++;}
+ static void IoSetCompletionRoutine(IRP*i,COMPLETION f,void*c,int a,int b,int x){assert(a&&b&&x);i->done=f;i->context=c;}
+ static void finish(IRP*i){i->IoStatus.Status=backend;i->IoStatus.Information=backend?0:512;i->PendingReturned=!immediate;assert(i->done);assert(i->done(NULL,i,i->context)==0);completed++;}
+-static NTSTATUS IoCallDriver(DEVICE*d,IRP*i){(void)d;submitted++;assert(!i->lower.FileObject);assert(i->lower.Parameters.Read.ByteOffset.QuadPart==0x123400);active=i;if(immediate)finish(i);return immediate?backend:STATUS_PENDING;}
++static NTSTATUS IoCallDriver(DEVICE*d,IRP*i){(void)d;submitted++;seen_flags=i->Flags;
++  i->Flags&=~IRP_XB_FATX_BATCHED_READ;
++  assert(!i->lower.FileObject);assert(i->lower.Parameters.Read.ByteOffset.QuadPart==0x123400);active=i;if(immediate)finish(i);return immediate?backend:STATUS_PENDING;}
+ '''
+ tests=r'''
+ static unsigned checks,failures;
+ static void check(int ok,const char*name){checks++;if(!ok){failures++;printf("FAIL: %s\n",name);}}
+ int main(void){
+- for(unsigned scenario=0;scenario<20;scenario++){
++ for(unsigned scenario=0;scenario<21;scenario++){
+   FCB f={.RFCB.FileSize.QuadPart=8192,.RFCB.AllocationSize.QuadPart=8192,.RFCB.ValidDataLength.QuadPart=8192,.entry=42};
+   FILE_OBJECT file={.FsContext=&f,.FsContext2=&f};
+   IRP irp={.Flags=IRP_NOCACHE,.UserBuffer=(void*)0x200000};
+@@ -122,9 +128,10 @@ int main(void){
+   DEVICE dev={.AlignmentRequirement=1};
+   DEVICE_EXTENSION de={.FatInfo={512,4096,64},.StorageDevice=&dev};
+   CONTEXT c={&irp,&file,&stack,&de,&dev,IRPCONTEXT_COMPLETE,0};
+-  submitted=queued=freed=allocated=completed=lock_calls=stats_calls=stats_sum=0;active=NULL;current=0x1000;
++  submitted=queued=freed=allocated=completed=lock_calls=stats_calls=stats_sum=0;seen_flags=0;active=NULL;current=0x1000;
++  NxkExperimentalFlags=scenario==20?0:NXK_EXPERIMENT_FATX_READ_BATCH;
+   immediate=allocation_fail=lock_fail=mapping_fail=0;checkpoint=scenario==19;backend=0;stack_size=0x4000;
+-  int eligible=scenario<6 || scenario==12 || scenario==19;
++  int eligible=scenario<6 || scenario==12 || scenario==19 || scenario==20;
+   if(scenario==1)immediate=1;
+   if(scenario==2){immediate=1;backend=STATUS_INVALID_PARAMETER;}
+   if(scenario==3)backend=STATUS_CANCELLED;
+@@ -147,6 +154,11 @@ int main(void){
+    check(result==STATUS_PENDING,"eligible read preserves asynchronous return");
+    check(submitted==1&&queued==0,"eligible resident read reaches storage without worker");
+    if(!submitted)continue;
++   check(((seen_flags&IRP_XB_FATX_BATCHED_READ)!=0)==
++         ((NxkExperimentalFlags&NXK_EXPERIMENT_FATX_READ_BATCH)!=0),
++         "enabled eligible read carries the private batch marker at lower call");
++   check((seen_flags&IRP_NOCACHE)!=0&&!(irp.Flags&IRP_XB_FATX_BATCHED_READ),
++         "adapter consumption preserves unrelated IRP flags");
+    check(allocated==0,"eligible read needs no per-request pool allocation");
+    check(f.MainResource.count==0 || f.MainResource.owner==((uintptr_t)&irp|3),"pending lease is keyed by stable parent IRP");
+    check(stats_calls==2&&stats_sum==513,"noncached read statistics preserved");
+@@ -161,6 +173,7 @@ int main(void){
+    check(irp.IoStatus.Status==backend&&irp.IoStatus.Information==(backend?0:512),"lower status and byte count survive completion");
+   }else{
+    check(!submitted,"ineligible read preserves worker fallback");
++   check(!(irp.Flags&IRP_XB_FATX_BATCHED_READ),"fallback never leaks batch marker");
+    check(c.Flags&IRPCONTEXT_COMPLETE,"fallback retains dispatcher ownership");
+    check(allocated==freed,"fallback releases allocated context");
+    check(f.MainResource.count==(scenario==7?1u:0u),"fallback preserves preexisting resource ownership");
+diff --git a/tests/host/nxstorage/native_adapter_host_platform.h b/tests/host/nxstorage/native_adapter_host_platform.h
+index 8cebcc82..dc3b37b2 100644
+--- a/tests/host/nxstorage/native_adapter_host_platform.h
++++ b/tests/host/nxstorage/native_adapter_host_platform.h
+@@ -23,6 +23,9 @@ struct _KDPC;
+ typedef void (NTAPI *PKDEFERRED_ROUTINE)(struct _KDPC *,PVOID,PVOID,PVOID);
+ typedef struct _KDPC { PKDEFERRED_ROUTINE DeferredRoutine; PVOID DeferredContext;
+     unsigned Inserted; } KDPC, *PKDPC;
++typedef union _LARGE_INTEGER { struct { ULONG LowPart; LONG HighPart; } u;
++    int64_t QuadPart; } LARGE_INTEGER, *PLARGE_INTEGER;
++typedef struct _KTIMER { unsigned Armed; PKDPC Dpc; } KTIMER, *PKTIMER;
+ typedef struct _UNICODE_STRING { USHORT Length, MaximumLength; uint16_t *Buffer; } UNICODE_STRING, *PUNICODE_STRING;
+ typedef struct _OBJECT_ATTRIBUTES { ULONG Length; HANDLE RootDirectory;
+     PUNICODE_STRING ObjectName; ULONG Attributes; PVOID SecurityDescriptor;
+@@ -115,11 +118,17 @@ enum {
+     DIRECTORY_ALL_ACCESS=0x000f000f,
+     NotificationEvent=0, SynchronizationEvent=1, Executive=0, KernelMode=0
+ };
++#define IRP_XB_SG_COMPLETION 0x00010000UL
++#define IRP_XB_FATX_BATCHED_READ 0x00020000UL
+ VOID KeInitializeEvent(PKEVENT, int, BOOLEAN);
+ LONG KeSetEvent(PKEVENT, LONG, BOOLEAN);
+ NTSTATUS KeWaitForSingleObject(PVOID, int, int, BOOLEAN, PVOID);
+ VOID KeInitializeDpc(PKDPC,PKDEFERRED_ROUTINE,PVOID);
+ BOOLEAN KeInsertQueueDpc(PKDPC,PVOID,PVOID);
++BOOLEAN KeRemoveQueueDpc(PKDPC);
++VOID KeInitializeTimer(PKTIMER);
++BOOLEAN KeSetTimer(PKTIMER,LARGE_INTEGER,PKDPC);
++BOOLEAN KeCancelTimer(PKTIMER);
+ VOID IoReuseIrp(PIRP, NTSTATUS);
+ PIRP IoAllocateIrp(CCHAR, BOOLEAN);
+ VOID IoFreeIrp(PIRP);
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 8d498f84..341546ef 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -26,6 +26,7 @@ static int poison_pool,cancel_during_prepare,cancel_during_submit,cancel_before_
+ static PIRP cancel_parent;
+ static void *live_irps[512],*live_mdls[512];
+ static uint8_t opcodes[1024],functions[1024];
++static uint32_t lower_lbas[1024];
+ static int lower_pending;
+ static NTSTATUS sync_command_status;
+ static uint32_t read_capacity_last=15,read_capacity_sector=2048;
+@@ -46,6 +47,8 @@ static unsigned completion_callback_active,child_reuse_during_completion;
+ static PKDPC queued_dpcs[32];
+ static PVOID queued_dpc_a1[32],queued_dpc_a2[32];
+ static unsigned queued_dpc_count;
++static PKTIMER armed_timers[32];
++static unsigned armed_timer_count,timer_set_calls;
+ static unsigned burst_complete_during_submit,burst_seed;
+ static unsigned stamp_read_payloads;
+ static unsigned rundown_event_calls;
+@@ -87,6 +90,34 @@ BOOLEAN KeInsertQueueDpc(PKDPC d,PVOID a1,PVOID a2)
+ { if(d->Inserted)return FALSE;MUST(queued_dpc_count<32);d->Inserted=1;
+   queued_dpcs[queued_dpc_count]=d;queued_dpc_a1[queued_dpc_count]=a1;
+   queued_dpc_a2[queued_dpc_count++]=a2;return TRUE; }
++BOOLEAN KeRemoveQueueDpc(PKDPC d)
++{ for(unsigned i=0;i<queued_dpc_count;++i) {
++    if(queued_dpcs[i]!=d) continue;
++    for(unsigned j=i+1;j<queued_dpc_count;++j){queued_dpcs[j-1]=queued_dpcs[j];
++      queued_dpc_a1[j-1]=queued_dpc_a1[j];queued_dpc_a2[j-1]=queued_dpc_a2[j];}
++    --queued_dpc_count;d->Inserted=0;return TRUE;
++  }
++  return FALSE; }
++VOID KeInitializeTimer(PKTIMER timer){memset(timer,0,sizeof(*timer));}
++BOOLEAN KeSetTimer(PKTIMER timer,LARGE_INTEGER due,PKDPC dpc)
++{ BOOLEAN replaced=timer->Armed;MUST(due.QuadPart<0);MUST(!replaced);
++  MUST(armed_timer_count<32);timer->Armed=1;timer->Dpc=dpc;
++  armed_timers[armed_timer_count++]=timer;++timer_set_calls;return replaced; }
++BOOLEAN KeCancelTimer(PKTIMER timer)
++{ if(!timer->Armed)return FALSE;
++  for(unsigned i=0;i<armed_timer_count;++i) {
++    if(armed_timers[i]!=timer) continue;
++    for(unsigned j=i+1;j<armed_timer_count;++j)armed_timers[j-1]=armed_timers[j];
++    --armed_timer_count;timer->Armed=0;return TRUE;
++  }
++  return FALSE; }
++static void drain_dpcs(void);
++static void expire_timers(void)
++{ while(armed_timer_count){PKTIMER timer=armed_timers[0];
++    for(unsigned i=1;i<armed_timer_count;++i)armed_timers[i-1]=armed_timers[i];
++    --armed_timer_count;timer->Armed=0;MUST(timer->Dpc);
++    (void)KeInsertQueueDpc(timer->Dpc,NULL,NULL);} }
++static void fire_timers(void){expire_timers();drain_dpcs();}
+ static void drain_dpcs(void)
+ { while(queued_dpc_count){PKDPC d=queued_dpcs[0];PVOID a1=queued_dpc_a1[0],a2=queued_dpc_a2[0];
+   for(unsigned i=1;i<queued_dpc_count;++i){queued_dpcs[i-1]=queued_dpcs[i];queued_dpc_a1[i-1]=queued_dpc_a1[i];queued_dpc_a2[i-1]=queued_dpc_a2[i];}
+@@ -173,7 +204,10 @@ NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT lower,PIRP child)
+         IofCompleteRequest(child,IO_NO_INCREMENT);return STATUS_SUCCESS;}
+     (void)lower;
+     MUST(lower_calls<1024 && s->Parameters.Scsi.Srb);PSCSI_REQUEST_BLOCK srb=s->Parameters.Scsi.Srb;
+-    opcodes[lower_calls]=srb->Cdb[0];functions[lower_calls]=srb->Function;++lower_calls;
++    opcodes[lower_calls]=srb->Cdb[0];functions[lower_calls]=srb->Function;
++    lower_lbas[lower_calls]=(uint32_t)srb->Cdb[2]<<24|(uint32_t)srb->Cdb[3]<<16|
++                           (uint32_t)srb->Cdb[4]<<8|srb->Cdb[5];
++    ++lower_calls;
+     if(revoke_cache_during_submit) {
+         revoke_cache_during_submit=0;
+         nx_lcq_revoke(&host_lower_cache);
+@@ -1276,4 +1310,525 @@ static int queued_cancel_and_flush_keep_fifo_barriers(void)
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!retained_submit_avoids_empty_lock_roundtrips();f+=!seal_after_reservation_keeps_accepted_parent_live();f+=!seal_during_dynamic_allocation_rejects_and_reclaims();f+=!cancellation_at_late_submit_unlock_keeps_lease();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("42 adapter groups, %u failures\n",f);return f?1:0;}
++/* A FATX batch marker must move the existing admission tail beyond the title's
++ * issuing call without creating a second packet or completion path.  All
++ * requests observed before the one-shot fires form one FIFO cohort. */
++static int marked_fatx_reads_batch_once_and_keep_fifo(void)
++{
++    PDEVICE_OBJECT d=make_device(4);
++    parent_fixture reads[5],barrier;
++    lower_pending=1;pending_child_count=0;lower_calls=0;
++    armed_timer_count=timer_set_calls=queued_dpc_count=0;
++    for(unsigned i=0;i<5;++i) {
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        reads[i].stack.Parameters.Read.ByteOffset=(int64_t)i*4096;
++        reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++    }
++    init_parent(&barrier,IRP_MJ_WRITE,4096);
++    reads[0].irp.Flags|=IRP_XB_SG_COMPLETION;
++    CHECK(NxNativeDispatchReadWrite(d,&reads[0].irp)==STATUS_PENDING);
++    CHECK(NxNativeDispatchReadWrite(d,&reads[1].irp)==STATUS_PENDING);
++    CHECK(!lower_calls&&timer_set_calls==1&&armed_timer_count==1);
++    /* Marked calls remain return-only for the complete small burst. */
++    CHECK(NxNativeDispatchReadWrite(d,&reads[2].irp)==STATUS_PENDING);
++    CHECK(NxNativeDispatchReadWrite(d,&reads[3].irp)==STATUS_PENDING);
++    CHECK(NxNativeDispatchReadWrite(d,&reads[4].irp)==STATUS_PENDING);
++    CHECK(!lower_calls&&!pending_child_count);
++    /* Any ordinary request is a FIFO boundary and releases the held prefix. */
++    CHECK(NxNativeDispatchReadWrite(d,&barrier.irp)==STATUS_PENDING);
++    CHECK(lower_calls==6&&pending_child_count==6);
++    CHECK(!(reads[0].irp.Flags&IRP_XB_FATX_BATCHED_READ));
++    CHECK(!(reads[1].irp.Flags&IRP_XB_FATX_BATCHED_READ));
++    CHECK(reads[0].irp.Flags&IRP_XB_SG_COMPLETION);
++    fire_timers();
++    CHECK(lower_calls==6&&pending_child_count==6);
++    for(unsigned i=0;i<5;++i) CHECK(opcodes[i]==0x28);
++    CHECK(opcodes[5]==0x2a);
++    for(unsigned i=0;i<6;++i)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned i=0;i<5;++i) CHECK(reads[i].irp.host_completed);
++    CHECK(barrier.irp.host_completed);
++    lower_pending=0;return 1;
++}
++static int batched_cancel_positions_never_reach_transport(void)
++{
++    PDEVICE_OBJECT d=make_device(4);parent_fixture reads[4];
++    lower_pending=1;pending_child_count=0;lower_calls=cancel_calls=0;
++    armed_timer_count=timer_set_calls=queued_dpc_count=0;
++    for(unsigned i=0;i<2;++i) {
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        reads[i].stack.Parameters.Read.ByteOffset=(int64_t)i*4096;
++        reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
++    }
++    for(unsigned i=0;i<2;++i) {
++        cancel_parent=&reads[i].irp;cancel_now();cancel_parent=NULL;
++        CHECK(reads[i].irp.host_completed&&reads[i].irp.IoStatus.Status==STATUS_CANCELLED);
++    }
++    CHECK(!lower_calls&&!cancel_calls&&timer_set_calls==1);
++    fire_timers();
++    CHECK(!lower_calls&&!pending_child_count);
++
++    lower_calls=0;timer_set_calls=0;
++    for(unsigned i=0;i<2;++i) {
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        reads[i].stack.Parameters.Read.ByteOffset=(int64_t)i*4096;
++        reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
++    }
++    cancel_parent=&reads[0].irp;cancel_now();cancel_parent=NULL;
++    CHECK(timer_set_calls==1&&!lower_calls&&armed_timer_count==1);
++    fire_timers();
++    CHECK(lower_calls==1&&lower_lbas[0]==8&&pending_child_count==1);
++    CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++          STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(reads[0].irp.host_completed&&reads[0].irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(reads[1].irp.host_completed&&reads[1].irp.IoStatus.Status==STATUS_SUCCESS);
++    CHECK(!armed_timer_count&&!queued_dpc_count);
++    lower_pending=0;return 1;
++}
++
++static int batched_inline_split_and_second_cohort_complete_once(void)
++{
++    PDEVICE_OBJECT d=make_device(2);parent_fixture inline_read,split,next;
++    lower_pending=0;lower_calls=0;timer_set_calls=armed_timer_count=queued_dpc_count=0;
++    init_parent(&inline_read,IRP_MJ_READ,4096);
++    inline_read.irp.Flags=IRP_XB_FATX_BATCHED_READ;
++    CHECK(NxNativeDispatchReadWrite(d,&inline_read.irp)==STATUS_PENDING);
++    CHECK(!inline_read.irp.host_completed&&!lower_calls);
++    fire_timers();
++    CHECK(inline_read.irp.host_completed&&inline_read.irp.IoStatus.Status==STATUS_SUCCESS);
++    CHECK(lower_calls==1&&timer_set_calls==1);
++
++    lower_pending=1;lower_calls=0;timer_set_calls=0;pending_child_count=0;
++    init_parent(&split,IRP_MJ_READ,8192);
++    split.irp.Flags=IRP_XB_FATX_BATCHED_READ;
++    CHECK(NxNativeDispatchReadWrite(d,&split.irp)==STATUS_PENDING);
++    expire_timers();
++    CHECK(queued_dpc_count==1&&!lower_calls);
++    drain_dpcs();
++    CHECK(lower_calls==1&&timer_set_calls==1&&pending_child_count==1);
++    init_parent(&next,IRP_MJ_READ,4096);
++    next.irp.Flags=IRP_XB_FATX_BATCHED_READ;
++    CHECK(NxNativeDispatchReadWrite(d,&next.irp)==STATUS_PENDING);
++    CHECK(timer_set_calls==2&&armed_timer_count==1&&lower_calls==1);
++    CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++          STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(lower_calls==2&&!split.irp.host_completed);
++    CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++          STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(split.irp.host_completed&&!next.irp.host_completed);
++    fire_timers();
++    CHECK(lower_calls==3&&pending_child_count==1);
++    CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++          STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(next.irp.host_completed&&!armed_timer_count&&!queued_dpc_count);
++    lower_pending=0;return 1;
++}
++
++static int quarantine_before_batch_fire_completes_without_data_io(void)
++{
++    PDEVICE_OBJECT d=make_device(2);parent_fixture reads[2];control_fixture toc;
++    lower_pending=0;lower_calls=0;timer_set_calls=armed_timer_count=queued_dpc_count=0;
++    for(unsigned i=0;i<2;++i) {
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
++    }
++    CHECK(!lower_calls&&armed_timer_count==1);
++    init_control(&toc,IOCTL_CDROM_READ_TOC,804);
++    freeze_next=1;release_failure=1;
++    CHECK(NxNativeDispatchControl(d,&toc.irp)==STATUS_PENDING);
++    CHECK(toc.irp.host_completed&&toc.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    CHECK(lower_calls==2);
++    fire_timers();
++    CHECK(lower_calls==2);
++    for(unsigned i=0;i<2;++i)
++        CHECK(reads[i].irp.host_completed&&reads[i].irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    release_failure=0;return 1;
++}
++static void expire_batch_at_rundown_wait(PKEVENT event)
++{
++    fire_timers();
++    MUST(__atomic_load_n(&event->signaled,__ATOMIC_ACQUIRE));
++}
++/* Even when every deferred parent is cancelled, PnP removal must retain the
++ * adapter until its armed timer/DPC is drained. */
++static int cancelled_empty_batch_is_drained_before_remove(void)
++{
++    PDEVICE_OBJECT d=make_device(2);parent_fixture read;
++    lower_pending=1;pending_child_count=0;lower_calls=0;
++    armed_timer_count=timer_set_calls=queued_dpc_count=0;
++    init_parent(&read,IRP_MJ_READ,4096);
++    read.irp.Flags=IRP_XB_FATX_BATCHED_READ;
++    CHECK(NxNativeDispatchReadWrite(d,&read.irp)==STATUS_PENDING);
++    CHECK(armed_timer_count==1&&!lower_calls);
++    cancel_parent=&read.irp;cancel_now();cancel_parent=NULL;
++    CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(armed_timer_count==1&&!lower_calls);
++    before_event_wait=expire_batch_at_rundown_wait;
++    CHECK(dispatch_pnp(NxNativeDispatchPnp,d,IRP_MN_REMOVE_DEVICE)==STATUS_SUCCESS);
++    CHECK(!before_event_wait&&!armed_timer_count&&!queued_dpc_count&&!lower_calls);
++    lower_pending=0;lower_started=1;cache_property(2,1);return 1;
++}
++
++typedef struct batch_pressure_result {
++    unsigned allocation_attempts, peak_dynamic, failed_index;
++} batch_pressure_result;
++
++static int run_batch_pressure(unsigned marked,unsigned inject_failure,
++                              batch_pressure_result *result)
++{
++    enum { RESERVE=16, READS=96 };
++    PDEVICE_OBJECT d=make_device(RESERVE);
++    parent_fixture *reads=calloc(READS,sizeof(*reads));
++    unsigned allocations_before=pool_allocations,live_before=pool_live;
++    CHECK(reads!=NULL);result->failed_index=UINT32_MAX;
++    lower_pending=1;pending_child_count=0;lower_calls=0;
++    armed_timer_count=timer_set_calls=queued_dpc_count=0;
++    if(inject_failure) pool_fail_call=(int)pool_calls+10;
++    for(unsigned i=0;i<READS;++i) {
++        NTSTATUS status;
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        reads[i].stack.Parameters.Read.ByteOffset=(int64_t)i*4096;
++        if(marked) reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++        status=NxNativeDispatchReadWrite(d,&reads[i].irp);
++        if(status==STATUS_INSUFFICIENT_RESOURCES) {
++            CHECK(result->failed_index==UINT32_MAX);
++            result->failed_index=i;
++        } else CHECK(status==STATUS_PENDING);
++    }
++    pool_fail_call=-1;
++    result->allocation_attempts=pool_allocations-allocations_before;
++    result->peak_dynamic=pool_live-live_before;
++    if(marked) while(armed_timer_count) fire_timers();
++    while(pending_child_count)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned i=0;i<READS;++i) {
++        if(i==result->failed_index)
++            CHECK(reads[i].irp.host_completed&&
++                  reads[i].irp.IoStatus.Status==STATUS_INSUFFICIENT_RESOURCES);
++        else
++            CHECK(reads[i].irp.host_completed&&reads[i].irp.IoStatus.Status==STATUS_SUCCESS);
++    }
++    CHECK(pool_live==live_before);
++    lower_pending=0;free(reads);return 1;
++}
++
++/* Batching changes admission timing, not ownership capacity.  A fixed burst
++ * must reserve the same dynamic envelopes and fail at the same injected pool
++ * allocation as the ordinary selected-0168 FIFO. */
++static int bounded_batch_pressure_matches_ordinary_fifo(void)
++{
++    batch_pressure_result ordinary={0},batched={0},ordinary_fail={0},batched_fail={0};
++    CHECK(run_batch_pressure(0,0,&ordinary));
++    CHECK(run_batch_pressure(1,0,&batched));
++    CHECK(ordinary.allocation_attempts==batched.allocation_attempts);
++    CHECK(ordinary.peak_dynamic==batched.peak_dynamic);
++    CHECK(run_batch_pressure(0,1,&ordinary_fail));
++    CHECK(run_batch_pressure(1,1,&batched_fail));
++    CHECK(ordinary_fail.failed_index==batched_fail.failed_index);
++    CHECK(ordinary_fail.allocation_attempts==batched_fail.allocation_attempts);
++    CHECK(ordinary_fail.peak_dynamic==batched_fail.peak_dynamic);
++    return 1;
++}
++
++/* Once the timer has expired, its DPC may remain queued while the issuing
++ * thread reaches the bounded cohort.  Releasing that cohort must make the
++ * stale DPC an idempotent rundown owner rather than a second submission. */
++static int expired_batch_dpc_after_threshold_is_idempotent(void)
++{
++    PDEVICE_OBJECT d=make_device(4);parent_fixture reads[3];
++    lower_pending=1;pending_child_count=0;lower_calls=0;
++    armed_timer_count=timer_set_calls=queued_dpc_count=0;
++    for(unsigned i=0;i<3;++i) {
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        reads[i].stack.Parameters.Read.ByteOffset=(int64_t)i*4096;
++        reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++    }
++    CHECK(NxNativeDispatchReadWrite(d,&reads[0].irp)==STATUS_PENDING);
++    CHECK(NxNativeDispatchReadWrite(d,&reads[1].irp)==STATUS_PENDING);
++    CHECK(!lower_calls&&timer_set_calls==1&&armed_timer_count==1);
++    expire_timers();
++    CHECK(!armed_timer_count&&queued_dpc_count==1&&!lower_calls);
++    CHECK(NxNativeDispatchReadWrite(d,&reads[2].irp)==STATUS_PENDING);
++    CHECK(!lower_calls&&!pending_child_count&&timer_set_calls==1);
++    drain_dpcs();
++    CHECK(lower_calls==3&&pending_child_count==3&&!queued_dpc_count);
++    for(unsigned i=0;i<3;++i)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned i=0;i<3;++i)
++        CHECK(reads[i].irp.host_completed&&reads[i].irp.IoStatus.Status==STATUS_SUCCESS);
++    lower_pending=0;return 1;
++}
++
++static control_fixture threshold_quarantine_control;
++static void quarantine_after_threshold_release(void)
++{
++    init_control(&threshold_quarantine_control,IOCTL_CDROM_READ_TOC,804);
++    freeze_next=1;release_failure=1;
++    MUST(NxNativeDispatchControl(created_device,&threshold_quarantine_control.irp)==
++         STATUS_PENDING);
++    MUST(threshold_quarantine_control.irp.host_completed);
++    MUST(threshold_quarantine_control.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++}
++
++/* Exercise cancellation and quarantine after a marked window is queued but
++ * before its timer callback releases the cohort. */
++static int threshold_release_races_cancel_and_quarantine(void)
++{
++    {
++        PDEVICE_OBJECT d=make_device(4);parent_fixture reads[3];
++        lower_pending=1;pending_child_count=0;lower_calls=cancel_calls=0;
++        armed_timer_count=timer_set_calls=queued_dpc_count=0;
++        for(unsigned i=0;i<3;++i) {
++            init_parent(&reads[i],IRP_MJ_READ,4096);
++            reads[i].stack.Parameters.Read.ByteOffset=(int64_t)i*4096;
++            reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++        }
++        CHECK(NxNativeDispatchReadWrite(d,&reads[0].irp)==STATUS_PENDING);
++        CHECK(NxNativeDispatchReadWrite(d,&reads[1].irp)==STATUS_PENDING);
++        cancel_parent=&reads[2].irp;after_unlock=cancel_now;unlock_countdown=2;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[2].irp)==STATUS_PENDING);
++        cancel_parent=NULL;
++        CHECK(!after_unlock&&!unlock_countdown);
++        CHECK(reads[2].irp.host_completed&&
++              reads[2].irp.IoStatus.Status==STATUS_CANCELLED);
++        CHECK(!lower_calls&&!pending_child_count&&!cancel_calls);
++        fire_timers();
++        CHECK(lower_calls==2&&pending_child_count==2&&!cancel_calls);
++        while(pending_child_count)
++            CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++                  STATUS_MORE_PROCESSING_REQUIRED);
++        CHECK(reads[0].irp.host_completed&&reads[1].irp.host_completed);
++        CHECK(lower_calls==2&&!armed_timer_count&&!queued_dpc_count);
++    }
++    {
++        PDEVICE_OBJECT d=make_device(4);parent_fixture reads[3];
++        lower_pending=0;pending_child_count=0;lower_calls=0;
++        armed_timer_count=timer_set_calls=queued_dpc_count=0;
++        for(unsigned i=0;i<3;++i) {
++            init_parent(&reads[i],IRP_MJ_READ,4096);
++            reads[i].stack.Parameters.Read.ByteOffset=(int64_t)i*4096;
++            reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++        }
++        CHECK(NxNativeDispatchReadWrite(d,&reads[0].irp)==STATUS_PENDING);
++        CHECK(NxNativeDispatchReadWrite(d,&reads[1].irp)==STATUS_PENDING);
++        after_unlock=quarantine_after_threshold_release;unlock_countdown=2;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[2].irp)==STATUS_PENDING);
++        CHECK(!after_unlock&&!unlock_countdown&&lower_calls==2);
++        for(unsigned i=0;i<3;++i) CHECK(!reads[i].irp.host_completed);
++        fire_timers();
++        for(unsigned i=0;i<3;++i)
++            CHECK(reads[i].irp.host_completed&&
++                  reads[i].irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++        CHECK(lower_calls==2&&!armed_timer_count&&!queued_dpc_count);
++        release_failure=0;
++    }
++    return 1;
++}
++
++/* Removal must wait for the timer that owns a held cohort; the callback can
++ * then admit and inline-complete that cohort before teardown returns. */
++static int inline_threshold_rundown_waits_for_noop_timer(void)
++{
++    PDEVICE_OBJECT d=make_device(4);parent_fixture reads[3];
++    lower_pending=0;lower_calls=0;
++    armed_timer_count=timer_set_calls=queued_dpc_count=0;
++    for(unsigned i=0;i<3;++i) {
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
++    }
++    CHECK(!lower_calls&&timer_set_calls==1&&armed_timer_count==1);
++    for(unsigned i=0;i<3;++i) CHECK(!reads[i].irp.host_completed);
++    before_event_wait=expire_batch_at_rundown_wait;
++    CHECK(dispatch_pnp(NxNativeDispatchPnp,d,IRP_MN_REMOVE_DEVICE)==STATUS_SUCCESS);
++    CHECK(!before_event_wait&&!armed_timer_count&&!queued_dpc_count&&lower_calls==3);
++    lower_started=1;cache_property(2,1);return 1;
++}
++
++/* The FATX marker is a read-admission hint only.  Unsupported operation and
++ * media shapes must consume the private bit while preserving unrelated bits. */
++static int marker_is_consumed_without_deferring_write_or_optical(void)
++{
++    {
++        PDEVICE_OBJECT d=make_device(2);parent_fixture write;
++        lower_pending=1;pending_child_count=0;lower_calls=0;
++        armed_timer_count=timer_set_calls=queued_dpc_count=0;
++        init_parent(&write,IRP_MJ_WRITE,4096);
++        write.irp.Flags=IRP_XB_FATX_BATCHED_READ|IRP_XB_SG_COMPLETION;
++        CHECK(NxNativeDispatchReadWrite(d,&write.irp)==STATUS_PENDING);
++        CHECK(lower_calls==1&&pending_child_count==1&&!timer_set_calls);
++        CHECK(!(write.irp.Flags&IRP_XB_FATX_BATCHED_READ));
++        CHECK(write.irp.Flags&IRP_XB_SG_COMPLETION);
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++        CHECK(write.irp.host_completed&&write.irp.IoStatus.Status==STATUS_SUCCESS);
++    }
++    {
++        PDEVICE_OBJECT d=make_optical();parent_fixture read;
++        lower_pending=1;pending_child_count=0;lower_calls=0;
++        armed_timer_count=timer_set_calls=queued_dpc_count=0;
++        init_parent(&read,IRP_MJ_READ,4096);
++        read.irp.Flags=IRP_XB_FATX_BATCHED_READ|IRP_XB_SG_COMPLETION;
++        CHECK(NxNativeDispatchReadWrite(d,&read.irp)==STATUS_PENDING);
++        CHECK(lower_calls==1&&pending_child_count==1&&!timer_set_calls);
++        CHECK(!(read.irp.Flags&IRP_XB_FATX_BATCHED_READ));
++        CHECK(read.irp.Flags&IRP_XB_SG_COMPLETION);
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++        CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS);
++    }
++    lower_pending=0;return 1;
++}
++
++/* Deterministically vary window-overflow release, timer release, ordinary
++ * FIFO boundaries, and cancellation.  With spare transport slots, the number of
++ * calls reaching the lower driver is an external invariant for the model's
++ * held-tail count after every transition. */
++static int randomized_batch_state_machine_preserves_waiting_model(void)
++{
++    enum { ROUNDS=64, PARENTS=1024 };
++    PDEVICE_OBJECT d=make_device(16);
++    parent_fixture parents[PARENTS];
++    parent_fixture *held[13];
++    uint32_t random=0x185a11ceu;
++    unsigned used=0;
++    lower_pending=1;pending_child_count=0;lower_calls=cancel_calls=0;
++    armed_timer_count=timer_set_calls=queued_dpc_count=0;
++    for(unsigned round=0;round<ROUNDS;++round) {
++        unsigned waiting=0,expected_lower=lower_calls;
++        unsigned initial=1+((random=random*1664525u+1013904223u)>>31);
++        CHECK(!armed_timer_count&&!queued_dpc_count&&!pending_child_count);
++        for(unsigned i=0;i<initial;++i) {
++            parent_fixture *parent=&parents[used++];
++            init_parent(parent,IRP_MJ_READ,4096);
++            parent->stack.Parameters.Read.ByteOffset=(int64_t)(used%128)*4096;
++            parent->irp.Flags=IRP_XB_FATX_BATCHED_READ;
++            CHECK(NxNativeDispatchReadWrite(d,&parent->irp)==STATUS_PENDING);
++            held[waiting++]=parent;
++            CHECK(lower_calls==expected_lower);
++        }
++        random=random*1664525u+1013904223u;
++        if((random&1)&&waiting) {
++            unsigned pick=(random>>8)%waiting;
++            cancel_parent=&held[pick]->irp;cancel_now();cancel_parent=NULL;
++            CHECK(held[pick]->irp.host_completed&&
++                  held[pick]->irp.IoStatus.Status==STATUS_CANCELLED);
++            held[pick]=held[--waiting];
++            CHECK(lower_calls==expected_lower&&!cancel_calls);
++        }
++        random=random*1664525u+1013904223u;
++        switch((random>>16)&3) {
++        case 0:
++            while(waiting<13) {
++                parent_fixture *parent=&parents[used++];
++                init_parent(parent,IRP_MJ_READ,4096);
++                parent->stack.Parameters.Read.ByteOffset=(int64_t)(used%128)*4096;
++                parent->irp.Flags=IRP_XB_FATX_BATCHED_READ;
++                CHECK(NxNativeDispatchReadWrite(d,&parent->irp)==STATUS_PENDING);
++                held[waiting++]=parent;
++                if(waiting<13) CHECK(lower_calls==expected_lower);
++            }
++            expected_lower+=waiting;waiting=0;
++            CHECK(lower_calls==expected_lower);
++            break;
++        case 1:
++            fire_timers();expected_lower+=waiting;waiting=0;
++            CHECK(lower_calls==expected_lower);
++            break;
++        case 2: {
++            parent_fixture *barrier=&parents[used++];
++            init_parent(barrier,IRP_MJ_WRITE,4096);
++            CHECK(NxNativeDispatchReadWrite(d,&barrier->irp)==STATUS_PENDING);
++            expected_lower+=waiting+1;waiting=0;
++            CHECK(lower_calls==expected_lower);
++            break;
++        }
++        default:
++            while(waiting) {
++                parent_fixture *parent=held[--waiting];
++                cancel_parent=&parent->irp;cancel_now();cancel_parent=NULL;
++                CHECK(parent->irp.host_completed&&
++                      parent->irp.IoStatus.Status==STATUS_CANCELLED);
++                CHECK(lower_calls==expected_lower&&!cancel_calls);
++            }
++            break;
++        }
++        while(pending_child_count)
++            CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++                  STATUS_MORE_PROCESSING_REQUIRED);
++        fire_timers();
++        CHECK(lower_calls==expected_lower&&!armed_timer_count&&!queued_dpc_count);
++    }
++    for(unsigned i=0;i<used;++i) CHECK(parents[i].irp.host_completed);
++    CHECK(used<=PARENTS);
++    lower_pending=0;return 1;
++}
++
++
++/* A marked read window must return every request in the title-sized burst
++ * before touching the transport.  The timer admits at most four parents per
++ * expiry so a single DPC cannot monopolize DISPATCH_LEVEL. */
++static int timer_window_returns_twelve_then_drains_four_per_expiry(void)
++{
++    PDEVICE_OBJECT d=make_device(16);parent_fixture reads[12];
++    lower_pending=1;pending_child_count=0;lower_calls=0;
++    armed_timer_count=timer_set_calls=queued_dpc_count=0;
++    for(unsigned i=0;i<12;++i) {
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        reads[i].stack.Parameters.Read.ByteOffset=(int64_t)i*4096;
++        reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
++        CHECK(lower_calls==0&&pending_child_count==0);
++    }
++    CHECK(timer_set_calls==1&&armed_timer_count==1);
++    fire_timers();
++    CHECK(lower_calls==4&&pending_child_count==4);
++    CHECK(timer_set_calls==2&&armed_timer_count==1);
++    fire_timers();
++    CHECK(lower_calls==8&&pending_child_count==8);
++    CHECK(timer_set_calls==3&&armed_timer_count==1);
++    fire_timers();
++    CHECK(lower_calls==12&&pending_child_count==12);
++    CHECK(timer_set_calls==3&&!armed_timer_count&&!queued_dpc_count);
++    while(pending_child_count)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned i=0;i<12;++i)
++        CHECK(reads[i].irp.host_completed&&reads[i].irp.IoStatus.Status==STATUS_SUCCESS);
++    lower_pending=0;return 1;
++}
++
++/* Waiting ownership is capped.  The first request beyond the twelve-parent
++ * window becomes an ordinary FIFO boundary and opens the complete prefix via
++ * the established admission path. */
++static int thirteenth_marked_read_bounds_waiting_ownership(void)
++{
++    PDEVICE_OBJECT d=make_device(16);parent_fixture reads[13];
++    lower_pending=1;pending_child_count=0;lower_calls=0;
++    armed_timer_count=timer_set_calls=queued_dpc_count=0;
++    for(unsigned i=0;i<13;++i) {
++        init_parent(&reads[i],IRP_MJ_READ,4096);
++        reads[i].stack.Parameters.Read.ByteOffset=(int64_t)i*4096;
++        reads[i].irp.Flags=IRP_XB_FATX_BATCHED_READ;
++        CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
++        if(i<12) CHECK(lower_calls==0);
++    }
++    CHECK(lower_calls==13&&pending_child_count==13);
++    CHECK(timer_set_calls==1&&armed_timer_count==1);
++    fire_timers();
++    CHECK(lower_calls==13&&!armed_timer_count&&!queued_dpc_count);
++    while(pending_child_count)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned i=0;i<13;++i)
++        CHECK(reads[i].irp.host_completed&&reads[i].irp.IoStatus.Status==STATUS_SUCCESS);
++    lower_pending=0;return 1;
++}
++
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!timer_window_returns_twelve_then_drains_four_per_expiry();f+=!thirteenth_marked_read_bounds_waiting_ownership();f+=!marked_fatx_reads_batch_once_and_keep_fifo();f+=!batched_cancel_positions_never_reach_transport();f+=!batched_inline_split_and_second_cohort_complete_once();f+=!quarantine_before_batch_fire_completes_without_data_io();f+=!cancelled_empty_batch_is_drained_before_remove();f+=!bounded_batch_pressure_matches_ordinary_fifo();f+=!expired_batch_dpc_after_threshold_is_idempotent();f+=!threshold_release_races_cancel_and_quarantine();f+=!inline_threshold_rundown_waits_for_noop_timer();f+=!marker_is_consumed_without_deferring_write_or_optical();f+=!randomized_batch_state_machine_preserves_waiting_model();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!retained_submit_avoids_empty_lock_roundtrips();f+=!seal_after_reservation_keeps_accepted_parent_live();f+=!seal_during_dynamic_allocation_rejects_and_reclaims();f+=!cancellation_at_late_submit_unlock_keeps_lease();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("55 adapter groups, %u failures\n",f);return f?1:0;}
