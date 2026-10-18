@@ -161,3 +161,8 @@ observer/analyzer source, synthetic tests and hashes are included. RAM, firmware
 and game bytes, disassembly, screenshots, private assets and credentials remain
 excluded. No proprietary BIOS implementation was inspected. No firmware code or
 commits were changed by this investigation.
+
+[Pre-bind controls](PREBIND-CONTROLS.md) split the same capture by request size,
+extent hit, inter-call gap and prior completion. The aggregate pre-bind gap is
+strongly mixed by spacing and completion state; short-gap direct calls can
+match queued-call pre-bind times. This follow-up adds four tests (30 total).

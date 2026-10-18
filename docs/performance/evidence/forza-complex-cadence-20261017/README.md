@@ -55,6 +55,13 @@ pair. The selected firmware lock is unchanged. The additive
 a whole-case first-size mix change and preserves the distinction between a
 measured per-size mean difference and an intrinsic or causal regression.
 
+The [0168 → 0171 → 0168 → 0171 compiler-only trial](candidate0171/README.md)
+passes all 32 sustained cases but leaves 0171 **unselected**. The first pair's
+450 µs gains reverse in the second pair at both memory levels. The final linked
+code has offsetting helper-call changes, so the explicitly authorized trial
+tests net behavior; neither inlining nor the first pair establishes a gain.
+All eight cases, per-size costs and whole-case first-size counts are retained.
+
 ## What ran
 
 The [owned release fixture](../../../../tests/xbe/forza-callback-cadence/README.md)

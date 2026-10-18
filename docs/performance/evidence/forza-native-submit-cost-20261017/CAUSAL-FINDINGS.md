@@ -149,6 +149,23 @@ They identify routes and ordering, not exclusive CPU times or a qualified new
 firmware speedup. The prior release fixture remains the performance acceptance
 measurement.
 
+### Preparation cost is also associated with inter-call spacing
+
+[The controlled pre-bind analysis](../forza-request-identity-20261017/PREBIND-CONTROLS.md)
+compares 512-byte extent hits with the same direct-start outcome and previous
+selected child already completed. The 145 calls following gaps of at least
+10 ms have median entry-to-bind cost 90.4 us; five nearby calls following gaps
+of 100 us to 1 ms have median 38.3 us. Queued/start-later hits have median
+36.45 us, but all follow short gaps and have different completion state.
+Long-gap excess appears both before and after mapping-ready. It cannot be
+attributed to a mapper miss or to the later lower-queue decision alone.
+
+This is an observational association, with only five nearby direct controls.
+Its mechanism is unresolved: extra executed work, interrupts, cache state and
+emulator scheduling have not been distinguished. The next attribution must
+compare executed paths within these state-controlled groups rather than assume
+that the aggregate direct-versus-queued timing difference is one firmware cost.
+
 ## Controlled release evidence
 
 The separate initial-poll fixture charges the first alertable poll to its
@@ -198,6 +215,15 @@ Source and reproduction:
   450 us deadline. It remains unselected; the [complete paired comparison](../forza-complex-cadence-20261017/candidate0170/README.md) retains every case,
   including an unexplained 28.03% per-size read-cost regression. Reducing a
   counted operation is not sufficient evidence that it limits native loading.
+* Experimental0171 applied `-O2` only to three owned submission translation
+  units. Actual final linking inlined some helpers but added kernel lock-helper
+  calls and 5,216 bytes of text. All 32 sustained release cases passed the
+  generated-data/callback oracle, but the first pair's 450 us improvements
+  reversed in the second pair at both memory levels. It remains unselected;
+  see [compiled scope and shape](compiler-0171/README.md) and
+  [all paired results](../forza-complex-cadence-20261017/candidate0171/README.md).
+  These three rejected micro-optimizations require a return to dynamic path
+  attribution before another dispatch, lock or compiler change.
 * The old cadence benchmark began its budget after the initial poll. That did
   not match the title's budget boundary. The separate frozen initial-poll
   fixture corrects the experiment without rewriting earlier results.

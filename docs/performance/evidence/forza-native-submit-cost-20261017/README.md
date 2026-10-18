@@ -3,8 +3,8 @@
 The [causal findings](CAUSAL-FINDINGS.md) connect the title's deadline to the
 owned submission path and separate demonstrated causes from remaining work.
 
-Five narrow owned-code experiments investigate avoidable work in the native
-storage adapter. The selected stack ends at 0168; 0169 and 0170 remain
+Six narrow owned-code experiments investigate avoidable work in the native
+storage adapter. The selected stack ends at 0168; 0169, 0170 and 0171 remain
 unselected after native tests failed to establish a repeatable gain. These are not an established
 Forza fix. Ordinary generated burst tests
 found no consistent gain from 0166. The repeated 0167 synthetic comparison is mixed; see
@@ -152,6 +152,17 @@ passes all 32 correctness cases, but primary 450 us cost/rate changes reverse
 sign between pairs at both memory targets. A per-size regression also exceeds
 20%. This experiment remains unselected; lower operation counts alone do not
 qualify a performance improvement.
+
+## 0171: optimize three owned files for speed
+
+The [compiler experiment](compiler-0171/README.md) adds `-O2` only to the
+three owned submission translation units in Xbox/GNU Release. Final linking
+inlines some helpers while adding kernel lock-helper calls; text grows by
+5,216 bytes. The [four-run release comparison](../forza-complex-cadence-20261017/candidate0171/README.md)
+passes all 32 sustained correctness cases, but both memory targets reverse
+their initial 450 us improvement in the second pair. The experiment remains
+unselected. All cases, per-size means and maxima, and frame-position mix are
+retained rather than reporting only the favorable first pair.
 
 ## Host validation and reproducibility
 

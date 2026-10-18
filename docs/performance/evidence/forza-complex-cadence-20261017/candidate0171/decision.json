@@ -1,0 +1,71 @@
+{
+  "selected": false,
+  "decision": "Unselected: both 450 us memory cases reverse their first-pair throughput and weighted return-cost gains in the second pair; no repeatable gain established.",
+  "all_four_runs_full_oracle_passed": true,
+  "cases_per_run": 8,
+  "minimum_case_seconds": 10,
+  "primary_450_pairs": [
+    {
+      "target": 783,
+      "paired_changes": {
+        "candidate1": {
+          "control": "control1",
+          "native_return_mean_percent": -3.5809975422939178,
+          "reads_per_second_percent": 1.1254079699558162,
+          "submit_mean_65536_percent": -3.317540780010364,
+          "submit_mean_512_percent": -3.875509979054248
+        },
+        "candidate2": {
+          "control": "control2",
+          "native_return_mean_percent": 3.0686703666348736,
+          "reads_per_second_percent": -0.19484686801625184,
+          "submit_mean_65536_percent": 12.148525553591849,
+          "submit_mean_512_percent": -6.330946596771547
+        }
+      }
+    },
+    {
+      "target": 900,
+      "paired_changes": {
+        "candidate1": {
+          "control": "control1",
+          "native_return_mean_percent": -12.606527711316673,
+          "reads_per_second_percent": 8.39074194149456,
+          "submit_mean_65536_percent": -8.083907713353666,
+          "submit_mean_512_percent": -17.614608457615933
+        },
+        "candidate2": {
+          "control": "control2",
+          "native_return_mean_percent": 3.9845711383954985,
+          "reads_per_second_percent": -1.8065305336250392,
+          "submit_mean_65536_percent": 3.4341901750261528,
+          "submit_mean_512_percent": 4.655483609992772
+        }
+      }
+    }
+  ],
+  "regressions_over_20_percent": [],
+  "selected_firmware_lock_changed": false,
+  "overall_Forza_fix_established": false,
+  "regressions_over_20_percent_scope": "Weighted/per-size mean read-return costs and throughput; observed maxima are listed separately.",
+  "observed_submit_max_increases_over_20_percent": [
+    {
+      "target": 783,
+      "budget_us": 250,
+      "pair": 2,
+      "bytes": 512,
+      "control_max_us": 540.5264443079958,
+      "candidate_max_us": 651.061731438962,
+      "change_percent": 20.449561403508774
+    },
+    {
+      "target": 900,
+      "budget_us": 0,
+      "pair": 2,
+      "bytes": 65536,
+      "control_max_us": 567.7898395252851,
+      "candidate_max_us": 709.4409581542444,
+      "change_percent": 24.947807933194134
+    }
+  ]
+}

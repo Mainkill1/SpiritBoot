@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+"""Run unchanged host gates at O2; retain every other compiler argument."""
+import os,re,shutil,sys
+args=['-O2'if re.fullmatch(r'-O(?:[0-3sgz]|fast)',x)else x for x in sys.argv[1:]]
+os.execv(shutil.which('clang'),['clang',*args])
