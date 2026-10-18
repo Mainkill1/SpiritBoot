@@ -1,0 +1,58 @@
+{
+  "date_utc": "2026-10-18T00:31:03.279328+00:00",
+  "scope": "Read-only behavioral investigation of supplied Forza snapshots using independently authored emulator observations. No firmware changes or BIOS implementation inspection. Replay windows are recipe-bound; pre-restore warmup excluded.",
+  "validation": {
+    "complex": {
+      "header_rows_match": true,
+      "overflow": 0,
+      "pump_reentry": 0,
+      "open_spans": 0,
+      "negative_spans": 0,
+      "initial_exceeds_total": 0,
+      "wait_exceeds_initial": 0,
+      "callback_exceeds_wait": 0,
+      "read_plus_wait_exceeds_total": 0,
+      "empty_and_deadline": 0,
+      "deadline_below_budget": 0,
+      "potential_start_boundary_overlap": 0
+    },
+    "spirit": {
+      "header_rows_match": true,
+      "overflow": 0,
+      "pump_reentry": 0,
+      "open_spans": 0,
+      "negative_spans": 0,
+      "initial_exceeds_total": 0,
+      "wait_exceeds_initial": 0,
+      "callback_exceeds_wait": 0,
+      "read_plus_wait_exceeds_total": 0,
+      "empty_and_deadline": 0,
+      "deadline_below_budget": 0,
+      "potential_start_boundary_overlap": 0
+    }
+  },
+  "source_artifact_sha256": {
+    "complex-v11-budget.log": "44e5ae6958e39265443ef1aeeaa5f2c088749ef7a41dbf26615d0cbdbd429812",
+    "replay-v11.log": "f5cc72503f40f4d888138772f3f9a67597e7a4fde8e84d82dbfc352ab27c08d7",
+    "buffer-budget-probe.py": "5b93dd453acbb6e1765a6cff50821c7b2cdae52be21f5f659f220ccaea599e75",
+    "spirit-v11-budget.log": "8577be4675a24547480757a5183a8593efd0c5882266e2452baa7cfcae56d3ac",
+    "spirit-replay-v11.log": "9d778df9cea7bb3a38c4da9683a22e73983325a6a0c3ab0f9cdcf04fac406ddb"
+  },
+  "conclusions": [
+    "The title gives each streaming pump 335000 RDTSC ticks. With the measured clock progression this is approximately 456.818 microseconds. It measures elapsed time from before the initial zero-duration alertable delay, so that delay, callbacks serviced inside it, and later submissions share the same budget.",
+    "In the buffered replay Complex had 291 pumps: 16 exhausted budget before work selection, 167 exhausted it later, and 108 found no work. Spirit had 315 pumps: 20 exhausted budget before work selection and 295 exhausted it later; none took the empty-work exit. Every productive pump in both runs ended on the time budget.",
+    "No observed pump saturated the outstanding-request limit. The limit was 512 in both runs; observed start/end outstanding counts were at most 4 for Complex and 2 for Spirit.",
+    "Complex productive pumps averaged 2.017 reads, versus 1.245 for Spirit. Inclusive native submission time averaged 70.253 microseconds per call for Complex and 163.671 for Spirit. Median per-pump mean call duration was 46.867 versus 162.000 microseconds. These are specific observed populations, not a universal firmware speed ratio.",
+    "The initial pump interval, which contains setup and the initial alertable delay, had productive-pump medians of 103.7 microseconds for Complex and 140.5 for Spirit. The measured submission-call difference is larger than that initial-interval difference.",
+    "The observed mechanism is budget pressure: higher time spent making native asynchronous submissions leaves room for fewer submissions before the title stops that pump. The title then leaves this timed submission phase; it does not keep submitting until the outstanding limit is reached.",
+    "The probe ends before the final alertable delay. It therefore does not measure the full frame or total callback delivery latency, and cannot alone establish how long before the next pump.",
+    "Wait duration means inclusive time inside the zero-duration alertable delay API, not measured blocked time. Callback duration overlaps wait duration and is not added to it. Native submission duration may include kernel processing, scheduling, interrupts or waiting; the unobserved remainder is not a measured CPU-compute quantity.",
+    "There are no per-event writes or formatting during the timed gameplay in this probe. Observation hooks still add work. The restored scenes and queued requests differ, and reads are identified by the native return callsite without a callback/file filter. Consequently this run isolates the title budget gate and inclusive API-cost contribution, but does not prove a particular internal firmware routine, disk-wait mechanism or exact uninstrumented speed ratio."
+  ],
+  "size_controlled_support": "Among pumps with exactly one native read, 512-byte submission median was 68.35 microseconds for Complex (16 samples) and 163.3 microseconds for Spirit (105 samples). This controls request length only; file/cache/scene state and selection bias remain.",
+  "accounting_note": "initial_ns is a broad phase interval containing wait_ns; callback_ns is an overlapping diagnostic measurement. Aggregate records do not capture every nested intersection, so no stacked exclusive timing breakdown or CPU-only residual is asserted.",
+  "detailed_analysis": [
+    "complex-analysis.json",
+    "spirit-analysis.json"
+  ]
+}

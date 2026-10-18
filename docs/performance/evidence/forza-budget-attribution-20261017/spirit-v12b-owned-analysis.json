@@ -1,0 +1,369 @@
+{
+  "excluded_rows": 125,
+  "host_end_ns": 1792284366371945900,
+  "host_start_ns": 1792284354363823200,
+  "interpretation": [
+    "status is IOSB.Status sampled at native return, not EAX/NtReadFile return status.",
+    "Same-phase recursion is measured once at outermost depth. Distinct phases can nest or overlap; their fractions are not additive.",
+    "Scope time includes interruptions, scheduling and emulator/host effects; it is not CPU-only or blocked-I/O time.",
+    "Active calls that never reach the observed return are not emitted. This is a completed-call population.",
+    "Host start is not captured; possible boundary overlap is estimated from virtual duration."
+  ],
+  "meta": {
+    "lost": 0,
+    "overflow": 0,
+    "rows": 498
+  },
+  "partitions": {
+    "dpc_absent": {
+      "adapter_ns": {
+        "max": 227800,
+        "mean": 150982.19895287958,
+        "median": 159500,
+        "n": 191,
+        "p95": 181000,
+        "sum": 28837600
+      },
+      "dpc_ns": {
+        "max": 0,
+        "mean": 0.0,
+        "median": 0,
+        "n": 191,
+        "p95": 0,
+        "sum": 0
+      },
+      "reads": 191,
+      "run_pump_counts": {
+        "1": 191
+      },
+      "total_api_ns": {
+        "max": 637600,
+        "mean": 243532.4607329843,
+        "median": 253900,
+        "n": 191,
+        "p95": 292700,
+        "sum": 46514700
+      }
+    },
+    "dpc_present": {
+      "adapter_ns": {
+        "max": 442500,
+        "mean": 227809.8901098901,
+        "median": 243400.0,
+        "n": 182,
+        "p95": 322200,
+        "sum": 41461400
+      },
+      "dpc_ns": {
+        "max": 232000,
+        "mean": 59304.945054945056,
+        "median": 59650.0,
+        "n": 182,
+        "p95": 98800,
+        "sum": 10793500
+      },
+      "reads": 182,
+      "run_pump_counts": {
+        "1": 62,
+        "2": 111,
+        "3": 9
+      },
+      "total_api_ns": {
+        "max": 1139400,
+        "mean": 345145.05494505493,
+        "median": 341150.0,
+        "n": 182,
+        "p95": 431800,
+        "sum": 62816400
+      }
+    }
+  },
+  "phases": {
+    "@KiRetireDpcList@4": {
+      "all_reads_ns": {
+        "max": 232000,
+        "mean": 28936.997319034854,
+        "median": 0,
+        "n": 373,
+        "p95": 91300,
+        "sum": 10793500
+      },
+      "entry_count": 219,
+      "index": 1,
+      "median_per_read_fraction_inclusive": 0.0,
+      "present_read_ns": {
+        "max": 232000,
+        "mean": 59304.945054945056,
+        "median": 59650.0,
+        "n": 182,
+        "p95": 98800,
+        "sum": 10793500
+      },
+      "reads_with_phase": 182,
+      "weighted_fraction_of_total_inclusive": 0.0987230531843181
+    },
+    "_IoAllocateIrp@8": {
+      "all_reads_ns": {
+        "max": 186900,
+        "mean": 10513.941018766756,
+        "median": 9100,
+        "n": 373,
+        "p95": 11000,
+        "sum": 3921700
+      },
+      "entry_count": 373,
+      "index": 0,
+      "median_per_read_fraction_inclusive": 0.03330838323353293,
+      "present_read_ns": {
+        "max": 186900,
+        "mean": 10513.941018766756,
+        "median": 9100,
+        "n": 373,
+        "p95": 11000,
+        "sum": 3921700
+      },
+      "reads_with_phase": 373,
+      "weighted_fraction_of_total_inclusive": 0.03586994002621395
+    },
+    "_MmProbeAndLockPages@12": {
+      "all_reads_ns": {
+        "max": 106300,
+        "mean": 8401.608579088472,
+        "median": 6800,
+        "n": 373,
+        "p95": 10500,
+        "sum": 3133800
+      },
+      "entry_count": 373,
+      "index": 2,
+      "median_per_read_fraction_inclusive": 0.02522935779816514,
+      "present_read_ns": {
+        "max": 106300,
+        "mean": 8401.608579088472,
+        "median": 6800,
+        "n": 373,
+        "p95": 10500,
+        "sum": 3133800
+      },
+      "reads_with_phase": 373,
+      "weighted_fraction_of_total_inclusive": 0.028663390380230327
+    },
+    "_NxNativeAdapterSubmit": {
+      "all_reads_ns": {
+        "max": 442500,
+        "mean": 188469.1689008043,
+        "median": 164800,
+        "n": 373,
+        "p95": 310900,
+        "sum": 70299000
+      },
+      "entry_count": 373,
+      "index": 3,
+      "median_per_read_fraction_inclusive": 0.6473449533846778,
+      "present_read_ns": {
+        "max": 442500,
+        "mean": 188469.1689008043,
+        "median": 164800,
+        "n": 373,
+        "p95": 310900,
+        "sum": 70299000
+      },
+      "reads_with_phase": 373,
+      "weighted_fraction_of_total_inclusive": 0.6429917928201582
+    },
+    "_PataStartIo": {
+      "all_reads_ns": {
+        "max": 79700,
+        "mean": 25710.455764075068,
+        "median": 27200,
+        "n": 373,
+        "p95": 40200,
+        "sum": 9590000
+      },
+      "entry_count": 349,
+      "index": 8,
+      "median_per_read_fraction_inclusive": 0.09163591635916359,
+      "present_read_ns": {
+        "max": 79700,
+        "mean": 27478.510028653294,
+        "median": 27400,
+        "n": 349,
+        "p95": 40700,
+        "sum": 9590000
+      },
+      "reads_with_phase": 349,
+      "weighted_fraction_of_total_inclusive": 0.08771520637769126
+    },
+    "_nx_packet_prepare.constprop.0": {
+      "all_reads_ns": {
+        "max": 79000,
+        "mean": 11016.890080428955,
+        "median": 10900,
+        "n": 373,
+        "p95": 12800,
+        "sum": 4109300
+      },
+      "entry_count": 373,
+      "index": 4,
+      "median_per_read_fraction_inclusive": 0.03895231699126931,
+      "present_read_ns": {
+        "max": 79000,
+        "mean": 11016.890080428955,
+        "median": 10900,
+        "n": 373,
+        "p95": 12800,
+        "sum": 4109300
+      },
+      "reads_with_phase": 373,
+      "weighted_fraction_of_total_inclusive": 0.037585828734916234
+    },
+    "_port_prepare": {
+      "all_reads_ns": {
+        "max": 95100,
+        "mean": 26441.82305630027,
+        "median": 25400,
+        "n": 373,
+        "p95": 34100,
+        "sum": 9862800
+      },
+      "entry_count": 373,
+      "index": 5,
+      "median_per_read_fraction_inclusive": 0.09243085880640466,
+      "present_read_ns": {
+        "max": 95100,
+        "mean": 26441.82305630027,
+        "median": 25400,
+        "n": 373,
+        "p95": 34100,
+        "sum": 9862800
+      },
+      "reads_with_phase": 373,
+      "weighted_fraction_of_total_inclusive": 0.09021037929738199
+    },
+    "_port_submit": {
+      "all_reads_ns": {
+        "max": 188800,
+        "mean": 66222.52010723861,
+        "median": 68600,
+        "n": 373,
+        "p95": 95400,
+        "sum": 24701000
+      },
+      "entry_count": 373,
+      "index": 6,
+      "median_per_read_fraction_inclusive": 0.23625981441827265,
+      "present_read_ns": {
+        "max": 188800,
+        "mean": 66222.52010723861,
+        "median": 68600,
+        "n": 373,
+        "p95": 95400,
+        "sum": 24701000
+      },
+      "reads_with_phase": 373,
+      "weighted_fraction_of_total_inclusive": 0.22592839548856639
+    },
+    "_run_pump": {
+      "all_reads_ns": {
+        "max": 315400,
+        "mean": 138846.6487935657,
+        "median": 127900,
+        "n": 373,
+        "p95": 208400,
+        "sum": 51789800
+      },
+      "entry_count": 502,
+      "index": 7,
+      "median_per_read_fraction_inclusive": 0.47249743764947044,
+      "present_read_ns": {
+        "max": 315400,
+        "mean": 138846.6487935657,
+        "median": 127900,
+        "n": 373,
+        "p95": 208400,
+        "sum": 51789800
+      },
+      "reads_with_phase": 373,
+      "weighted_fraction_of_total_inclusive": 0.4736968712470651
+    }
+  },
+  "population": {
+    "bytes": {
+      "512": 169,
+      "1024": 1,
+      "1536": 8,
+      "2048": 3,
+      "2560": 6,
+      "3072": 2,
+      "3584": 4,
+      "4096": 2,
+      "4608": 9,
+      "5120": 8,
+      "6144": 2,
+      "6656": 1,
+      "7168": 2,
+      "7680": 2,
+      "8192": 2,
+      "10752": 44,
+      "12288": 1,
+      "13312": 1,
+      "13824": 1,
+      "14336": 1,
+      "17408": 1,
+      "21504": 26,
+      "39424": 1,
+      "43520": 41,
+      "65536": 35
+    },
+    "handle": {
+      "0000042c": 373
+    },
+    "info": {
+      "0": 253,
+      "512": 115,
+      "1536": 3,
+      "2048": 1,
+      "2560": 1
+    },
+    "status": {
+      "00000000": 373
+    },
+    "thread": {
+      "c1008c20": 373
+    }
+  },
+  "scope": "Completed observed callback-filtered native reads with host-end inside the saved-scene replay window. Warmup excluded.",
+  "selected_rows": 373,
+  "sha256": {
+    "owned-phase-sites.json": "111de70e5b664966da1097a8deee0710f6a8bd64b46233d3c565fb5a640bbb44",
+    "spirit-v12b-owned.log": "5489b8e2bf24899b7be892886570045998669aef697606b945a0a02972dd4460",
+    "spirit-v12b-receipts.jsonl": "03a4bf5f9fdb0ddbe5cd44f3de04efc18892c2f6dd3585efa31ea651ab364e31",
+    "v12b-owned-observer.c.txt": "aa017fb66340fac17209f851bba0ac0ef2d5887b61fc7d2a25f302a2c22710ca"
+  },
+  "total_api_ns": {
+    "max": 1139400,
+    "mean": 293112.8686327078,
+    "median": 272500,
+    "n": 373,
+    "p95": 413800,
+    "sum": 109331100
+  },
+  "unobserved_time_bounds_ns": {
+    "aggregate_lower": 1003200,
+    "aggregate_upper": 38611100,
+    "meaning": "Bounds on time outside the union of observed scopes, not CPU execution. Lower subtracts all inclusive phases and clips at zero; upper subtracts the largest phase per read. Unknown overlap prevents a unique residual."
+  },
+  "validation": {
+    "bad_selected": 0,
+    "duration_without_entry": 0,
+    "header_matches": true,
+    "lost_global": 0,
+    "open_phase_depths": 0,
+    "overflow": 0,
+    "phase_exceeds_total": 0,
+    "potential_start_boundary_overlap": 0,
+    "reentry_selected": 0,
+    "zero_total_duration": 0
+  },
+  "window_seconds": 12.0081227
+}

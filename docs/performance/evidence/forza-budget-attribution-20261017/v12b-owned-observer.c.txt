@@ -1,0 +1,75 @@
+
+/* Owned-kernel phase localization only. Flush after emulation ends; nested
+ * inclusive times are not additive and include interrupt/scheduling time. */
+typedef struct {
+ uint32_t thread,active,esp,iosb,bytes,handle,status,info,reentry,bad;
+ int64_t begin,end,host_end;
+ int64_t phase_begin[9],phase_ns[9];
+ unsigned depth[9],count[9];
+} ForzaOwned;
+static ForzaOwned owned_rows[16384],owned_slots[16];
+static unsigned owned_count,owned_overflow,owned_lost;
+static void forza_owned_flush(void)
+{
+ const char *path=getenv("XEMU_FORZA_OWNED_OUTPUT");FILE *f=path?fopen(path,"w"):NULL;
+ if(!f)return;
+ fprintf(f,"owned_meta rows=%u overflow=%u lost=%u\n",owned_count,owned_overflow,owned_lost);
+ for(unsigned j=0;j<owned_count;j++){
+  ForzaOwned *r=&owned_rows[j];
+  fprintf(f,"owned_read host_ns=%" PRId64 " virtual_ns=%" PRId64 " thread=%08x handle=%08x bytes=%u total_ns=%" PRId64 " status=%08x info=%u reentry=%u bad=%u",r->host_end,r->end,r->thread,r->handle,r->bytes,r->end-r->begin,r->status,r->info,r->reentry,r->bad);
+  for(unsigned i=0;i<9;i++)fprintf(f," p%u_ns=%" PRId64 " p%u_count=%u p%u_open=%u",i,r->phase_ns[i],i,r->count[i],i,r->depth[i]);
+  fprintf(f,"\n");
+ }
+ fclose(f);
+}
+static void forza_owned_profile(CPUX86State *env,uint32_t pc)
+{
+ static bool registered;
+ if(!registered){atexit(forza_owned_flush);registered=true;}
+ uint32_t thread=spirit_read32(env,0xffdff124),esp=env->regs[R_ESP];
+ ForzaOwned *r=NULL;
+ for(unsigned i=0;i<16;i++)if(owned_slots[i].thread==thread){r=&owned_slots[i];break;}
+ if(!r)for(unsigned i=0;i<16;i++)if(!owned_slots[i].active){r=&owned_slots[i];break;}
+ if(!thread||!r){owned_lost++;return;}
+ if(pc==0x8404cec4){
+  if(spirit_read32(env,esp)!=0x0026741a || spirit_read32(env,esp+16)!=0x001103e0)return;
+  unsigned reentry=r->active;
+  memset(r,0,sizeof(*r));r->reentry=reentry;r->active=1;r->thread=thread;
+  r->begin=qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);r->esp=esp+36;
+  r->iosb=spirit_read32(env,esp+20);r->bytes=spirit_read32(env,esp+28);r->handle=spirit_read32(env,esp+4);return;
+ }
+ if(!r->active||r->thread!=thread)return;
+ int64_t now=qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+ if(pc==0x0026741a && esp==r->esp){
+  r->end=now;r->host_end=qemu_clock_get_ns(QEMU_CLOCK_HOST);
+  r->status=spirit_read32(env,r->iosb);r->info=spirit_read32(env,r->iosb+4);
+  if(owned_count<16384)owned_rows[owned_count++]=*r;else owned_overflow++;
+  r->active=0;return;
+ }
+ int phase=-1;bool entering=false;
+ switch(pc){
+ case 0x84013cc8:phase=0;entering=true;break;
+ case 0x84013ddf:phase=0;break;
+ case 0x8401f35c:phase=1;entering=true;break;
+ case 0x8401f46e:phase=1;break;
+ case 0x84022a0c:phase=2;entering=true;break;
+ case 0x84022c23:phase=2;break;
+ case 0x840281f4:phase=3;entering=true;break;
+ case 0x8402880a:phase=3;break;
+ case 0x84050ec4:phase=4;entering=true;break;
+ case 0x8405125c:phase=4;break;
+ case 0x84051554:phase=5;entering=true;break;
+ case 0x84051733:phase=5;break;
+ case 0x84051750:phase=6;entering=true;break;
+ case 0x84051830:phase=6;break;
+ case 0x84051c38:phase=7;entering=true;break;
+ case 0x840521a7:phase=7;break;
+ case 0x840347e4:phase=8;entering=true;break;
+ case 0x84034afa:phase=8;break;
+ }
+ if(phase<0)return;
+ if(entering){if(!r->depth[phase]++)r->phase_begin[phase]=now;r->count[phase]++;}
+ else if(!r->depth[phase])r->bad++;
+ else if(!--r->depth[phase])r->phase_ns[phase]+=now-r->phase_begin[phase];
+}
+

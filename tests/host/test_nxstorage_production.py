@@ -41,7 +41,10 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0162-transient-native-envelope-growth.patch",
                      "0163-queue-saturated-native-admission.patch",
                      "0164-compact-data-overflow-envelopes.patch",
-                     "0165-cancel-before-native-admission.patch"):
+                     "0165-cancel-before-native-admission.patch",
+                     "0166-sealed-rundown-notifications.patch",
+                     "0167-skip-inactive-native-slots.patch",
+                     "0168-coalesce-native-adapter-bookkeeping.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -66,6 +69,7 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertIn('16 adapter scenarios, 61973 checks', result.stdout)
             self.assertIn('34 passed; 0 failed', result.stdout)
             self.assertIn('production checks passed', result.stdout)
+            self.assertIn('differential observations; 8 lifecycle capacities passed', result.stdout)
             packet = subprocess.run([sys.executable, str(source / 'tests/host/nxstorage/check_packet.py'),
                                      str(Path(temporary) / 'packet-output')], text=True,
                                     capture_output=True, timeout=120,
@@ -92,8 +96,8 @@ class NxStorageProductionTests(unittest.TestCase):
                                      capture_output=True, timeout=120,
                                      env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
             self.assertEqual(adapter.returncode, 0, adapter.stdout + adapter.stderr)
-            self.assertIn('adapter-plain: 36 adapter groups, 0 failures', adapter.stdout)
-            self.assertIn('adapter-sanitized: 36 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-plain: 42 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-sanitized: 42 adapter groups, 0 failures', adapter.stdout)
 
             driver = (source / 'drivers/storage/class/nxstorage/driver.c').read_text()
             self.assertIn('ZwCreateDirectoryObject(&context->object_directory', driver)

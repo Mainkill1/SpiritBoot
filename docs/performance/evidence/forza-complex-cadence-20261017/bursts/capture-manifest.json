@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "purpose": "Generated eight-slot synthetic submission-budget baseline; no title budget or firmware fix established",
+  "fixture": {
+    "title": "forza-submit-bursts",
+    "iso_sha256": "3b960e63bf8170cd1636ec471dd55aabc2083b2790f9cd3e5e7221013122382e",
+    "xbe_sha256": "01e4900c154bc8761591b81666eafa662969f97637f025fb6ea5748cd204ded8",
+    "nxdk_commit": "29638d0b001f179b73c3513489af10ddc2986216",
+    "compiler": "Debian clang19.1.7",
+    "flags": [
+      "-O2",
+      "-mno-sse",
+      "-mno-sse2"
+    ],
+    "source_sha256": {
+      "tests/xbe/forza-submit-bursts/main.c": "534f2763797156b22ec4e8bdf2748c621c8a5eac3cedc5e2cca9372d4479a8c8",
+      "tests/xbe/forza-submit-bursts/Makefile": "cdb1d41674c21cee64bb3b8860af30b76922767bcb9f03f2ff5f9442f5fce699",
+      "tools/storage_io_long16/tap.c": "f251c533bcb1bd2b6a19e3a07e4d7a6e1a6efce39f76c7ca2eb4eb8ee8e799b8",
+      "tools/storage_io_long16/tap.h": "ecd0873a89d3211c06618cd61917203eef07dc54f3b9bf795f81bab8f4f06eae"
+    }
+  },
+  "emulator": {
+    "release": "0.8.136-0-g458730bf5373",
+    "platform": "windows-x86_64",
+    "archive_sha256": "6fcab6a26657fecff95e09f0ef6ecf132a91cfbac6e80a88a9de96cc43d6f685",
+    "executable_sha256": "5488be40bf3c1c444b507d084c8d964f8f7d73c2a912970495cf85a4f7239564",
+    "published_release_executable": true,
+    "instruction_profiling": false
+  },
+  "runs": {
+    "complex": {
+      "job_id": "forza-bursts-complex-release-20261017-1",
+      "result_id": "20261018-001029300-13e8ec70ee354c89adc2f9921a68e292",
+      "finished_utc": "2026-10-18T00:11:54.2244079+00:00",
+      "runner_result": "completed",
+      "firmware_sha256": "1de4c87effe40d44f95581d204f9fa0600fbd5fe2171692316dcf97af0f4113f",
+      "firmware_bytes": 1048576,
+      "config_sha256": "5acc868d9242720c28402e33606064b79bc73072d4f2f0047ffbad1899b30a39",
+      "launcher_sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "request": "complex-request.sanitized.json",
+      "serial": "complex-serial1.log",
+      "summary": "complex-summary1.json",
+      "serial_sha256": "fa7d88d5957c3491ee39c103ae0591216825427d2eaadaa251d6f679341a4b7d",
+      "summary_sha256": "3a91e912a3ba88693665231b4c7e318a387aa6225d1e52928451d5e812942c6d",
+      "frequency": 3375000,
+      "snapshot_name": null,
+      "memory_mib": 64
+    },
+    "spirit": {
+      "job_id": "forza-bursts-spirit-release-20261017-1",
+      "result_id": "20261018-001245847-96ff56c23b5a4ea8a5cea1c4f7dc795c",
+      "finished_utc": "2026-10-18T00:14:13.667837+00:00",
+      "runner_result": "completed",
+      "firmware_sha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296",
+      "firmware_bytes": 524288,
+      "config_sha256": "10ea387472f831c3eb2451f9e5d1b01a27b7da929edc2d259879e7b24bdbca26",
+      "launcher_sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "request": "spirit-request.sanitized.json",
+      "serial": "spirit-serial1.log",
+      "summary": "spirit-summary1.json",
+      "serial_sha256": "b77d942cacc32e9c0e00b548a48f4e7f9f4731e9ac09c977a28f45d4151b648f",
+      "summary_sha256": "7d985678ddf2708bf8300e3a91a4feb6bb3d7b0a13ee31d2f24a000541af0eb6",
+      "frequency": 3374488,
+      "snapshot_name": null,
+      "memory_mib": 64
+    }
+  },
+  "private_scene_snapshots": {
+    "status": "No scene snapshot paths or hashes in these fixture summaries; separate gameplay snapshot provenance must be supplied by the operator.",
+    "included": false
+  },
+  "sanitization": {
+    "included": [
+      "owned fixture serial output",
+      "numeric analyzer summaries",
+      "owned analyzer and tests",
+      "sanitized runner recipes and metadata hashes"
+    ],
+    "excluded": [
+      "BIOS and emulator binaries",
+      "EEPROM contents",
+      "HDD or snapshot contents",
+      "game executable/data/RAM",
+      "screenshots",
+      "environment mappings",
+      "private network endpoint",
+      "workstation telemetry",
+      "original live-host launch script"
+    ]
+  }
+}

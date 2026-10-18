@@ -1,0 +1,109 @@
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index dcc2996..4d60d9c 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -420,7 +420,10 @@ static void release_envelope_locked(NX_NATIVE_ENVELOPE *envelope)
+             envelope->next_free=envelope->adapter->free_envelopes;
+             envelope->adapter->free_envelopes=envelope;
+         }
+-        (void)KeSetEvent(&envelope->adapter->drain_event,IO_NO_INCREMENT,FALSE);
++        /* Only sealed adapters can have a rundown waiter. Seal and the
++         * waiter's idle check use this same lock, so no final wake is lost. */
++        if(envelope->adapter->sealed)
++            (void)KeSetEvent(&envelope->adapter->drain_event,IO_NO_INCREMENT,FALSE);
+     }
+ }
+ 
+@@ -895,7 +898,8 @@ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+         if(!envelope || (adapter->data_active==adapter->data_limit &&
+                          !adapter->quarantined)) {
+             adapter->admission_active=0;
+-            (void)KeSetEvent(&adapter->drain_event,IO_NO_INCREMENT,FALSE);
++            if(adapter->sealed)
++                (void)KeSetEvent(&adapter->drain_event,IO_NO_INCREMENT,FALSE);
+             port_leave(adapter);return;
+         }
+         adapter->waiting_head=envelope->next_waiting;
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index e59ff3a..b4b04ed 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -48,6 +48,8 @@ static PVOID queued_dpc_a1[32],queued_dpc_a2[32];
+ static unsigned queued_dpc_count;
+ static unsigned burst_complete_during_submit,burst_seed;
+ static unsigned stamp_read_payloads;
++static unsigned rundown_event_calls;
++static void (*before_event_wait)(PKEVENT);
+ static void publish_host_cache_from_descriptor(void);
+ 
+ static void remember(void **live,void *pointer){for(unsigned i=0;i<512;++i)if(!live[i]){live[i]=pointer;return;}abort();}
+@@ -71,9 +73,9 @@ VOID FASTCALL IofCompleteRequest(PIRP i,CCHAR b){(void)b;MUST(!i->host_completed
+         completion_reentry_status=NxNativeDispatchReadWrite(completion_reentry_device,parent);}}
+ VOID IoMarkIrpPending(PIRP i){i->host_pending=1;}
+ VOID KeInitializeEvent(PKEVENT event,int type,BOOLEAN state){(void)type;__atomic_store_n(&event->signaled,state,__ATOMIC_RELEASE);}
+-LONG KeSetEvent(PKEVENT event,LONG increment,BOOLEAN wait){(void)increment;(void)wait;return (LONG)__atomic_exchange_n(&event->signaled,1,__ATOMIC_ACQ_REL);}
++LONG KeSetEvent(PKEVENT event,LONG increment,BOOLEAN wait){(void)increment;(void)wait;__atomic_add_fetch(&rundown_event_calls,1,__ATOMIC_RELAXED);return (LONG)__atomic_exchange_n(&event->signaled,1,__ATOMIC_ACQ_REL);}
+ NTSTATUS KeWaitForSingleObject(PVOID object,int reason,int mode,BOOLEAN alert,PVOID timeout)
+-{(void)reason;(void)mode;(void)alert;(void)timeout;while(!__atomic_load_n(&((PKEVENT)object)->signaled,__ATOMIC_ACQUIRE))sched_yield();return STATUS_SUCCESS;}
++{(void)reason;(void)mode;(void)alert;(void)timeout;if(before_event_wait){void (*hook)(PKEVENT)=before_event_wait;before_event_wait=NULL;hook(object);}while(!__atomic_load_n(&((PKEVENT)object)->signaled,__ATOMIC_ACQUIRE))sched_yield();return STATUS_SUCCESS;}
+ VOID KeInitializeDpc(PKDPC d,PKDEFERRED_ROUTINE routine,PVOID context)
+ { memset(d,0,sizeof(*d));d->DeferredRoutine=routine;d->DeferredContext=context; }
+ BOOLEAN KeInsertQueueDpc(PKDPC d,PVOID a1,PVOID a2)
+@@ -918,6 +920,51 @@ static int production_cache_qualification_and_durability(void)
+     lower_pending=0;
+     return 1;
+ }
++/* Break: normal admission/retirement enters the dispatcher for a rundown
++ * event even though no teardown waiter can exist before sealing. */
++static int unsealed_reads_do_not_signal_rundown(void)
++{
++    PDEVICE_OBJECT device=make_device(2);
++    unsigned signals=__atomic_load_n(&rundown_event_calls,__ATOMIC_RELAXED);
++    for(unsigned delayed=0;delayed<2;++delayed) {
++        parent_fixture read;init_parent(&read,IRP_MJ_READ,512);
++        lower_pending=delayed;lower_calls=0;
++        CHECK(NxNativeDispatchReadWrite(device,&read.irp)==
++              (delayed ? STATUS_PENDING:STATUS_SUCCESS));
++        if(delayed) CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++        CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS&&
++              read.irp.IoStatus.Information==512);
++    }
++    lower_pending=0;
++    CHECK(__atomic_load_n(&rundown_event_calls,__ATOMIC_RELAXED)==signals);
++    /* Completion before sealing needs no remembered signal: removal sees idle. */
++    CHECK(dispatch_pnp(NxNativeDispatchPnp,device,IRP_MN_REMOVE_DEVICE)==STATUS_SUCCESS);
++    CHECK(__atomic_load_n(&rundown_event_calls,__ATOMIC_RELAXED)==signals);
++    return 1;
++}
++static void complete_final_read_at_wait(PKEVENT event)
++{
++    MUST(active_child);
++    MUST(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    /* Fail promptly rather than hanging if final retirement loses its wake. */
++    MUST(__atomic_load_n(&event->signaled,__ATOMIC_ACQUIRE));
++}
++/* Break: filtering cold notifications also suppresses the final wake after
++ * sealing, including completion between the idle check and the actual wait. */
++static int sealed_final_completion_wakes_removal(void)
++{
++    PDEVICE_OBJECT device=make_device(2);
++    parent_fixture read;init_parent(&read,IRP_MJ_READ,512);
++    lower_pending=1;lower_calls=0;
++    CHECK(NxNativeDispatchReadWrite(device,&read.irp)==STATUS_PENDING);
++    unsigned signals=__atomic_load_n(&rundown_event_calls,__ATOMIC_RELAXED);
++    before_event_wait=complete_final_read_at_wait;
++    CHECK(dispatch_pnp(NxNativeDispatchPnp,device,IRP_MN_REMOVE_DEVICE)==STATUS_SUCCESS);
++    CHECK(!before_event_wait&&read.irp.host_completed&&
++          read.irp.IoStatus.Status==STATUS_SUCCESS&&read.irp.IoStatus.Information==512);
++    CHECK(__atomic_load_n(&rundown_event_calls,__ATOMIC_RELAXED)>signals);
++    lower_pending=0;return 1;
++}
+ static int removal_drains_bound_cache_readers(void)
+ {
+     cache_property(2,1);
+@@ -1135,4 +1182,4 @@ static int queued_cancel_and_flush_keep_fifo_barriers(void)
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("36 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("38 adapter groups, %u failures\n",f);return f?1:0;}

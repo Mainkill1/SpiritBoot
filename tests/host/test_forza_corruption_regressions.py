@@ -21,6 +21,9 @@ QUEUED_ADMISSION = "patches/roswell/0163-queue-saturated-native-admission.patch"
 COMPACT_ENVELOPES = "patches/roswell/0164-compact-data-overflow-envelopes.patch"
 
 PRE_ADMISSION_CANCEL = "patches/roswell/0165-cancel-before-native-admission.patch"
+SEALED_RUNDOWN = "patches/roswell/0166-sealed-rundown-notifications.patch"
+ACTIVE_SCAN = "patches/roswell/0167-skip-inactive-native-slots.patch"
+ADAPTER_BOOKKEEPING = "patches/roswell/0168-coalesce-native-adapter-bookkeeping.patch"
 
 
 class ForzaCorruptionRegressionTests(unittest.TestCase):
@@ -30,12 +33,12 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
 
     def test_corrective_patches_are_consecutive_and_hash_locked(self):
         self.assertEqual(
-            [entry["path"] for entry in self.entries[-10:]],
+            [entry["path"] for entry in self.entries[-13:]],
             [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION,
              RESET_MEDIA_LIFETIME, OPTICAL_ADMISSION, COMPLETION_LIFETIME,
-             TRANSIENT_ENVELOPE_GROWTH, QUEUED_ADMISSION, COMPACT_ENVELOPES, PRE_ADMISSION_CANCEL],
+             TRANSIENT_ENVELOPE_GROWTH, QUEUED_ADMISSION, COMPACT_ENVELOPES, PRE_ADMISSION_CANCEL, SEALED_RUNDOWN, ACTIVE_SCAN, ADAPTER_BOOKKEEPING],
         )
-        for entry in self.entries[-10:]:
+        for entry in self.entries[-13:]:
             self.assertEqual(
                 hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
                 entry["sha256"],

@@ -1,7 +1,20 @@
 # Forza missing-world investigation, 2026-10-17
 
 Tracking: [SpiritBoot issue #250](https://github.com/Mainkill1/SpiritBoot/issues/250).
-Status: delay localized; firmware fix and controlled performance comparison remain open.
+Status: delay localized; paired synthetic comparison recorded; real-title cause
+and firmware fix remain open.
+
+**Follow-up, 2026-10-17:** The [paired release Complex/SpiritBoot cadence
+comparison](../forza-complex-cadence-20261017/README.md) finds matching tested APC
+wait semantics. Complex also shows callback occupancy on the roughly 33 ms
+frame scale under the controlled polling cadence. The roughly 30 ms interval
+below is therefore not, by itself, evidence of a SpiritBoot-specific delivery
+defect. SpiritBoot has higher small-read submission cost, but the fixture
+results are mixed: its 64 KiB throughput and frame-cadence cases are similar
+or faster. A separate eight-slot experiment now shows a large issue-rate gap
+under explicitly synthetic 250/500 µs burst budgets, largely closing at 1 ms
+or uncapped. The actual title budget remains unproven. No firmware fix or
+real-title streaming improvement is claimed.
 
 The operator drove a class-R Porsche and paused while multiple portions of the
 world were missing. The 64 MB release BIOS was
@@ -94,7 +107,7 @@ must not be assumed to exercise the same queue as this title. Existing QD12
 throughput results remain measurements of their recorded route; they do not
 qualify this in-race title callback cadence.
 
-The next synthetic qualification needs:
+The synthetic qualification requirements identified from this capture were:
 
 1. Generated data with full byte and canary validation, using an isolated HDD.
 2. The exported `NtUserIoApcDispatcher` and its real Win32-style callback ABI,
@@ -111,8 +124,12 @@ The next synthetic qualification needs:
    must reduce end-to-end title-visible latency while preserving data and APC
    ordering. Delivering callbacks before their permitted wait is not a fix.
 
-This fixture extension is a remaining task, not a test claimed to have run.
-No firmware code was changed for this investigation.
+The [standalone callback-cadence follow-up](../forza-complex-cadence-20261017/README.md)
+now covers the generated-data oracle, title dispatcher route, sustained tight
+and frame cadence, paired page targets, and controlled wait semantics. Native
+completion timestamps, the full cancellation/lifetime matrix and a verified
+real-title performance fix are not established by that follow-up. No firmware
+code was changed for either capture or the paired baseline comparison.
 
 ## Reproduction and artifacts
 

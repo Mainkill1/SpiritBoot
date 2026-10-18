@@ -1,0 +1,237 @@
+diff --git a/drivers/storage/class/nxstorage/active_scan.h b/drivers/storage/class/nxstorage/active_scan.h
+new file mode 100644
+index 0000000..59caf2d
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/active_scan.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_STORAGE_ACTIVE_SCAN_H
++#define NX_STORAGE_ACTIVE_SCAN_H
++#include <stdint.h>
++
++static inline uint32_t nx_active_at_or_after(const uint32_t bits[2],uint32_t start)
++{
++    uint32_t tail;
++    if(start<32) {
++        tail=bits[0]&(UINT32_MAX<<start);
++        if(tail)return (uint32_t)__builtin_ctz(tail);
++        tail=bits[1];
++    } else tail=bits[1]&(UINT32_MAX<<(start-32));
++    return tail ? 32u+(uint32_t)__builtin_ctz(tail):UINT32_MAX;
++}
++
++/* Called under the core state lock, with 1 <= count <= 64, cursor < count,
++ * remaining <= count, and no set bits outside [0,count). Skip only inactive
++ * slots. Cursor/remaining match an ordinary circular scan exactly, including
++ * the final inactive suffix when no active entry remains in this pass. */
++static inline uint32_t nx_active_scan_next(const uint32_t bits[2],uint32_t count,
++    uint32_t *cursor,uint32_t *remaining)
++{
++    uint32_t index,distance;
++    if(!*remaining)return UINT32_MAX;
++    index=nx_active_at_or_after(bits,*cursor);
++    if(index==UINT32_MAX)index=nx_active_at_or_after(bits,0);
++    if(index!=UINT32_MAX) {
++        distance=index>=*cursor ? index-*cursor:count-*cursor+index;
++        if(distance<*remaining) {
++            *remaining-=distance+1;
++            *cursor=index+1==count ? 0:index+1;
++            return index;
++        }
++    }
++    index=*cursor+*remaining;
++    *cursor=index>=count ? index-count:index;
++    *remaining=0;
++    return UINT32_MAX;
++}
++#endif
+diff --git a/drivers/storage/class/nxstorage/request.c b/drivers/storage/class/nxstorage/request.c
+index fa296b8..d48c1bc 100644
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -1,5 +1,6 @@
+ /* SPDX-License-Identifier: GPL-2.0-or-later */
+ #include "request.h"
++#include "active_scan.h"
+ 
+ enum { EXECUTE=0x00, RELEASE=0x04, READ10=0x28, WRITE10=0x2a, SYNC10=0x35,
+        DATA_IN=0x40, DATA_OUT=0x80 };
+@@ -186,8 +187,14 @@ static void run_pump(nx_device *d)
+         nx_slot *s=NULL; uint32_t index=0;
+         void *parent=NULL; nx_status final=NX_OK; uint64_t bytes=0;
+         lock(d);
+-        for (uint32_t scanned=0;scanned<d->count;++scanned) {
+-            index=d->cursor; d->cursor=index+1u==d->count ? 0:index+1u;
++        for (uint32_t remaining=d->count;remaining;) {
++            if(d->count<=64) {
++                index=nx_active_scan_next(d->active_slots,d->count,&d->cursor,&remaining);
++                if(index==UINT32_MAX) { s=NULL;break; }
++            } else {
++                index=d->cursor; d->cursor=index+1u==d->count ? 0:index+1u;
++                --remaining;
++            }
+             s=&d->slots[index];
+             if (!s->active) continue;
+             if (s->inflight) {
+@@ -215,6 +222,7 @@ static void run_pump(nx_device *d)
+                 action=COMPLETE; parent=s->request.parent; final=s->final_status; bytes=s->transferred;
+                 if (s->dispatch_result) *s->dispatch_result=s->pending ? NX_PENDING:final;
+                 s->dispatch_result=NULL; s->active=0;
++                if(d->count<=64) d->active_slots[index>>5]&=~(UINT32_C(1)<<(index&31));
+                 if (s->generation!=UINT64_MAX) {
+                     s->free_next=d->free_head; d->free_head=index;
+                 }
+@@ -286,6 +294,7 @@ nx_status nx_start(nx_device *d, const nx_request *r, nx_handle *handle)
+     clear_bytes(&s->command,offsetof(nx_slot,free_next)-offsetof(nx_slot,command));
+     s->generation=generation; s->order=++d->order;
+     s->request=*r; s->active=1; s->dispatch_result=&result;
++    if(d->count<=64) d->active_slots[index>>5]|=UINT32_C(1)<<(index&31);
+     handle->slot=index; handle->generation=generation;
+     unsigned run=!d->pumping;
+     if (run) { d->pumping=1; d->cursor=index; }
+diff --git a/drivers/storage/class/nxstorage/request.h b/drivers/storage/class/nxstorage/request.h
+index 2b4cbc4..6051834 100644
+--- a/drivers/storage/class/nxstorage/request.h
++++ b/drivers/storage/class/nxstorage/request.h
+@@ -83,6 +83,7 @@ typedef struct nx_device {
+     uint32_t count, cursor, free_head;
+     uint32_t sector_shift, sector_mask;
+     uint64_t order;
++    uint32_t active_slots[2]; /* Used only when count <= 64; private state lock. */
+     unsigned pumping, quarantined;
+ } nx_device;
+ 
+diff --git a/tests/host/nxstorage/active_scan_test.c b/tests/host/nxstorage/active_scan_test.c
+new file mode 100644
+index 0000000..6212ab4
+--- /dev/null
++++ b/tests/host/nxstorage/active_scan_test.c
+@@ -0,0 +1,115 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#include "request.h"
++#include "active_scan.h"
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#define MUST(x) do { if(!(x)) { fprintf(stderr,"%s:%u: %s\n",__func__,__LINE__,#x); abort(); } } while(0)
++static uint32_t seed=0x672591a3u;
++static uint32_t random_word(void) {seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
++static unsigned observations;
++/* Independent original scan: visit every slot, advancing even past inactive
++ * entries. The bitmap selector must produce identical active visits/cursors. */
++static uint32_t original_next(const unsigned active[64],uint32_t count,
++                              uint32_t *cursor,uint32_t *remaining)
++{
++    while(*remaining) {
++        uint32_t index=*cursor;
++        *cursor=index+1==count ? 0:index+1;
++        --*remaining;
++        if(active[index])return index;
++    }
++    return UINT32_MAX;
++}
++static void compare_scan(const unsigned active[64],uint32_t count,uint32_t start,
++                         const unsigned runnable[64])
++{
++    uint32_t bits[2]={0,0},old_cursor=start,new_cursor=start;
++    uint32_t old_left=count,new_left=count;
++    for(uint32_t i=0;i<count;++i)if(active[i])bits[i>>5]|=UINT32_C(1)<<(i&31);
++    for(;;) {
++        uint32_t old=original_next(active,count,&old_cursor,&old_left);
++        uint32_t next=nx_active_scan_next(bits,count,&new_cursor,&new_left);
++        MUST(old==next&&old_cursor==new_cursor&&old_left==new_left);
++        ++observations;
++        /* Stop at the first action, as the real pump does. Inflight/blocked
++         * slots remain active but need not produce any action this pass. */
++        if(old==UINT32_MAX || runnable[old])break;
++    }
++}
++static void differential_scans(void)
++{
++    unsigned active[64],runnable[64];
++    for(unsigned count=1;count<=8;++count)for(unsigned mask=0;mask<(1u<<count);++mask)
++        for(unsigned cursor=0;cursor<count;++cursor) {
++            for(unsigned i=0;i<count;++i){active[i]=(mask>>i)&1;runnable[i]=0;}
++            compare_scan(active,count,cursor,runnable);
++            for(unsigned chosen=0;chosen<count;++chosen) {
++                runnable[chosen]=1;compare_scan(active,count,cursor,runnable);runnable[chosen]=0;
++            }
++        }
++    for(unsigned count=1;count<=64;++count)for(unsigned trial=0;trial<2000;++trial) {
++        for(unsigned i=0;i<count;++i) {
++            unsigned state=random_word();active[i]=(state&3)==0;
++            runnable[i]=active[i]&&((state>>2)&1);
++        }
++        compare_scan(active,count,random_word()%count,runnable);
++        memset(runnable,0,sizeof(runnable));
++        compare_scan(active,count,random_word()%count,runnable);
++    }
++    /* Every boundary bit alone, at every starting cursor, including wrap. */
++    for(unsigned bit=0;bit<64;++bit)for(unsigned cursor=0;cursor<64;++cursor) {
++        memset(active,0,sizeof(active));memset(runnable,0,sizeof(runnable));
++        active[bit]=1;compare_scan(active,64,cursor,runnable);
++        runnable[bit]=1;compare_scan(active,64,cursor,runnable);
++    }
++}
++struct parent {unsigned completed;};
++struct transport {
++    nx_device device;
++    nx_slot slots[129];
++    nx_command commands[129];
++    unsigned live[129],locked,submits,retires,completes;
++};
++static void enter(void *p){struct transport *t=p;MUST(!t->locked);t->locked=1;}
++static void leave(void *p){struct transport *t=p;MUST(t->locked);t->locked=0;}
++static nx_status prepare(void *p,const nx_command *c){struct transport *t=p;MUST(!t->locked&&!t->live[c->token.slot]);t->commands[c->token.slot]=*c;t->live[c->token.slot]=1;return NX_OK;}
++static int submit(void *p,const nx_command *c){struct transport *t=p;MUST(!t->locked&&t->live[c->token.slot]);++t->submits;return 1;}
++static void retire(void *p,const nx_command *c){struct transport *t=p;MUST(!t->locked&&t->live[c->token.slot]);t->live[c->token.slot]=0;++t->retires;}
++static void cancel(void *p,const nx_command *c){(void)p;(void)c;abort();}
++static void pending(void *p,void *r){struct transport *t=p;(void)r;MUST(t->locked);}
++static void complete(void *p,void *r,nx_status status,uint64_t bytes){struct transport *t=p;struct parent *parent=r;MUST(!t->locked&&!parent->completed&&status==NX_OK&&bytes==512);parent->completed=1;++t->completes;}
++/* Break: bits at/above 32 are lost, a freed slot remains visible, or the
++ * non-bitmap >64-slot fallback cannot drain/reuse every admitted request. */
++static void lifecycle_boundaries(void)
++{
++    static const unsigned counts[]={1,31,32,33,63,64,65,129};
++    for(unsigned test=0;test<sizeof(counts)/sizeof(counts[0]);++test) {
++        struct transport t;memset(&t,0,sizeof(t));
++        struct parent parents[129];nx_handle handles[129];
++        nx_config config={512,4096,65536,17,0,128,1024*1024,0,NX_CACHE_ENABLED};
++        nx_port port={&t,enter,leave,prepare,submit,retire,cancel,pending,complete};
++        unsigned count=counts[test];
++        MUST(nx_device_init(&t.device,&config,&port,t.slots,count,sizeof(t.slots))==NX_OK);
++        for(unsigned round=0;round<8;++round) {
++            memset(parents,0,sizeof(parents));
++            for(unsigned i=0;i<count;++i) {
++                nx_request request={.parent=&parents[i],.operation=NX_READ,.offset=(int64_t)i*512,
++                    .bytes=512,.mdl_virtual=4096,.mdl_bytes=512,.mdl_present=1};
++                MUST(nx_start(&t.device,&request,&handles[i])==NX_PENDING);
++            }
++            for(unsigned left=count;left;--left) {
++                unsigned pick=random_word()%count;
++                while(!t.live[pick])pick=(pick+1)%count;
++                nx_command command=t.commands[pick];
++                nx_lower_done(&t.device,command.token,NX_OK,512,0);
++                MUST(!t.live[pick]);
++                /* A duplicate/stale completion must not recreate an active bit. */
++                nx_lower_done(&t.device,command.token,NX_OK,512,0);
++            }
++            for(unsigned i=0;i<count;++i)MUST(parents[i].completed==1);
++            MUST(t.submits==(round+1)*count&&t.retires==t.submits&&t.completes==t.submits);
++        }
++    }
++}
++int main(void){differential_scans();lifecycle_boundaries();printf("active scan: %u differential observations; 8 lifecycle capacities passed\n",observations);return 0;}
+diff --git a/tests/host/nxstorage/check.py b/tests/host/nxstorage/check.py
+index f661351..e63dcf3 100644
+--- a/tests/host/nxstorage/check.py
++++ b/tests/host/nxstorage/check.py
+@@ -13,7 +13,7 @@ output = Path(sys.argv[1]).resolve()
+ output.mkdir(parents=True, exist_ok=True)
+ cc = os.environ.get("CC", "clang" if shutil.which("clang") else "gcc")
+ flags = ["-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-I" + str(source)]
+-for case, production in (("request_test", "request.c"), ("pthread_ownership_test", "request.c"), ("test_geometry_composer", "geometry_composer.c"), ("cache_query_test", "cache_query.c")):
++for case, production in (("request_test", "request.c"), ("active_scan_test", "request.c"), ("pthread_ownership_test", "request.c"), ("test_geometry_composer", "geometry_composer.c"), ("cache_query_test", "cache_query.c")):
+     executable = output / case
+     subprocess.run([cc] + flags + ["-pthread", str(source / production), str(tests / (case + ".c")), "-o", str(executable)], check=True)
+     subprocess.run([str(executable)], check=True, env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1", UBSAN_OPTIONS="halt_on_error=1"))
