@@ -26,6 +26,13 @@ class ReleaseIdentityConfigurationTests(unittest.TestCase):
 
     def test_kernel_coverage_product_pins_match_the_workspace(self):
         manifest = json.loads((ROOT / "sources/kernel-coverage-inputs.json").read_text())
+        report = json.loads((ROOT / "sources/kernel-coverage-report.json").read_text())
+        canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+        self.assertEqual(
+            report["input_manifest_semantic_sha256"],
+            hashlib.sha256(canonical).hexdigest(),
+            "kernel coverage report is stale",
+        )
         descriptors = manifest["test_sources"] + manifest["supporting_sources"]
         product = [entry for entry in descriptors if entry["scope"] == "product"]
         self.assertTrue(product)
