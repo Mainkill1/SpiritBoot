@@ -1,0 +1,191 @@
+{
+  "decision": "rejected",
+  "reason": "Correctness passed, but caller-side DPC admission did not produce a repeatable performance gain and usually regressed the measured return path.",
+  "firmware_sha256": "b43e250a9daba70517ab6d429836c96033c9d165a7160aaa0fccd209aafe5f53",
+  "source_tree": "34bcbc1ba645fec88469adc3cedf4ce0ec6a7366",
+  "patch_sha256": "359c5cdb877be2bca5b6a1e850831c3c0c98cc884e631a066f6083070c24d4ab",
+  "runs": {
+    "control1": null,
+    "candidate1": null,
+    "control2": null,
+    "candidate2": null
+  },
+  "cases": [
+    {
+      "target": 783,
+      "budget_us": 250,
+      "pairs": {
+        "1": {
+          "control_cost_us": 115.31937440284368,
+          "candidate_cost_us": 122.8629956837971,
+          "cost_change_percent": 6.541503819298722,
+          "control_reads_per_second": 71.94946658117188,
+          "candidate_reads_per_second": 67.36783913756554,
+          "rate_change_percent": -6.367840737828734
+        },
+        "2": {
+          "control_cost_us": 124.84388580693587,
+          "candidate_cost_us": 134.02489587860495,
+          "cost_change_percent": 7.353992558247513,
+          "control_reads_per_second": 65.52288062662687,
+          "candidate_reads_per_second": 62.94651892386297,
+          "rate_change_percent": -3.932003108112636
+        }
+      }
+    },
+    {
+      "target": 783,
+      "budget_us": 450,
+      "pairs": {
+        "1": {
+          "control_cost_us": 79.38023399663105,
+          "candidate_cost_us": 80.5650167189316,
+          "cost_change_percent": 1.4925412318019138,
+          "control_reads_per_second": 142.06868782999055,
+          "candidate_reads_per_second": 141.2181775995945,
+          "rate_change_percent": -0.5986612837684757
+        },
+        "2": {
+          "control_cost_us": 79.54118573453808,
+          "candidate_cost_us": 87.50889484538251,
+          "cost_change_percent": 10.01708616393524,
+          "control_reads_per_second": 142.23889554161573,
+          "candidate_reads_per_second": 134.98867575365983,
+          "rate_change_percent": -5.097213220299968
+        }
+      }
+    },
+    {
+      "target": 783,
+      "budget_us": 1000,
+      "pairs": {
+        "1": {
+          "control_cost_us": 68.24191246155122,
+          "candidate_cost_us": 75.55750789783025,
+          "cost_change_percent": 10.720091469301618,
+          "control_reads_per_second": 199.17489156704318,
+          "candidate_reads_per_second": 198.63620296908874,
+          "rate_change_percent": -0.2704600934968271
+        },
+        "2": {
+          "control_cost_us": 63.48967369360612,
+          "candidate_cost_us": 74.89407471259399,
+          "cost_change_percent": 17.96260770534781,
+          "control_reads_per_second": 199.48722920127022,
+          "candidate_reads_per_second": 201.2938668188476,
+          "rate_change_percent": 0.9056407394152366
+        }
+      }
+    },
+    {
+      "target": 783,
+      "budget_us": 0,
+      "pairs": {
+        "1": {
+          "control_cost_us": 71.36549307628297,
+          "candidate_cost_us": 72.16898283054037,
+          "cost_change_percent": 1.125879917060968,
+          "control_reads_per_second": 198.70666790285873,
+          "candidate_reads_per_second": 199.32703618883244,
+          "rate_change_percent": 0.3122030541405918
+        },
+        "2": {
+          "control_cost_us": 68.53378475873916,
+          "candidate_cost_us": 75.66614140160164,
+          "cost_change_percent": 10.407066628482076,
+          "control_reads_per_second": 199.46745571640741,
+          "candidate_reads_per_second": 201.529499354394,
+          "rate_change_percent": 1.0337744724223663
+        }
+      }
+    },
+    {
+      "target": 900,
+      "budget_us": 250,
+      "pairs": {
+        "1": {
+          "control_cost_us": 110.38711650478531,
+          "candidate_cost_us": 121.37291007448495,
+          "cost_change_percent": 9.952061361457343,
+          "control_reads_per_second": 74.6607366009406,
+          "candidate_reads_per_second": 67.49343983378888,
+          "rate_change_percent": -9.5998205930658
+        },
+        "2": {
+          "control_cost_us": 112.6632563742822,
+          "candidate_cost_us": 104.80627555397609,
+          "cost_change_percent": -6.973862706581269,
+          "control_reads_per_second": 71.41087240513639,
+          "candidate_reads_per_second": 77.75818813273474,
+          "rate_change_percent": 8.888444453651312
+        }
+      }
+    },
+    {
+      "target": 900,
+      "budget_us": 450,
+      "pairs": {
+        "1": {
+          "control_cost_us": 75.91653474063945,
+          "candidate_cost_us": 82.58598806261148,
+          "cost_change_percent": 8.785244670028058,
+          "control_reads_per_second": 148.0759981636026,
+          "candidate_reads_per_second": 137.77408338385547,
+          "rate_change_percent": -6.957180709573885
+        },
+        "2": {
+          "control_cost_us": 74.66123644252178,
+          "candidate_cost_us": 74.92367520770276,
+          "cost_change_percent": 0.3515060527868652,
+          "control_reads_per_second": 149.70737496015536,
+          "candidate_reads_per_second": 150.34672579586785,
+          "rate_change_percent": 0.4270670271806276
+        }
+      }
+    },
+    {
+      "target": 900,
+      "budget_us": 1000,
+      "pairs": {
+        "1": {
+          "control_cost_us": 69.9898053595559,
+          "candidate_cost_us": 74.63080655249405,
+          "cost_change_percent": 6.6309674231784355,
+          "control_reads_per_second": 197.73524144325094,
+          "candidate_reads_per_second": 198.18681523287958,
+          "rate_change_percent": 0.2283729426947989
+        },
+        "2": {
+          "control_cost_us": 72.51458615304105,
+          "candidate_cost_us": 75.3088064577621,
+          "cost_change_percent": 3.8533217287124666,
+          "control_reads_per_second": 199.06943627557476,
+          "candidate_reads_per_second": 200.54338210273593,
+          "rate_change_percent": 0.7404179439784775
+        }
+      }
+    },
+    {
+      "target": 900,
+      "budget_us": 0,
+      "pairs": {
+        "1": {
+          "control_cost_us": 70.0568501058531,
+          "candidate_cost_us": 69.61746693806835,
+          "cost_change_percent": -0.6271808782736699,
+          "control_reads_per_second": 198.99544829832783,
+          "candidate_reads_per_second": 199.55977990255633,
+          "rate_change_percent": 0.2835902072405583
+        },
+        "2": {
+          "control_cost_us": 71.82231669418681,
+          "candidate_cost_us": 69.59250553066113,
+          "cost_change_percent": -3.1046216080999223,
+          "control_reads_per_second": 199.4939293798572,
+          "candidate_reads_per_second": 201.92577768974698,
+          "rate_change_percent": 1.219008677331379
+        }
+      }
+    }
+  ]
+}

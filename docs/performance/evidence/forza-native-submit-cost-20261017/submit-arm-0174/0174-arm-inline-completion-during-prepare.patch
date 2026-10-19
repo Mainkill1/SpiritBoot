@@ -1,0 +1,64 @@
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index 8800c675..d4826faf 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -307,6 +307,10 @@ static nx_status port_prepare(void *context,const nx_command *command)
+     if(!envelope || envelope->packet_live) return NX_PROTOCOL_ERROR;
+     handle.slot=command->token.slot;handle.generation=command->token.generation;
+     port_enter(adapter);envelope->handle=handle;envelope->handle_valid=1;
++    /* Preparation is the last adapter-owned step before submission.  Arm
++     * inline-completion deferral while publishing the handle so port_submit
++     * does not need a second lock round trip immediately before IofCallDriver. */
++    envelope->submit_active=1;
+     cancel_after=envelope->cancel_latched;port_leave(adapter);
+     if(cancel_after) nx_cancel(&adapter->core,handle);
+     mdl=envelope->parent->MdlAddress;
+@@ -339,8 +343,10 @@ static nx_status port_prepare(void *context,const nx_command *command)
+     packet.lower_stack_count=adapter->lower->StackSize;
+     packet.completion=NxNativeAdapterChildComplete;
+     packet.completion_context=envelope;
+-    if(nx_packet_prepare(&resources,&packet,&envelope->ticket)!=NX_PACKET_OK)
++    if(nx_packet_prepare(&resources,&packet,&envelope->ticket)!=NX_PACKET_OK) {
++        envelope->submit_active=0;
+         return NX_INVALID;
++    }
+     envelope->packet_live=1;
+     return NX_OK;
+ }
+@@ -363,9 +369,6 @@ static int port_submit(void *context,const nx_command *command)
+     nx_packet_status captured=NX_PACKET_OK;
+     unsigned report=0;
+     if(!envelope || !envelope->packet_live) return 0;
+-    port_enter(adapter);
+-    envelope->submit_active=1;
+-    port_leave(adapter);
+     status=IofCallDriver(adapter->lower,envelope->child);
+     port_enter(adapter);
+     envelope->submit_active=0;
+@@ -384,7 +387,12 @@ static void port_retire(void *context,const nx_command *command)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+     NX_NATIVE_ENVELOPE *envelope=command_envelope(adapter,command);
+-    if(envelope) envelope->packet_live=0;
++    if(envelope) {
++        /* Cancellation or quarantine may retire a prepared command without
++         * submitting it, so undo the deferral arm as part of retirement. */
++        envelope->packet_live=0;
++        envelope->submit_active=0;
++    }
+ }
+ 
+ static void port_cancel(void *context,const nx_command *command)
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 171a555c..60a6e2e3 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -941,7 +941,7 @@ static int single_command_read_has_bounded_native_submission(void)
+     CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS);
+     lower_pending=0;
+     printf("single-command pending submit: %u adapter lock entries\n",used);
+-    CHECK(used<=11);
++    CHECK(used<=10);
+     return 1;
+ }
+ static pnp_thread reservation_removal;

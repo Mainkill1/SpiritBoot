@@ -1,0 +1,41 @@
+
+artifacts/forza-bookkeeping-release64/work-14lo4o24/build/ntoskrnl/xboxkrnl.unstripped.exe:     file format pei-i386
+
+
+Disassembly of section .text:
+
+840150a8 <_IoInitializeIrp@12>:
+840150a8:	57                   	push   %edi
+840150a9:	31 c0                	xor    %eax,%eax
+840150ab:	56                   	push   %esi
+840150ac:	53                   	push   %ebx
+840150ad:	8b 54 24 10          	mov    0x10(%esp),%edx
+840150b1:	8b 74 24 14          	mov    0x14(%esp),%esi
+840150b5:	8b 5c 24 18          	mov    0x18(%esp),%ebx
+840150b9:	89 d7                	mov    %edx,%edi
+840150bb:	0f b7 ce             	movzwl %si,%ecx
+840150be:	f3 aa                	rep stos %al,%es:(%edi)
+840150c0:	8d 43 01             	lea    0x1(%ebx),%eax
+840150c3:	88 5a 18             	mov    %bl,0x18(%edx)
+840150c6:	0f be db             	movsbl %bl,%ebx
+840150c9:	66 c7 02 06 00       	movw   $0x6,(%edx)
+840150ce:	6b db 24             	imul   $0x24,%ebx,%ebx
+840150d1:	66 89 72 02          	mov    %si,0x2(%edx)
+840150d5:	88 42 19             	mov    %al,0x19(%edx)
+840150d8:	a1 24 f1 df ff       	mov    0xffdff124,%eax
+840150dd:	8a 80 1c 01 00 00    	mov    0x11c(%eax),%al
+840150e3:	88 42 7a             	mov    %al,0x7a(%edx)
+840150e6:	8d 84 1a 80 00 00 00 	lea    0x80(%edx,%ebx,1),%eax
+840150ed:	89 42 5c             	mov    %eax,0x5c(%edx)
+840150f0:	8d 42 08             	lea    0x8(%edx),%eax
+840150f3:	89 42 0c             	mov    %eax,0xc(%edx)
+840150f6:	89 42 08             	mov    %eax,0x8(%edx)
+840150f9:	5b                   	pop    %ebx
+840150fa:	5e                   	pop    %esi
+840150fb:	5f                   	pop    %edi
+840150fc:	c2 0c 00             	ret    $0xc
+840150ff:	90                   	nop
+
+Disassembly of section PAGE:
+
+Disassembly of section INIT:

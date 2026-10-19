@@ -1,0 +1,68 @@
+owner_handoff_cost:961: f.lock_entries-before==4
+owner_handoff_cost:964: f.lock_entries-before==3
+owner_handoff_cost:970: f.lock_entries-before==2
+owner_handoff_cost:970: f.lock_entries-before==2
+PASS zero_domain_write_through
+FAIL start_transfers_owned_lock
+FAIL lower_done_transfers_owned_lock
+FAIL cancel_transfers_owned_lock
+FAIL quarantine_transfers_owned_lock
+PASS completion_at_idle_release_is_not_lost
+PASS zero_domain_guards
+PASS rejects_invalid_input
+PASS zero_has_no_transport
+PASS one_inline_read_owns_until_return
+PASS pending_duplicate_generation
+PASS coalesced_completions_drain_every_runnable_slot
+PASS coalesced_admissions_submit_every_runnable_slot
+PASS completion_reentry_cannot_starve_eligible_write
+PASS randomized_mixed_reentry_is_fair
+PASS exhausted_generation_is_retired_from_free_list
+PASS inline_pending_still_marks_parent
+PASS long_inline_sequence_is_iterative
+PASS respects_page_and_block_limits
+PASS partial_error_stops_without_fabrication
+PASS short_and_overreport_are_bounded
+PASS low_memory_cleans_and_allows_next_parent
+PASS cancellation_waits_for_lower_ownership
+PASS initial_cancel_and_inline_cancel
+PASS flush_is_real_ordered_cache_sync
+PASS cache_capability_is_visible
+PASS frozen_queue_uses_bounded_release
+PASS concurrent_slots_and_optical_policy
+PASS address_and_cdb_overflow_are_rejected
+PASS missing_terminal_does_not_release_pages
+PASS cancellation_during_preparation_retires_without_submit
+PASS duplicate_segment_is_ignored
+PASS odd_optical_buffer_reaches_transport
+PASS cdb_count_splits_at_65535_blocks
+PASS invalid_parent_has_no_delivery
+PASS failed_recovery_cancels_live_and_finishes_waiters
+PASS sector_sizes_preserve_high_offset_cdb
+PASS final_lba_and_exact_capacity_end
+PASS sector_alignment_remainders_are_rejected
+PASS sector_configuration_rejects_nonpowers
+PASS mdl_offsets_keep_their_full_width
+PASS write_through_inline_chunks_then_sync
+PASS write_through_delayed_sync_holds_parent
+PASS write_through_sync_error_preserves_data
+PASS write_through_partial_data_stops
+PASS write_through_cancel_during_sync_waits
+PASS write_through_cancel_before_sync_keeps_data_count
+PASS write_through_orders_following_write_allows_read
+PASS write_through_sync_waits_for_prior_write
+PASS write_through_disabled_cache_still_orders
+PASS write_through_duplicate_data_and_sync_are_ignored
+PASS write_through_zero_and_invalid_flags
+PASS write_through_sync_prepare_failure_preserves_data
+PASS impossible_slot_count_rejects_before_any_clear
+PASS durability_snapshot_is_request_owned
+55 tests, 4 failures
+Traceback (most recent call last):
+  File "/home/codex/xemu-shader-workbench-handoff/.scratch/spiritboot-halo-optical-integrity-20261017/.scratch/forza-core-lock-0170/source/tests/host/nxstorage/check.py", line 19, in <module>
+    subprocess.run([str(executable)], check=True, env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1:halt_on_error=1:detect_stack_use_after_return=1", UBSAN_OPTIONS="halt_on_error=1"))
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/home/codex/xemu-shader-workbench-handoff/.scratch/spiritboot-halo-optical-integrity-20261017/.scratch/forza-core-lock-0170/red/request_test']' returned non-zero exit status 1.

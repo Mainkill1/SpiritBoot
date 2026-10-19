@@ -1,0 +1,703 @@
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index 6508bbb0..ba1bb792 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -1159,6 +1159,7 @@ VfatTryAsyncRead(
+     IoSetCompletionRoutine(Irp, VfatAsyncReadComplete, Resource, TRUE, TRUE, TRUE);
+     IoMarkIrpPending(Irp);
+     IrpContext->Flags &= ~IRPCONTEXT_COMPLETE;
++    Irp->Flags |= IRP_XBOX_FAST_NATIVE_READ;
+     IoCallDriver(IrpContext->DeviceExt->StorageDevice, Irp);
+     /* The lower driver may already have completed and released the lease. */
+     return TRUE;
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index 8800c675..1bd5c9a7 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -30,6 +30,9 @@ typedef struct NX_NATIVE_ENVELOPE {
+     unsigned handle_valid, terminal_ready, completed;
+     unsigned submit_active, result_deferred, packet_live;
+     unsigned deferred_control, dynamic;
++    unsigned direct_read, direct_recovery;
++    nx_status direct_status;
++    uint64_t direct_bytes;
+     KDPC completion_dpc;
+     PMDL control_mdl;
+     ULONG control_code, control_output;
+@@ -126,6 +129,8 @@ static void port_leave(void *context);
+ static VOID NTAPI NxNativeCompletionDpc(PKDPC,PVOID,PVOID,PVOID);
+ static VOID NTAPI NxNativeTrimDpc(PKDPC,PVOID,PVOID,PVOID);
+ static VOID NTAPI NxNativeAdmissionDpc(PKDPC,PVOID,PVOID,PVOID);
++static void handle_direct_result(NX_NATIVE_ENVELOPE *,const nx_packet_result *,
++                                 nx_packet_status);
+ 
+ static void destroy_dynamic_envelope(NX_NATIVE_ENVELOPE *envelope)
+ {
+@@ -294,22 +299,14 @@ static NX_NATIVE_ENVELOPE *command_envelope(NX_NATIVE_ADAPTER *adapter,
+     return envelope;
+ }
+ 
+-static nx_status port_prepare(void *context,const nx_command *command)
++static nx_packet_status prepare_data_packet(NX_NATIVE_ENVELOPE *envelope,
++                                            const nx_command *command)
+ {
+-    NX_NATIVE_ADAPTER *adapter=context;
+-    NX_NATIVE_ENVELOPE *envelope=command_envelope(adapter,command);
++    NX_NATIVE_ADAPTER *adapter=envelope->adapter;
+     nx_packet_resources resources;
+     nx_packet_command packet;
+-    nx_handle handle;
+-    PMDL mdl;
++    PMDL mdl=envelope->parent->MdlAddress;
+     uint32_t pfn_capacity=0;
+-    unsigned cancel_after;
+-    if(!envelope || envelope->packet_live) return NX_PROTOCOL_ERROR;
+-    handle.slot=command->token.slot;handle.generation=command->token.generation;
+-    port_enter(adapter);envelope->handle=handle;envelope->handle_valid=1;
+-    cancel_after=envelope->cancel_latched;port_leave(adapter);
+-    if(cancel_after) nx_cancel(&adapter->core,handle);
+-    mdl=envelope->parent->MdlAddress;
+     if(mdl && mdl->Size>=(int)sizeof(*mdl))
+         pfn_capacity=((uint32_t)mdl->Size-(uint32_t)sizeof(*mdl))/(uint32_t)sizeof(ULONG);
+     resources.child=envelope->child;
+@@ -327,10 +324,7 @@ static nx_status port_prepare(void *context,const nx_command *command)
+     packet.direction=command->direction;
+     packet.function=command->function;
+     packet.cdb_length=command->cdb_length;
+-    {
+-        unsigned index;
+-        for(index=0;index<command->cdb_length;++index) packet.cdb[index]=command->cdb[index];
+-    }
++    copy_bytes(packet.cdb,command->cdb,command->cdb_length);
+     packet.timeout_seconds=NX_NATIVE_TIMEOUT_SECONDS;
+     packet.timeout_limit_seconds=NX_NATIVE_TIMEOUT_LIMIT_SECONDS;
+     packet.max_bytes=adapter->core.config.max_bytes;
+@@ -339,7 +333,21 @@ static nx_status port_prepare(void *context,const nx_command *command)
+     packet.lower_stack_count=adapter->lower->StackSize;
+     packet.completion=NxNativeAdapterChildComplete;
+     packet.completion_context=envelope;
+-    if(nx_packet_prepare(&resources,&packet,&envelope->ticket)!=NX_PACKET_OK)
++    return nx_packet_prepare(&resources,&packet,&envelope->ticket);
++}
++
++static nx_status port_prepare(void *context,const nx_command *command)
++{
++    NX_NATIVE_ADAPTER *adapter=context;
++    NX_NATIVE_ENVELOPE *envelope=command_envelope(adapter,command);
++    nx_handle handle;
++    unsigned cancel_after;
++    if(!envelope || envelope->packet_live) return NX_PROTOCOL_ERROR;
++    handle.slot=command->token.slot;handle.generation=command->token.generation;
++    port_enter(adapter);envelope->handle=handle;envelope->handle_valid=1;
++    cancel_after=envelope->cancel_latched;port_leave(adapter);
++    if(cancel_after) nx_cancel(&adapter->core,handle);
++    if(prepare_data_packet(envelope,command)!=NX_PACKET_OK)
+         return NX_INVALID;
+     envelope->packet_live=1;
+     return NX_OK;
+@@ -678,17 +686,19 @@ static VOID NTAPI NxNativeCompletionDpc(PKDPC dpc,PVOID context,PVOID argument1,
+     NX_NATIVE_ADAPTER *adapter=envelope->adapter;
+     nx_packet_result result;
+     nx_packet_status captured=NX_PACKET_OK;
+-    unsigned report=0,control=0;
++    unsigned report=0,control=0,direct=0;
+     (void)dpc;(void)argument1;(void)argument2;
+     port_enter(adapter);
+     if(envelope->result_deferred) {
+         result=envelope->deferred_result;captured=envelope->deferred_capture;
+         control=envelope->deferred_control;envelope->result_deferred=0;
++        direct=envelope->direct_read;
+         envelope->deferred_control=0;report=1;
+     }
+     port_leave(adapter);
+     if(!report) return;
+     if(control) (void)handle_control_result(envelope,&result,captured);
++    else if(direct) handle_direct_result(envelope,&result,captured);
+     else report_result(envelope,&result,captured);
+ }
+ 
+@@ -722,6 +732,100 @@ static void port_complete(void *context,void *parent,nx_status status,uint64_t b
+     }
+ }
+ 
++static void submit_direct_packet(NX_NATIVE_ENVELOPE *envelope,
++                                 const nx_command *command,unsigned recovery)
++{
++    NX_NATIVE_ADAPTER *adapter=envelope->adapter;
++    nx_packet_result deferred;
++    nx_packet_status captured=NX_PACKET_OK,prepared;
++    unsigned report=0,cancel_after=0,cancelled;
++    if(!envelope->was_pending) port_pending(adapter,envelope->parent);
++    prepared=prepare_data_packet(envelope,command);
++    port_enter(adapter);cancelled=envelope->cancel_latched;
++    if(prepared==NX_PACKET_OK) {
++        envelope->packet_live=1;
++        if(!cancelled||recovery) envelope->submit_active=1;
++    }
++    port_leave(adapter);
++    if(prepared!=NX_PACKET_OK) {
++        if(recovery) {
++            nx_status status=envelope->direct_status;
++            uint64_t bytes=envelope->direct_bytes;
++            if(status==NX_OK) status=NX_IO_ERROR;
++            quarantine_adapter(adapter);
++            port_complete(adapter,envelope->parent,status,bytes);
++        } else port_complete(adapter,envelope->parent,
++                             cancelled ? NX_CANCELLED:NX_INVALID,0);
++        return;
++    }
++    if(cancelled&&!recovery) {
++        port_enter(adapter);envelope->packet_live=0;port_leave(adapter);
++        port_complete(adapter,envelope->parent,NX_CANCELLED,0);return;
++    }
++    (void)IofCallDriver(adapter->lower,envelope->child);
++    port_enter(adapter);envelope->submit_active=0;
++    if(envelope->result_deferred) {
++        deferred=envelope->deferred_result;captured=envelope->deferred_capture;
++        envelope->result_deferred=0;report=1;
++    }
++    cancel_after=envelope->cancel_latched&&envelope->packet_live&&!recovery;
++    port_leave(adapter);
++    if(report) handle_direct_result(envelope,&deferred,captured);
++    else if(cancel_after) (void)IoCancelIrp(envelope->child);
++}
++
++static void start_direct_read(NX_NATIVE_ENVELOPE *envelope)
++{
++    nx_command command;
++    if(!nx_plan_single_read(&envelope->adapter->core,
++                            &envelope->waiting_request,&command)) {
++        port_complete(envelope->adapter,envelope->parent,NX_INVALID,0);return;
++    }
++    command.token.slot=UINT32_MAX;
++    command.token.generation=envelope->media_epoch;
++    command.token.command=1;
++    submit_direct_packet(envelope,&command,0);
++}
++
++static void handle_direct_result(NX_NATIVE_ENVELOPE *envelope,
++                                 const nx_packet_result *result,
++                                 nx_packet_status captured)
++{
++    NX_NATIVE_ADAPTER *adapter=envelope->adapter;
++    nx_status status=core_status(result,captured);
++    uint64_t bytes=status==NX_PROTOCOL_ERROR ? 0:result->reported_bytes;
++    unsigned cancelled,quarantined,recovery;
++    port_enter(adapter);cancelled=envelope->cancel_latched;
++    quarantined=adapter->quarantined;recovery=envelope->direct_recovery;
++    if(recovery) envelope->direct_recovery=0;
++    port_leave(adapter);
++    if(recovery) {
++        nx_status original=envelope->direct_status;
++        uint64_t original_bytes=envelope->direct_bytes;
++        if(status!=NX_OK||result->queue_frozen) {
++            if(original==NX_OK) original=NX_IO_ERROR;
++            quarantine_adapter(adapter);
++        } else if(quarantined&&original==NX_OK) original=NX_IO_ERROR;
++        if(cancelled) original=NX_CANCELLED;
++        port_complete(adapter,envelope->parent,original,original_bytes);return;
++    }
++    if(cancelled) status=NX_CANCELLED;
++    else if(quarantined&&(status==NX_OK||status==NX_CANCELLED)) status=NX_IO_ERROR;
++    else if(status==NX_OK&&bytes!=envelope->waiting_request.bytes)
++        status=NX_SHORT_TRANSFER;
++    if(result->queue_frozen) {
++        nx_command release;
++        zero_bytes(&release,sizeof(release));
++        release.parent=envelope->parent;release.lease=envelope;
++        release.token.slot=UINT32_MAX;release.token.generation=envelope->media_epoch;
++        release.token.command=2;release.function=4;
++        port_enter(adapter);envelope->direct_status=status;
++        envelope->direct_bytes=bytes;envelope->direct_recovery=1;port_leave(adapter);
++        submit_direct_packet(envelope,&release,1);return;
++    }
++    port_complete(adapter,envelope->parent,status,bytes);
++}
++
+ NTSTATUS NTAPI NxNativeAdapterChildComplete(PDEVICE_OBJECT device,PIRP child,PVOID context)
+ {
+     NX_NATIVE_ENVELOPE *envelope=context;
+@@ -734,6 +838,7 @@ NTSTATUS NTAPI NxNativeAdapterChildComplete(PDEVICE_OBJECT device,PIRP child,PVO
+     captured=nx_packet_capture(&envelope->ticket,&result);
+     port_enter(adapter);
+     defer=envelope->submit_active;
++    if(envelope->direct_read) envelope->packet_live=0;
+     envelope->deferred_result=result;
+     envelope->deferred_capture=captured;
+     envelope->result_deferred=1;envelope->deferred_control=0;
+@@ -769,6 +874,8 @@ void NTAPI NxNativeAdapterCancel(PDEVICE_OBJECT device,PIRP parent)
+             cursor->queued=0;cursor->next_waiting=NULL;call_core=3;
+         }
+     }
++    else if(envelope->direct_read && envelope->packet_live &&
++            !envelope->submit_active && !envelope->direct_recovery) call_core=2;
+     port_leave(adapter);
+     IoReleaseCancelSpinLock(parent->CancelIrql);
+     if(call_core==1) nx_cancel(&adapter->core,handle);
+@@ -910,10 +1017,12 @@ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+         if(!quarantined) { ++adapter->data_active;envelope->admitted=1; }
+         port_leave(adapter);
+         if(quarantined) port_complete(adapter,envelope->parent,NX_IO_ERROR,0);
++        else if(envelope->direct_read) start_direct_read(envelope);
+         else (void)nx_start(&adapter->core,&envelope->waiting_request,&handle);
+         port_enter(adapter);
+         if(envelope->active && !envelope->completed) {
+-            envelope->handle=handle;envelope->handle_valid=handle.slot!=UINT32_MAX;
++            envelope->handle=handle;
++            envelope->handle_valid=!envelope->direct_read&&handle.slot!=UINT32_MAX;
+             cancel_after=envelope->cancel_latched && envelope->handle_valid;
+         }
+         /* Keep the start lease across an unlocked cancellation. Without a
+@@ -940,9 +1049,11 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     nx_request request;
+     NTSTATUS result;
+     KIRQL cancel_irql;
+-    unsigned grow=0,cancelled;
++    unsigned grow=0,cancelled,qualified;
+     nx_lcq_observation cache_observation={0};
+     if(!adapter || !parent) return STATUS_INVALID_PARAMETER;
++    qualified=(parent->Flags&IRP_XBOX_FAST_NATIVE_READ)!=0;
++    parent->Flags&=~IRP_XBOX_FAST_NATIVE_READ;
+     port_enter(adapter);
+     if(adapter->quarantined) {
+         port_leave(adapter);parent->IoStatus.Status=STATUS_IO_DEVICE_ERROR;
+@@ -978,6 +1089,8 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+         envelope->cancel_active=envelope->cancel_latched=envelope->handle_valid=0;
+         envelope->terminal_ready=envelope->completed=envelope->submit_active=0;
+         envelope->result_deferred=envelope->packet_live=0;
++        envelope->direct_read=envelope->direct_recovery=0;
++        envelope->direct_status=NX_PROTOCOL_ERROR;envelope->direct_bytes=0;
+         envelope->queued=envelope->start_active=envelope->admitted=envelope->was_pending=0;
+         envelope->dispatch_status=STATUS_PENDING;
+         envelope->cache_guard=!adapter->core.config.optical&&
+@@ -1011,6 +1124,8 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+             request.mdl_bytes=mdl->ByteCount;request.mdl_present=1;
+         }
+     }
++    if(qualified&&nx_plan_single_read(&adapter->core,&request,&(nx_command){0}))
++        envelope->direct_read=1;
+     port_enter(adapter);
+     /* Cancellation can run after installation but before queue insertion.
+      * Resolve that latch without waiting for unrelated transport capacity. */
+diff --git a/drivers/storage/class/nxstorage/request.c b/drivers/storage/class/nxstorage/request.c
+index d48c1bc1..96956658 100644
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -105,21 +105,13 @@ static int barrier_clear(const nx_device *d, const nx_slot *s)
+     return 1;
+ }
+ 
+-static nx_status build_command(nx_device *d, nx_slot *s, uint32_t index)
++static nx_status plan_data_command(const nx_device *d,const nx_request *r,
++                                   uint64_t transferred,nx_command *c)
+ {
+-    nx_command *c=&s->command;
+-    if (s->sequence==UINT64_MAX) return NX_PROTOCOL_ERROR;
+-    if (s->sequence) clear_bytes(c,sizeof(*c));
+-    c->token.slot=index; c->token.generation=s->generation; c->token.command=++s->sequence;
+-    c->parent=s->request.parent; c->lease=s->request.lease;
+-    c->function=s->recovery ? RELEASE:EXECUTE;
+-    if (s->recovery) return NX_OK;
+-    c->cdb_length=10;
+-    if (cache_sync(s)) { c->cdb[0]=SYNC10; return NX_OK; }
+-    c->mdl_virtual=s->request.mdl_virtual; c->mdl_bytes=s->request.mdl_bytes;
+-    c->data_virtual=c->mdl_virtual+(uintptr_t)(s->request.mdl_offset+s->transferred);
+-    c->disk_byte=(uint64_t)s->request.offset+s->transferred;
+-    uint64_t bytes=s->request.bytes-s->transferred;
++    c->mdl_virtual=r->mdl_virtual;c->mdl_bytes=r->mdl_bytes;
++    c->data_virtual=c->mdl_virtual+(uintptr_t)(r->mdl_offset+transferred);
++    c->disk_byte=(uint64_t)r->offset+transferred;
++    uint64_t bytes=r->bytes-transferred;
+     uint64_t page_room=(uint64_t)d->config.max_pages*d->config.page_bytes-
+                        (c->data_virtual & (d->config.page_bytes-1u));
+     uint64_t block_room=(uint64_t)d->config.ata_max_blocks<<d->sector_shift;
+@@ -133,14 +125,39 @@ static nx_status build_command(nx_device *d, nx_slot *s, uint32_t index)
+     c->bytes=(uint32_t)bytes;
+     uint32_t lba=(uint32_t)(c->disk_byte>>d->sector_shift);
+     uint32_t blocks=c->bytes>>d->sector_shift;
+-    c->cdb[0]=s->request.operation==NX_READ ? READ10:WRITE10;
+-    c->direction=s->request.operation==NX_READ ? DATA_IN:DATA_OUT;
++    c->cdb_length=10;
++    c->cdb[0]=r->operation==NX_READ ? READ10:WRITE10;
++    c->direction=r->operation==NX_READ ? DATA_IN:DATA_OUT;
+     c->cdb[2]=(uint8_t)(lba>>24); c->cdb[3]=(uint8_t)(lba>>16);
+     c->cdb[4]=(uint8_t)(lba>>8); c->cdb[5]=(uint8_t)lba;
+     c->cdb[7]=(uint8_t)(blocks>>8); c->cdb[8]=(uint8_t)blocks;
+     return NX_OK;
+ }
+ 
++int nx_plan_single_read(const nx_device *d,const nx_request *r,nx_command *c)
++{
++    if (!d || !r || !c || r->operation!=NX_READ || !r->bytes ||
++        validate(d,r)!=NX_OK) return 0;
++    clear_bytes(c,sizeof(*c));c->parent=r->parent;c->lease=r->lease;
++    if (plan_data_command(d,r,0,c)!=NX_OK || c->bytes!=r->bytes) {
++        clear_bytes(c,sizeof(*c));return 0;
++    }
++    return 1;
++}
++
++static nx_status build_command(nx_device *d, nx_slot *s, uint32_t index)
++{
++    nx_command *c=&s->command;
++    if (s->sequence==UINT64_MAX) return NX_PROTOCOL_ERROR;
++    if (s->sequence) clear_bytes(c,sizeof(*c));
++    c->token.slot=index; c->token.generation=s->generation; c->token.command=++s->sequence;
++    c->parent=s->request.parent; c->lease=s->request.lease;
++    c->function=s->recovery ? RELEASE:EXECUTE;
++    if (s->recovery) return NX_OK;
++    if (cache_sync(s)) { c->cdb_length=10;c->cdb[0]=SYNC10; return NX_OK; }
++    return plan_data_command(d,&s->request,s->transferred,c);
++}
++
+ static void preparation_failed(nx_device *d, nx_slot *s, nx_status result)
+ {
+     if (s->recovery) {
+diff --git a/drivers/storage/class/nxstorage/request.h b/drivers/storage/class/nxstorage/request.h
+index 60518348..bb0e6df2 100644
+--- a/drivers/storage/class/nxstorage/request.h
++++ b/drivers/storage/class/nxstorage/request.h
+@@ -89,6 +89,7 @@ typedef struct nx_device {
+ 
+ /* Last argument is the actual caller-provided slot storage byte capacity. */
+ nx_status nx_device_init(nx_device *, const nx_config *, const nx_port *, nx_slot *, uint32_t, size_t);
++int nx_plan_single_read(const nx_device *, const nx_request *, nx_command *);
+ nx_status nx_start(nx_device *, const nx_request *, nx_handle *);
+ void nx_lower_done(nx_device *, nx_token, nx_status, uint32_t, uint32_t);
+ void nx_cancel(nx_device *, nx_handle);
+diff --git a/sdk/include/xdk/iotypes.h b/sdk/include/xdk/iotypes.h
+index ee2c97cc..d1de7977 100644
+--- a/sdk/include/xdk/iotypes.h
++++ b/sdk/include/xdk/iotypes.h
+@@ -1947,6 +1947,8 @@ $if (_WDMDDK_)
+ /* The following 2 are missing in latest WDK */
+ #define IRP_RETRY_IO_COMPLETION         0x00004000
+ #define IRP_CLASS_CACHE_OPERATION       0x00008000
++/* Private one-hop hint consumed by SpiritBoot's native storage adapter. */
++#define IRP_XBOX_FAST_NATIVE_READ       0x00010000
+ 
+ /* IRP.AllocationFlags */
+ #define IRP_QUOTA_CHARGED                 0x01
+diff --git a/tests/host/fatx/check-async-read.py b/tests/host/fatx/check-async-read.py
+index dba089b0..897124e5 100644
+--- a/tests/host/fatx/check-async-read.py
++++ b/tests/host/fatx/check-async-read.py
+@@ -45,6 +45,7 @@ shim = r'''
+ #define STATUS_CANCELLED ((NTSTATUS)0xc0000120)
+ #define IRP_PAGING_IO 1
+ #define IRP_NOCACHE 2
++#define IRP_XBOX_FAST_NATIVE_READ 0x00010000
+ #define IRPCONTEXT_CANWAIT 1
+ #define IRPCONTEXT_COMPLETE 2
+ #define FCB_IS_PAGE_FILE 1
+@@ -80,7 +81,7 @@ typedef struct { IRP *Irp; FILE_OBJECT *FileObject; STACK *Stack; DEVICE_EXTENSI
+ typedef __typeof__(((DEVICE_EXTENSION*)0)->FatInfo) *PFATINFO;
+ static struct { DEVICE *DeviceObject; } global,*VfatGlobalData=&global;
+ static uintptr_t current=0x1000;
+-static unsigned submitted,queued,freed,allocated,completed,lock_calls,stats_calls,stats_sum;
++static unsigned submitted,queued,freed,allocated,completed,lock_calls,stats_calls,stats_sum,fast_flags_seen;
+ static int immediate,allocation_fail,lock_fail,mapping_fail,checkpoint;
+ static unsigned stack_size=0x4000;
+ static NTSTATUS backend;
+@@ -108,7 +109,7 @@ static STACK *IoGetNextIrpStackLocation(IRP*i){return &i->lower;}
+ static void IoMarkIrpPending(IRP*i){i->pending++;}
+ static void IoSetCompletionRoutine(IRP*i,COMPLETION f,void*c,int a,int b,int x){assert(a&&b&&x);i->done=f;i->context=c;}
+ static void finish(IRP*i){i->IoStatus.Status=backend;i->IoStatus.Information=backend?0:512;i->PendingReturned=!immediate;assert(i->done);assert(i->done(NULL,i,i->context)==0);completed++;}
+-static NTSTATUS IoCallDriver(DEVICE*d,IRP*i){(void)d;submitted++;assert(!i->lower.FileObject);assert(i->lower.Parameters.Read.ByteOffset.QuadPart==0x123400);active=i;if(immediate)finish(i);return immediate?backend:STATUS_PENDING;}
++static NTSTATUS IoCallDriver(DEVICE*d,IRP*i){(void)d;submitted++;assert(!i->lower.FileObject);assert(i->lower.Parameters.Read.ByteOffset.QuadPart==0x123400);assert(i->Flags&IRP_XBOX_FAST_NATIVE_READ);fast_flags_seen++;i->Flags&=~IRP_XBOX_FAST_NATIVE_READ;active=i;if(immediate)finish(i);return immediate?backend:STATUS_PENDING;}
+ '''
+ tests=r'''
+ static unsigned checks,failures;
+@@ -122,7 +123,7 @@ int main(void){
+   DEVICE dev={.AlignmentRequirement=1};
+   DEVICE_EXTENSION de={.FatInfo={512,4096,64},.StorageDevice=&dev};
+   CONTEXT c={&irp,&file,&stack,&de,&dev,IRPCONTEXT_COMPLETE,0};
+-  submitted=queued=freed=allocated=completed=lock_calls=stats_calls=stats_sum=0;active=NULL;current=0x1000;
++  submitted=queued=freed=allocated=completed=lock_calls=stats_calls=stats_sum=fast_flags_seen=0;active=NULL;current=0x1000;
+   immediate=allocation_fail=lock_fail=mapping_fail=0;checkpoint=scenario==19;backend=0;stack_size=0x4000;
+   int eligible=scenario<6 || scenario==12 || scenario==19;
+   if(scenario==1)immediate=1;
+@@ -143,9 +144,11 @@ int main(void){
+   if(scenario==17)irp.Cancel=1;
+   if(scenario==18)f.Flags=FCB_IS_FAT;
+   NTSTATUS result=VfatRead(&c);
++  check(!(irp.Flags&IRP_XBOX_FAST_NATIVE_READ),"private native-read qualification never escapes FATX submission");
+   if(eligible){
+    check(result==STATUS_PENDING,"eligible read preserves asynchronous return");
+    check(submitted==1&&queued==0,"eligible resident read reaches storage without worker");
++   check(fast_flags_seen==1,"eligible read qualifies exactly one lower submission");
+    if(!submitted)continue;
+    check(allocated==0,"eligible read needs no per-request pool allocation");
+    check(f.MainResource.count==0 || f.MainResource.owner==((uintptr_t)&irp|3),"pending lease is keyed by stable parent IRP");
+diff --git a/tests/host/nxstorage/native_adapter_host_platform.h b/tests/host/nxstorage/native_adapter_host_platform.h
+index 8cebcc82..1e4cac1b 100644
+--- a/tests/host/nxstorage/native_adapter_host_platform.h
++++ b/tests/host/nxstorage/native_adapter_host_platform.h
+@@ -100,6 +100,7 @@ enum {
+     IO_NO_INCREMENT=0, IO_DISK_INCREMENT=1, FILE_WRITE_THROUGH=2,
+     SL_WRITE_THROUGH=4, SL_INVOKE_ON_CANCEL=0x20,
+     SL_INVOKE_ON_SUCCESS=0x40, SL_INVOKE_ON_ERROR=0x80,
++    IRP_XBOX_FAST_NATIVE_READ=0x00010000,
+     IOCTL_DISK_GET_DRIVE_GEOMETRY=0x00070000,
+     IOCTL_DISK_GET_DRIVE_GEOMETRY_EX=0x000700a0,
+     IOCTL_CDROM_GET_DRIVE_GEOMETRY=0x0002404c,
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 8d498f84..83997186 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -388,7 +388,7 @@ static int randomized_qd12_bursts_complete_1024_reads(void)
+     PDEVICE_OBJECT d=make_device(16);parent_fixture reads[WINDOW];unsigned active[WINDOW]={0};
+     unsigned request_index[WINDOW]={0};
+     uint8_t *payloads=aligned_alloc(4096,WINDOW*4096);
+-    unsigned submitted=0,completed=0;lower_pending=1;pending_child_count=0;
++    unsigned submitted=0,completed=0;lower_pending=1;pending_child_count=0;lower_calls=0;
+     CHECK(payloads!=NULL);memset(payloads,0xa5,WINDOW*4096);stamp_read_payloads=1;
+     for(unsigned i=0;i<WINDOW;++i) {
+         init_parent(&reads[i],IRP_MJ_READ,4096);lower_calls=0;
+@@ -426,6 +426,48 @@ static int randomized_qd12_bursts_complete_1024_reads(void)
+     stamp_read_payloads=0;free(payloads);
+     burst_complete_during_submit=0;lower_pending=0;return 1;
+ }
++/* Break: direct completions become associated with a recycled envelope or a
++ * randomized completion burst strands a qualified FATX parent. */
++static int qualified_qd12_bursts_preserve_1024_payloads(void)
++{
++    enum { WINDOW=12,TOTAL=1024 };
++    PDEVICE_OBJECT d=make_device(16);parent_fixture reads[WINDOW];
++    unsigned active[WINDOW]={0},request_index[WINDOW]={0};
++    uint8_t *payloads=aligned_alloc(4096,WINDOW*4096);
++    unsigned submitted=0,completed=0;lower_pending=1;pending_child_count=0;lower_calls=0;
++    CHECK(payloads!=NULL);memset(payloads,0xa5,WINDOW*4096);stamp_read_payloads=1;
++    burst_seed=0x36d2a9f1u;burst_complete_during_submit=1;
++    while(completed<TOTAL) {
++        for(unsigned i=0;i<WINDOW&&submitted<TOTAL;++i) if(!active[i]) {
++            init_parent(&reads[i],IRP_MJ_READ,4096);
++            memset(payloads+i*4096,0xa5,4096);
++            reads[i].mdl.StartVa=payloads+i*4096;
++            reads[i].stack.Parameters.Read.ByteOffset=(int64_t)(submitted%256u)*4096;
++            reads[i].irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
++            request_index[i]=submitted;
++            CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
++            active[i]=1;++submitted;
++        }
++        if(pending_child_count) {
++            unsigned pick=(burst_seed=burst_seed*1664525u+1013904223u)%pending_child_count;
++            CHECK(complete_specific_child(pending_children[pick],STATUS_SUCCESS,4096,1)==
++                  STATUS_MORE_PROCESSING_REQUIRED);
++        }
++        for(unsigned i=0;i<WINDOW;++i) if(active[i]&&reads[i].irp.host_completed) {
++            uint32_t expected=(request_index[i]%256u)*8u,first,last;
++            memcpy(&first,payloads+i*4096,sizeof(first));
++            memcpy(&last,payloads+(i+1u)*4096-sizeof(last),sizeof(last));
++            CHECK(first==expected&&last==~expected);
++            CHECK(reads[i].irp.IoStatus.Status==STATUS_SUCCESS&&
++                  reads[i].irp.IoStatus.Information==4096);
++            active[i]=0;++completed;
++        }
++        CHECK(pending_child_count<=WINDOW);
++    }
++    CHECK(submitted==TOTAL&&!pending_child_count);
++    stamp_read_payloads=0;free(payloads);burst_complete_during_submit=0;
++    lower_pending=0;return 1;
++}
+ /* Break: a cancelled parent reaches lower transport before commit, or committed transport is not drained once. */
+ static int cancellation_respects_transport_commit(void)
+ {
+@@ -943,6 +985,115 @@ static int retained_submit_avoids_empty_lock_roundtrips(void)
+     CHECK(used<=14);
+     return 1;
+ }
++/* Break: the FATX-qualified one-command read still traverses the generic
++ * split/barrier request pump and completes inline before returning pending. */
++static int qualified_single_read_has_direct_native_contract(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture pending,inline_read;
++    lower_pending=1;lower_calls=0;pending_child_count=0;
++    init_parent(&pending,IRP_MJ_READ,512);
++    pending.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
++    unsigned before=__atomic_load_n(&spin_acquires,__ATOMIC_RELAXED);
++    CHECK(NxNativeDispatchReadWrite(device,&pending.irp)==STATUS_PENDING);
++    unsigned used=__atomic_load_n(&spin_acquires,__ATOMIC_RELAXED)-before;
++    CHECK(used<=8);
++    CHECK(lower_calls==1&&pending.irp.host_pending&&!pending.irp.host_completed);
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(pending.irp.host_completed&&pending.irp.IoStatus.Status==STATUS_SUCCESS&&
++          pending.irp.IoStatus.Information==512);
++
++    lower_pending=0;lower_calls=0;
++    init_parent(&inline_read,IRP_MJ_READ,512);
++    inline_read.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&inline_read.irp)==STATUS_PENDING);
++    CHECK(lower_calls==1&&inline_read.irp.host_pending&&inline_read.irp.host_completed);
++    CHECK(inline_read.irp.IoStatus.Status==STATUS_SUCCESS&&
++          inline_read.irp.IoStatus.Information==512);
++    return 1;
++}
++/* Break: cancellation during direct packet preparation returns a synchronous
++ * status even though FATX already transferred completion ownership. */
++static int qualified_read_cancellation_keeps_pending_contract(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture before,after;
++    lower_pending=1;lower_calls=cancel_calls=0;
++    init_parent(&before,IRP_MJ_READ,512);
++    before.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;cancel_parent=&before.irp;
++    cancel_during_prepare=1;
++    CHECK(NxNativeDispatchReadWrite(device,&before.irp)==STATUS_PENDING);
++    CHECK(before.irp.host_pending&&before.irp.host_completed&&
++          before.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(!lower_calls&&!cancel_calls&&!cancel_during_prepare&&
++          !(before.irp.Flags&IRP_XBOX_FAST_NATIVE_READ));
++
++    init_parent(&after,IRP_MJ_READ,512);
++    after.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;cancel_parent=&after.irp;
++    cancel_during_submit=1;
++    CHECK(NxNativeDispatchReadWrite(device,&after.irp)==STATUS_PENDING);
++    CHECK(after.irp.host_pending&&after.irp.host_completed&&
++          after.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(lower_calls==1&&cancel_calls==1&&!cancel_during_submit&&
++          !(after.irp.Flags&IRP_XBOX_FAST_NATIVE_READ));
++    cancel_parent=NULL;lower_pending=0;return 1;
++}
++/* Break: a qualified read bypasses bounded RELEASE QUEUE recovery or lets a
++ * failed release leave later requests on an unsafe lower queue. */
++static int qualified_read_recovers_or_quarantines_frozen_queue(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture frozen,next;
++    lower_pending=0;lower_calls=0;freeze_next=1;release_failure=0;
++    init_parent(&frozen,IRP_MJ_READ,512);frozen.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&frozen.irp)==STATUS_PENDING);
++    CHECK(frozen.irp.host_completed&&frozen.irp.IoStatus.Status==STATUS_IO_DEVICE_ERROR);
++    CHECK(lower_calls==2&&functions[0]==0&&functions[1]==4);
++    init_parent(&next,IRP_MJ_READ,512);next.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&next.irp)==STATUS_PENDING);
++    CHECK(next.irp.host_completed&&next.irp.IoStatus.Status==STATUS_SUCCESS&&lower_calls==3);
++
++    device=make_device(2);lower_calls=0;freeze_next=1;release_failure=1;
++    init_parent(&frozen,IRP_MJ_READ,512);frozen.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&frozen.irp)==STATUS_PENDING);
++    CHECK(frozen.irp.host_completed&&lower_calls==2&&functions[1]==4);
++    init_parent(&next,IRP_MJ_READ,512);next.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&next.irp)==STATUS_IO_DEVICE_ERROR);
++    CHECK(next.irp.host_completed&&lower_calls==2);
++    release_failure=0;return 1;
++}
++/* Break: an oversized marked read skips core segmentation or leaves the
++ * private qualification bit visible after the adapter declines the shortcut. */
++static int qualified_split_read_falls_back_to_core(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture read;
++    lower_pending=0;lower_calls=0;
++    init_parent(&read,IRP_MJ_READ,8192);read.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&read.irp)==STATUS_SUCCESS);
++    CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS&&
++          read.irp.IoStatus.Information==8192);
++    CHECK(lower_calls==2&&opcodes[0]==0x28&&opcodes[1]==0x28&&
++          !(read.irp.Flags&IRP_XBOX_FAST_NATIVE_READ));
++    return 1;
++}
++/* Break: the direct completion path fabricates a full transfer, credits an
++ * over-report, or drops bytes the lower driver actually transferred on error. */
++static int qualified_read_bounds_terminal_byte_counts(void)
++{
++    struct { NTSTATUS lower; ULONG actual; UCHAR srb; NTSTATUS status; ULONG bytes; } cases[]={
++        {STATUS_SUCCESS,256,1,STATUS_BUFFER_OVERFLOW,256},
++        {STATUS_SUCCESS,513,1,STATUS_IO_DEVICE_ERROR,0},
++        {STATUS_IO_DEVICE_ERROR,256,2,STATUS_IO_DEVICE_ERROR,256}
++    };
++    for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
++        PDEVICE_OBJECT device=make_device(2);parent_fixture read;
++        lower_pending=1;pending_child_count=0;lower_calls=0;
++        init_parent(&read,IRP_MJ_READ,512);read.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
++        CHECK(NxNativeDispatchReadWrite(device,&read.irp)==STATUS_PENDING);
++        CHECK(complete_child(cases[i].lower,cases[i].actual,cases[i].srb)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++        CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==cases[i].status&&
++              read.irp.IoStatus.Information==cases[i].bytes);
++    }
++    lower_pending=0;return 1;
++}
+ static pnp_thread reservation_removal;
+ static pthread_t reservation_removal_id;
+ static unsigned reservation_wait_seen;
+@@ -1049,6 +1200,7 @@ static int sealed_final_completion_wakes_removal(void)
+ {
+     PDEVICE_OBJECT device=make_device(2);
+     parent_fixture read;init_parent(&read,IRP_MJ_READ,512);
++    read.irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
+     lower_pending=1;lower_calls=0;
+     CHECK(NxNativeDispatchReadWrite(device,&read.irp)==STATUS_PENDING);
+     unsigned signals=__atomic_load_n(&rundown_event_calls,__ATOMIC_RELAXED);
+@@ -1250,6 +1402,7 @@ static int queued_cancel_and_flush_keep_fifo_barriers(void)
+     lower_pending=1;pending_child_count=0;lower_calls=0;cancel_calls=0;
+     for(unsigned i=0;i<5;++i) {
+         init_parent(&reads[i],i<4?IRP_MJ_WRITE:IRP_MJ_READ,4096);
++        if(i==4) reads[i].irp.Flags|=IRP_XBOX_FAST_NATIVE_READ;
+         CHECK(NxNativeDispatchReadWrite(d,&reads[i].irp)==STATUS_PENDING);
+     }
+     CHECK(pending_child_count==4&&lower_calls==4);
+@@ -1276,4 +1429,4 @@ static int queued_cancel_and_flush_keep_fifo_barriers(void)
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!retained_submit_avoids_empty_lock_roundtrips();f+=!seal_after_reservation_keeps_accepted_parent_live();f+=!seal_during_dynamic_allocation_rejects_and_reclaims();f+=!cancellation_at_late_submit_unlock_keeps_lease();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("42 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!qualified_qd12_bursts_preserve_1024_payloads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!retained_submit_avoids_empty_lock_roundtrips();f+=!qualified_single_read_has_direct_native_contract();f+=!qualified_read_cancellation_keeps_pending_contract();f+=!qualified_read_recovers_or_quarantines_frozen_queue();f+=!qualified_split_read_falls_back_to_core();f+=!qualified_read_bounds_terminal_byte_counts();f+=!seal_after_reservation_keeps_accepted_parent_live();f+=!seal_during_dynamic_allocation_rejects_and_reclaims();f+=!cancellation_at_late_submit_unlock_keeps_lease();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("48 adapter groups, %u failures\n",f);return f?1:0;}
+diff --git a/tests/host/nxstorage/request_test.c b/tests/host/nxstorage/request_test.c
+index a78b4257..a6671fcc 100644
+--- a/tests/host/nxstorage/request_test.c
++++ b/tests/host/nxstorage/request_test.c
+@@ -9,6 +9,7 @@
+  * validation, ownership, byte accounting and parent results are production C. */
+ #define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s\n", __func__, __LINE__, #x); return 0; } } while (0)
+ #define MUST(x) do { if (!(x)) abort(); } while (0)
++int nx_plan_single_read(const nx_device *, const nx_request *, nx_command *);
+ static void *test_allocations[64];
+ static unsigned allocation_count;
+ static void register_allocation(void *p) { MUST(allocation_count<64); test_allocations[allocation_count++]=p; }
+@@ -174,6 +175,39 @@ static nx_request request(fixture *f, parent *p, nx_operation op, int64_t offset
+     nx_request r={p,op,offset,bytes,(uintptr_t)f->buffer,f->buffer_size,0,p,0,0,1,0,0};
+     return r;
+ }
++
++/* Break: the native adapter duplicates request validation or admits a read
++ * that the core would split at a page, adapter, ATA, or READ(10) boundary. */
++static int single_read_plan_matches_core_limits(void)
++{
++    nx_config cfg=config(); fixture f; CHECK(init(&f,&cfg));
++    parent p=fresh(); nx_request r=request(&f,&p,NX_READ,512,4096);
++    nx_command c; memset(&c,0xa5,sizeof(c));
++    CHECK(nx_plan_single_read(&f.dev,&r,&c));
++    CHECK(c.parent==&p&&c.lease==&p&&c.function==0&&c.cdb_length==10);
++    CHECK(c.bytes==4096&&c.disk_byte==512&&c.data_virtual==(uintptr_t)f.buffer);
++    CHECK(c.direction==0x40&&c.cdb[0]==0x28&&c.cdb[5]==1&&c.cdb[8]==8);
++
++    r.operation=NX_WRITE;
++    CHECK(!nx_plan_single_read(&f.dev,&r,&c));
++    r.operation=NX_READ;r.bytes=0;
++    CHECK(!nx_plan_single_read(&f.dev,&r,&c));
++    r.bytes=(uint64_t)cfg.max_bytes+512;
++    CHECK(!nx_plan_single_read(&f.dev,&r,&c));
++
++    r.bytes=1024;r.mdl_offset=3584;f.dev.config.max_pages=1;
++    CHECK(!nx_plan_single_read(&f.dev,&r,&c));
++    r.bytes=512;
++    CHECK(nx_plan_single_read(&f.dev,&r,&c)&&c.bytes==512&&
++          c.data_virtual==(uintptr_t)f.buffer+3584);
++
++    f.dev.config.max_pages=33;f.dev.config.ata_max_blocks=1;
++    r.mdl_offset=0;r.bytes=1024;
++    CHECK(!nx_plan_single_read(&f.dev,&r,&c));
++    r.bytes=512;r.offset=-512;
++    CHECK(!nx_plan_single_read(&f.dev,&r,&c));
++    cleanup(&f);return 1;
++}
+ static void finish_held(fixture *f, unsigned i, nx_status s, uint32_t bytes, uint32_t flags)
+ {
+     MUST(f->held_live[i]); nx_command c=f->held[i]; f->held_live[i]=0;
+@@ -942,6 +976,7 @@ static int durability_snapshot_is_request_owned(void)
+ int main(void)
+ {
+     struct {const char *name; int (*run)(void);} tests[]={
++        {"single_read_plan_matches_core_limits",single_read_plan_matches_core_limits},
+         {"zero_domain_write_through",zero_domain_write_through},
+         {"zero_domain_guards",zero_domain_guards},
+         {"rejects_invalid_input",rejects_invalid_input}, {"zero_has_no_transport",zero_has_no_transport},

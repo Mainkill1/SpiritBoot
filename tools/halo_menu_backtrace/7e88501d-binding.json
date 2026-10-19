@@ -1,0 +1,39 @@
+{
+  "bios_sha256": "7e88501da2969a0e549197f61751c5c3d2779ccdf09b88e6ea046290c23d36f9",
+  "xemu_base": "f3c528eeec86db32c9f96a932267105e83f77375",
+  "pcs": {
+    "submit": "840281f4",
+    "complete": "840159f0",
+    "port_complete": "840513b4",
+    "read": "8404ce78",
+    "scatter": "8404cec8"
+  },
+  "calling_conventions": {
+    "submit": "LTO regparm(3): EAX adapter, EDX IRP, ECX operation; stack offset64,length64,flags",
+    "complete": "fastcall: ECX IRP",
+    "port_complete": "cdecl: stack adapter,IRP,status,bytes64"
+  },
+  "irp_offsets": {
+    "status": "0x10",
+    "information": "0x14",
+    "mdl": "0x6c"
+  },
+  "mdl_offsets": {
+    "start_va": "0x10",
+    "byte_count": "0x14",
+    "byte_offset": "0x18"
+  },
+  "menu_disk_offsets": {
+    "campaign": "52071e00",
+    "multiplayer": "52274c00",
+    "settings": "52c11e00",
+    "game_demos": "52c21e00"
+  },
+  "scope": "Addresses and menu disk offsets are fixture-specific. Re-derive from disassembly and failing textures for other firmware/HDD images.",
+  "allocation_return_pcs": {
+    "envelope_pool": "8404f557",
+    "child_irp": "8404f5a9",
+    "control_mdl": "8404f5d6"
+  },
+  "available_pages_address": "84062220"
+}

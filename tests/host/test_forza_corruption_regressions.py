@@ -12,6 +12,32 @@ SYSVA_REVERT = "patches/roswell/0155-revert-sysva-local-invalidation.patch"
 XDVDFS_REPAIR = "patches/roswell/0156-xdvdfs-preserve-file-position.patch"
 PAYLOAD_QUALIFICATION = "patches/roswell/0157-forza-payload-association-qualification.patch"
 RESET_MEDIA_LIFETIME = "patches/roswell/0158-reset-media-lifetime.patch"
+OPTICAL_ADMISSION = "patches/roswell/0160-optical-qd12-admission.patch"
+COMPLETION_LIFETIME = "patches/roswell/0161-defer-native-child-completion.patch"
+TRANSIENT_ENVELOPE_GROWTH = "patches/roswell/0162-transient-native-envelope-growth.patch"
+
+QUEUED_ADMISSION = "patches/roswell/0163-queue-saturated-native-admission.patch"
+
+COMPACT_ENVELOPES = "patches/roswell/0164-compact-data-overflow-envelopes.patch"
+
+PRE_ADMISSION_CANCEL = "patches/roswell/0165-cancel-before-native-admission.patch"
+SEALED_RUNDOWN = "patches/roswell/0166-sealed-rundown-notifications.patch"
+ACTIVE_SCAN = "patches/roswell/0167-skip-inactive-native-slots.patch"
+ADAPTER_BOOKKEEPING = "patches/roswell/0168-coalesce-native-adapter-bookkeeping.patch"
+EXACT_XBOX_IRP_ABI = "patches/roswell/0177-exact-xbox-irp-abi.patch"
+REJECTED_READ_PATHS = (
+    "patches/roswell/0173-fast-start-first-read-command.patch",
+    "patches/roswell/0175-handoff-native-admission-lock.patch",
+    "patches/roswell/0176-transfer-submit-lock-to-core.patch",
+    "patches/roswell/0180-fatx-direct-native-read.patch",
+    "patches/roswell/0181-unify-direct-read-quarantine.patch",
+    "patches/roswell/0182-close-direct-read-quarantine-handoff.patch",
+    "patches/roswell/0183-close-bypass-request-lifetimes.patch",
+    "patches/roswell/0184-plan-qualified-read-once.patch",
+    "patches/roswell/0185-batch-fatx-read-admission.patch",
+    "patches/roswell/0186-defer-fatx-read-window.patch",
+    "patches/roswell/0187-defer-inline-fatx-completion.patch",
+)
 
 
 class ForzaCorruptionRegressionTests(unittest.TestCase):
@@ -21,14 +47,36 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
 
     def test_corrective_patches_are_consecutive_and_hash_locked(self):
         self.assertEqual(
-            [entry["path"] for entry in self.entries[-4:]],
-            [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION, RESET_MEDIA_LIFETIME],
+            [entry["path"] for entry in self.entries[-14:]],
+            [SYSVA_REVERT, XDVDFS_REPAIR, PAYLOAD_QUALIFICATION,
+             RESET_MEDIA_LIFETIME, OPTICAL_ADMISSION, COMPLETION_LIFETIME,
+             TRANSIENT_ENVELOPE_GROWTH, QUEUED_ADMISSION, COMPACT_ENVELOPES,
+             PRE_ADMISSION_CANCEL, SEALED_RUNDOWN, ACTIVE_SCAN,
+             ADAPTER_BOOKKEEPING, EXACT_XBOX_IRP_ABI],
         )
-        for entry in self.entries[-4:]:
+        for entry in self.entries[-14:]:
             self.assertEqual(
                 hashlib.sha256((ROOT / entry["path"]).read_bytes()).hexdigest(),
                 entry["sha256"],
             )
+
+    def test_exact_irp_abi_patch_carries_executable_contracts(self):
+        patch = (ROOT / EXACT_XBOX_IRP_ABI).read_text()
+        for token in (
+            "IOP_XBOX_IRP_PRIVATE_SIZE",
+            "IopEnsureCallerIrpSidecar",
+            "IopBuildXboxPublicFsdRequest",
+            "tests/host/irp-xbox-abi/check.py",
+            "tests/host/irp-direct-builder/fixture.c",
+            "tests/host/io-special-completion/fixture.c",
+            "if (Length != 0)",
+            "tests/xbe/cold-storage-persistence/main.c",
+        ):
+            self.assertIn(token, patch)
+
+    def test_rejected_read_shortcuts_stay_out_of_selected_firmware(self):
+        selected = {entry["path"] for entry in self.entries}
+        self.assertTrue(selected.isdisjoint(REJECTED_READ_PATHS))
 
     def test_sysva_candidate_is_rolled_back_to_global_invalidation(self):
         patch = (ROOT / SYSVA_REVERT).read_text()
@@ -53,6 +101,27 @@ class ForzaCorruptionRegressionTests(unittest.TestCase):
         ):
             self.assertIn(token, patch)
 
+    def test_child_irp_reuse_is_deferred_past_lower_completion(self):
+        patch = (ROOT / COMPLETION_LIFETIME).read_text()
+        for token in (
+            "KDPC completion_dpc",
+            "KeInsertQueueDpc(&envelope->completion_dpc",
+            "NxNativeCompletionDpc",
+            "async_split_waits_until_completion_callback_returns",
+            "child_reuse_during_completion",
+        ):
+            self.assertIn(token, patch)
+
+    def test_storage_bursts_grow_transiently_instead_of_failing_reads(self):
+        patch = (ROOT / TRANSIENT_ENVELOPE_GROWTH).read_text()
+        for token in (
+            "allocate_dynamic_envelope",
+            "NxNativeTrimDpc",
+            "core_count=slot_count*4u",
+            "saturated_pool_grows_transiently_instead_of_failing_game_reads",
+            "pool_live==pools_before",
+        ):
+            self.assertIn(token, patch)
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,307 @@
+{
+  "schema": 1,
+  "date": "2026-10-17",
+  "scope": "Owned storage source and generated host tests; no proprietary implementation input.",
+  "native_performance_qualification": "0176 passed the consecutive generated 0168/0176/0168/0176 release comparison, but later failed title acceptance: no visible Forza improvement and an early PGR2 crash were reported. A conservative lock-continuation retry then tied 0168 in four alternating fresh-process Forza map-load runs, so it was also discarded. The product lock is restored to 0168.",
+  "patches": [
+    {
+      "path": "patches/roswell/0166-sealed-rundown-notifications.patch",
+      "sha256": "7ea77957e7ce55a09e184a575b90487ef847115fb6bb6e630cd4658321cb079d",
+      "assembled_source_tree": "59df71a2d29e1fc7ecc8607395476c49b3374e47"
+    },
+    {
+      "path": "patches/roswell/0167-skip-inactive-native-slots.patch",
+      "sha256": "de3f3bafc35aae9c91bbb54e0acd9fc1cd5f6869a66c8b7dd93a613ad0010a1e",
+      "assembled_source_tree": "0c91bbfd1bb68e93f5000bae2b504f77de7fdac1"
+    },
+    {
+      "patch": "patches/roswell/0168-coalesce-native-adapter-bookkeeping.patch",
+      "sha256": "b20d36f5deab259f398e4a02531c27487fb7507da51049fc1f24c8cb9d5185b2",
+      "assembled_source_tree": "2716b75a7159254904b4c7a9282f2c51961ee510"
+    },
+    {
+      "patch": "patches/roswell/0169-static-native-port-binding.patch",
+      "sha256": "fea1c4fd1f2747347ed431351a79dcea74ec82c3ffacc65be8018f7180088d1d",
+      "assembled_source_tree": "261b24f5a7ae667cc8f39670b706112aafe3c285"
+    },
+    {
+      "patch": "patches/roswell/0173-fast-start-first-read-command.patch",
+      "sha256": "fee98444406d4d8af6641ffbc93d978951bb98eaa77810decdc4343528169197",
+      "assembled_source_tree": "rejected prerequisite of experimental 0176 tree c30e8e2e9cab57d122040f1cd6a17bb44928ae0a"
+    },
+    {
+      "patch": "patches/roswell/0175-handoff-native-admission-lock.patch",
+      "sha256": "4adc7909ca1e1b83926cb169c93726ef9e7de4e1e750f27f132a3214b9c91e78",
+      "assembled_source_tree": "rejected prerequisite of experimental 0176 tree c30e8e2e9cab57d122040f1cd6a17bb44928ae0a"
+    },
+    {
+      "patch": "patches/roswell/0176-transfer-submit-lock-to-core.patch",
+      "sha256": "642df8f38687d97e5602c63f5175f77f4fa18360f8aba3ec38fb3c00c9a5ef0d",
+      "assembled_source_tree": "c30e8e2e9cab57d122040f1cd6a17bb44928ae0a"
+    }
+  ],
+  "adapter_checks": {
+    "plain_groups": 38,
+    "asan_ubsan_groups": 38,
+    "failures": 0
+  },
+  "differential_scan_observations": 1528352,
+  "lifecycle_capacities": [
+    1,
+    31,
+    32,
+    33,
+    63,
+    64,
+    65,
+    129
+  ],
+  "full_suite": {
+    "initial": {
+      "tests": 562,
+      "seconds": 446.993,
+      "skipped": 26,
+      "failures": 2,
+      "cause": "Stale product hashes for the changed firmware lock and production test assembler; refreshed in kernel-coverage-inputs.json."
+    },
+    "after_pin_refresh": {
+      "targeted_command": "python3 -m unittest discover -s tests/host -p test_firmware.py -v",
+      "tests": 62,
+      "seconds": 6.263,
+      "skipped": 1,
+      "failures": 0,
+      "full_rerun": "stopped as redundant for hash-only correction"
+    },
+    "scope_note": "Initial full run began with 0166 integrated. Final exact locked production checks separately reconstruct and exercise 0167."
+  },
+  "artifact_hashes": {
+    "rundown-baseline-red.log": "c75d7e02ee23afef4da5cd462ab4b1b2a167f356de008e9fcb2b0112e9559a73",
+    "rundown-missing-wake-mutation.log": "ec16e383c54f8df6a7e807f617f0850ddba6c153e5cb1a426607130fb4cfcb2e",
+    "host-suite-before-pin-refresh.log": "e797a409817f14315fc9876e6c1c16d0c6d2555f0eedb6235f6400415c066b01",
+    "active-scan-core-checks.log": "b949542e93d0f7a921295fbc148458be942d92625dbb6ec42596d83ff0f97328",
+    "locked-production-checks.log": "a1862dd4848c66089638e0e95a267359ff5d9085871c4f29614c589374333d51",
+    "corrected-identity-checks.log": "aff692a59f5e61097055ebe0a3ad472d42885f88c3c5f796869f50e7adc9ebc2",
+    "adapter-locks-locked-production.log": "302cf37b48313a073d84bc3abae3b984ad395eafad10c2264e6a4162e70f832c",
+    "adapter-locks-corrective.log": "f3fad9c3de6c078cae4c72cdbb84a58499515192cb090209a7fb5aeb771014df",
+    "adapter-locks-baseline-red.log": "30a1721a94ed7998cf8f3bb10951254414ad727b9bc566ea4d91572435193c46",
+    "adapter-locks-host-checks.log": "729808100ccf68271c69a368c2d0a7c4c941502f11105278ee818f0c63c25a68",
+    "adapter-locks-identity.log": "7f8268139b0921746a93ef4ef2aa4d810b8e80de96c56f09141a29e2735d799f",
+    "adapter-locks-count.log": "545ef17c7f966c86485d5225febeec034b59032cf8ea5aa06d69820713abbbfc",
+    "irp-reset-baseline.log": "841bb574be1d4fc968e9b34d9d82324f996ed98c25aa9426a72c1130b120f789",
+    "irp-reset-truncate-tail.log": "171ed66c1c1bb6daa8a537093fb34781718002fd48248853324e7432690a0ffb",
+    "irp-reset-overrun-tail.log": "398134a0b900cdd8aaa0e0c2848cc9a8aa719311d958ed2e2b6923c559513316",
+    "irp-reset-code-shape.json": "e172358d64e1400f603c452cda02456e79d8a694dd3745db653da0510b44efce",
+    "static-ports-missing-guard.log": "e7180884d8ec41b11904ec9166da164310a80fbbc89cd8bfbccd843efbe5d40f",
+    "static-ports-identity.log": "3d5b31a42440f2249149051bcc4ba7e636cdfbb2f2ce2e9c2879ade5c859d829",
+    "static-ports-corrective.log": "f3fad9c3de6c078cae4c72cdbb84a58499515192cb090209a7fb5aeb771014df",
+    "static-ports-clang.log": "7fc185ce02a641ef4a674ca9b9785d5c6e65b4e4250d701b150d9799cf97ba4f",
+    "static-ports-core.log": "75d77a10f368535ca96565d205226feb9c2a769d7fc86215a68d32057365d7f3",
+    "static-ports-locked-production.log": "ffa491a4273ed584c566dfe8a7bc6d5ceaa7e857bd065db79b718d953f882963",
+    "static-ports-baseline-red.log": "fa072753366391ee04e4ad752b21402890d4309da8c09994433ffeb3bca54c32",
+    "static-ports-gcc.log": "48567df880862881d705a27f7de0d1f7870df3b0ed91588801f77e0a0724daff",
+    "static-ports-adapter.log": "fa6acaa6e9683fe0bf994e4b2f5075d1c4041ec5c049d5dd774bf7612cbdc698",
+    "static-ports-linked-assembly.json": "db8d08406590a8745bc993110240d7bb432549a15a4fe0d27a4aaa62b61087ba"
+  },
+  "candidate0168": {
+    "adapter_plain_groups": 42,
+    "adapter_asan_ubsan_groups": 42,
+    "failures": 0,
+    "pending_retained_lock_entries": {
+      "baseline0167": 16,
+      "candidate0168": 14
+    },
+    "baseline_red": "Only lock-count ceiling failed; all 42 groups executed with unchanged 0167 adapter and final new tests.",
+    "exact_locked_production": {
+      "tests": 2,
+      "seconds": 10.009,
+      "failures": 0
+    },
+    "firmware_identity": {
+      "tests": 62,
+      "skipped": 1,
+      "seconds": 6.157,
+      "failures": 0
+    },
+    "corrective": {
+      "tests": 6,
+      "failures": 0
+    },
+    "release64": {
+      "flash_sha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
+      "source_tree": "2716b75a7159254904b4c7a9282f2c51961ee510",
+      "output": "artifacts/rollback-0168-release64",
+      "status": "rebuilt from the final selected lock; byte-identical to the two accepted Forza control runs and the fresh-process PGR2 run"
+    },
+    "full_host_suite": {
+      "command": "python3 -m unittest discover -s tests/host -v",
+      "tests": 563,
+      "seconds": 455.231,
+      "skipped": 26,
+      "failures": 0
+    }
+  },
+  "candidate0176": {
+    "status": "rejected by title acceptance after passing the generated fixture",
+    "pending_retained_lock_entries": {
+      "control0168": 14,
+      "candidate0176": 7
+    },
+    "exact_built_source": {
+      "core_tests": 50,
+      "active_scan_observations": 1528352,
+      "pthread_ownership_tests": 8,
+      "adapter_groups_plain_and_asan_ubsan": 42,
+      "packet_groups_plain_sanitized_msan": 10,
+      "owner_groups_plain_and_sanitized": 9,
+      "failures": 0
+    },
+    "release_abab": {
+      "runs": 4,
+      "cases_per_run": 8,
+      "minimum_case_seconds": 10,
+      "primary_450_cost_change_percent": [
+        -10.0243,
+        -15.6921,
+        -15.9165,
+        -8.9933
+      ],
+      "primary_450_rate_change_percent": [
+        4.0459,
+        13.1681,
+        12.5302,
+        2.5431
+      ],
+      "all_weighted_cost_comparisons_improved": true,
+      "unresolved_repeatable_regressions_over_20_percent": 0,
+      "all_correctness_oracles_passed": true
+    },
+    "release64": {
+      "flash_sha256": "5be85ddc85f462a0a6ef28ed2ba5fb4ba3e1688c75cab4e2ebcbad556a33c1a2",
+      "source_tree": "c30e8e2e9cab57d122040f1cd6a17bb44928ae0a",
+      "output": "artifacts/forza-submit-lock-selected-release64",
+      "status": "reproducibly rebuilt; byte-identical to the measured but rejected candidate"
+    },
+    "full_host_suite": {
+      "tests": 563,
+      "seconds": 442.309,
+      "skipped": 26,
+      "failures": 0
+    }
+  },
+  "conservative_followup": {
+    "status": "rejected because no game-level improvement was observed",
+    "firmware_sha256": "1b5b5829b80d5127d4a67ec9ce853c4ea1eb8252421e0d24a2b741c14f9dc753",
+    "selected0168_sha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
+    "forza_map_load_runs": [
+      "20261018-094150006-605d8d5cbfba4d1ca8179723e0471d18",
+      "20261018-094557986-06cede4fad0e4808ae4a2db33575967e",
+      "20261018-095027183-aa43babd1f70486daf72baaf2ae5fa69",
+      "20261018-095415439-5ce9044dc9f5435ea778685e19234847"
+    ],
+    "first_grid_sample": [
+      4,
+      4,
+      4,
+      4
+    ],
+    "all_execution_completed": true,
+    "all_correctness_passed": true,
+    "all_evidence_complete": true,
+    "all_driven_scenes_rendered": true,
+    "selected": false
+  },
+  "irp_reset_preparatory": {
+    "production_change": false,
+    "observations": 2568,
+    "sanitizers": [
+      "address",
+      "undefined"
+    ],
+    "tail_mutations_rejected": [
+      "truncate-tail",
+      "overrun-tail"
+    ],
+    "native_abi_test": false,
+    "timing_claim": false
+  },
+  "candidate0169": {
+    "status": "host gates, release64 build and three native trials passed correctness; repeatable performance gain not established; patch excluded from selected firmware stack",
+    "adapter_groups": 44,
+    "modes": [
+      "runtime-plain",
+      "runtime-ASan-UBSan",
+      "bound-plain",
+      "bound-ASan-UBSan"
+    ],
+    "failures": 0,
+    "all_mode_stdout_equal": true,
+    "i386_indirect_call_or_jump_sites": {
+      "clang": {
+        "runtime": 44,
+        "bound": 0
+      },
+      "gcc": {
+        "runtime": 11,
+        "bound": 0
+      }
+    },
+    "retained_pending_lock_entries": 14,
+    "binding_guard_mutation_rejected": true,
+    "exact_locked_production": {
+      "tests": 2,
+      "seconds": 13.478,
+      "failures": 0
+    },
+    "firmware_identity": {
+      "tests": 62,
+      "skipped": 1,
+      "seconds": 6.108,
+      "failures": 0
+    },
+    "corrective": {
+      "tests": 6,
+      "failures": 0
+    },
+    "full_host_suite": "not rerun; previous results and their scope retained",
+    "release64": {
+      "flash_sha256": "c7dcfe9214d422ef0477e10a2ff552e08f6c78db0675085ad6cf88eef44a5527",
+      "source_tree": "261b24f5a7ae667cc8f39670b706112aafe3c285",
+      "output": "artifacts/forza-static-ports-release64",
+      "storage_preflight_passed": true
+    },
+    "linked_assembly": {
+      "run_pump_indirect_sites_before": 7,
+      "run_pump_indirect_sites_after": 0,
+      "lock_unlock_forwarding_symbols_absent": true,
+      "native_callbacks_remain_separate_direct_functions": true
+    }
+  },
+  "selected_rollback": {
+    "selected": true,
+    "reason": "Reject alternate read-state and lock-ownership protocols that did not improve the automated Forza route after the operator reported an early PGR2 crash.",
+    "rejected_patch_paths": [
+      "patches/roswell/0173-fast-start-first-read-command.patch",
+      "patches/roswell/0175-handoff-native-admission-lock.patch",
+      "patches/roswell/0176-transfer-submit-lock-to-core.patch"
+    ],
+    "release64_sha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
+    "assembled_source_tree": "2716b75a7159254904b4c7a9282f2c51961ee510",
+    "forza_runs": [
+      "20261018-094557986-06cede4fad0e4808ae4a2db33575967e",
+      "20261018-095415439-5ce9044dc9f5435ea778685e19234847"
+    ],
+    "pgr2_run": "20261018-100317063-6b5d031c1d284d69919a871879db7dc4",
+    "title_outcomes": {
+      "all_execution_completed": true,
+      "all_correctness_passed": true,
+      "all_evidence_complete": true
+    },
+    "full_host_suite": {
+      "command": "python3 -m unittest discover -s tests/host -v",
+      "tests": 563,
+      "seconds": 455.231,
+      "skipped": 26,
+      "failures": 0
+    }
+  }
+}

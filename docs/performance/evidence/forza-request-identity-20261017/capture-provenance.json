@@ -1,0 +1,62 @@
+{
+  "created_utc": "2026-10-18T01:38:15.076070+00:00",
+  "job_id": "forza-spirit-identity-20261017-1",
+  "run_id": "20261018-013239495-840fd669b9644dfa9f6a610ca6246a98",
+  "snapshot": "forza-missing-world",
+  "snapshot_provenance": "../forza-budget-attribution-20261017/snapshot-metadata.json",
+  "baseline_flash_sha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296",
+  "inputs": [
+    {
+      "Path": "flash.bin",
+      "Length": 524288,
+      "Sha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296",
+      "Executable": false
+    },
+    {
+      "Path": "native-launch.exe",
+      "Length": 78848,
+      "Sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "Executable": true
+    },
+    {
+      "Path": "xemu-real.exe",
+      "Length": 44753929,
+      "Sha256": "a92a17527473ffa29e62c3ce5c7310a6e3e52c3965d7e929a82ab5fac3a9b5f1",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.exe",
+      "Length": 10240,
+      "Sha256": "478d61d90e6474167668cd6e0285eb057b6bde252b89e2b45869e45a415f6005",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.toml",
+      "Length": 697,
+      "Sha256": "432e8a0f90cc6b2385ff7e0f6378a14c2e54112948350600f4bf884701d44336",
+      "Executable": false
+    }
+  ],
+  "environment": {
+    "PR248_NATIVE_PACKAGE": "{packageDir}",
+    "PR248_NATIVE_EVIDENCE": "{resultDir}",
+    "XEMU_SPIRIT_MENU_TRACE": "1",
+    "XEMU_FORZA_IDENTITY": "1",
+    "XEMU_FORZA_IDENTITY_OUTPUT": "{resultDir}/forza-identity.log"
+  },
+  "requested_replay_seconds": 12,
+  "restore_monitor_empty": true,
+  "paused_verification": {
+    "status": "paused",
+    "running": false
+  },
+  "final_runner_idle": true,
+  "original_private_receipts_sha256": "9164111b25e59e74162251b1942eee462a056368e2385a3d910f6cd3863c0114",
+  "observer_sha256": "a07209227e3ae6c8ad5431cb2de944123a1b6c7337cdf376599ff06fe1f464c0",
+  "staged_xemu_sha256": {
+    "target/i386/tcg/misc_helper.c": "f274bb523a2eb8649af8fbb721e20d89d5e0267bcaa7a6012e9609a5b8597971",
+    "target/i386/tcg/translate.c": "b3fd8a88d60862fee0eeb31783edba99aaa8613d06886767af6cec9fdfb17958"
+  },
+  "independent_review": "forza_wait_contract_review independently verified owned ABI sites, all26 tests, raw capture generation joins, exact identity analysis and exact timeline reproduction; no blocking finding.",
+  "validation": "26 synthetic tests and strict host C syntax check pass. Complete native scalar log passes strict header/footer/lifetime/counter checks. No firmware changes."
+}

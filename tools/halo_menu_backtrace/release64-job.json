@@ -1,0 +1,277 @@
+{
+  "id": "halo-admission-queue-live-20261017-1",
+  "files": [
+    {
+      "Path": "flash.bin",
+      "Length": 524288,
+      "Sha256": "6b31d6604b153119da528ee1eed6396f5c7b56ca59998bc9e34b40f9055656a9",
+      "Executable": false
+    },
+    {
+      "Path": "native-launch.exe",
+      "Length": 78848,
+      "Sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "Executable": true
+    },
+    {
+      "Path": "trace-events",
+      "Length": 195,
+      "Sha256": "335ff95c5c77dbc479ab2021c0761231780833bcab9ee768799b39a9ee8abc4e",
+      "Executable": false
+    },
+    {
+      "Path": "xemu-real.exe",
+      "Length": 44723565,
+      "Sha256": "2da2a4904af0593ec4f94bb126f1e3769da3b2214b924420115c5d63157ac7f1",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.exe",
+      "Length": 9728,
+      "Sha256": "c86364dd89c7e15b9d9ac8978c8c48ccb4e5d374b6aa709e59e850732ba12896",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.toml",
+      "Length": 700,
+      "Sha256": "6cd6c8adf17c223357f38fa477597df88af8b4fb5fd29c2ec74d09c3c0ea83de",
+      "Executable": false
+    }
+  ],
+  "job": {
+    "Id": "halo-admission-queue-live-20261017-1",
+    "Executable": "native-launch.exe",
+    "Arguments": [
+      "-config_path",
+      "{packageDir}/xemu.toml",
+      "-m",
+      "64",
+      "-device",
+      "lpc47m157",
+      "-serial",
+      "file:{resultDir}/native-serial.log",
+      "-d",
+      "guest_errors,cpu_reset",
+      "-D",
+      "{resultDir}/qemu.log",
+      "-trace",
+      "events={packageDir}/trace-events,file={resultDir}/ide-trace.log",
+      "-no-shutdown"
+    ],
+    "WorkingDirectory": ".",
+    "Environment": {
+      "PR248_NATIVE_PACKAGE": "{packageDir}",
+      "PR248_NATIVE_EVIDENCE": "{resultDir}"
+    },
+    "TimeoutSeconds": 120,
+    "Tags": [
+      "HALO-CE-QUEUED-ADMISSION",
+      "HDD-ADMISSION-VALIDATION",
+      "QUEUED-MEMORY-1",
+      "64MIB",
+      "RETAINED-HDD",
+      "IDE-TRACE",
+      "USER-POWERSHELL-PIPE"
+    ],
+    "Plan": [
+      {
+        "Type": "wait",
+        "DelayMs": 31000,
+        "Button": null,
+        "DurationMs": 100,
+        "Name": null,
+        "DiagnosticId": null,
+        "Condition": null,
+        "TimeoutMs": 10000,
+        "PollIntervalMs": 100
+      },
+      {
+        "Type": "diagnostic",
+        "DelayMs": 0,
+        "Button": null,
+        "DurationMs": 100,
+        "Name": null,
+        "DiagnosticId": "menu-memory",
+        "Condition": null,
+        "TimeoutMs": 10000,
+        "PollIntervalMs": 100
+      },
+      {
+        "Type": "quit",
+        "DelayMs": 0,
+        "Button": null,
+        "DurationMs": 100,
+        "Name": null,
+        "DiagnosticId": null,
+        "Condition": null,
+        "TimeoutMs": 10000,
+        "PollIntervalMs": 100
+      }
+    ],
+    "TargetOs": "windows",
+    "ExpectedExecutableSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+    "RequiredFiles": [
+      "flash.bin",
+      "native-launch.exe",
+      "trace-events",
+      "xemu-real.exe",
+      "xemu.exe",
+      "xemu.toml"
+    ],
+    "LaunchMode": "direct",
+    "SnapshotName": null,
+    "StartPaused": false,
+    "RequireInput": false,
+    "Diagnostics": [
+      {
+        "Id": "menu-memory",
+        "Type": "memory_dump",
+        "DurationMs": 30000,
+        "PauseBefore": true,
+        "ResumeDuring": false,
+        "PauseAfter": true,
+        "Reason": "menu-memory",
+        "Profile": null,
+        "Frequency": 997,
+        "CallGraph": "dwarf",
+        "Frames": 1,
+        "TracePgraph": false,
+        "RenderDocTrigger": null,
+        "AnalyzeCapture": false,
+        "Address": 0,
+        "Size": 67108864,
+        "DebugFile": null,
+        "Addresses": [],
+        "QmpCommand": null,
+        "QmpArguments": {},
+        "MonitorCommand": null,
+        "ToolExecutable": null,
+        "ToolArguments": [],
+        "ToolWorkingDirectory": null,
+        "OutputName": "menu-memory"
+      }
+    ],
+    "RuntimeState": {
+      "Enabled": false
+    },
+    "Inputs": [
+      {
+        "Path": "flash.bin",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "6b31d6604b153119da528ee1eed6396f5c7b56ca59998bc9e34b40f9055656a9"
+      },
+      {
+        "Path": "native-launch.exe",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c"
+      },
+      {
+        "Path": "trace-events",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "335ff95c5c77dbc479ab2021c0761231780833bcab9ee768799b39a9ee8abc4e"
+      },
+      {
+        "Path": "xemu-real.exe",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "2da2a4904af0593ec4f94bb126f1e3769da3b2214b924420115c5d63157ac7f1"
+      },
+      {
+        "Path": "xemu.exe",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "c86364dd89c7e15b9d9ac8978c8c48ccb4e5d374b6aa709e59e850732ba12896"
+      },
+      {
+        "Path": "xemu.toml",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "6cd6c8adf17c223357f38fa477597df88af8b4fb5fd29c2ec74d09c3c0ea83de"
+      }
+    ],
+    "Workload": {
+      "CorrectnessChecks": [],
+      "EvidenceRequirements": [
+        {
+          "Name": "ide-trace",
+          "Scope": "result",
+          "Path": "ide-trace.log",
+          "MustExist": true,
+          "MinimumBytes": 100,
+          "MinimumNonBlackPixelRatio": null,
+          "NonBlackPixelThreshold": 0,
+          "ImageRegion": null,
+          "ExpectedSha256": null,
+          "ContainsText": "ide_atapi_cmd",
+          "EqualsText": null
+        },
+        {
+          "Name": "shim-receipt",
+          "Scope": "result",
+          "Path": "shim-capture-receipt.txt",
+          "MustExist": true,
+          "MinimumBytes": 100,
+          "MinimumNonBlackPixelRatio": null,
+          "NonBlackPixelThreshold": 0,
+          "ImageRegion": null,
+          "ExpectedSha256": null,
+          "ContainsText": "status=ok",
+          "EqualsText": null
+        },
+        {
+          "Name": "qemu-log",
+          "Scope": "result",
+          "Path": "qemu.log",
+          "MustExist": true,
+          "MinimumBytes": 0,
+          "MinimumNonBlackPixelRatio": null,
+          "NonBlackPixelThreshold": 0,
+          "ImageRegion": null,
+          "ExpectedSha256": null,
+          "ContainsText": null,
+          "EqualsText": null
+        }
+      ],
+      "ReportedMetrics": [],
+      "MinimumMetricSamples": 0,
+      "RequirePlanCompletion": true
+    },
+    "Experiment": {
+      "Id": "halo-admission-queue-20261017",
+      "Variant": "memory-1",
+      "Reference": null,
+      "VariedFactors": [
+        "bios"
+      ],
+      "ControlledFactors": [
+        "xemu",
+        "halo-v1.09",
+        "retained-test-hdd",
+        "eeprom-seed",
+        "64MiB",
+        "host",
+        "trace-events"
+      ],
+      "RequireCorrectnessPass": false,
+      "RequireCompleteEvidence": true,
+      "AllowOperatorIntervention": false,
+      "AllowDiagnostics": true
+    },
+    "Operations": {
+      "Mode": "diagnostic",
+      "AllowPreview": false,
+      "AllowManualInput": false,
+      "AllowPauseResume": true,
+      "AllowDiagnostics": true,
+      "AllowBulkTransfers": true,
+      "PreviewAllowed": false,
+      "ManualInputAllowed": false,
+      "PauseResumeAllowed": true,
+      "DiagnosticsAllowed": true,
+      "BulkTransfersAllowed": true
+    }
+  }
+}

@@ -1,18 +1,26 @@
 # Live game test readiness
 
-No fresh PGR2, Conker or complete DOA save-cycle pass is established on the
-current final PR248 image. A bounded earlier DOA human test is recorded below.
+**Release qualification remains open (2026-10-17).** Halo's missing menu
+entries were traced to failed HDD reads at the 64-request admission ceiling.
+The new candidate queues overflow and reduces its memory overhead. The exact
+final BIOS has completed two diagnostic launches with all 3,292 requests
+successful and no envelope/child allocation failures. Ordinary-release and
+reset results are recorded in
+[the investigation](HALO-STORAGE-ADMISSION-CORRUPTION-FIX-2026-10-17.md).
+This does not close the separate Forza streaming issue or establish a full-game
+pass. Exact-head CI and broader release qualification still gate release.
+
+No fresh PGR2, Conker or complete DOA save-cycle pass is established on this
+PR251 image. A bounded earlier DOA human test is recorded below.
 The independent replacement is installed in the complete-candidate release
 link. Its current safe-default release64 SHA-256 is
-`382956e7bfceaf943e37e90a772963ca7d9d6162959b326135ace533a0cba9ec`
-from assembled tree `319d81cfe9f6e1a524012cbab66d9bd8f5f929d4`.
+`add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296`
+from assembled tree `84e1d572b5a3a4ae81c78c28a0855908a909acf1`.
 Ordinary boots retain the delayed ATA path. Acceleration requires an explicit
 session-only Advanced setting. Repeated race/loading qualification remains
 pending because the original missing-data symptom was sporadic.
-Matched 64 MiB Halo cold-boot isolation reaches a correct live menu on this
-exact image; the failed predecessor differed only by issuing TEST UNIT READY
-during the initial XDVDFS mount. Reset and media-lifetime details are recorded
-in [RESET_MEDIA_LIFETIME_20261016.md](../provenance/RESET_MEDIA_LIFETIME_20261016.md).
+Reset and media-lifetime details are recorded in
+[RESET_MEDIA_LIFETIME_20261016.md](../provenance/RESET_MEDIA_LIFETIME_20261016.md).
 The final pre-extraction image
 `0f6e4f48269e0ef65bb27758e221b4bcdb707ef0cbf57c211d7e969866334d5e`
 is now the historical game-test control; the published reference remains

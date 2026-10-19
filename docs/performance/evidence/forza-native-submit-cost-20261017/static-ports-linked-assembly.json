@@ -1,0 +1,301 @@
+{
+  "scope": "owned linked code shape; not latency evidence",
+  "builds": {
+    "baseline0168": {
+      "flash_sha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
+      "source_tree": "2716b75a7159254904b4c7a9282f2c51961ee510",
+      "owned_image_sha256": "343ffab5324577362f20c1cae5f4d867c41a55bddc462a239676316d181e6691",
+      "functions": {
+        "_run_pump": {
+          "address": "84051c38",
+          "indirect_sites": 7,
+          "call_sites": 27,
+          "indirect_instructions": [
+            "84052262:\tff 56 3c             \tcall   *0x3c(%esi)",
+            "8405231b:\tff 56 48             \tcall   *0x48(%esi)",
+            "84052336:\tff 56 40             \tcall   *0x40(%esi)",
+            "8405242f:\tff 56 34             \tcall   *0x34(%esi)",
+            "840524a7:\tff 56 3c             \tcall   *0x3c(%esi)",
+            "840524e0:\tff 56 3c             \tcall   *0x3c(%esi)",
+            "84052528:\tff 56 38             \tcall   *0x38(%esi)"
+          ],
+          "calls": [
+            "84051c47:\te8 00 ef ff ff       \tcall   84050b4c <_lock>",
+            "84051e61:\te8 02 d8 ff ff       \tcall   8404f668 <_cache_sync>",
+            "84051e74:\te8 23 f5 ff ff       \tcall   8405139c <_pending>",
+            "84051e80:\te8 e3 d7 ff ff       \tcall   8404f668 <_cache_sync>",
+            "84051f93:\te8 ec d6 ff ff       \tcall   8404f684 <_clear_bytes.lto_priv.0.lto_priv.0>",
+            "84052004:\te8 5f d6 ff ff       \tcall   8404f668 <_cache_sync>",
+            "8405224c:\te8 b3 0b 00 00       \tcall   84052e04 <_unlock>",
+            "84052262:\tff 56 3c             \tcall   *0x3c(%esi)",
+            "84052267:\te8 e0 e8 ff ff       \tcall   84050b4c <_lock>",
+            "840522db:\te8 24 0b 00 00       \tcall   84052e04 <_unlock>",
+            "840522ef:\te8 10 0b 00 00       \tcall   84052e04 <_unlock>",
+            "8405231b:\tff 56 48             \tcall   *0x48(%esi)",
+            "84052336:\tff 56 40             \tcall   *0x40(%esi)",
+            "84052377:\te8 ec d2 ff ff       \tcall   8404f668 <_cache_sync>",
+            "840523d8:\te8 8b d2 ff ff       \tcall   8404f668 <_cache_sync>",
+            "8405242f:\tff 56 34             \tcall   *0x34(%esi)",
+            "84052437:\te8 10 e7 ff ff       \tcall   84050b4c <_lock>",
+            "84052498:\te8 67 09 00 00       \tcall   84052e04 <_unlock>",
+            "840524a7:\tff 56 3c             \tcall   *0x3c(%esi)",
+            "840524ac:\te8 9b e6 ff ff       \tcall   84050b4c <_lock>",
+            "840524d1:\te8 2e 09 00 00       \tcall   84052e04 <_unlock>",
+            "840524e0:\tff 56 3c             \tcall   *0x3c(%esi)",
+            "840524e5:\te8 62 e6 ff ff       \tcall   84050b4c <_lock>",
+            "84052519:\te8 e6 08 00 00       \tcall   84052e04 <_unlock>",
+            "84052528:\tff 56 38             \tcall   *0x38(%esi)",
+            "8405252f:\te8 18 e6 ff ff       \tcall   84050b4c <_lock>",
+            "84052549:\te8 4e ee ff ff       \tcall   8405139c <_pending>"
+          ]
+        },
+        "_lock": {
+          "address": "84050b4c",
+          "indirect_sites": 1,
+          "call_sites": 1,
+          "indirect_instructions": [
+            "84050b58:\tff 50 2c             \tcall   *0x2c(%eax)"
+          ],
+          "calls": [
+            "84050b58:\tff 50 2c             \tcall   *0x2c(%eax)"
+          ]
+        },
+        "_unlock": {
+          "address": "84052e04",
+          "indirect_sites": 1,
+          "call_sites": 1,
+          "indirect_instructions": [
+            "84052e10:\tff 50 30             \tcall   *0x30(%eax)"
+          ],
+          "calls": [
+            "84052e10:\tff 50 30             \tcall   *0x30(%eax)"
+          ]
+        },
+        "_pending": {
+          "address": "8405139c",
+          "indirect_sites": 1,
+          "call_sites": 1,
+          "indirect_instructions": [
+            "840513c1:\tff 50 44             \tcall   *0x44(%eax)"
+          ],
+          "calls": [
+            "840513c1:\tff 50 44             \tcall   *0x44(%eax)"
+          ]
+        },
+        "_port_enter": {
+          "address": "840514fc",
+          "indirect_sites": 0,
+          "call_sites": 0,
+          "indirect_instructions": [],
+          "calls": []
+        },
+        "_port_leave": {
+          "address": "84051514",
+          "indirect_sites": 0,
+          "call_sites": 1,
+          "indirect_instructions": [],
+          "calls": [
+            "8405151e:\te8 25 bc fc ff       \tcall   8401d148 <@KfLowerIrql@4>"
+          ]
+        },
+        "_port_prepare": {
+          "address": "84051548",
+          "indirect_sites": 0,
+          "call_sites": 5,
+          "indirect_instructions": [],
+          "calls": [
+            "8405155a:\te8 45 e1 ff ff       \tcall   8404f6a4 <_command_envelope>",
+            "840515a0:\te8 57 ff ff ff       \tcall   840514fc <_port_enter>",
+            "840515d9:\te8 36 ff ff ff       \tcall   84051514 <_port_leave>",
+            "84051618:\te8 2f f6 ff ff       \tcall   84050c4c <_nx_cancel>",
+            "84051703:\te8 b0 f7 ff ff       \tcall   84050eb8 <_nx_packet_prepare.constprop.0>"
+          ]
+        },
+        "_port_submit": {
+          "address": "84051744",
+          "indirect_sites": 0,
+          "call_sites": 7,
+          "indirect_instructions": [],
+          "calls": [
+            "84051756:\te8 49 df ff ff       \tcall   8404f6a4 <_command_envelope>",
+            "8405177c:\te8 7b fd ff ff       \tcall   840514fc <_port_enter>",
+            "84051791:\te8 7e fd ff ff       \tcall   84051514 <_port_leave>",
+            "8405179f:\te8 d8 41 fc ff       \tcall   8401597c <@IofCallDriver@8>",
+            "840517b0:\te8 47 fd ff ff       \tcall   840514fc <_port_enter>",
+            "840517f3:\te8 1c fd ff ff       \tcall   84051514 <_port_leave>",
+            "84051806:\te8 05 03 00 00       \tcall   84051b10 <_report_result>"
+          ]
+        },
+        "_port_retire": {
+          "address": "84051728",
+          "indirect_sites": 0,
+          "call_sites": 1,
+          "indirect_instructions": [],
+          "calls": [
+            "84051731:\te8 6e df ff ff       \tcall   8404f6a4 <_command_envelope>"
+          ]
+        },
+        "_port_cancel": {
+          "address": "840513c8",
+          "indirect_sites": 0,
+          "call_sites": 2,
+          "indirect_instructions": [],
+          "calls": [
+            "840513d4:\te8 cb e2 ff ff       \tcall   8404f6a4 <_command_envelope>",
+            "840513ec:\te8 fb 30 fc ff       \tcall   840144ec <_IoCancelIrp@4>"
+          ]
+        },
+        "_port_complete": {
+          "address": "840513f4",
+          "indirect_sites": 0,
+          "call_sites": 9,
+          "indirect_instructions": [],
+          "calls": [
+            "84051415:\te8 36 28 fc ff       \tcall   84013c50 <_IoAcquireCancelSpinLock@4>",
+            "84051439:\te8 2e 41 fc ff       \tcall   8401556c <_IoReleaseCancelSpinLock@4>",
+            "8405144a:\te8 ad 00 00 00       \tcall   840514fc <_port_enter>",
+            "84051482:\te8 95 93 fc ff       \tcall   8401a81c <_KeInsertQueueDpc@12>",
+            "840514cb:\te8 44 00 00 00       \tcall   84051514 <_port_leave>",
+            "840514d6:\te8 cd f1 ff ff       \tcall   840506a8 <_finish_parent>",
+            "840514de:\te8 19 00 00 00       \tcall   840514fc <_port_enter>",
+            "840514e5:\te8 2a 05 00 00       \tcall   84051a14 <_release_envelope_locked>",
+            "840514ed:\te8 22 00 00 00       \tcall   84051514 <_port_leave>"
+          ]
+        }
+      }
+    },
+    "candidate0169": {
+      "flash_sha256": "c7dcfe9214d422ef0477e10a2ff552e08f6c78db0675085ad6cf88eef44a5527",
+      "source_tree": "261b24f5a7ae667cc8f39670b706112aafe3c285",
+      "owned_image_sha256": "5f0fb81f87f4f49fe56568f64f49d060966f99d9dfd27e0c52f403e4a2255f94",
+      "functions": {
+        "_run_pump": {
+          "address": "84051c34",
+          "indirect_sites": 0,
+          "call_sites": 27,
+          "indirect_instructions": [],
+          "calls": [
+            "84051c47:\te8 40 f2 ff ff       \tcall   84050e8c <_nx_native_port_enter>",
+            "84051e61:\te8 0a d8 ff ff       \tcall   8404f670 <_cache_sync>",
+            "84051e74:\te8 7f f9 ff ff       \tcall   840517f8 <_pending>",
+            "84051e80:\te8 eb d7 ff ff       \tcall   8404f670 <_cache_sync>",
+            "84051f93:\te8 f4 d6 ff ff       \tcall   8404f68c <_clear_bytes.lto_priv.0.lto_priv.0>",
+            "84052004:\te8 67 d6 ff ff       \tcall   8404f670 <_cache_sync>",
+            "84052253:\te8 4c ec ff ff       \tcall   84050ea4 <_nx_native_port_leave>",
+            "84052269:\te8 4a ee ff ff       \tcall   840510b8 <_nx_native_port_retire>",
+            "84052274:\te8 13 ec ff ff       \tcall   84050e8c <_nx_native_port_enter>",
+            "840522ec:\te8 b3 eb ff ff       \tcall   84050ea4 <_nx_native_port_leave>",
+            "84052304:\te8 9b eb ff ff       \tcall   84050ea4 <_nx_native_port_leave>",
+            "84052330:\te8 4f ea ff ff       \tcall   84050d84 <_nx_native_port_complete>",
+            "8405234d:\te8 06 ea ff ff       \tcall   84050d58 <_nx_native_port_cancel>",
+            "84052390:\te8 db d2 ff ff       \tcall   8404f670 <_cache_sync>",
+            "840523f1:\te8 7a d2 ff ff       \tcall   8404f670 <_cache_sync>",
+            "84052448:\te8 8b ea ff ff       \tcall   84050ed8 <_nx_native_port_prepare>",
+            "84052455:\te8 32 ea ff ff       \tcall   84050e8c <_nx_native_port_enter>",
+            "840524ba:\te8 e5 e9 ff ff       \tcall   84050ea4 <_nx_native_port_leave>",
+            "840524c9:\te8 ea eb ff ff       \tcall   840510b8 <_nx_native_port_retire>",
+            "840524d4:\te8 b3 e9 ff ff       \tcall   84050e8c <_nx_native_port_enter>",
+            "840524fd:\te8 a2 e9 ff ff       \tcall   84050ea4 <_nx_native_port_leave>",
+            "8405250c:\te8 a7 eb ff ff       \tcall   840510b8 <_nx_native_port_retire>",
+            "84052517:\te8 70 e9 ff ff       \tcall   84050e8c <_nx_native_port_enter>",
+            "8405254f:\te8 50 e9 ff ff       \tcall   84050ea4 <_nx_native_port_leave>",
+            "8405255e:\te8 71 eb ff ff       \tcall   840510d4 <_nx_native_port_submit>",
+            "8405256b:\te8 1c e9 ff ff       \tcall   84050e8c <_nx_native_port_enter>",
+            "84052585:\te8 6e f2 ff ff       \tcall   840517f8 <_pending>"
+          ]
+        },
+        "_lock": null,
+        "_unlock": null,
+        "_pending": {
+          "address": "840517f8",
+          "indirect_sites": 0,
+          "call_sites": 1,
+          "indirect_instructions": [],
+          "calls": [
+            "8405181d:\te8 96 f6 ff ff       \tcall   84050eb8 <_nx_native_port_mark_pending>"
+          ]
+        },
+        "_nx_native_port_enter": {
+          "address": "84050e8c",
+          "indirect_sites": 0,
+          "call_sites": 0,
+          "indirect_instructions": [],
+          "calls": []
+        },
+        "_nx_native_port_leave": {
+          "address": "84050ea4",
+          "indirect_sites": 0,
+          "call_sites": 1,
+          "indirect_instructions": [],
+          "calls": [
+            "84050eae:\te8 95 c2 fc ff       \tcall   8401d148 <@KfLowerIrql@4>"
+          ]
+        },
+        "_nx_native_port_prepare": {
+          "address": "84050ed8",
+          "indirect_sites": 0,
+          "call_sites": 5,
+          "indirect_instructions": [],
+          "calls": [
+            "84050eea:\te8 bd e7 ff ff       \tcall   8404f6ac <_command_envelope>",
+            "84050f30:\te8 57 ff ff ff       \tcall   84050e8c <_nx_native_port_enter>",
+            "84050f69:\te8 36 ff ff ff       \tcall   84050ea4 <_nx_native_port_leave>",
+            "84050fa8:\te8 93 fc ff ff       \tcall   84050c40 <_nx_cancel>",
+            "84051093:\te8 7c 02 00 00       \tcall   84051314 <_nx_packet_prepare.constprop.0>"
+          ]
+        },
+        "_nx_native_port_submit": {
+          "address": "840510d4",
+          "indirect_sites": 0,
+          "call_sites": 7,
+          "indirect_instructions": [],
+          "calls": [
+            "840510e6:\te8 c1 e5 ff ff       \tcall   8404f6ac <_command_envelope>",
+            "8405110c:\te8 7b fd ff ff       \tcall   84050e8c <_nx_native_port_enter>",
+            "84051121:\te8 7e fd ff ff       \tcall   84050ea4 <_nx_native_port_leave>",
+            "8405112f:\te8 48 48 fc ff       \tcall   8401597c <@IofCallDriver@8>",
+            "84051140:\te8 47 fd ff ff       \tcall   84050e8c <_nx_native_port_enter>",
+            "84051183:\te8 1c fd ff ff       \tcall   84050ea4 <_nx_native_port_leave>",
+            "84051196:\te8 79 09 00 00       \tcall   84051b14 <_report_result>"
+          ]
+        },
+        "_nx_native_port_retire": {
+          "address": "840510b8",
+          "indirect_sites": 0,
+          "call_sites": 1,
+          "indirect_instructions": [],
+          "calls": [
+            "840510c1:\te8 e6 e5 ff ff       \tcall   8404f6ac <_command_envelope>"
+          ]
+        },
+        "_nx_native_port_cancel": {
+          "address": "84050d58",
+          "indirect_sites": 0,
+          "call_sites": 2,
+          "indirect_instructions": [],
+          "calls": [
+            "84050d64:\te8 43 e9 ff ff       \tcall   8404f6ac <_command_envelope>",
+            "84050d7c:\te8 6b 37 fc ff       \tcall   840144ec <_IoCancelIrp@4>"
+          ]
+        },
+        "_nx_native_port_complete": {
+          "address": "84050d84",
+          "indirect_sites": 0,
+          "call_sites": 9,
+          "indirect_instructions": [],
+          "calls": [
+            "84050da5:\te8 a6 2e fc ff       \tcall   84013c50 <_IoAcquireCancelSpinLock@4>",
+            "84050dc9:\te8 9e 47 fc ff       \tcall   8401556c <_IoReleaseCancelSpinLock@4>",
+            "84050dda:\te8 ad 00 00 00       \tcall   84050e8c <_nx_native_port_enter>",
+            "84050e12:\te8 05 9a fc ff       \tcall   8401a81c <_KeInsertQueueDpc@12>",
+            "84050e5b:\te8 44 00 00 00       \tcall   84050ea4 <_nx_native_port_leave>",
+            "84050e66:\te8 45 f8 ff ff       \tcall   840506b0 <_finish_parent>",
+            "84050e6e:\te8 19 00 00 00       \tcall   84050e8c <_nx_native_port_enter>",
+            "84050e75:\te8 9e 0b 00 00       \tcall   84051a18 <_release_envelope_locked>",
+            "84050e7d:\te8 22 00 00 00       \tcall   84050ea4 <_nx_native_port_leave>"
+          ]
+        }
+      }
+    }
+  }
+}

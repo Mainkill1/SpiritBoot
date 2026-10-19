@@ -1,0 +1,938 @@
+diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
+index 0c4c2e4..05d011d 100644
+--- a/drivers/storage/class/nxstorage/CMakeLists.txt
++++ b/drivers/storage/class/nxstorage/CMakeLists.txt
+@@ -5,6 +5,6 @@ add_library(nxstorage STATIC request.c native_packet.c native_adapter.c driver.c
+     geometry_composer.c nxdisk_owner.c)
+ target_include_directories(nxstorage PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+ target_link_libraries(nxstorage PUBLIC nxcache)
+-target_compile_definitions(nxstorage PRIVATE NX_NATIVE_TARGET=1)
++target_compile_definitions(nxstorage PRIVATE NX_NATIVE_TARGET=1 NX_NATIVE_PORT_BINDING=1)
+ add_dependencies(nxstorage psdk xdk bugcodes)
+ target_sources(nxstorage PRIVATE nxcdrom_profile.c)
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index 8800c67..cf2e8b2 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: GPL-2.0-or-later */
+ #include "native_adapter.h"
+ #include "cache_property.h"
++#include "port_binding.h"
+ 
+ enum { NX_NATIVE_SENSE_BYTES=32, NX_NATIVE_TIMEOUT_SECONDS=30,
+        NX_NATIVE_TIMEOUT_LIMIT_SECONDS=120, NX_SRB_SUCCESS=1,
+@@ -121,8 +122,8 @@ static void write_le64(UCHAR *p,uint64_t value)
+     write_le32(p,(uint32_t)value);write_le32(p+4,(uint32_t)(value>>32));
+ }
+ 
+-static void port_enter(void *context);
+-static void port_leave(void *context);
++void nx_native_port_enter(void *context);
++void nx_native_port_leave(void *context);
+ static VOID NTAPI NxNativeCompletionDpc(PKDPC,PVOID,PVOID,PVOID);
+ static VOID NTAPI NxNativeTrimDpc(PKDPC,PVOID,PVOID,PVOID);
+ static VOID NTAPI NxNativeAdmissionDpc(PKDPC,PVOID,PVOID,PVOID);
+@@ -157,7 +158,7 @@ static NX_NATIVE_ENVELOPE *allocate_dynamic_envelope(NX_NATIVE_ADAPTER *adapter,
+ 
+ static void quarantine_adapter(NX_NATIVE_ADAPTER *adapter)
+ {
+-    port_enter(adapter);adapter->quarantined=1;port_leave(adapter);
++    nx_native_port_enter(adapter);adapter->quarantined=1;nx_native_port_leave(adapter);
+     nx_quarantine(&adapter->core);
+ }
+ 
+@@ -174,36 +175,36 @@ static void clear_media_capacity(NX_NATIVE_ADAPTER *adapter)
+ 
+ static void observe_media_absent(NX_NATIVE_ADAPTER *adapter)
+ {
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     if(adapter->core.config.optical) {
+         if(adapter->media_state==NX_MEDIA_PRESENT) advance_media_generation(adapter);
+         ++adapter->media_epoch;
+         adapter->media_state=NX_MEDIA_ABSENT;clear_media_capacity(adapter);
+     }
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+ }
+ 
+ static void observe_media_change(NX_NATIVE_ADAPTER *adapter)
+ {
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     if(adapter->core.config.optical) {
+         if(adapter->media_state!=NX_MEDIA_UNKNOWN || adapter->media_capacity_valid)
+             advance_media_generation(adapter);
+         ++adapter->media_epoch;
+         adapter->media_state=NX_MEDIA_UNKNOWN;clear_media_capacity(adapter);
+     }
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+ }
+ 
+ static void observe_media_present(NX_NATIVE_ADAPTER *adapter)
+ {
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     if(adapter->core.config.optical && adapter->media_state!=NX_MEDIA_PRESENT) {
+         if(adapter->media_state==NX_MEDIA_ABSENT || !adapter->media_generation)
+             advance_media_generation(adapter);
+         adapter->media_state=NX_MEDIA_PRESENT;++adapter->media_epoch;
+     }
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+ }
+ 
+ static NTSTATUS native_status(nx_status status)
+@@ -252,13 +253,13 @@ static void observe_control_media_failure(NX_NATIVE_ADAPTER *adapter,
+         observe_media_change(adapter);
+ }
+ 
+-static void port_enter(void *context)
++void nx_native_port_enter(void *context)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+     adapter->saved_irql=KfAcquireSpinLock(&adapter->lock);
+ }
+ 
+-static void port_leave(void *context)
++void nx_native_port_leave(void *context)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+     KfReleaseSpinLock(&adapter->lock,adapter->saved_irql);
+@@ -294,7 +295,7 @@ static NX_NATIVE_ENVELOPE *command_envelope(NX_NATIVE_ADAPTER *adapter,
+     return envelope;
+ }
+ 
+-static nx_status port_prepare(void *context,const nx_command *command)
++nx_status nx_native_port_prepare(void *context,const nx_command *command)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+     NX_NATIVE_ENVELOPE *envelope=command_envelope(adapter,command);
+@@ -306,8 +307,8 @@ static nx_status port_prepare(void *context,const nx_command *command)
+     unsigned cancel_after;
+     if(!envelope || envelope->packet_live) return NX_PROTOCOL_ERROR;
+     handle.slot=command->token.slot;handle.generation=command->token.generation;
+-    port_enter(adapter);envelope->handle=handle;envelope->handle_valid=1;
+-    cancel_after=envelope->cancel_latched;port_leave(adapter);
++    nx_native_port_enter(adapter);envelope->handle=handle;envelope->handle_valid=1;
++    cancel_after=envelope->cancel_latched;nx_native_port_leave(adapter);
+     if(cancel_after) nx_cancel(&adapter->core,handle);
+     mdl=envelope->parent->MdlAddress;
+     if(mdl && mdl->Size>=(int)sizeof(*mdl))
+@@ -354,7 +355,7 @@ static void report_result(NX_NATIVE_ENVELOPE *envelope,const nx_packet_result *r
+     nx_lower_done(&envelope->adapter->core,result->token,status,bytes,flags);
+ }
+ 
+-static int port_submit(void *context,const nx_command *command)
++int nx_native_port_submit(void *context,const nx_command *command)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+     NX_NATIVE_ENVELOPE *envelope=command_envelope(adapter,command);
+@@ -363,11 +364,11 @@ static int port_submit(void *context,const nx_command *command)
+     nx_packet_status captured=NX_PACKET_OK;
+     unsigned report=0;
+     if(!envelope || !envelope->packet_live) return 0;
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     envelope->submit_active=1;
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     status=IofCallDriver(adapter->lower,envelope->child);
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     envelope->submit_active=0;
+     if(envelope->result_deferred) {
+         deferred=envelope->deferred_result;
+@@ -375,26 +376,26 @@ static int port_submit(void *context,const nx_command *command)
+         envelope->result_deferred=0;
+         report=1;
+     }
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(report) report_result(envelope,&deferred,captured);
+     return status==STATUS_PENDING;
+ }
+ 
+-static void port_retire(void *context,const nx_command *command)
++void nx_native_port_retire(void *context,const nx_command *command)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+     NX_NATIVE_ENVELOPE *envelope=command_envelope(adapter,command);
+     if(envelope) envelope->packet_live=0;
+ }
+ 
+-static void port_cancel(void *context,const nx_command *command)
++void nx_native_port_cancel(void *context,const nx_command *command)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+     NX_NATIVE_ENVELOPE *envelope=command_envelope(adapter,command);
+     if(envelope && envelope->packet_live) (void)IoCancelIrp(envelope->child);
+ }
+ 
+-static void port_pending(void *context,void *parent)
++void nx_native_port_mark_pending(void *context,void *parent)
+ {
+     NX_NATIVE_ENVELOPE *envelope=((PIRP)parent)->Tail.Overlay.DriverContext[0];
+     (void)context;
+@@ -433,9 +434,9 @@ static VOID NTAPI NxNativeTrimDpc(PKDPC dpc,PVOID context,PVOID argument1,PVOID
+     NX_NATIVE_ENVELOPE *envelope;
+     (void)dpc;(void)argument1;(void)argument2;
+     for(;;) {
+-        port_enter(adapter);envelope=adapter->trim_envelopes;
++        nx_native_port_enter(adapter);envelope=adapter->trim_envelopes;
+         if(envelope) adapter->trim_envelopes=envelope->next_free;
+-        port_leave(adapter);
++        nx_native_port_leave(adapter);
+         if(!envelope) return;
+         destroy_dynamic_envelope(envelope);
+     }
+@@ -466,8 +467,8 @@ static NTSTATUS complete_control_output(NX_NATIVE_ENVELOPE *envelope)
+     uint64_t capacity;
+     ULONG sector;
+     unsigned capacity_valid;
+-    port_enter(adapter);capacity=adapter->media_capacity;sector=adapter->media_sector;
+-    capacity_valid=adapter->media_capacity_valid;port_leave(adapter);
++    nx_native_port_enter(adapter);capacity=adapter->media_capacity;sector=adapter->media_sector;
++    capacity_valid=adapter->media_capacity_valid;nx_native_port_leave(adapter);
+     if(!output) return STATUS_INVALID_PARAMETER;
+     if(envelope->control_code==IOCTL_DISK_GET_LENGTH_INFO) {
+         if(envelope->control_output<8) return STATUS_BUFFER_TOO_SMALL;
+@@ -544,7 +545,7 @@ static NTSTATUS finish_control_result(NX_NATIVE_ENVELOPE *envelope,
+                    capacity/sector!=blocks || capacity>INT64_MAX) native=STATUS_NOT_SUPPORTED;
+                 else {
+                     unsigned stale;
+-                    port_enter(adapter);
++                    nx_native_port_enter(adapter);
+                     stale=adapter->core.config.optical && envelope->media_epoch!=adapter->media_epoch;
+                     if(!stale) {
+                         if(adapter->core.config.optical) {
+@@ -566,7 +567,7 @@ static NTSTATUS finish_control_result(NX_NATIVE_ENVELOPE *envelope,
+                         adapter->core.sector_mask=sector-1u;adapter->core.sector_shift=0;
+                         { uint32_t value=sector;while(value>1u){++adapter->core.sector_shift;value>>=1;} }
+                     }
+-                    port_leave(adapter);
++                    nx_native_port_leave(adapter);
+                     native=stale ? STATUS_DEVICE_NOT_READY:complete_control_output(envelope);
+                 }
+             }
+@@ -583,16 +584,16 @@ static NTSTATUS finish_control_result(NX_NATIVE_ENVELOPE *envelope,
+         } else if(envelope->control_code==IOCTL_CDROM_CHECK_VERIFY) {
+             if(envelope->control_output && envelope->control_output<4) native=STATUS_BUFFER_TOO_SMALL;
+             else if(envelope->control_output) {
+-                observe_media_present(adapter);port_enter(adapter);
++                observe_media_present(adapter);nx_native_port_enter(adapter);
+                 write_le32(parent->AssociatedIrp.SystemBuffer,adapter->media_generation);
+-                port_leave(adapter);parent->IoStatus.Information=4;
++                nx_native_port_leave(adapter);parent->IoStatus.Information=4;
+             } else { observe_media_present(adapter);parent->IoStatus.Information=0; }
+         }
+     }
+     IoAcquireCancelSpinLock(&cancel_irql);
+     if(parent->CancelRoutine==NxNativeAdapterCancel) parent->CancelRoutine=NULL;
+     IoReleaseCancelSpinLock(cancel_irql);
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     envelope->packet_live=0;envelope->control_active=0;envelope->control_recovery=0;
+     envelope->terminal_status=native==STATUS_SUCCESS ? NX_OK:
+         native==STATUS_CANCELLED ? NX_CANCELLED:NX_IO_ERROR;
+@@ -601,11 +602,11 @@ static NTSTATUS finish_control_result(NX_NATIVE_ENVELOPE *envelope,
+     parent->IoStatus.Status=native;
+     if(native!=STATUS_SUCCESS) parent->IoStatus.Information=0;
+     if(!envelope->cancel_active&&!envelope->completed) finish=1;
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(finish) {
+         parent->Tail.Overlay.DriverContext[0]=NULL;envelope->completed=1;
+         IofCompleteRequest(parent,native==STATUS_SUCCESS ? IO_DISK_INCREMENT:IO_NO_INCREMENT);
+-        port_enter(adapter);release_envelope_locked(envelope);port_leave(adapter);
++        nx_native_port_enter(adapter);release_envelope_locked(envelope);nx_native_port_leave(adapter);
+     }
+     return native;
+ }
+@@ -622,9 +623,9 @@ static NTSTATUS handle_control_result(NX_NATIVE_ENVELOPE *envelope,
+     if(envelope->control_recovery) {
+         original=envelope->control_result;original_capture=envelope->control_capture;
+         failed=core_status(result,captured)!=NX_OK || result->queue_frozen;
+-        port_enter(adapter);envelope->control_recovery=0;
++        nx_native_port_enter(adapter);envelope->control_recovery=0;
+         if(failed) envelope->control_recovery_failed=1;
+-        port_leave(adapter);
++        nx_native_port_leave(adapter);
+         if(failed) quarantine_adapter(adapter);
+         return finish_control_result(envelope,&original,original_capture);
+     }
+@@ -638,17 +639,17 @@ static NTSTATUS handle_control_result(NX_NATIVE_ENVELOPE *envelope,
+     command.lower_stack_count=adapter->lower->StackSize;
+     command.completion=NxNativeControlComplete;command.completion_context=envelope;
+     if(prepare_control_packet(envelope,&command)!=NX_PACKET_OK) {
+-        port_enter(adapter);envelope->control_recovery_failed=1;
+-        port_leave(adapter);quarantine_adapter(adapter);
++        nx_native_port_enter(adapter);envelope->control_recovery_failed=1;
++        nx_native_port_leave(adapter);quarantine_adapter(adapter);
+         return finish_control_result(envelope,result,captured);
+     }
+-    port_enter(adapter);envelope->control_recovery=1;envelope->packet_live=1;
+-    envelope->submit_active=1;port_leave(adapter);
++    nx_native_port_enter(adapter);envelope->control_recovery=1;envelope->packet_live=1;
++    envelope->submit_active=1;nx_native_port_leave(adapter);
+     (void)IofCallDriver(adapter->lower,envelope->child);
+-    port_enter(adapter);envelope->submit_active=0;
++    nx_native_port_enter(adapter);envelope->submit_active=0;
+     if(envelope->result_deferred) { deferred=envelope->deferred_result;
+         deferred_capture=envelope->deferred_capture;envelope->result_deferred=0;report=1; }
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(report) return handle_control_result(envelope,&deferred,deferred_capture);
+     return STATUS_PENDING;
+ }
+@@ -663,11 +664,11 @@ static NTSTATUS NTAPI NxNativeControlComplete(PDEVICE_OBJECT device,PIRP child,P
+     (void)device;
+     if(child!=envelope->child) return STATUS_MORE_PROCESSING_REQUIRED;
+     captured=nx_packet_capture(&envelope->ticket,&result);
+-    port_enter(adapter);defer=envelope->submit_active;
++    nx_native_port_enter(adapter);defer=envelope->submit_active;
+     envelope->deferred_result=result;envelope->deferred_capture=captured;
+     envelope->result_deferred=1;envelope->deferred_control=1;
+     if(!defer) queue=1;
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(queue) (void)KeInsertQueueDpc(&envelope->completion_dpc,NULL,NULL);
+     return STATUS_MORE_PROCESSING_REQUIRED;
+ }
+@@ -680,19 +681,19 @@ static VOID NTAPI NxNativeCompletionDpc(PKDPC dpc,PVOID context,PVOID argument1,
+     nx_packet_status captured=NX_PACKET_OK;
+     unsigned report=0,control=0;
+     (void)dpc;(void)argument1;(void)argument2;
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     if(envelope->result_deferred) {
+         result=envelope->deferred_result;captured=envelope->deferred_capture;
+         control=envelope->deferred_control;envelope->result_deferred=0;
+         envelope->deferred_control=0;report=1;
+     }
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(!report) return;
+     if(control) (void)handle_control_result(envelope,&result,captured);
+     else report_result(envelope,&result,captured);
+ }
+ 
+-static void port_complete(void *context,void *parent,nx_status status,uint64_t bytes)
++void nx_native_port_complete(void *context,void *parent,nx_status status,uint64_t bytes)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+     NX_NATIVE_ENVELOPE *envelope;
+@@ -704,7 +705,7 @@ static void port_complete(void *context,void *parent,nx_status status,uint64_t b
+         ((PIRP)parent)->CancelRoutine=NULL;
+     IoReleaseCancelSpinLock(cancel_irql);
+     if(!envelope) return;
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     if(envelope->admitted) {
+         envelope->admitted=0;
+         --adapter->data_active;
+@@ -715,10 +716,10 @@ static void port_complete(void *context,void *parent,nx_status status,uint64_t b
+     envelope->terminal_bytes=bytes;
+     envelope->terminal_ready=1;
+     if(!envelope->cancel_active && !envelope->completed) finish=1;
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(finish) {
+         finish_parent(envelope);
+-        port_enter(adapter);release_envelope_locked(envelope);port_leave(adapter);
++        nx_native_port_enter(adapter);release_envelope_locked(envelope);nx_native_port_leave(adapter);
+     }
+ }
+ 
+@@ -732,13 +733,13 @@ NTSTATUS NTAPI NxNativeAdapterChildComplete(PDEVICE_OBJECT device,PIRP child,PVO
+     (void)device;
+     if(child!=envelope->child) return STATUS_MORE_PROCESSING_REQUIRED;
+     captured=nx_packet_capture(&envelope->ticket,&result);
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     defer=envelope->submit_active;
+     envelope->deferred_result=result;
+     envelope->deferred_capture=captured;
+     envelope->result_deferred=1;envelope->deferred_control=0;
+     if(!defer) queue=1;
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(queue) (void)KeInsertQueueDpc(&envelope->completion_dpc,NULL,NULL);
+     return STATUS_MORE_PROCESSING_REQUIRED;
+ }
+@@ -752,7 +753,7 @@ void NTAPI NxNativeAdapterCancel(PDEVICE_OBJECT device,PIRP parent)
+     (void)device;
+     if(!envelope) { IoReleaseCancelSpinLock(parent->CancelIrql); return; }
+     adapter=envelope->adapter;
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     envelope->cancel_active=1;
+     envelope->cancel_latched=1;
+     if(envelope->control_active) call_core=2;
+@@ -769,17 +770,17 @@ void NTAPI NxNativeAdapterCancel(PDEVICE_OBJECT device,PIRP parent)
+             cursor->queued=0;cursor->next_waiting=NULL;call_core=3;
+         }
+     }
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     IoReleaseCancelSpinLock(parent->CancelIrql);
+     if(call_core==1) nx_cancel(&adapter->core,handle);
+     else if(call_core==2) (void)IoCancelIrp(envelope->child);
+-    else if(call_core==3) port_complete(adapter,parent,NX_CANCELLED,0);
+-    port_enter(adapter);
++    else if(call_core==3) nx_native_port_complete(adapter,parent,NX_CANCELLED,0);
++    nx_native_port_enter(adapter);
+     envelope->cancel_active=0;
+     if(envelope->terminal_ready && !envelope->completed) finish=1;
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(finish) finish_parent(envelope);
+-    port_enter(adapter);release_envelope_locked(envelope);port_leave(adapter);
++    nx_native_port_enter(adapter);release_envelope_locked(envelope);nx_native_port_leave(adapter);
+ }
+ 
+ NTSTATUS NxNativeAdapterInitialize(NX_NATIVE_ADAPTER *adapter,PDEVICE_OBJECT lower,
+@@ -817,9 +818,9 @@ NTSTATUS NxNativeAdapterInitialize(NX_NATIVE_ADAPTER *adapter,PDEVICE_OBJECT low
+         adapter->envelopes[index].next_free=adapter->free_envelopes;
+         adapter->free_envelopes=&adapter->envelopes[index];
+     }
+-    port.context=adapter;port.enter=port_enter;port.leave=port_leave;
+-    port.prepare=port_prepare;port.submit=port_submit;port.retire=port_retire;
+-    port.cancel=port_cancel;port.mark_pending=port_pending;port.complete=port_complete;
++    port.context=adapter;port.enter=nx_native_port_enter;port.leave=nx_native_port_leave;
++    port.prepare=nx_native_port_prepare;port.submit=nx_native_port_submit;port.retire=nx_native_port_retire;
++    port.cancel=nx_native_port_cancel;port.mark_pending=nx_native_port_mark_pending;port.complete=nx_native_port_complete;
+     if(nx_device_init(&adapter->core,config,&port,adapter->slots,core_count,
+                       (size_t)core_count*sizeof(*adapter->slots))!=NX_OK)
+         goto invalid;
+@@ -842,8 +843,8 @@ no_memory:
+ void NxNativeAdapterSeal(NX_NATIVE_ADAPTER *adapter)
+ {
+     if(!adapter) return;
+-    port_enter(adapter);adapter->sealed=1;
+-    port_leave(adapter);
++    nx_native_port_enter(adapter);adapter->sealed=1;
++    nx_native_port_leave(adapter);
+ }
+ 
+ static void unbind_cache_publication(NX_NATIVE_ADAPTER *adapter)
+@@ -851,16 +852,16 @@ static void unbind_cache_publication(NX_NATIVE_ADAPTER *adapter)
+     ULONG index;
+     for(;;) {
+         unsigned active=0;
+-        port_enter(adapter);
++        nx_native_port_enter(adapter);
+         active=adapter->dynamic_active!=0 || adapter->admission_active;
+         for(index=0;index<adapter->count;++index)
+             if(adapter->envelopes[index].active) { active=1;break; }
+         if(!active) {
+             adapter->lower_cache=NULL;
+-            port_leave(adapter);
++            nx_native_port_leave(adapter);
+             return;
+         }
+-        port_leave(adapter);
++        nx_native_port_leave(adapter);
+         (void)KeWaitForSingleObject(&adapter->drain_event,Executive,KernelMode,
+                                     FALSE,NULL);
+     }
+@@ -887,8 +888,8 @@ static void destroy_unpublished_adapter(NX_NATIVE_ADAPTER *adapter)
+  * core slots in FIFO order; queued parents retain their envelopes and MDLs. */
+ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+ {
+-    port_enter(adapter);
+-    if(adapter->admission_active) { port_leave(adapter);return; }
++    nx_native_port_enter(adapter);
++    if(adapter->admission_active) { nx_native_port_leave(adapter);return; }
+     adapter->admission_active=1;
+     for(;;) {
+         NX_NATIVE_ENVELOPE *envelope;
+@@ -900,7 +901,7 @@ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+             adapter->admission_active=0;
+             if(adapter->sealed)
+                 (void)KeSetEvent(&adapter->drain_event,IO_NO_INCREMENT,FALSE);
+-            port_leave(adapter);return;
++            nx_native_port_leave(adapter);return;
+         }
+         adapter->waiting_head=envelope->next_waiting;
+         if(!adapter->waiting_head) adapter->waiting_tail=NULL;
+@@ -908,10 +909,10 @@ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+         envelope->waiting_request.cancelled=envelope->cancel_latched;
+         quarantined=adapter->quarantined;
+         if(!quarantined) { ++adapter->data_active;envelope->admitted=1; }
+-        port_leave(adapter);
+-        if(quarantined) port_complete(adapter,envelope->parent,NX_IO_ERROR,0);
++        nx_native_port_leave(adapter);
++        if(quarantined) nx_native_port_complete(adapter,envelope->parent,NX_IO_ERROR,0);
+         else (void)nx_start(&adapter->core,&envelope->waiting_request,&handle);
+-        port_enter(adapter);
++        nx_native_port_enter(adapter);
+         if(envelope->active && !envelope->completed) {
+             envelope->handle=handle;envelope->handle_valid=handle.slot!=UINT32_MAX;
+             cancel_after=envelope->cancel_latched && envelope->handle_valid;
+@@ -919,9 +920,9 @@ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+         /* Keep the start lease across an unlocked cancellation. Without a
+          * cancellation callback, publication and lease release share the lock. */
+         if(cancel_after) {
+-            port_leave(adapter);
++            nx_native_port_leave(adapter);
+             nx_cancel(&adapter->core,handle);
+-            port_enter(adapter);
++            nx_native_port_enter(adapter);
+         }
+         envelope->start_active=0;release_envelope_locked(envelope);
+     }
+@@ -943,15 +944,15 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     unsigned grow=0,cancelled;
+     nx_lcq_observation cache_observation={0};
+     if(!adapter || !parent) return STATUS_INVALID_PARAMETER;
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     if(adapter->quarantined) {
+-        port_leave(adapter);parent->IoStatus.Status=STATUS_IO_DEVICE_ERROR;
++        nx_native_port_leave(adapter);parent->IoStatus.Status=STATUS_IO_DEVICE_ERROR;
+         parent->IoStatus.Information=0;IofCompleteRequest(parent,IO_NO_INCREMENT);
+         return STATUS_IO_DEVICE_ERROR;
+     }
+     if(!adapter->core.config.optical && operation!=NX_FLUSH &&
+        !adapter->media_capacity_valid) {
+-        port_leave(adapter);parent->IoStatus.Status=STATUS_DEVICE_NOT_READY;
++        nx_native_port_leave(adapter);parent->IoStatus.Status=STATUS_DEVICE_NOT_READY;
+         parent->IoStatus.Information=0;IofCompleteRequest(parent,IO_NO_INCREMENT);
+         return STATUS_DEVICE_NOT_READY;
+     }
+@@ -962,12 +963,12 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     /* A retained reservation becomes active before releasing the lock.
+      * Only allocation needs an unlocked window and the subsequent seal check. */
+     if(!envelope && grow) {
+-        port_leave(adapter);
++        nx_native_port_leave(adapter);
+         envelope=allocate_dynamic_envelope(adapter,0);
+-        port_enter(adapter);
++        nx_native_port_enter(adapter);
+     }
+     if(envelope && (adapter->sealed || adapter->quarantined)) {
+-        grow=envelope->dynamic;port_leave(adapter);
++        grow=envelope->dynamic;nx_native_port_leave(adapter);
+         if(grow) destroy_dynamic_envelope(envelope);
+         parent->IoStatus.Status=STATUS_IO_DEVICE_ERROR;parent->IoStatus.Information=0;
+         IofCompleteRequest(parent,IO_NO_INCREMENT);return STATUS_IO_DEVICE_ERROR;
+@@ -987,7 +988,7 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+             cache_observation=observe_lower_cache(adapter);
+         envelope->cache_observation=cache_observation;
+     }
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(!envelope) {
+         parent->IoStatus.Status=STATUS_INSUFFICIENT_RESOURCES;parent->IoStatus.Information=0;
+         IofCompleteRequest(parent,IO_NO_INCREMENT);return STATUS_INSUFFICIENT_RESOURCES;
+@@ -1011,7 +1012,7 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+             request.mdl_bytes=mdl->ByteCount;request.mdl_present=1;
+         }
+     }
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     /* Cancellation can run after installation but before queue insertion.
+      * Resolve that latch without waiting for unrelated transport capacity. */
+     cancelled=envelope->cancel_latched;
+@@ -1021,15 +1022,15 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+         else adapter->waiting_head=envelope;
+         adapter->waiting_tail=envelope;
+     }
+-    port_leave(adapter);
+-    if(cancelled) port_complete(adapter,parent,NX_CANCELLED,0);
++    nx_native_port_leave(adapter);
++    if(cancelled) nx_native_port_complete(adapter,parent,NX_CANCELLED,0);
+     else admit_waiting_requests(adapter);
+-    port_enter(adapter);
+-    if(!envelope->completed && !envelope->was_pending) port_pending(adapter,parent);
++    nx_native_port_enter(adapter);
++    if(!envelope->completed && !envelope->was_pending) nx_native_port_mark_pending(adapter,parent);
+     result=envelope->was_pending ? STATUS_PENDING:envelope->dispatch_status;
+     envelope->dispatch_active=0;
+     release_envelope_locked(envelope);
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     return result;
+ }
+ 
+@@ -1135,8 +1136,8 @@ NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device,PIRP irp)
+     if(!extension||!irp||!irp->Tail.Overlay.CurrentStackLocation) return STATUS_INVALID_PARAMETER;
+     adapter=&extension->adapter;stack=irp->Tail.Overlay.CurrentStackLocation;
+     code=stack->Parameters.DeviceIoControl.IoControlCode;
+-    port_enter(adapter);cached=adapter->media_capacity_valid;quarantined=adapter->quarantined;
+-    port_leave(adapter);
++    nx_native_port_enter(adapter);cached=adapter->media_capacity_valid;quarantined=adapter->quarantined;
++    nx_native_port_leave(adapter);
+     if(quarantined) {
+         irp->IoStatus.Status=STATUS_IO_DEVICE_ERROR;irp->IoStatus.Information=0;
+         IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_IO_DEVICE_ERROR;
+@@ -1169,7 +1170,7 @@ NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device,PIRP irp)
+         irp->IoStatus.Status=STATUS_BUFFER_TOO_SMALL;irp->IoStatus.Information=0;
+         IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_BUFFER_TOO_SMALL;
+     }
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     /* Control and data requests share the child-IRP/envelope pool.  Acquire
+      * both through its single free list so a pending media check cannot leave
+      * the same child visible to a data request or enqueue it twice later. */
+@@ -1177,12 +1178,12 @@ NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device,PIRP irp)
+         envelope=adapter->free_envelopes;
+         adapter->free_envelopes=envelope->next_free;
+     } else if(!adapter->sealed) grow=1;
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(!envelope && grow)
+         envelope=allocate_dynamic_envelope(adapter,1);
+-    port_enter(adapter);
++    nx_native_port_enter(adapter);
+     if(envelope && (adapter->sealed || adapter->quarantined)) {
+-        unsigned dynamic=envelope->dynamic;port_leave(adapter);
++        unsigned dynamic=envelope->dynamic;nx_native_port_leave(adapter);
+         if(dynamic) destroy_dynamic_envelope(envelope);
+         irp->IoStatus.Status=STATUS_IO_DEVICE_ERROR;irp->IoStatus.Information=0;
+         IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_IO_DEVICE_ERROR;
+@@ -1197,14 +1198,14 @@ NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device,PIRP irp)
+         envelope->control_code=code;envelope->control_output=stack->Parameters.DeviceIoControl.OutputBufferLength;
+         envelope->media_epoch=adapter->media_epoch;
+     }
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(!envelope){irp->IoStatus.Status=STATUS_INSUFFICIENT_RESOURCES;irp->IoStatus.Information=0;IofCompleteRequest(irp,IO_NO_INCREMENT);return STATUS_INSUFFICIENT_RESOURCES;}
+     irp->Tail.Overlay.DriverContext[0]=envelope;IoAcquireCancelSpinLock(&cancel_irql);
+     if(irp->Cancel) envelope->cancel_latched=1;else irp->CancelRoutine=NxNativeAdapterCancel;
+     IoReleaseCancelSpinLock(cancel_irql);
+     if(envelope->cancel_latched) {
+-        port_enter(adapter);envelope->dispatch_active=0;port_leave(adapter);
+-        port_complete(adapter,irp,NX_CANCELLED,0);return STATUS_CANCELLED;
++        nx_native_port_enter(adapter);envelope->dispatch_active=0;nx_native_port_leave(adapter);
++        nx_native_port_complete(adapter,irp,NX_CANCELLED,0);return STATUS_CANCELLED;
+     }
+     zero_bytes(envelope->control_data,sizeof(envelope->control_data));
+     zero_bytes(&command,sizeof(command));command.token.slot=UINT32_MAX;command.token.generation=envelope->media_epoch;
+@@ -1222,16 +1223,16 @@ NTSTATUS NTAPI NxNativeDispatchControl(PDEVICE_OBJECT device,PIRP irp)
+     command.timeout_limit_seconds=NX_NATIVE_TIMEOUT_LIMIT_SECONDS;command.max_bytes=NX_CONTROL_BYTES;
+     command.max_pages=2;command.lower_stack_count=adapter->lower->StackSize;command.completion=NxNativeControlComplete;command.completion_context=envelope;
+     if(prepare_control_packet(envelope,&command)!=NX_PACKET_OK) {
+-        envelope->terminal_status=NX_INVALID;envelope->terminal_bytes=0;port_complete(adapter,irp,NX_INVALID,0);return STATUS_INVALID_PARAMETER;
++        envelope->terminal_status=NX_INVALID;envelope->terminal_bytes=0;nx_native_port_complete(adapter,irp,NX_INVALID,0);return STATUS_INVALID_PARAMETER;
+     }
+     envelope->packet_live=1;envelope->submit_active=1;IoMarkIrpPending(irp);
+     dispatched=IofCallDriver(adapter->lower,envelope->child);
+-    port_enter(adapter);envelope->submit_active=0;
++    nx_native_port_enter(adapter);envelope->submit_active=0;
+     if(envelope->result_deferred){deferred=envelope->deferred_result;
+         captured=envelope->deferred_capture;envelope->result_deferred=0;report=1;}
+-    port_leave(adapter);
++    nx_native_port_leave(adapter);
+     if(report) (void)handle_control_result(envelope,&deferred,captured);
+     dispatched=STATUS_PENDING;
+-    port_enter(adapter);envelope->dispatch_active=0;release_envelope_locked(envelope);port_leave(adapter);
++    nx_native_port_enter(adapter);envelope->dispatch_active=0;release_envelope_locked(envelope);nx_native_port_leave(adapter);
+     return dispatched;
+ }
+diff --git a/drivers/storage/class/nxstorage/port_binding.h b/drivers/storage/class/nxstorage/port_binding.h
+new file mode 100644
+index 0000000..4025303
+--- /dev/null
++++ b/drivers/storage/class/nxstorage/port_binding.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef NX_STORAGE_PORT_BINDING_H
++#define NX_STORAGE_PORT_BINDING_H
++#include "request.h"
++
++/* One native implementation, with a separate context for every device.
++ * These are internal class-driver symbols, not kernel exports. */
++void nx_native_port_enter(void *);
++void nx_native_port_leave(void *);
++nx_status nx_native_port_prepare(void *, const nx_command *);
++int nx_native_port_submit(void *, const nx_command *);
++void nx_native_port_retire(void *, const nx_command *);
++void nx_native_port_cancel(void *, const nx_command *);
++void nx_native_port_mark_pending(void *, void *);
++void nx_native_port_complete(void *, void *, nx_status, uint64_t);
++
++#ifdef NX_NATIVE_PORT_BINDING
++#define NX_PORT_CALL(device, member) nx_native_port_##member
++#define NX_PORT_INLINE inline __attribute__((always_inline))
++static inline int nx_native_port_matches(const nx_port *p)
++{
++    return p->enter==nx_native_port_enter && p->leave==nx_native_port_leave &&
++        p->prepare==nx_native_port_prepare && p->submit==nx_native_port_submit &&
++        p->retire==nx_native_port_retire && p->cancel==nx_native_port_cancel &&
++        p->mark_pending==nx_native_port_mark_pending && p->complete==nx_native_port_complete;
++}
++#else
++#define NX_PORT_CALL(device, member) ((device)->port.member)
++#define NX_PORT_INLINE
++#endif
++#endif
+diff --git a/drivers/storage/class/nxstorage/request.c b/drivers/storage/class/nxstorage/request.c
+index d48c1bc..74581ef 100644
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: GPL-2.0-or-later */
+ #include "request.h"
+ #include "active_scan.h"
++#include "port_binding.h"
+ 
+ enum { EXECUTE=0x00, RELEASE=0x04, READ10=0x28, WRITE10=0x2a, SYNC10=0x35,
+        DATA_IN=0x40, DATA_OUT=0x80 };
+@@ -19,13 +20,13 @@ static void clear_bytes(void *storage, size_t bytes)
+     unsigned char *p=storage;
+     for (size_t i=0;i<bytes;++i) p[i]=0;
+ }
+-static void lock(nx_device *d) { d->port.enter(d->port.context); }
+-static void unlock(nx_device *d) { d->port.leave(d->port.context); }
++static NX_PORT_INLINE void lock(nx_device *d) { NX_PORT_CALL(d,enter)(d->port.context); }
++static NX_PORT_INLINE void unlock(nx_device *d) { NX_PORT_CALL(d,leave)(d->port.context); }
+ static void pending(nx_device *d, nx_slot *s)
+ {
+     if (!s->pending) {
+         s->pending=1;
+-        d->port.mark_pending(d->port.context,s->request.parent);
++        NX_PORT_CALL(d,mark_pending)(d->port.context,s->request.parent);
+     }
+ }
+ static nx_status validate(const nx_device *d, const nx_request *r)
+@@ -72,6 +73,10 @@ nx_status nx_device_init(nx_device *d, const nx_config *c, const nx_port *p,
+         !p->enter || !p->leave || !p->prepare || !p->submit || !p->retire ||
+         !p->cancel || !p->mark_pending || !p->complete)
+         return NX_INVALID;
++#ifdef NX_NATIVE_PORT_BINDING
++    /* Refuse a foreign table rather than silently dispatching it as native. */
++    if (!nx_native_port_matches(p)) return NX_INVALID;
++#endif
+     clear_bytes(d,sizeof(*d));
+     clear_bytes(slots,(size_t)count*sizeof(*slots));
+     d->config=*c; d->port=*p; d->slots=slots; d->count=count; d->free_head=0;
+@@ -240,32 +245,32 @@ static void run_pump(nx_device *d)
+         }
+         unlock(d);
+         if (action==COMPLETE) {
+-            d->port.complete(d->port.context,parent,final,bytes);
++            NX_PORT_CALL(d,complete)(d->port.context,parent,final,bytes);
+         } else if (action==CANCEL) {
+-            d->port.cancel(d->port.context,&s->command);
++            NX_PORT_CALL(d,cancel)(d->port.context,&s->command);
+         } else if (action==RETIRE) {
+-            d->port.retire(d->port.context,&s->command);
++            NX_PORT_CALL(d,retire)(d->port.context,&s->command);
+             lock(d); record_result(d,s); d->cursor=index; unlock(d);
+         } else {
+-            nx_status prepared=d->port.prepare(d->port.context,&s->command);
++            nx_status prepared=NX_PORT_CALL(d,prepare)(d->port.context,&s->command);
+             lock(d);
+             if (prepared!=NX_OK) {
+                 preparation_failed(d,s,prepared>NX_OK ? NX_PROTOCOL_ERROR:prepared);
+                 unlock(d); continue;
+             }
+             if (d->quarantined && !s->recovery) {
+-                unlock(d); d->port.retire(d->port.context,&s->command);
++                unlock(d); NX_PORT_CALL(d,retire)(d->port.context,&s->command);
+                 lock(d); s->final_status=NX_IO_ERROR; s->terminal=1; unlock(d); continue;
+             }
+             if (s->cancelled && !s->recovery) {
+-                unlock(d); d->port.retire(d->port.context,&s->command);
++                unlock(d); NX_PORT_CALL(d,retire)(d->port.context,&s->command);
+                 lock(d); s->final_status=NX_CANCELLED; s->terminal=1; unlock(d); continue;
+             }
+             /* Submission commit: subsequent cancellation may race with the
+              * unlocked port call, so it must cancel/drain committed transport. */
+             s->inflight=1; s->prepared=1;
+             unlock(d);
+-            int submitted_pending=d->port.submit(d->port.context,&s->command);
++            int submitted_pending=NX_PORT_CALL(d,submit)(d->port.context,&s->command);
+             lock(d);
+             /* A return value never proves lower ownership ended. A broken
+              * adapter that omits its terminal report keeps the pages live. */
+@@ -281,13 +286,13 @@ nx_status nx_start(nx_device *d, const nx_request *r, nx_handle *handle)
+     handle->slot=UINT32_MAX; handle->generation=0;
+     nx_status result=validate(d,r);
+     if (result!=NX_OK || (r->operation!=NX_FLUSH && !r->bytes)) {
+-        d->port.complete(d->port.context,r->parent,result,0); return result;
++        NX_PORT_CALL(d,complete)(d->port.context,r->parent,result,0); return result;
+     }
+     lock(d);
+     uint32_t index=d->free_head;
+     if (d->quarantined || index==UINT32_MAX || d->order==UINT64_MAX) {
+         result=d->quarantined ? NX_IO_ERROR:NX_NO_MEMORY;
+-        unlock(d); d->port.complete(d->port.context,r->parent,result,0); return result;
++        unlock(d); NX_PORT_CALL(d,complete)(d->port.context,r->parent,result,0); return result;
+     }
+     nx_slot *s=&d->slots[index]; uint64_t generation=s->generation+1u;
+     d->free_head=s->free_next;
+diff --git a/tests/host/nxstorage/check.py b/tests/host/nxstorage/check.py
+index e63dcf3..d2dc6ab 100644
+--- a/tests/host/nxstorage/check.py
++++ b/tests/host/nxstorage/check.py
+@@ -44,4 +44,5 @@ if subprocess.check_output(["nm", "-u", str(combined)], text=True).strip():
+ abi_object = output / "cache-abi-assert.i386.o"
+ target = ["-target", "i386-none-elf"] if Path(cc).name.startswith("clang") else ["-m32"]
+ subprocess.run([cc] + target + ["-std=c11", "-O2", "-ffreestanding", "-fno-pic", "-fno-pie", "-I" + str(source), "-I" + str(tests), "-c", str(tests / "cache_abi_assert.c"), "-o", str(abi_object)], check=True)
++subprocess.run([sys.executable, str(tests / "check_port_binding.py"), str(output / "port-binding")], check=True)
+ print("Owned nxstorage production checks passed; kernel adapter/native qualification remains open")
+diff --git a/tests/host/nxstorage/check_adapter.py b/tests/host/nxstorage/check_adapter.py
+index d68c2f8..4ee8fb3 100644
+--- a/tests/host/nxstorage/check_adapter.py
++++ b/tests/host/nxstorage/check_adapter.py
+@@ -12,8 +12,16 @@ inputs=[str(source/'request.c'),str(source/'native_packet.c'),str(source/'native
+         str(source/'cache_query.c'),str(source/'cache_property.c'),
+         str(source/'nxdisk_owner.c'),str(source/'nxcdrom_profile.c'),str(source/'driver.c'),
+         str(tests/'native_adapter_test.c')]
+-for name,flags in [('adapter-plain',[]),('adapter-sanitized',['-fsanitize=address,undefined','-fno-omit-frame-pointer'])]:
++outputs=[]
++for name,flags in [('adapter-plain',[]),('adapter-sanitized',['-fsanitize=address,undefined','-fno-omit-frame-pointer']),
++                   ('adapter-bound-plain',['-DNX_NATIVE_PORT_BINDING=1']),
++                   ('adapter-bound-sanitized',['-DNX_NATIVE_PORT_BINDING=1','-fsanitize=address,undefined','-fno-omit-frame-pointer'])]:
+     exe=out/name;subprocess.run(base+flags+inputs+['-o',str(exe)],check=True)
+     result=subprocess.run([str(exe)],check=True,text=True,capture_output=True,
+       env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0:halt_on_error=1',UBSAN_OPTIONS='halt_on_error=1'))
+     print(name+': '+result.stdout.splitlines()[-1])
++
++    outputs.append(result.stdout)
++if any(value!=outputs[0] for value in outputs[1:]):
++    raise SystemExit("runtime/bound adapter observations differ")
++print("runtime/bound adapter observations match")
+diff --git a/tests/host/nxstorage/check_port_binding.py b/tests/host/nxstorage/check_port_binding.py
+new file mode 100644
+index 0000000..d506ebe
+--- /dev/null
++++ b/tests/host/nxstorage/check_port_binding.py
+@@ -0,0 +1,41 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-or-later
++"""Require the bound production engine to use direct native port calls."""
++import os
++from pathlib import Path
++import re
++import subprocess
++import sys
++
++root = Path(__file__).resolve().parents[3]
++source = root / 'drivers/storage/class/nxstorage'
++output = Path(sys.argv[1]).resolve()
++output.mkdir(parents=True, exist_ok=True)
++cc = os.environ.get('CC', 'clang')
++target = ['-target', 'i386-none-elf'] if Path(cc).name.startswith('clang') else ['-m32']
++for mode in ('runtime', 'bound'):
++    obj = output / (mode + '.i386.o')
++    flags = ['-DNX_NATIVE_PORT_BINDING=1'] if mode == 'bound' else []
++    subprocess.run([cc] + target + ['-std=c11', '-Os', '-ffreestanding', '-fno-builtin',
++                   '-fno-pic', '-fno-pie', '-fno-stack-protector',
++                   '-fno-optimize-sibling-calls', '-fno-omit-frame-pointer',
++                   '-DNX_NATIVE_TARGET=1', '-I' + str(source)] + flags +
++                   ['-c', str(source / 'request.c'), '-o', str(obj)], check=True)
++    assembly = subprocess.check_output(['objdump', '-dr', str(obj)], text=True)
++    (output / (mode + '.disasm.txt')).write_text(assembly)
++    indirect = len(re.findall(r'\b(?:call|jmp)\s+\*', assembly))
++    print(f'{mode}: {indirect} indirect engine call/jump sites', flush=True)
++    if mode == 'bound' and indirect:
++        raise SystemExit('bound engine still contains runtime port dispatch')
++    if mode == 'runtime' and not indirect:
++        raise SystemExit('runtime control did not exercise callback dispatch')
++    if mode == 'bound':
++        undefined = subprocess.check_output(['nm', '-u', str(obj)], text=True)
++        names = {line.split()[-1].lstrip('_') for line in undefined.splitlines()}
++        expected = {'nx_native_port_' + name for name in
++                    ('enter', 'leave', 'prepare', 'submit', 'retire', 'cancel', 'mark_pending', 'complete')}
++        if names != expected:
++            raise SystemExit('unexpected native binding imports: ' + repr(names))
++        if re.search(r'<_?(?:lock|unlock)>:', assembly):
++            raise SystemExit('bound engine retained lock/unlock forwarding wrappers')
++print('native binding: direct calls, no forwarding wrappers or compiler helpers')
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 8d498f8..7a0d787 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -3,6 +3,7 @@
+ #include "native_adapter.h"
+ #include "native_driver.h"
+ #include "cache_property.h"
++#include "port_binding.h"
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -325,6 +326,72 @@ static int initialization_cleans_only_constructed_envelopes(void)
+     }
+     poison_pool=0;return 1;
+ }
++/* Break: native direct binding silently accepts a different callback table. */
++static nx_status foreign_prepare(void *context,const nx_command *command)
++{ (void)context;(void)command;return NX_OK; }
++static int foreign_submit(void *context,const nx_command *command)
++{ (void)context;(void)command;return 0; }
++static void foreign_pending(void *context,void *parent)
++{ (void)context;(void)parent; }
++static void foreign_complete(void *context,void *parent,nx_status status,uint64_t bytes)
++{ (void)context;(void)parent;(void)status;(void)bytes; }
++static int binding_rejects_foreign_tables_before_mutation(void)
++{
++    nx_config config={512,4096,4096,2,0,256,1u<<20,0,NX_CACHE_ENABLED};
++    unsigned context=17;nx_device device;nx_slot slots[2];
++    nx_port native={&context,nx_native_port_enter,nx_native_port_leave,
++        nx_native_port_prepare,nx_native_port_submit,nx_native_port_retire,
++        nx_native_port_cancel,nx_native_port_mark_pending,nx_native_port_complete};
++    CHECK(nx_device_init(&device,&config,&native,slots,2,sizeof(slots))==NX_OK);
++    CHECK(device.port.context==&context&&device.slots==slots);
++    for(unsigned member=0;member<8;++member) {
++        nx_port changed=native;
++        switch(member) {
++        case 0:changed.enter=nx_native_port_leave;break;
++        case 1:changed.leave=nx_native_port_enter;break;
++        case 2:changed.prepare=foreign_prepare;break;
++        case 3:changed.submit=foreign_submit;break;
++        case 4:changed.retire=nx_native_port_cancel;break;
++        case 5:changed.cancel=nx_native_port_retire;break;
++        case 6:changed.mark_pending=foreign_pending;break;
++        case 7:changed.complete=foreign_complete;break;
++        }
++        memset(&device,0xa5,sizeof(device));memset(slots,0xa5,sizeof(slots));
++#ifdef NX_NATIVE_PORT_BINDING
++        unsigned char saved_device[sizeof(device)],saved_slots[sizeof(slots)];
++        memcpy(saved_device,&device,sizeof(device));memcpy(saved_slots,slots,sizeof(slots));
++        CHECK(nx_device_init(&device,&config,&changed,slots,2,sizeof(slots))==NX_INVALID);
++        CHECK(!memcmp(&device,saved_device,sizeof(device))&&!memcmp(slots,saved_slots,sizeof(slots)));
++#else
++        CHECK(nx_device_init(&device,&config,&changed,slots,2,sizeof(slots))==NX_OK);
++#endif
++    }
++    return 1;
++}
++/* Break: direct callbacks use one global adapter instead of each device context. */
++static int independent_devices_keep_binding_context(void)
++{
++    int started=lower_started;
++    PDEVICE_OBJECT first=make_device(2),second=make_device(2);
++    parent_fixture a,b,next;PIRP child_a,child_b;
++    init_parent(&a,IRP_MJ_READ,512);init_parent(&b,IRP_MJ_READ,512);
++    lower_pending=1;lower_calls=0;
++    CHECK(NxNativeDispatchReadWrite(first,&a.irp)==STATUS_PENDING);child_a=active_child;
++    CHECK(NxNativeDispatchReadWrite(second,&b.irp)==STATUS_PENDING);child_b=active_child;
++    CHECK(child_a&&child_b&&child_a!=child_b&&lower_calls==2);
++    CHECK(complete_specific_child(child_b,STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(b.irp.host_completed&&!a.irp.host_completed);
++    CHECK(dispatch_pnp(NxNativeDispatchPnp,second,IRP_MN_REMOVE_DEVICE)==STATUS_SUCCESS);
++    init_parent(&next,IRP_MJ_READ,512);
++    CHECK(NxNativeDispatchReadWrite(first,&next.irp)==STATUS_PENDING);
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(next.irp.host_completed&&!a.irp.host_completed);
++    CHECK(complete_specific_child(child_a,STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(a.irp.host_completed&&a.irp.IoStatus.Status==STATUS_SUCCESS);
++    CHECK(dispatch_pnp(NxNativeDispatchPnp,first,IRP_MN_REMOVE_DEVICE)==STATUS_SUCCESS);
++    lower_started=started;publish_host_cache_from_descriptor();
++    lower_pending=0;return 1;
++}
+ static int sync_read_and_write_through(void)
+ {
+     PDEVICE_OBJECT d=make_device(2);parent_fixture p;lower_calls=0;lower_pending=0;init_parent(&p,IRP_MJ_READ,4096);
+@@ -1276,4 +1343,4 @@ static int queued_cancel_and_flush_keep_fifo_barriers(void)
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!retained_submit_avoids_empty_lock_roundtrips();f+=!seal_after_reservation_keeps_accepted_parent_live();f+=!seal_during_dynamic_allocation_rejects_and_reclaims();f+=!cancellation_at_late_submit_unlock_keeps_lease();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("42 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!binding_rejects_foreign_tables_before_mutation();f+=!independent_devices_keep_binding_context();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!retained_submit_avoids_empty_lock_roundtrips();f+=!seal_after_reservation_keeps_accepted_parent_live();f+=!seal_during_dynamic_allocation_rejects_and_reclaims();f+=!cancellation_at_late_submit_unlock_keeps_lease();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("44 adapter groups, %u failures\n",f);return f?1:0;}

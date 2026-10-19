@@ -1,0 +1,191 @@
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index 4d60d9c..8800c67 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -916,10 +916,13 @@ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+             envelope->handle=handle;envelope->handle_valid=handle.slot!=UINT32_MAX;
+             cancel_after=envelope->cancel_latched && envelope->handle_valid;
+         }
+-        /* Hold the envelope through a possible synchronous cancellation. */
+-        port_leave(adapter);
+-        if(cancel_after) nx_cancel(&adapter->core,handle);
+-        port_enter(adapter);
++        /* Keep the start lease across an unlocked cancellation. Without a
++         * cancellation callback, publication and lease release share the lock. */
++        if(cancel_after) {
++            port_leave(adapter);
++            nx_cancel(&adapter->core,handle);
++            port_enter(adapter);
++        }
+         envelope->start_active=0;release_envelope_locked(envelope);
+     }
+ }
+@@ -956,9 +959,13 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+         envelope=adapter->free_envelopes;
+         adapter->free_envelopes=envelope->next_free;
+     } else if(!adapter->sealed) grow=1;
+-    port_leave(adapter);
+-    if(!envelope && grow) envelope=allocate_dynamic_envelope(adapter,0);
+-    port_enter(adapter);
++    /* A retained reservation becomes active before releasing the lock.
++     * Only allocation needs an unlocked window and the subsequent seal check. */
++    if(!envelope && grow) {
++        port_leave(adapter);
++        envelope=allocate_dynamic_envelope(adapter,0);
++        port_enter(adapter);
++    }
+     if(envelope && (adapter->sealed || adapter->quarantined)) {
+         grow=envelope->dynamic;port_leave(adapter);
+         if(grow) destroy_dynamic_envelope(envelope);
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index b4b04ed..8d498f8 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -49,6 +49,11 @@ static unsigned queued_dpc_count;
+ static unsigned burst_complete_during_submit,burst_seed;
+ static unsigned stamp_read_payloads;
+ static unsigned rundown_event_calls;
++static unsigned spin_acquires;
++static _Thread_local unsigned spin_depth;
++static unsigned unlock_countdown;
++static void (*after_unlock)(void);
++static PDEVICE_OBJECT seal_after_allocation;
+ static void (*before_event_wait)(PKEVENT);
+ static void publish_host_cache_from_descriptor(void);
+ 
+@@ -63,11 +68,11 @@ static void cancel_now(void)
+     cancel_parent->Cancel=TRUE;cancel_parent->CancelIrql=0;
+     routine(created_device,cancel_parent);
+ }
+-VOID IoReuseIrp(PIRP i,NTSTATUS s){if(i==lower_call_child)++child_reuse_before_lower_return;if(completion_callback_active)++child_reuse_during_completion;if(cancel_during_prepare){cancel_during_prepare=0;cancel_now();}int8_t n=i->StackCount;PIO_STACK_LOCATION base=i->Tail.Overlay.CurrentStackLocation-n;memset(i,0,sizeof(*i));i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=base+n;i->IoStatus.Status=s;}
++VOID IoReuseIrp(PIRP i,NTSTATUS s){MUST(!spin_depth);if(i==lower_call_child)++child_reuse_before_lower_return;if(completion_callback_active)++child_reuse_during_completion;if(cancel_during_prepare){cancel_during_prepare=0;cancel_now();}int8_t n=i->StackCount;PIO_STACK_LOCATION base=i->Tail.Overlay.CurrentStackLocation-n;memset(i,0,sizeof(*i));i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=base+n;i->IoStatus.Status=s;}
+ PIRP IoAllocateIrp(CCHAR n,BOOLEAN q){(void)q;++irp_allocations;unsigned call=irp_calls++;if((int)call==irp_fail_call)return NULL;size_t z=sizeof(IRP)+(size_t)n*sizeof(IO_STACK_LOCATION);PIRP i=calloc(1,z);if(i){remember(live_irps,i);i->StackCount=n;i->CurrentLocation=n+1;i->Tail.Overlay.CurrentStackLocation=(PIO_STACK_LOCATION)(i+1)+n;}return i;}
+ VOID IoFreeIrp(PIRP i){if(!forget(live_irps,i)){++invalid_irp_frees;return;}++free_irps;free(i);}
+ 
+-VOID FASTCALL IofCompleteRequest(PIRP i,CCHAR b){(void)b;MUST(!i->host_completed);i->host_completed=1;
++VOID FASTCALL IofCompleteRequest(PIRP i,CCHAR b){MUST(!spin_depth);(void)b;MUST(!i->host_completed);i->host_completed=1;
+     if(completion_reentry_parent&&i!=completion_reentry_parent){PIRP parent=completion_reentry_parent;
+         completion_reentry_parent=NULL;
+         completion_reentry_status=NxNativeDispatchReadWrite(completion_reentry_device,parent);}}
+@@ -90,9 +95,10 @@ VOID KeFlushQueuedDpcs(VOID){drain_dpcs();}
+ VOID IoAcquireCancelSpinLock(KIRQL *q){*q=0;}
+ VOID IoReleaseCancelSpinLock(KIRQL q){(void)q;if(cancel_before_enqueue){cancel_before_enqueue=0;cancel_now();}}
+ VOID KeInitializeSpinLock(PKSPIN_LOCK l){*l=0;}
+-KIRQL FASTCALL KfAcquireSpinLock(PKSPIN_LOCK l){while(__atomic_exchange_n(l,1,__ATOMIC_ACQUIRE))sched_yield();return 0;}
+-VOID FASTCALL KfReleaseSpinLock(PKSPIN_LOCK l,KIRQL q){(void)q;MUST(__atomic_load_n(l,__ATOMIC_RELAXED));__atomic_store_n(l,0,__ATOMIC_RELEASE);}
+-PVOID ExAllocatePool(int t,size_t n){(void)t;++pool_allocations;unsigned call=pool_calls++;if(n>pool_request_limit)return NULL;if(fail_pool){--fail_pool;return NULL;}if((int)call==pool_fail_call)return NULL;PVOID p=malloc(n);if(p){memset(p,poison_pool?0xa5:0,n);++pool_live;}return p;}
++KIRQL FASTCALL KfAcquireSpinLock(PKSPIN_LOCK l){while(__atomic_exchange_n(l,1,__ATOMIC_ACQUIRE))sched_yield();++spin_depth;__atomic_add_fetch(&spin_acquires,1,__ATOMIC_RELAXED);return 0;}
++VOID FASTCALL KfReleaseSpinLock(PKSPIN_LOCK l,KIRQL q){(void)q;MUST(__atomic_load_n(l,__ATOMIC_RELAXED)&&spin_depth);--spin_depth;__atomic_store_n(l,0,__ATOMIC_RELEASE);
++    if(after_unlock&&unlock_countdown&&!--unlock_countdown){void (*hook)(void)=after_unlock;after_unlock=NULL;hook();}}
++PVOID ExAllocatePool(int t,size_t n){(void)t;if(seal_after_allocation){PDEVICE_OBJECT device=seal_after_allocation;seal_after_allocation=NULL;MUST(!spin_depth);NxNativeSealClassDevice(device);}++pool_allocations;unsigned call=pool_calls++;if(n>pool_request_limit)return NULL;if(fail_pool){--fail_pool;return NULL;}if((int)call==pool_fail_call)return NULL;PVOID p=malloc(n);if(p){memset(p,poison_pool?0xa5:0,n);++pool_live;}return p;}
+ VOID ExFreePool(PVOID p){if(p){MUST(pool_live);--pool_live;}free(p);}
+ PMDL IoAllocateMdl(PVOID p,ULONG n,BOOLEAN s,BOOLEAN q,PIRP i){(void)s;(void)q;(void)i;++mdl_allocations;unsigned call=mdl_calls++;if((int)call==mdl_fail_call)return NULL;PMDL m=calloc(1,sizeof(*m)+2*sizeof(ULONG));if(m){remember(live_mdls,m);uintptr_t a=(uintptr_t)p;m->StartVa=(PVOID)(a&~(uintptr_t)4095);m->ByteOffset=(ULONG)(a&4095);m->ByteCount=n;m->Size=sizeof(*m)+2*sizeof(ULONG);}return m;}
+ 
+@@ -139,6 +145,7 @@ static NTSTATUS complete_child(NTSTATUS status,ULONG bytes,UCHAR srb_status)
+ }
+ NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT lower,PIRP child)
+ {
++    MUST(!spin_depth);
+     PIO_STACK_LOCATION s=child->Tail.Overlay.CurrentStackLocation-1;
+     if(s->MajorFunction==IRP_MJ_PNP) {
+         (void)lower;++forward_calls;
+@@ -920,6 +927,93 @@ static int production_cache_qualification_and_durability(void)
+     lower_pending=0;
+     return 1;
+ }
++/* Break: a retained pending read pays two avoidable release/reacquire
++ * round trips even though neither window calls an external operation. */
++static int retained_submit_avoids_empty_lock_roundtrips(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture read;
++    init_parent(&read,IRP_MJ_READ,512);lower_pending=1;lower_calls=0;
++    unsigned before=__atomic_load_n(&spin_acquires,__ATOMIC_RELAXED);
++    CHECK(NxNativeDispatchReadWrite(device,&read.irp)==STATUS_PENDING);
++    unsigned used=__atomic_load_n(&spin_acquires,__ATOMIC_RELAXED)-before;
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS);
++    lower_pending=0;
++    printf("retained pending submit: %u adapter lock entries\n",used);
++    CHECK(used<=14);
++    return 1;
++}
++static pnp_thread reservation_removal;
++static pthread_t reservation_removal_id;
++static unsigned reservation_wait_seen;
++static void mark_reservation_wait(PKEVENT event)
++{
++    (void)event;
++    __atomic_store_n(&reservation_wait_seen,1,__ATOMIC_RELEASE);
++}
++static void remove_reserved_device(void)
++{
++    MUST(!spin_depth);
++    init_pnp(&reservation_removal,NxNativeDispatchPnp,created_device,IRP_MN_REMOVE_DEVICE);
++    __atomic_store_n(&reservation_wait_seen,0,__ATOMIC_RELAXED);
++    before_event_wait=mark_reservation_wait;
++    MUST(!pthread_create(&reservation_removal_id,NULL,run_pnp,&reservation_removal));
++    while(!__atomic_load_n(&reservation_wait_seen,__ATOMIC_ACQUIRE)&&
++          !__atomic_load_n(&reservation_removal.returned,__ATOMIC_ACQUIRE))sched_yield();
++}
++/* Break: reservation/publication leaves a window in which removal observes
++ * idle and unbinds, yet the outer call still accepts an unprotected parent. */
++static int seal_after_reservation_keeps_accepted_parent_live(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture read,late;
++    init_parent(&read,IRP_MJ_READ,512);lower_pending=1;lower_calls=0;
++    after_unlock=remove_reserved_device;unlock_countdown=1;
++    NTSTATUS status=NxNativeDispatchReadWrite(device,&read.irp);
++    CHECK(!after_unlock);
++    /* Both linearizations are valid. Acceptance requires removal to wait;
++     * removal that already returned requires rejection without lower I/O. */
++    if(status==STATUS_PENDING) {
++        CHECK(__atomic_load_n(&reservation_wait_seen,__ATOMIC_ACQUIRE));
++        CHECK(!__atomic_load_n(&reservation_removal.returned,__ATOMIC_ACQUIRE));
++        CHECK(!read.irp.host_completed&&lower_calls==1);
++        CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++        CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS);
++    } else CHECK(status<0&&read.irp.host_completed&&lower_calls==0);
++    CHECK(!pthread_join(reservation_removal_id,NULL));before_event_wait=NULL;
++    CHECK(reservation_removal.returned&&reservation_removal.status==STATUS_SUCCESS);
++    init_parent(&late,IRP_MJ_READ,512);unsigned calls=lower_calls;
++    CHECK(NxNativeDispatchReadWrite(device,&late.irp)<0&&late.irp.host_completed&&lower_calls==calls);
++    lower_pending=0;return 1;
++}
++/* Break: allocation is moved under the adapter lock, or a dynamically
++ * allocated envelope is published after sealing without the recheck. */
++static int seal_during_dynamic_allocation_rejects_and_reclaims(void)
++{
++    PDEVICE_OBJECT device=make_device(1);parent_fixture held,overflow;
++    init_parent(&held,IRP_MJ_READ,512);lower_pending=1;lower_calls=0;
++    CHECK(NxNativeDispatchReadWrite(device,&held.irp)==STATUS_PENDING);
++    unsigned pools=pool_live,irps=live_count(live_irps);
++    init_parent(&overflow,IRP_MJ_READ,512);seal_after_allocation=device;
++    CHECK(NxNativeDispatchReadWrite(device,&overflow.irp)==STATUS_IO_DEVICE_ERROR);
++    CHECK(!seal_after_allocation&&overflow.irp.host_completed&&lower_calls==1);
++    CHECK(pool_live==pools&&live_count(live_irps)==irps);
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(held.irp.host_completed&&held.irp.IoStatus.Status==STATUS_SUCCESS);
++    CHECK(dispatch_pnp(NxNativeDispatchPnp,device,IRP_MN_REMOVE_DEVICE)==STATUS_SUCCESS);
++    lower_pending=0;return 1;
++}
++/* Break: removing the no-cancel window drops the dispatch/start lifetime
++ * protection before a newly delivered cancellation uses the published handle. */
++static int cancellation_at_late_submit_unlock_keeps_lease(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture read;
++    init_parent(&read,IRP_MJ_READ,512);lower_pending=1;lower_calls=cancel_calls=0;
++    cancel_parent=&read.irp;after_unlock=cancel_now;unlock_countdown=13;
++    CHECK(NxNativeDispatchReadWrite(device,&read.irp)==STATUS_PENDING);
++    CHECK(!after_unlock&&read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(lower_calls==1&&cancel_calls==1&&!active_child);
++    cancel_parent=NULL;lower_pending=0;return 1;
++}
+ /* Break: normal admission/retirement enters the dispatcher for a rundown
+  * event even though no teardown waiter can exist before sealing. */
+ static int unsealed_reads_do_not_signal_rundown(void)
+@@ -1182,4 +1276,4 @@ static int queued_cancel_and_flush_keep_fifo_barriers(void)
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("38 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!retained_submit_avoids_empty_lock_roundtrips();f+=!seal_after_reservation_keeps_accepted_parent_live();f+=!seal_during_dynamic_allocation_rejects_and_reclaims();f+=!cancellation_at_late_submit_unlock_keeps_lease();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("42 adapter groups, %u failures\n",f);return f?1:0;}

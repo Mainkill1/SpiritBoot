@@ -1,0 +1,81 @@
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index 8800c675..a31684d0 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -885,10 +885,16 @@ static void destroy_unpublished_adapter(NX_NATIVE_ADAPTER *adapter)
+ 
+ /* Bound transport concurrency, not guest request admission. One owner assigns
+  * core slots in FIFO order; queued parents retain their envelopes and MDLs. */
+-static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
++/* Entered with the adapter lock held.  A dispatch caller supplies its retained
++ * envelope and receives the same lock back for finalization.  Other callers
++ * pass NULL and this helper releases the lock before returning. */
++static void admit_waiting_requests_locked(NX_NATIVE_ADAPTER *adapter,
++                                          NX_NATIVE_ENVELOPE *dispatch)
+ {
+-    port_enter(adapter);
+-    if(adapter->admission_active) { port_leave(adapter);return; }
++    if(adapter->admission_active) {
++        if(!dispatch) port_leave(adapter);
++        return;
++    }
+     adapter->admission_active=1;
+     for(;;) {
+         NX_NATIVE_ENVELOPE *envelope;
+@@ -900,7 +906,8 @@ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+             adapter->admission_active=0;
+             if(adapter->sealed)
+                 (void)KeSetEvent(&adapter->drain_event,IO_NO_INCREMENT,FALSE);
+-            port_leave(adapter);return;
++            if(!dispatch) port_leave(adapter);
++            return;
+         }
+         adapter->waiting_head=envelope->next_waiting;
+         if(!adapter->waiting_head) adapter->waiting_tail=NULL;
+@@ -927,6 +934,12 @@ static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
+     }
+ }
+ 
++static void admit_waiting_requests(NX_NATIVE_ADAPTER *adapter)
++{
++    port_enter(adapter);
++    admit_waiting_requests_locked(adapter,NULL);
++}
++
+ static VOID NTAPI NxNativeAdmissionDpc(PKDPC dpc,PVOID context,PVOID argument1,PVOID argument2)
+ {
+     (void)dpc;(void)argument1;(void)argument2;
+@@ -1020,11 +1033,16 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+         if(adapter->waiting_tail) adapter->waiting_tail->next_waiting=envelope;
+         else adapter->waiting_head=envelope;
+         adapter->waiting_tail=envelope;
++        /* Reuse queue publication as the admission-owner acquisition.  The
++         * helper returns this lock for the dispatch epilogue, including when
++         * another admission owner will consume the newly queued request. */
++        admit_waiting_requests_locked(adapter,envelope);
++    }
++    else {
++        port_leave(adapter);
++        port_complete(adapter,parent,NX_CANCELLED,0);
++        port_enter(adapter);
+     }
+-    port_leave(adapter);
+-    if(cancelled) port_complete(adapter,parent,NX_CANCELLED,0);
+-    else admit_waiting_requests(adapter);
+-    port_enter(adapter);
+     if(!envelope->completed && !envelope->was_pending) port_pending(adapter,parent);
+     result=envelope->was_pending ? STATUS_PENDING:envelope->dispatch_status;
+     envelope->dispatch_active=0;
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 171a555c..4846ee09 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -941,7 +941,7 @@ static int single_command_read_has_bounded_native_submission(void)
+     CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS);
+     lower_pending=0;
+     printf("single-command pending submit: %u adapter lock entries\n",used);
+-    CHECK(used<=11);
++    CHECK(used<=9);
+     return 1;
+ }
+ static pnp_thread reservation_removal;

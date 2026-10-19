@@ -1,0 +1,136 @@
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index a31684d0..512bde60 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -307,6 +307,10 @@ static nx_status port_prepare(void *context,const nx_command *command)
+     if(!envelope || envelope->packet_live) return NX_PROTOCOL_ERROR;
+     handle.slot=command->token.slot;handle.generation=command->token.generation;
+     port_enter(adapter);envelope->handle=handle;envelope->handle_valid=1;
++    /* This is already the final adapter critical section before lower submit.
++     * Arm inline-completion deferral here instead of reacquiring immediately
++     * in port_submit. */
++    envelope->submit_active=1;
+     cancel_after=envelope->cancel_latched;port_leave(adapter);
+     if(cancel_after) nx_cancel(&adapter->core,handle);
+     mdl=envelope->parent->MdlAddress;
+@@ -339,8 +343,10 @@ static nx_status port_prepare(void *context,const nx_command *command)
+     packet.lower_stack_count=adapter->lower->StackSize;
+     packet.completion=NxNativeAdapterChildComplete;
+     packet.completion_context=envelope;
+-    if(nx_packet_prepare(&resources,&packet,&envelope->ticket)!=NX_PACKET_OK)
++    if(nx_packet_prepare(&resources,&packet,&envelope->ticket)!=NX_PACKET_OK) {
++        envelope->submit_active=0;
+         return NX_INVALID;
++    }
+     envelope->packet_live=1;
+     return NX_OK;
+ }
+@@ -363,9 +369,6 @@ static int port_submit(void *context,const nx_command *command)
+     nx_packet_status captured=NX_PACKET_OK;
+     unsigned report=0;
+     if(!envelope || !envelope->packet_live) return 0;
+-    port_enter(adapter);
+-    envelope->submit_active=1;
+-    port_leave(adapter);
+     status=IofCallDriver(adapter->lower,envelope->child);
+     port_enter(adapter);
+     envelope->submit_active=0;
+@@ -375,16 +378,26 @@ static int port_submit(void *context,const nx_command *command)
+         envelope->result_deferred=0;
+         report=1;
+     }
+-    port_leave(adapter);
+-    if(report) report_result(envelope,&deferred,captured);
+-    return status==STATUS_PENDING;
++    if(report) {
++        port_leave(adapter);
++        report_result(envelope,&deferred,captured);
++        return status==STATUS_PENDING ? NX_SUBMIT_PENDING:0;
++    }
++    /* No inline result needs delivery.  Transfer this already-held adapter
++     * lock to the core so its post-submit state update does not reacquire it. */
++    return (status==STATUS_PENDING ? NX_SUBMIT_PENDING:0)|NX_SUBMIT_LOCK_HELD;
+ }
+ 
+ static void port_retire(void *context,const nx_command *command)
+ {
+     NX_NATIVE_ADAPTER *adapter=context;
+     NX_NATIVE_ENVELOPE *envelope=command_envelope(adapter,command);
+-    if(envelope) envelope->packet_live=0;
++    if(envelope) {
++        /* Preparation can be retired before submission after cancellation or
++         * quarantine, so undo the deferral arm on every no-submit path. */
++        envelope->packet_live=0;
++        envelope->submit_active=0;
++    }
+ }
+ 
+ static void port_cancel(void *context,const nx_command *command)
+diff --git a/drivers/storage/class/nxstorage/request.c b/drivers/storage/class/nxstorage/request.c
+index f80a9b3e..c877004c 100644
+--- a/drivers/storage/class/nxstorage/request.c
++++ b/drivers/storage/class/nxstorage/request.c
+@@ -265,11 +265,11 @@ static void run_pump(nx_device *d)
+              * unlocked port call, so it must cancel/drain committed transport. */
+             s->inflight=1; s->prepared=1;
+             unlock(d);
+-            int submitted_pending=d->port.submit(d->port.context,&s->command);
+-            lock(d);
++            int submitted=d->port.submit(d->port.context,&s->command);
++            if (!(submitted & NX_SUBMIT_LOCK_HELD)) lock(d);
+             /* A return value never proves lower ownership ended. A broken
+              * adapter that omits its terminal report keeps the pages live. */
+-            if (submitted_pending || !s->done) pending(d,s);
++            if ((submitted & NX_SUBMIT_PENDING) || !s->done) pending(d,s);
+             unlock(d);
+         }
+     }
+@@ -323,9 +323,9 @@ nx_status nx_start(nx_device *d, const nx_request *r, nx_handle *handle)
+         } else {
+             s->inflight=1; s->prepared=1;
+             unlock(d);
+-            int submitted_pending=d->port.submit(d->port.context,&s->command);
+-            lock(d);
+-            if (submitted_pending || !s->done) pending(d,s);
++            int submitted=d->port.submit(d->port.context,&s->command);
++            if (!(submitted & NX_SUBMIT_LOCK_HELD)) lock(d);
++            if ((submitted & NX_SUBMIT_PENDING) || !s->done) pending(d,s);
+             if (s->active && s->generation==generation && s->inflight &&
+                 !s->done && !s->cancelled && !d->quarantined &&
+                 !d->rescan_requested) {
+diff --git a/drivers/storage/class/nxstorage/request.h b/drivers/storage/class/nxstorage/request.h
+index 4f264aa7..1a4b70a9 100644
+--- a/drivers/storage/class/nxstorage/request.h
++++ b/drivers/storage/class/nxstorage/request.h
+@@ -12,6 +12,9 @@ typedef enum nx_status {
+ typedef enum nx_operation { NX_READ, NX_WRITE, NX_FLUSH } nx_operation;
+ typedef enum nx_cache { NX_CACHE_DISABLED, NX_CACHE_ENABLED, NX_CACHE_UNQUALIFIED } nx_cache;
+ enum { NX_LOWER_QUEUE_FROZEN=1 };
++/* submit() may return with the port state lock held.  The request core then
++ * consumes that ownership without calling enter() and always calls leave(). */
++enum { NX_SUBMIT_PENDING=1, NX_SUBMIT_LOCK_HELD=2 };
+ /* Valid only on NX_WRITE; one parent includes data and real durability sync. */
+ enum { NX_WRITE_THROUGH=1 };
+ 
+@@ -56,6 +59,8 @@ typedef struct nx_port {
+     void (*enter)(void *);
+     void (*leave)(void *);
+     nx_status (*prepare)(void *, const nx_command *);
++    /* NX_SUBMIT_* bit mask.  LOCK_HELD transfers one enter/leave ownership
++     * to the request core; ports that return 0/1 retain the original ABI. */
+     int (*submit)(void *, const nx_command *);
+     void (*retire)(void *, const nx_command *);
+     void (*cancel)(void *, const nx_command *);
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 4846ee09..1cae2b34 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -941,7 +941,7 @@ static int single_command_read_has_bounded_native_submission(void)
+     CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS);
+     lower_pending=0;
+     printf("single-command pending submit: %u adapter lock entries\n",used);
+-    CHECK(used<=9);
++    CHECK(used<=7);
+     return 1;
+ }
+ static pnp_thread reservation_removal;

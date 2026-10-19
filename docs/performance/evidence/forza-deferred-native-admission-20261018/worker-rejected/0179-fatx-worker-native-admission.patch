@@ -1,0 +1,140 @@
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index 6508bbb0..8bef6daa 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -1262,17 +1262,28 @@ VfatRead(
+     }
+ 
+ #ifdef SARCH_XBOX
+-    /* Noncached file reads wait for disk children in VfatReadFileData.
+-     * An asynchronous issuer must post that work before entering this path.
+-     * The existing queue pins its buffer and grants the worker CANWAIT. */
++    /* Publish asynchronous completion before mapping or native submission.
++     * The retained IRP context carries this request through the existing FATX
++     * critical queue; its worker then attempts the allocation-free direct
++     * route without making the title pay that work in NtReadFile. */
+     if (NoCache && !PagingIo && !IsVolume && !CanWait)
+     {
+-        if (VfatTryAsyncRead(IrpContext))
+-            return STATUS_PENDING;
++        IrpContext->Flags |= IRPCONTEXT_ASYNC_READ;
+         Status = STATUS_PENDING;
+         goto ByeBye;
+     }
+ 
++    if (NoCache && !PagingIo && !IsVolume && CanWait &&
++        BooleanFlagOn(IrpContext->Flags, IRPCONTEXT_ASYNC_READ))
++    {
++        IrpContext->Flags &= ~IRPCONTEXT_ASYNC_READ;
++        if (VfatTryAsyncRead(IrpContext))
++            return STATUS_PENDING;
++        /* A changed file/resource/map condition uses the established worker
++         * fallback below.  It is already allowed to wait and still owns the
++         * completion contract. */
++    }
++
+     /* Xbox user-buffer probing is intentionally smaller than the desktop
+      * I/O manager path, so enforce the mounted device's direct-I/O alignment
+      * here.  Keep this after the asynchronous post decision: Complex returns
+diff --git a/drivers/filesystems/vfatfs/vfat.h b/drivers/filesystems/vfatfs/vfat.h
+index ff949e26..85fba151 100644
+--- a/drivers/filesystems/vfatfs/vfat.h
++++ b/drivers/filesystems/vfatfs/vfat.h
+@@ -606,6 +606,7 @@ DOSDATE, *PDOSDATE;
+ #define IRPCONTEXT_QUEUE            0x0004
+ #define IRPCONTEXT_PENDINGRETURNED  0x0008
+ #define IRPCONTEXT_DEFERRED_WRITE   0x0010
++#define IRPCONTEXT_ASYNC_READ       0x0020
+ 
+ typedef struct
+ {
+diff --git a/tests/host/fatx/check-async-coupling.py b/tests/host/fatx/check-async-coupling.py
+index d084524b..0022af39 100644
+--- a/tests/host/fatx/check-async-coupling.py
++++ b/tests/host/fatx/check-async-coupling.py
+@@ -46,7 +46,9 @@ static void run(FCB*f,DEVICE_EXTENSION*de,ULONG off,ULONG n,int64_t diskoff,ULON
+  STACK stack={.Parameters.Read={.ByteOffset.QuadPart=off,.Length=n}};
+  DEVICE dev={.AlignmentRequirement=1};CONTEXT c={&irp,&file,&stack,de,&dev,IRPCONTEXT_COMPLETE,0};
+  requested=n;expected_disk=diskoff;submitted=queued=completed=0;immediate=1;
+- assert(VfatRead(&c)==STATUS_PENDING);assert(submitted==1&&!queued&&completed==1);
++ assert(VfatRead(&c)==STATUS_PENDING);assert(!submitted&&queued==1&&(c.Flags&IRPCONTEXT_QUEUE));
++ c.Flags|=IRPCONTEXT_CANWAIT|IRPCONTEXT_COMPLETE;c.Flags&=~IRPCONTEXT_QUEUE;
++ assert(VfatRead(&c)==STATUS_PENDING);assert(submitted==1&&queued==1&&completed==1);
+  assert(!f->MainResource.count&&!de->FatResource.count&&!fat_pins);
+  assert(f->SeekCache->Positions[15].Offset==hintoff);
+  assert(f->SeekCache->Positions[15].Cluster==hintcluster);
+diff --git a/tests/host/fatx/check-async-read.py b/tests/host/fatx/check-async-read.py
+index dba089b0..5fcae9d9 100644
+--- a/tests/host/fatx/check-async-read.py
++++ b/tests/host/fatx/check-async-read.py
+@@ -1,8 +1,8 @@
+ #!/usr/bin/env python3
+-"""Run the real FATX read entry point against controlled storage completions.
++"""Run the real FATX read entry point against controlled worker/storage completions.
+ 
+-Catches unnecessary worker posting, early lock release, double completion,
+-issuer-owned leases, and forwarding requests outside the eligible read range.
++Catches inline native submission, lost worker intent, early lock release,
++double completion, issuer-owned leases, and forwarding outside the eligible range.
+ """
+ import importlib.util
+ import subprocess
+@@ -47,6 +47,8 @@ shim = r'''
+ #define IRP_NOCACHE 2
+ #define IRPCONTEXT_CANWAIT 1
+ #define IRPCONTEXT_COMPLETE 2
++#define IRPCONTEXT_QUEUE 4
++#define IRPCONTEXT_ASYNC_READ 0x20
+ #define FCB_IS_PAGE_FILE 1
+ #define FCB_IS_VOLUME 2
+ #define FCB_IS_FAT 4
+@@ -98,7 +100,7 @@ static void ExFreePoolWithTag(void*p,int tag){(void)tag;freed++;free(p);}
+ static void *MmGetMdlVirtualAddress(void*p){return p;}
+ static unsigned IoGetRemainingStackSize(void){return stack_size;}
+ static NTSTATUS VfatLockUserBuffer(IRP*i,ULONG n,int access){(void)n;(void)access;lock_calls++;if(lock_fail)return STATUS_INSUFFICIENT_RESOURCES;i->MdlAddress=i->UserBuffer;return 0;}
+-static NTSTATUS VfatMarkIrpContextForQueue(CONTEXT*c){(void)c;queued++;return STATUS_PENDING;}
++static NTSTATUS VfatMarkIrpContextForQueue(CONTEXT*c){queued++;c->Flags&=~IRPCONTEXT_COMPLETE;c->Flags|=IRPCONTEXT_QUEUE;return STATUS_PENDING;}
+ static NTSTATUS VfatCommonRead(CONTEXT*c){(void)c;return 0;}
+ static void VfatPostRead(CONTEXT*c,ERESOURCE*r,int paging){(void)c;(void)r;(void)paging;queued++;}
+ static BOOLEAN VfatTryMapRead(DEVICE_EXTENSION*d,ULONG first,ULONG off,ULONG n,LARGE_INTEGER*at){(void)d;assert(first==42&&n==512&&off==4096);if(mapping_fail)return 0;at->QuadPart=0x123400;return 1;}
+@@ -145,12 +147,20 @@ int main(void){
+   NTSTATUS result=VfatRead(&c);
+   if(eligible){
+    check(result==STATUS_PENDING,"eligible read preserves asynchronous return");
+-   check(submitted==1&&queued==0,"eligible resident read reaches storage without worker");
++   check(submitted==0&&queued==1,"eligible read returns before mapping or native submission");
++   check(c.Flags&IRPCONTEXT_QUEUE,"eligible read transfers ownership to FATX worker");
++   if(submitted)continue; /* Keep the RED failure bounded to the old inline path. */
++   c.Flags|=IRPCONTEXT_CANWAIT|IRPCONTEXT_COMPLETE;
++   c.Flags&=~IRPCONTEXT_QUEUE;
++   result=VfatRead(&c);
++   check(result==STATUS_PENDING,"FATX worker preserves pending return");
++   check(submitted==1&&queued==1,"FATX worker uses resident direct read path");
++   check(!(c.Flags&IRPCONTEXT_ASYNC_READ),"worker consumes direct-read intent once");
+    if(!submitted)continue;
+    check(allocated==0,"eligible read needs no per-request pool allocation");
+    check(f.MainResource.count==0 || f.MainResource.owner==((uintptr_t)&irp|3),"pending lease is keyed by stable parent IRP");
+    check(stats_calls==2&&stats_sum==513,"noncached read statistics preserved");
+-   check(!(c.Flags&IRPCONTEXT_COMPLETE),"dispatcher relinquishes completion ownership");
++   check(!(c.Flags&IRPCONTEXT_COMPLETE),"worker relinquishes completion ownership");
+    check(irp.MdlAddress==irp.UserBuffer,"parent MDL stays owned by I/O manager");
+    if(!immediate){
+     check(f.MainResource.count==1&&(f.MainResource.owner&3)==3&&freed==0,"pending DMA retains tagged resource and context");
+@@ -161,7 +171,16 @@ int main(void){
+    check(irp.IoStatus.Status==backend&&irp.IoStatus.Information==(backend?0:512),"lower status and byte count survive completion");
+   }else{
+    check(!submitted,"ineligible read preserves worker fallback");
+-   check(c.Flags&IRPCONTEXT_COMPLETE,"fallback retains dispatcher ownership");
++   if(result==STATUS_PENDING)
++    check(queued==1&&(c.Flags&IRPCONTEXT_QUEUE),"fallback transfers dispatcher ownership to worker");
++   else
++    check(c.Flags&IRPCONTEXT_COMPLETE,"failed fallback retains dispatcher completion ownership");
++   if(scenario==18){
++    c.Flags|=IRPCONTEXT_CANWAIT|IRPCONTEXT_COMPLETE;c.Flags&=~IRPCONTEXT_QUEUE;
++    check(VfatRead(&c)==STATUS_SUCCESS,"worker fallback completes through established path");
++    check(!(c.Flags&IRPCONTEXT_ASYNC_READ)&&!submitted,
++          "worker fallback consumes direct-read intent without requeueing");
++   }
+    check(allocated==freed,"fallback releases allocated context");
+    check(f.MainResource.count==(scenario==7?1u:0u),"fallback preserves preexisting resource ownership");
+   }

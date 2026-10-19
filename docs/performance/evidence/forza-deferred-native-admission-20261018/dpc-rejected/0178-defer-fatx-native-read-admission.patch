@@ -1,0 +1,253 @@
+diff --git a/drivers/filesystems/vfatfs/rw.c b/drivers/filesystems/vfatfs/rw.c
+index 6508bbb0..a0d026e1 100644
+--- a/drivers/filesystems/vfatfs/rw.c
++++ b/drivers/filesystems/vfatfs/rw.c
+@@ -1159,7 +1159,12 @@ VfatTryAsyncRead(
+     IoSetCompletionRoutine(Irp, VfatAsyncReadComplete, Resource, TRUE, TRUE, TRUE);
+     IoMarkIrpPending(Irp);
+     IrpContext->Flags &= ~IRPCONTEXT_COMPLETE;
++    /* This upper request is already pending and its resource lifetime belongs
++     * to VfatAsyncReadComplete.  Let the native adapter publish the dispatch
++     * result before it spends the caller's issue budget starting transport. */
++    Irp->Flags |= IRP_XBOX_DEFER_NATIVE_READ;
+     IoCallDriver(IrpContext->DeviceExt->StorageDevice, Irp);
++    Irp->Flags &= ~IRP_XBOX_DEFER_NATIVE_READ;
+     /* The lower driver may already have completed and released the lease. */
+     return TRUE;
+ }
+diff --git a/drivers/storage/class/nxstorage/native_adapter.c b/drivers/storage/class/nxstorage/native_adapter.c
+index 8800c675..cf263b38 100644
+--- a/drivers/storage/class/nxstorage/native_adapter.c
++++ b/drivers/storage/class/nxstorage/native_adapter.c
+@@ -940,9 +940,11 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     nx_request request;
+     NTSTATUS result;
+     KIRQL cancel_irql;
+-    unsigned grow=0,cancelled;
++    unsigned grow=0,cancelled,defer_read,queue_admission=0;
+     nx_lcq_observation cache_observation={0};
+     if(!adapter || !parent) return STATUS_INVALID_PARAMETER;
++    defer_read=operation==NX_READ&&
++        (parent->Flags&IRP_XBOX_DEFER_NATIVE_READ)!=0;
+     port_enter(adapter);
+     if(adapter->quarantined) {
+         port_leave(adapter);parent->IoStatus.Status=STATUS_IO_DEVICE_ERROR;
+@@ -1023,6 +1025,7 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     }
+     port_leave(adapter);
+     if(cancelled) port_complete(adapter,parent,NX_CANCELLED,0);
++    else if(defer_read) queue_admission=1;
+     else admit_waiting_requests(adapter);
+     port_enter(adapter);
+     if(!envelope->completed && !envelope->was_pending) port_pending(adapter,parent);
+@@ -1030,6 +1033,12 @@ NTSTATUS NxNativeAdapterSubmit(NX_NATIVE_ADAPTER *adapter,PIRP parent,nx_operati
+     envelope->dispatch_active=0;
+     release_envelope_locked(envelope);
+     port_leave(adapter);
++    /* Queue only after the dispatch lease is released.  Cancellation can
++     * remove the waiting request in this window; an empty admission pass is
++     * harmless.  A DPC already queued or running owns the same FIFO and will
++     * observe this request under the adapter lock. */
++    if(queue_admission)
++        (void)KeInsertQueueDpc(&adapter->admission_dpc,NULL,NULL);
+     return result;
+ }
+ 
+diff --git a/sdk/include/xdk/iotypes.h b/sdk/include/xdk/iotypes.h
+index ee2c97cc..7e3b0d36 100644
+--- a/sdk/include/xdk/iotypes.h
++++ b/sdk/include/xdk/iotypes.h
+@@ -1947,6 +1947,9 @@ $if (_WDMDDK_)
+ /* The following 2 are missing in latest WDK */
+ #define IRP_RETRY_IO_COMPLETION         0x00004000
+ #define IRP_CLASS_CACHE_OPERATION       0x00008000
++/* The Xbox FATX fast path has already exposed this read as asynchronous.
++ * The native disk adapter may publish it before starting lower transport. */
++#define IRP_XBOX_DEFER_NATIVE_READ      0x00010000
+ 
+ /* IRP.AllocationFlags */
+ #define IRP_QUOTA_CHARGED                 0x01
+diff --git a/tests/host/fatx/check-async-read.py b/tests/host/fatx/check-async-read.py
+index dba089b0..124d5f03 100644
+--- a/tests/host/fatx/check-async-read.py
++++ b/tests/host/fatx/check-async-read.py
+@@ -45,6 +45,7 @@ shim = r'''
+ #define STATUS_CANCELLED ((NTSTATUS)0xc0000120)
+ #define IRP_PAGING_IO 1
+ #define IRP_NOCACHE 2
++#define IRP_XBOX_DEFER_NATIVE_READ 0x00010000
+ #define IRPCONTEXT_CANWAIT 1
+ #define IRPCONTEXT_COMPLETE 2
+ #define FCB_IS_PAGE_FILE 1
+@@ -108,7 +109,7 @@ static STACK *IoGetNextIrpStackLocation(IRP*i){return &i->lower;}
+ static void IoMarkIrpPending(IRP*i){i->pending++;}
+ static void IoSetCompletionRoutine(IRP*i,COMPLETION f,void*c,int a,int b,int x){assert(a&&b&&x);i->done=f;i->context=c;}
+ static void finish(IRP*i){i->IoStatus.Status=backend;i->IoStatus.Information=backend?0:512;i->PendingReturned=!immediate;assert(i->done);assert(i->done(NULL,i,i->context)==0);completed++;}
+-static NTSTATUS IoCallDriver(DEVICE*d,IRP*i){(void)d;submitted++;assert(!i->lower.FileObject);assert(i->lower.Parameters.Read.ByteOffset.QuadPart==0x123400);active=i;if(immediate)finish(i);return immediate?backend:STATUS_PENDING;}
++static NTSTATUS IoCallDriver(DEVICE*d,IRP*i){(void)d;submitted++;assert(i->Flags&IRP_XBOX_DEFER_NATIVE_READ);assert(!i->lower.FileObject);assert(i->lower.Parameters.Read.ByteOffset.QuadPart==0x123400);active=i;if(immediate)finish(i);return immediate?backend:STATUS_PENDING;}
+ '''
+ tests=r'''
+ static unsigned checks,failures;
+@@ -150,6 +151,7 @@ int main(void){
+    check(allocated==0,"eligible read needs no per-request pool allocation");
+    check(f.MainResource.count==0 || f.MainResource.owner==((uintptr_t)&irp|3),"pending lease is keyed by stable parent IRP");
+    check(stats_calls==2&&stats_sum==513,"noncached read statistics preserved");
++   check(!(irp.Flags&IRP_XBOX_DEFER_NATIVE_READ),"native deferral marker is scoped to lower dispatch");
+    check(!(c.Flags&IRPCONTEXT_COMPLETE),"dispatcher relinquishes completion ownership");
+    check(irp.MdlAddress==irp.UserBuffer,"parent MDL stays owned by I/O manager");
+    if(!immediate){
+diff --git a/tests/host/nxstorage/native_adapter_host_platform.h b/tests/host/nxstorage/native_adapter_host_platform.h
+index 8cebcc82..6967a1de 100644
+--- a/tests/host/nxstorage/native_adapter_host_platform.h
++++ b/tests/host/nxstorage/native_adapter_host_platform.h
+@@ -100,6 +100,7 @@ enum {
+     IO_NO_INCREMENT=0, IO_DISK_INCREMENT=1, FILE_WRITE_THROUGH=2,
+     SL_WRITE_THROUGH=4, SL_INVOKE_ON_CANCEL=0x20,
+     SL_INVOKE_ON_SUCCESS=0x40, SL_INVOKE_ON_ERROR=0x80,
++    IRP_XBOX_DEFER_NATIVE_READ=0x00010000,
+     IOCTL_DISK_GET_DRIVE_GEOMETRY=0x00070000,
+     IOCTL_DISK_GET_DRIVE_GEOMETRY_EX=0x000700a0,
+     IOCTL_CDROM_GET_DRIVE_GEOMETRY=0x0002404c,
+diff --git a/tests/host/nxstorage/native_adapter_test.c b/tests/host/nxstorage/native_adapter_test.c
+index 8d498f84..dcf993a0 100644
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -26,6 +26,7 @@ static int poison_pool,cancel_during_prepare,cancel_during_submit,cancel_before_
+ static PIRP cancel_parent;
+ static void *live_irps[512],*live_mdls[512];
+ static uint8_t opcodes[1024],functions[1024];
++static uint32_t lbas[1024];
+ static int lower_pending;
+ static NTSTATUS sync_command_status;
+ static uint32_t read_capacity_last=15,read_capacity_sector=2048;
+@@ -173,7 +174,10 @@ NTSTATUS FASTCALL IofCallDriver(PDEVICE_OBJECT lower,PIRP child)
+         IofCompleteRequest(child,IO_NO_INCREMENT);return STATUS_SUCCESS;}
+     (void)lower;
+     MUST(lower_calls<1024 && s->Parameters.Scsi.Srb);PSCSI_REQUEST_BLOCK srb=s->Parameters.Scsi.Srb;
+-    opcodes[lower_calls]=srb->Cdb[0];functions[lower_calls]=srb->Function;++lower_calls;
++    opcodes[lower_calls]=srb->Cdb[0];functions[lower_calls]=srb->Function;
++    lbas[lower_calls]=((uint32_t)srb->Cdb[2]<<24)|((uint32_t)srb->Cdb[3]<<16)|
++        ((uint32_t)srb->Cdb[4]<<8)|srb->Cdb[5];
++    ++lower_calls;
+     if(revoke_cache_during_submit) {
+         revoke_cache_during_submit=0;
+         nx_lcq_revoke(&host_lower_cache);
+@@ -943,6 +947,80 @@ static int retained_submit_avoids_empty_lock_roundtrips(void)
+     CHECK(used<=14);
+     return 1;
+ }
++/* Break: an upper asynchronous FATX read enters the lower transport before
++ * its dispatch call has returned, consuming the title's issue budget and
++ * allowing completion work to reenter that same call. */
++static int deferred_async_read_returns_before_lower_submission(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture read,cancelled,inline_read;
++    lower_pending=1;lower_calls=cancel_calls=0;pending_child_count=0;
++    CHECK(!queued_dpc_count);
++
++    init_parent(&read,IRP_MJ_READ,512);
++    read.irp.Flags|=IRP_XBOX_DEFER_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&read.irp)==STATUS_PENDING);
++    CHECK(read.irp.host_pending&&!read.irp.host_completed);
++    CHECK(lower_calls==0&&!active_child&&queued_dpc_count==1);
++    drain_dpcs();
++    CHECK(lower_calls==1&&active_child&&pending_child_count==1);
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS&&
++          read.irp.IoStatus.Information==512);
++
++    init_parent(&cancelled,IRP_MJ_READ,512);
++    cancelled.irp.Flags|=IRP_XBOX_DEFER_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&cancelled.irp)==STATUS_PENDING);
++    CHECK(lower_calls==1&&queued_dpc_count==1&&cancelled.irp.CancelRoutine);
++    cancelled.irp.Cancel=TRUE;cancelled.irp.CancelIrql=0;
++    cancelled.irp.CancelRoutine(device,&cancelled.irp);
++    CHECK(cancelled.irp.host_completed&&cancelled.irp.IoStatus.Status==STATUS_CANCELLED);
++    CHECK(cancel_calls==0&&lower_calls==1);
++    drain_dpcs();
++    CHECK(lower_calls==1&&!queued_dpc_count);
++
++    lower_pending=0;
++    init_parent(&inline_read,IRP_MJ_READ,512);
++    inline_read.irp.Flags|=IRP_XBOX_DEFER_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&inline_read.irp)==STATUS_PENDING);
++    CHECK(!inline_read.irp.host_completed&&lower_calls==1&&queued_dpc_count==1);
++    drain_dpcs();
++    CHECK(lower_calls==2&&inline_read.irp.host_completed&&
++          inline_read.irp.IoStatus.Status==STATUS_SUCCESS&&
++          inline_read.irp.IoStatus.Information==512);
++    CHECK(!queued_dpc_count&&!active_child);
++    return 1;
++}
++/* Break: repeated queue attempts lose requests when the shared admission DPC
++ * is already inserted, or a cancelled middle request disturbs FIFO order. */
++static int deferred_async_burst_shares_one_fifo_admission(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture reads[4];
++    lower_pending=1;lower_calls=cancel_calls=0;pending_child_count=0;
++    CHECK(!queued_dpc_count);
++    for(unsigned index=0;index<4;++index) {
++        init_parent(&reads[index],IRP_MJ_READ,512);
++        reads[index].stack.Parameters.Read.ByteOffset=(int64_t)index*512;
++        reads[index].irp.Flags|=IRP_XBOX_DEFER_NATIVE_READ;
++        CHECK(NxNativeDispatchReadWrite(device,&reads[index].irp)==STATUS_PENDING);
++    }
++    CHECK(lower_calls==0&&queued_dpc_count==1);
++    reads[1].irp.Cancel=TRUE;reads[1].irp.CancelIrql=0;
++    reads[1].irp.CancelRoutine(device,&reads[1].irp);
++    CHECK(reads[1].irp.host_completed&&reads[1].irp.IoStatus.Status==STATUS_CANCELLED);
++    drain_dpcs();
++    CHECK(lower_calls==3&&pending_child_count==3);
++    CHECK(lbas[0]==0&&lbas[1]==2&&lbas[2]==3);
++    while(pending_child_count)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,512,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned index=0;index<4;++index) {
++        CHECK(reads[index].irp.host_completed);
++        CHECK(reads[index].irp.IoStatus.Status==
++              (index==1?STATUS_CANCELLED:STATUS_SUCCESS));
++    }
++    CHECK(cancel_calls==0&&!queued_dpc_count&&!active_child);
++    lower_pending=0;return 1;
++}
+ static pnp_thread reservation_removal;
+ static pthread_t reservation_removal_id;
+ static unsigned reservation_wait_seen;
+@@ -1002,6 +1080,31 @@ static int seal_during_dynamic_allocation_rejects_and_reclaims(void)
+     CHECK(dispatch_pnp(NxNativeDispatchPnp,device,IRP_MN_REMOVE_DEVICE)==STATUS_SUCCESS);
+     lower_pending=0;return 1;
+ }
++/* Break: removal seals the adapter after an upper asynchronous read returns
++ * but before its admission DPC runs, leaving rundown asleep forever or
++ * forwarding removal before the accepted request drains. */
++static int deferred_async_read_drains_after_seal(void)
++{
++    PDEVICE_OBJECT device=make_device(2);parent_fixture read,late;
++    lower_pending=1;lower_calls=0;pending_child_count=0;
++    init_parent(&read,IRP_MJ_READ,512);
++    read.irp.Flags|=IRP_XBOX_DEFER_NATIVE_READ;
++    CHECK(NxNativeDispatchReadWrite(device,&read.irp)==STATUS_PENDING);
++    CHECK(!lower_calls&&queued_dpc_count==1&&!read.irp.host_completed);
++    remove_reserved_device();
++    CHECK(__atomic_load_n(&reservation_wait_seen,__ATOMIC_ACQUIRE));
++    CHECK(!__atomic_load_n(&reservation_removal.returned,__ATOMIC_ACQUIRE));
++    drain_dpcs();
++    CHECK(lower_calls==1&&active_child&&!read.irp.host_completed);
++    CHECK(complete_child(STATUS_SUCCESS,512,1)==STATUS_MORE_PROCESSING_REQUIRED);
++    CHECK(!pthread_join(reservation_removal_id,NULL));before_event_wait=NULL;
++    CHECK(read.irp.host_completed&&read.irp.IoStatus.Status==STATUS_SUCCESS);
++    CHECK(reservation_removal.returned&&reservation_removal.status==STATUS_SUCCESS);
++    init_parent(&late,IRP_MJ_READ,512);
++    CHECK(NxNativeDispatchReadWrite(device,&late.irp)<0);
++    CHECK(late.irp.host_completed&&lower_calls==1&&!queued_dpc_count);
++    lower_pending=0;return 1;
++}
+ /* Break: removing the no-cancel window drops the dispatch/start lifetime
+  * protection before a newly delivered cancellation uses the published handle. */
+ static int cancellation_at_late_submit_unlock_keeps_lease(void)
+@@ -1276,4 +1379,4 @@ static int queued_cancel_and_flush_keep_fifo_barriers(void)
+     lower_pending=0;
+     return 1;
+ }
+-int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!retained_submit_avoids_empty_lock_roundtrips();f+=!seal_after_reservation_keeps_accepted_parent_live();f+=!seal_during_dynamic_allocation_rejects_and_reclaims();f+=!cancellation_at_late_submit_unlock_keeps_lease();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("42 adapter groups, %u failures\n",f);return f?1:0;}
++int main(void){unsigned f=0;cache_property(2,1);f+=!initialization_cleans_only_constructed_envelopes();f+=!saturated_core_waits_instead_of_failing_texture_reads();f+=!data_overflow_needs_no_control_buffer_or_mdl();f+=!cancelled_before_enqueue_does_not_wait_for_capacity();f+=!queued_cancel_and_flush_keep_fifo_barriers();f+=!sync_read_and_write_through();f+=!pending_cancel_and_pool_bound();f+=!completion_reentry_waits_for_lower_return_and_keeps_envelope_lease();f+=!async_split_waits_until_completion_callback_returns();f+=!randomized_qd12_bursts_complete_1024_reads();f+=!cancellation_respects_transport_commit();f+=!read_capacity_releases_frozen_queue();f+=!read_toc_releases_frozen_queue();f+=!check_verify_releases_frozen_queue();f+=!failed_control_recovery_quarantines_adapter();f+=!failed_control_recovery_drains_active_core();f+=!control_recovery_uses_preallocated_state();f+=!verify_preserves_unchanged_generation();f+=!removal_invalidates_cached_capacity();f+=!new_media_advances_once_and_refreshes_capacity();f+=!repeated_unit_attention_counts_one_transition();f+=!repeated_no_media_counts_state_transitions_only();f+=!descriptor_no_media_invalidates_cached_capacity();f+=!reset_toc_invalidates_cached_capacity();f+=!stale_capacity_cannot_overwrite_new_media();f+=!geometry_reports_device_media_type();f+=!capacity_control_publishes_geometry();f+=!optical_toc_verify_and_pending_capacity();f+=!closes_control_races_and_forwards_property();f+=!publishes_authoritative_disk_capacity();f+=!unwinds_unpublished_creation();f+=!production_cache_qualification_and_durability();f+=!retained_submit_avoids_empty_lock_roundtrips();f+=!deferred_async_read_returns_before_lower_submission();f+=!deferred_async_burst_shares_one_fifo_admission();f+=!seal_after_reservation_keeps_accepted_parent_live();f+=!seal_during_dynamic_allocation_rejects_and_reclaims();f+=!deferred_async_read_drains_after_seal();f+=!cancellation_at_late_submit_unlock_keeps_lease();f+=!unsealed_reads_do_not_signal_rundown();f+=!sealed_final_completion_wakes_removal();f+=!removal_drains_bound_cache_readers();f+=!removal_drains_transient_envelopes();f+=!control_lease_is_removed_from_free_list();f+=!saturated_pool_grows_transiently_instead_of_failing_game_reads();printf("45 adapter groups, %u failures\n",f);return f?1:0;}

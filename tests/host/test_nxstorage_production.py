@@ -32,7 +32,19 @@ class NxStorageProductionTests(unittest.TestCase):
                      "0146-forza-map-queue-depth.patch",
                      "0147-retained-pata-sg-workspace.patch",
                      "0148-native-storage-qd12-hotpath.patch",
-                     "0150-native-packet-prepare-hotpath.patch"):
+                     "0150-native-packet-prepare-hotpath.patch",
+                     "0151-ata-cache-capture-hotpath.patch",
+                     "0157-forza-payload-association-qualification.patch",
+                     "0158-reset-media-lifetime.patch",
+                     "0160-optical-qd12-admission.patch",
+                     "0161-defer-native-child-completion.patch",
+                     "0162-transient-native-envelope-growth.patch",
+                     "0163-queue-saturated-native-admission.patch",
+                     "0164-compact-data-overflow-envelopes.patch",
+                     "0165-cancel-before-native-admission.patch",
+                     "0166-sealed-rundown-notifications.patch",
+                     "0167-skip-inactive-native-slots.patch",
+                     "0168-coalesce-native-adapter-bookkeeping.patch"):
             entry = next(item for item in lock['repositories']['roswell']['patches']
                          if item['path'] == 'patches/roswell/' + name)
             data = (ROOT / entry['path']).read_bytes()
@@ -57,6 +69,7 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertIn('16 adapter scenarios, 61973 checks', result.stdout)
             self.assertIn('34 passed; 0 failed', result.stdout)
             self.assertIn('production checks passed', result.stdout)
+            self.assertIn('differential observations; 8 lifecycle capacities passed', result.stdout)
             packet = subprocess.run([sys.executable, str(source / 'tests/host/nxstorage/check_packet.py'),
                                      str(Path(temporary) / 'packet-output')], text=True,
                                     capture_output=True, timeout=120,
@@ -83,8 +96,8 @@ class NxStorageProductionTests(unittest.TestCase):
                                      capture_output=True, timeout=120,
                                      env=dict(os.environ, CC=shutil.which('clang') or shutil.which('gcc')))
             self.assertEqual(adapter.returncode, 0, adapter.stdout + adapter.stderr)
-            self.assertIn('adapter-plain: 28 adapter groups, 0 failures', adapter.stdout)
-            self.assertIn('adapter-sanitized: 28 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-plain: 42 adapter groups, 0 failures', adapter.stdout)
+            self.assertIn('adapter-sanitized: 42 adapter groups, 0 failures', adapter.stdout)
 
             driver = (source / 'drivers/storage/class/nxstorage/driver.c').read_text()
             self.assertIn('ZwCreateDirectoryObject(&context->object_directory', driver)
@@ -92,7 +105,7 @@ class NxStorageProductionTests(unittest.TestCase):
             self.assertLess(driver.index('ZwCreateDirectoryObject(&context->object_directory'),
                             driver.index('NxNativeCreateClassDevice(context->driver'))
             self.assertIn('driver->MajorFunction[IRP_MJ_PNP]=NxNativeDispatchPnp', driver)
-            self.assertIn('NX_NATIVE_DISK_SLOTS = 16, NX_NATIVE_CDROM_SLOTS = 8', driver)
+            self.assertIn('NX_NATIVE_DISK_SLOTS = 16, NX_NATIVE_CDROM_SLOTS = 16', driver)
             self.assertIn('init.SlotCount=NX_NATIVE_DISK_SLOTS;', driver)
             self.assertIn('NX_NATIVE_CDROM_SLOTS);', driver)
 

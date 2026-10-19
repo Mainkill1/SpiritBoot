@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "state": "awaiting-attributed-release64-candidate",
+  "common": {
+    "xemu": {
+      "sha256": "5488be40bf3c1c444b507d084c8d964f8f7d73c2a912970495cf85a4f7239564",
+      "build": "release"
+    },
+    "launcher": {
+      "sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c"
+    },
+    "bootrom_asset": {
+      "id": "devbox-mcpx10-readonly-v1",
+      "sha256": "e99e3a772bf5f5d262786aee895664eb96136196e37732fe66e14ae062f20335"
+    },
+    "eeprom_sha256": "d8ad01ff8c028aca874c82940b6cb54b4f81b53204fe42716729c549fb3728f5",
+    "firmware_asset": {
+      "id": null,
+      "sha256": null
+    },
+    "memory_mib": 64,
+    "fresh_process": true,
+    "private_hdd_copy": true,
+    "cold_application_cache": true,
+    "debugger": false,
+    "manual_input": false,
+    "reject_if": [
+      "firmware id/hash unresolved",
+      "process crash/hang/nonzero exit",
+      "failed or invalid block read",
+      "disk/FATX/guest corruption log",
+      "operator intervention"
+    ]
+  },
+  "titles": {
+    "pgr2": {
+      "plans": [
+        "plans/pgr2-profile-create.json",
+        "plans/pgr2-cold-race.json"
+      ],
+      "hdd_seed": {
+        "id": "pr256-clean-fatx-compat010-v1",
+        "sha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+        "phase_one_retention": "keep"
+      },
+      "disc": {
+        "id": "pgr2-usa-readonly-v1",
+        "sha256": "6943653e6e8540f2c473579cf27c8e710d79ac76f88abaa95ec0c011c5bd69cd"
+      },
+      "phase_two_hdd": {
+        "id": null,
+        "sha256": null,
+        "source": "exact retained phase-one HDD"
+      },
+      "accept": [
+        "phase one creates the profile under this exact candidate BIOS and EEPROM",
+        "phase two imports that exact retained HDD into a fresh process",
+        "phase two recognizes the existing profile without damaged/corrupt text",
+        "race-start, race-10s, and race-25s frames are live gameplay",
+        "world geometry remains complete",
+        "at least 25 seconds of guest frames after race start"
+      ]
+    },
+    "forza": {
+      "plan": "plans/forza-rclass-world.json",
+      "hdd": {
+        "id": "spiritboot-forza-hdd-pr253-0183-compact-v3",
+        "sha256": "06c023a97ae1203ff2ab0533fd0b4deb238071e4457d930340146a0aa45044d6",
+        "retention": "deleteAfterEvidence"
+      },
+      "disc": {
+        "id": "forza-world-readonly-v1",
+        "sha256": "63817cbbe70d07ca1d1dabfecdc61c859c154ca417ec20b0f51bec4e29b91c66"
+      },
+      "accept": [
+        "default Maple Valley Short and first R-class car",
+        "first 14 seconds compare to selected0168 baseline",
+        ">=40 MPH, >=12 px minimap movement, >=8 observations",
+        "zero bad world frames in comparison window"
+      ]
+    },
+    "halo2": {
+      "repetitions": 2,
+      "plans": [
+        "plans/halo2-menu-a.json",
+        "plans/halo2-menu-b.json"
+      ],
+      "hdd": {
+        "id": "pr256-clean-fatx-compat010-v1",
+        "sha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+        "retention": "deleteAfterEvidence"
+      },
+      "disc": {
+        "id": "halo2-usa-europe-a5b99c1ce2ee",
+        "sha256": "a5b99c1ce2ee650f12caf342118c716cedd4a797fc369b3f0eba82382734f05c"
+      },
+      "accept": [
+        "three nonblack, non-low-entropy menu captures per fresh process",
+        "OCR contains CAMPAIGN and SETTINGS in both repetitions",
+        "normal menu-entry count is stable between repetitions"
+      ]
+    },
+    "doa": {
+      "plans": [
+        "plans/doa-save-create.json",
+        "plans/doa-save-reload.json"
+      ],
+      "hdd_seed": {
+        "id": "pr256-clean-fatx-compat010-v1",
+        "sha256": "78af83a6c8a1f84cefd37b811a4197419ace68e09ad197376ca9bb2cca05e56b",
+        "phase_one_retention": "keep"
+      },
+      "disc": {
+        "id": "doaxbv-usa-readonly-v1",
+        "sha256": "54ab77f28eec03bb5d37bb73c81674569565171305425a92ee211a3d99867419"
+      },
+      "phase_two_hdd": {
+        "id": null,
+        "sha256": null,
+        "source": "exact retained phase-one HDD"
+      },
+      "accept": [
+        "phase one reaches vacation menu and records >=1 successful HDD write",
+        "phase two fresh process reaches loaded slot",
+        "OCR excludes DAMAGED GAME and corrupt/cannot-load equivalents"
+      ]
+    }
+  }
+}

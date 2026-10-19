@@ -1,0 +1,34 @@
+{
+  "order": [
+    "control1",
+    "candidate1",
+    "control2",
+    "candidate2"
+  ],
+  "condition": "The actual 0176 built source must pass request-core, pthread ownership, native-adapter, packet, owner and sanitizer gates; the release64 artifact must bind that tree and all three candidate patches before launch. Every run must use a fresh emulator process without a snapshot, and each full native oracle must pass before the next run.",
+  "fixture_sha256": "8d94b0c6fa4699de29959e0bdc5ddd63b6b518ea7c65fcf22cf4da9e1f9b4630",
+  "emulator_sha256": "5488be40bf3c1c444b507d084c8d964f8f7d73c2a912970495cf85a4f7239564",
+  "control0168_sha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
+  "candidate0176_sha256": "5be85ddc85f462a0a6ef28ed2ba5fb4ba3e1688c75cab4e2ebcbad556a33c1a2",
+  "candidate0176_source_tree": "c30e8e2e9cab57d122040f1cd6a17bb44928ae0a",
+  "candidate_patches": {
+    "0173": "fee98444406d4d8af6641ffbc93d978951bb98eaa77810decdc4343528169197",
+    "0175": "4adc7909ca1e1b83926cb169c93726ef9e7de4e1e750f27f132a3214b9c91e78",
+    "0176": "642df8f38687d97e5602c63f5175f77f4fa18360f8aba3ec38fb3c00c9a5ef0d"
+  },
+  "candidate_scope": "0176 combines first-READ-command fast start, the native admission lock handoff, preparation-time inline-completion arming, and an explicit submit lock-return flag. When lower submission has no inline result, the core consumes the already-held adapter lock for its post-submit state update; inline completion uses the ordinary unlocked fallback. The retained pending read path falls from 14 adapter lock transitions in selected0168 to 7. FIFO, capacity, sole owners, cancellation, completion, splitting, recovery, quarantine and removal rundown remain enforced.",
+  "primary_observations": [
+    "Native NtReadFile entry-to-return mean weighted over all operations",
+    "450 us verified reads/s at both 783 and 900 free pages"
+  ],
+  "reporting": "Compare each candidate with its immediately preceding control and retain all eight cases, per-size means/maxima, weighted means, throughput and first-request position mix. No runner job may interleave the sequence.",
+  "acceptance_scope": "Both 450 us memory cases must improve weighted return cost and verified throughput in both pairs, all full oracles must pass, and no repeatable unexplained regression may exceed 20 percent. Earlier candidate sequences cannot satisfy this gate.",
+  "snapshot_policy": "Every run launches a fresh emulator process; SnapshotName is null, RuntimeState is disabled, and there are no diagnostic plan or loadvm arguments. Disk state contains the generated fixture file only, without RAM restoration.",
+  "limits": [
+    "two observations per variant are not statistical significance",
+    "shared private state is reseeded only for the generated fixture file",
+    "synthetic blocking frame cadence and deadlines",
+    "no overall Forza fix claim",
+    "per-size means can be confounded by first-request ordinal mix; whole-case weighted cost is primary"
+  ]
+}

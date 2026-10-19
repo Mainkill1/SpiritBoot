@@ -1,0 +1,135 @@
+{
+  "id": "forza-bursts-baseline0167-release-20261017-2",
+  "files": [
+    {
+      "Path": "fixture.iso",
+      "Length": 655360,
+      "Sha256": "3b960e63bf8170cd1636ec471dd55aabc2083b2790f9cd3e5e7221013122382e",
+      "Executable": false
+    },
+    {
+      "Path": "flash.bin",
+      "Length": 524288,
+      "Sha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296",
+      "Executable": false
+    },
+    {
+      "Path": "native-launch.exe",
+      "Length": 78848,
+      "Sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.exe",
+      "Length": 28779100,
+      "Sha256": "5488be40bf3c1c444b507d084c8d964f8f7d73c2a912970495cf85a4f7239564",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.toml",
+      "Length": 647,
+      "Sha256": "10ea387472f831c3eb2451f9e5d1b01a27b7da929edc2d259879e7b24bdbca26",
+      "Executable": false
+    }
+  ],
+  "job": {
+    "Id": "forza-bursts-baseline0167-release-20261017-2",
+    "Executable": "native-launch.exe",
+    "Arguments": [
+      "-config_path",
+      "{packageDir}/xemu.toml",
+      "-m",
+      "64",
+      "-device",
+      "lpc47m157",
+      "-serial",
+      "file:{resultDir}/native-serial.log",
+      "-d",
+      "guest_errors",
+      "-D",
+      "{resultDir}/qemu.log"
+    ],
+    "WorkingDirectory": ".",
+    "TimeoutSeconds": 240,
+    "Tags": [
+      "FORZA-BURSTS",
+      "SPIRIT64",
+      "PUBLISHED-RELEASE-XEMU",
+      "RELEASE-XBE"
+    ],
+    "Plan": [],
+    "TargetOs": "windows",
+    "ExpectedExecutableSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+    "RequiredFiles": [
+      "fixture.iso",
+      "flash.bin",
+      "native-launch.exe",
+      "xemu.exe",
+      "xemu.toml"
+    ],
+    "LaunchMode": "direct",
+    "SnapshotName": null,
+    "StartPaused": false,
+    "RequireInput": false,
+    "Diagnostics": [],
+    "RuntimeState": {
+      "Enabled": false
+    },
+    "Inputs": [
+      {
+        "Path": "fixture.iso",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "3b960e63bf8170cd1636ec471dd55aabc2083b2790f9cd3e5e7221013122382e"
+      },
+      {
+        "Path": "flash.bin",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "add882b6f50e9c9ae49705bb8374be5646e44ed1b72f0e2eb4b77bdedeeaf296"
+      },
+      {
+        "Path": "native-launch.exe",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c"
+      },
+      {
+        "Path": "xemu.exe",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "5488be40bf3c1c444b507d084c8d964f8f7d73c2a912970495cf85a4f7239564"
+      },
+      {
+        "Path": "xemu.toml",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "10ea387472f831c3eb2451f9e5d1b01a27b7da929edc2d259879e7b24bdbca26"
+      }
+    ],
+    "Experiment": {
+      "Id": "forza-submit-bursts",
+      "Variant": "spirit",
+      "VariedFactors": [
+        "firmware"
+      ],
+      "ControlledFactors": [
+        "xemu-release",
+        "fixture",
+        "memory-64MiB"
+      ],
+      "RequireCorrectnessPass": false,
+      "RequireCompleteEvidence": true,
+      "AllowOperatorIntervention": false,
+      "AllowDiagnostics": true
+    }
+  },
+  "sanitization": {
+    "source_request_sha256": "62ac2ba7c612e285ec229f0acbe735ecf6a344e31f6e9cdfa4205a9ed3de0f46",
+    "omitted_job_fields": [
+      "Environment",
+      "Workload",
+      "Operations"
+    ]
+  }
+}

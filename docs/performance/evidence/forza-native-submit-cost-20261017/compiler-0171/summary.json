@@ -1,0 +1,443 @@
+{
+  "limitations": [
+    "Static sites grow when shared helpers inline; they are not executed path counts.",
+    "Stack reservation is the immediate function allocation, not cumulative peak stack usage.",
+    "Whole-kernel LTO can further inline kernel spinlock helpers and internalize public engine functions."
+  ],
+  "scope": "Three owned native-ABI translation units, relocatable LTO. Kernel callees opaque; not complete-kernel code or native latency.",
+  "variants": {
+    "0168-O2": {
+      "functions": {
+        "_NxNativeAdapterSubmit": {
+          "call_sites": 26,
+          "call_targets": {
+            "@IofCompleteRequest@8": 3,
+            "@KfAcquireSpinLock@4": 4,
+            "@KfReleaseSpinLock@8": 9,
+            "_ExFreePool@4": 1,
+            "_IoAcquireCancelSpinLock@4": 1,
+            "_IoFreeIrp@4": 1,
+            "_IoFreeMdl@4": 1,
+            "_IoReleaseCancelSpinLock@4": 1,
+            "_admit_waiting_requests": 1,
+            "_allocate_dynamic_envelope": 1,
+            "_nx_lcq_observe": 1,
+            "_port_complete": 1,
+            "_release_envelope_locked": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 148,
+          "static_instructions_excluding_nops": 406
+        },
+        "_admit_waiting_requests": {
+          "call_sites": 13,
+          "call_targets": {
+            "@KfAcquireSpinLock@4": 3,
+            "@KfReleaseSpinLock@8": 5,
+            "_KeSetEvent@12": 1,
+            "_nx_cancel": 1,
+            "_nx_start": 1,
+            "_port_complete": 1,
+            "_release_envelope_locked": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 52,
+          "static_instructions_excluding_nops": 157
+        },
+        "_lock": null,
+        "_nx_native_port_enter": null,
+        "_nx_native_port_leave": null,
+        "_nx_packet_prepare": {
+          "call_sites": 2,
+          "call_targets": {
+            "_IoReuseIrp@8": 1,
+            "_memset": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 52,
+          "static_instructions_excluding_nops": 339
+        },
+        "_nx_start": {
+          "call_sites": 10,
+          "call_targets": {
+            "_run_pump": 1,
+            "indirect": 9
+          },
+          "indirect_call_sites": 9,
+          "initial_stack_reservation_bytes": 60,
+          "static_instructions_excluding_nops": 446
+        },
+        "_pending": null,
+        "_port_enter": {
+          "call_sites": 1,
+          "call_targets": {
+            "@KfAcquireSpinLock@4": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 4,
+          "static_instructions_excluding_nops": 12
+        },
+        "_port_leave": {
+          "call_sites": 1,
+          "call_targets": {
+            "@KfReleaseSpinLock@8": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 0,
+          "static_instructions_excluding_nops": 9
+        },
+        "_run_pump": {
+          "call_sites": 28,
+          "call_targets": {
+            "indirect": 28
+          },
+          "indirect_call_sites": 28,
+          "initial_stack_reservation_bytes": 84,
+          "static_instructions_excluding_nops": 802
+        },
+        "_unlock": null
+      },
+      "text_bytes": 23280
+    },
+    "0168-Os": {
+      "functions": {
+        "_NxNativeAdapterSubmit": {
+          "call_sites": 24,
+          "call_targets": {
+            "@IofCompleteRequest@8": 3,
+            "_IoAcquireCancelSpinLock@4": 1,
+            "_IoReleaseCancelSpinLock@4": 1,
+            "_admit_waiting_requests": 1,
+            "_allocate_dynamic_envelope": 1,
+            "_destroy_dynamic_envelope": 1,
+            "_nx_lcq_observe": 1,
+            "_port_complete": 1,
+            "_port_enter": 4,
+            "_port_leave": 7,
+            "_port_pending": 1,
+            "_release_envelope_locked": 1,
+            "_zero_bytes": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 180,
+          "static_instructions_excluding_nops": 370
+        },
+        "_admit_waiting_requests": {
+          "call_sites": 11,
+          "call_targets": {
+            "_KeSetEvent@12": 1,
+            "_nx_cancel": 1,
+            "_nx_start": 1,
+            "_port_complete": 1,
+            "_port_enter": 3,
+            "_port_leave": 3,
+            "_release_envelope_locked": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 52,
+          "static_instructions_excluding_nops": 122
+        },
+        "_lock": {
+          "call_sites": 1,
+          "call_targets": {
+            "indirect": 1
+          },
+          "indirect_call_sites": 1,
+          "initial_stack_reservation_bytes": 8,
+          "static_instructions_excluding_nops": 8
+        },
+        "_nx_native_port_enter": null,
+        "_nx_native_port_leave": null,
+        "_nx_packet_prepare": {
+          "call_sites": 2,
+          "call_targets": {
+            "_IoReuseIrp@8": 1,
+            "_clear_bytes.lto_priv.0": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 60,
+          "static_instructions_excluding_nops": 315
+        },
+        "_nx_start": {
+          "call_sites": 10,
+          "call_targets": {
+            "_clear_bytes.lto_priv.0": 1,
+            "_lock": 2,
+            "_pending": 2,
+            "_run_pump": 1,
+            "_unlock": 3,
+            "indirect": 1
+          },
+          "indirect_call_sites": 1,
+          "initial_stack_reservation_bytes": 68,
+          "static_instructions_excluding_nops": 359
+        },
+        "_pending": {
+          "call_sites": 1,
+          "call_targets": {
+            "indirect": 1
+          },
+          "indirect_call_sites": 1,
+          "initial_stack_reservation_bytes": 8,
+          "static_instructions_excluding_nops": 14
+        },
+        "_port_enter": {
+          "call_sites": 1,
+          "call_targets": {
+            "@KfAcquireSpinLock@4": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 0,
+          "static_instructions_excluding_nops": 8
+        },
+        "_port_leave": {
+          "call_sites": 1,
+          "call_targets": {
+            "@KfReleaseSpinLock@8": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 0,
+          "static_instructions_excluding_nops": 7
+        },
+        "_run_pump": {
+          "call_sites": 27,
+          "call_targets": {
+            "_cache_sync": 5,
+            "_clear_bytes.lto_priv.0": 1,
+            "_lock": 6,
+            "_pending": 2,
+            "_unlock": 6,
+            "indirect": 7
+          },
+          "indirect_call_sites": 7,
+          "initial_stack_reservation_bytes": 76,
+          "static_instructions_excluding_nops": 638
+        },
+        "_unlock": {
+          "call_sites": 1,
+          "call_targets": {
+            "indirect": 1
+          },
+          "indirect_call_sites": 1,
+          "initial_stack_reservation_bytes": 8,
+          "static_instructions_excluding_nops": 8
+        }
+      },
+      "text_bytes": 17900
+    },
+    "0169-O2": {
+      "functions": {
+        "_NxNativeAdapterSubmit": {
+          "call_sites": 26,
+          "call_targets": {
+            "@IofCompleteRequest@8": 3,
+            "@KfAcquireSpinLock@4": 4,
+            "@KfReleaseSpinLock@8": 9,
+            "_ExFreePool@4": 1,
+            "_IoAcquireCancelSpinLock@4": 1,
+            "_IoFreeIrp@4": 1,
+            "_IoFreeMdl@4": 1,
+            "_IoReleaseCancelSpinLock@4": 1,
+            "_admit_waiting_requests": 1,
+            "_allocate_dynamic_envelope": 1,
+            "_nx_lcq_observe": 1,
+            "_nx_native_port_complete": 1,
+            "_release_envelope_locked": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 148,
+          "static_instructions_excluding_nops": 406
+        },
+        "_admit_waiting_requests": {
+          "call_sites": 13,
+          "call_targets": {
+            "@KfAcquireSpinLock@4": 3,
+            "@KfReleaseSpinLock@8": 5,
+            "_KeSetEvent@12": 1,
+            "_nx_cancel": 1,
+            "_nx_native_port_complete": 1,
+            "_nx_start": 1,
+            "_release_envelope_locked": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 52,
+          "static_instructions_excluding_nops": 157
+        },
+        "_lock": null,
+        "_nx_native_port_enter": {
+          "call_sites": 1,
+          "call_targets": {
+            "@KfAcquireSpinLock@4": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 4,
+          "static_instructions_excluding_nops": 12
+        },
+        "_nx_native_port_leave": {
+          "call_sites": 1,
+          "call_targets": {
+            "@KfReleaseSpinLock@8": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 0,
+          "static_instructions_excluding_nops": 9
+        },
+        "_nx_packet_prepare": {
+          "call_sites": 2,
+          "call_targets": {
+            "_IoReuseIrp@8": 1,
+            "_memset": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 52,
+          "static_instructions_excluding_nops": 339
+        },
+        "_nx_start": {
+          "call_sites": 8,
+          "call_targets": {
+            "@KfAcquireSpinLock@4": 2,
+            "@KfReleaseSpinLock@8": 4,
+            "_nx_native_port_complete": 1,
+            "_run_pump": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 68,
+          "static_instructions_excluding_nops": 426
+        },
+        "_pending": null,
+        "_port_enter": null,
+        "_port_leave": null,
+        "_run_pump": {
+          "call_sites": 22,
+          "call_targets": {
+            "@KfAcquireSpinLock@4": 6,
+            "@KfReleaseSpinLock@8": 12,
+            "_nx_native_port_cancel": 1,
+            "_nx_native_port_complete": 1,
+            "_nx_native_port_prepare": 1,
+            "_nx_native_port_submit": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 84,
+          "static_instructions_excluding_nops": 849
+        },
+        "_unlock": null
+      },
+      "text_bytes": 23728
+    },
+    "0169-Os": {
+      "functions": {
+        "_NxNativeAdapterSubmit": {
+          "call_sites": 24,
+          "call_targets": {
+            "@IofCompleteRequest@8": 3,
+            "_IoAcquireCancelSpinLock@4": 1,
+            "_IoReleaseCancelSpinLock@4": 1,
+            "_admit_waiting_requests": 1,
+            "_allocate_dynamic_envelope": 1,
+            "_destroy_dynamic_envelope": 1,
+            "_nx_lcq_observe": 1,
+            "_nx_native_port_complete": 1,
+            "_nx_native_port_enter": 4,
+            "_nx_native_port_leave": 7,
+            "_nx_native_port_mark_pending": 1,
+            "_release_envelope_locked": 1,
+            "_zero_bytes": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 180,
+          "static_instructions_excluding_nops": 370
+        },
+        "_admit_waiting_requests": {
+          "call_sites": 11,
+          "call_targets": {
+            "_KeSetEvent@12": 1,
+            "_nx_cancel": 1,
+            "_nx_native_port_complete": 1,
+            "_nx_native_port_enter": 3,
+            "_nx_native_port_leave": 3,
+            "_nx_start": 1,
+            "_release_envelope_locked": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 52,
+          "static_instructions_excluding_nops": 122
+        },
+        "_lock": null,
+        "_nx_native_port_enter": {
+          "call_sites": 1,
+          "call_targets": {
+            "@KfAcquireSpinLock@4": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 0,
+          "static_instructions_excluding_nops": 8
+        },
+        "_nx_native_port_leave": {
+          "call_sites": 1,
+          "call_targets": {
+            "@KfReleaseSpinLock@8": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 0,
+          "static_instructions_excluding_nops": 7
+        },
+        "_nx_packet_prepare": {
+          "call_sites": 2,
+          "call_targets": {
+            "_IoReuseIrp@8": 1,
+            "_clear_bytes.lto_priv.0": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 60,
+          "static_instructions_excluding_nops": 315
+        },
+        "_nx_start": {
+          "call_sites": 10,
+          "call_targets": {
+            "_clear_bytes.lto_priv.0": 1,
+            "_nx_native_port_complete": 1,
+            "_nx_native_port_enter": 2,
+            "_nx_native_port_leave": 3,
+            "_pending": 2,
+            "_run_pump": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 68,
+          "static_instructions_excluding_nops": 368
+        },
+        "_pending": {
+          "call_sites": 1,
+          "call_targets": {
+            "_nx_native_port_mark_pending": 1
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 8,
+          "static_instructions_excluding_nops": 14
+        },
+        "_port_enter": null,
+        "_port_leave": null,
+        "_run_pump": {
+          "call_sites": 27,
+          "call_targets": {
+            "_cache_sync": 5,
+            "_clear_bytes.lto_priv.0": 1,
+            "_nx_native_port_cancel": 1,
+            "_nx_native_port_complete": 1,
+            "_nx_native_port_enter": 6,
+            "_nx_native_port_leave": 6,
+            "_nx_native_port_prepare": 1,
+            "_nx_native_port_retire": 3,
+            "_nx_native_port_submit": 1,
+            "_pending": 2
+          },
+          "indirect_call_sites": 0,
+          "initial_stack_reservation_bytes": 76,
+          "static_instructions_excluding_nops": 651
+        },
+        "_unlock": null
+      },
+      "text_bytes": 18132
+    }
+  }
+}

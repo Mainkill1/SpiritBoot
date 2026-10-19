@@ -1,0 +1,135 @@
+{
+  "id": "forza-poll-budget-o2-candidate-release-20261017-2",
+  "files": [
+    {
+      "Path": "fixture.iso",
+      "Length": 655360,
+      "Sha256": "8d94b0c6fa4699de29959e0bdc5ddd63b6b518ea7c65fcf22cf4da9e1f9b4630",
+      "Executable": false
+    },
+    {
+      "Path": "flash.bin",
+      "Length": 524288,
+      "Sha256": "903e8a9462a5457966a1327373297a19e53a48401724db8f6c2ec15e26752f37",
+      "Executable": false
+    },
+    {
+      "Path": "native-launch.exe",
+      "Length": 78848,
+      "Sha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.exe",
+      "Length": 28779100,
+      "Sha256": "5488be40bf3c1c444b507d084c8d964f8f7d73c2a912970495cf85a4f7239564",
+      "Executable": true
+    },
+    {
+      "Path": "xemu.toml",
+      "Length": 647,
+      "Sha256": "10ea387472f831c3eb2451f9e5d1b01a27b7da929edc2d259879e7b24bdbca26",
+      "Executable": false
+    }
+  ],
+  "job": {
+    "Id": "forza-poll-budget-o2-candidate-release-20261017-2",
+    "Executable": "native-launch.exe",
+    "Arguments": [
+      "-config_path",
+      "{packageDir}/xemu.toml",
+      "-m",
+      "64",
+      "-device",
+      "lpc47m157",
+      "-serial",
+      "file:{resultDir}/native-serial.log",
+      "-d",
+      "guest_errors",
+      "-D",
+      "{resultDir}/qemu.log"
+    ],
+    "WorkingDirectory": ".",
+    "TimeoutSeconds": 240,
+    "Tags": [
+      "FORZA-BURSTS",
+      "SPIRIT64",
+      "PUBLISHED-RELEASE-XEMU",
+      "RELEASE-XBE"
+    ],
+    "Plan": [],
+    "TargetOs": "windows",
+    "ExpectedExecutableSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c",
+    "RequiredFiles": [
+      "fixture.iso",
+      "flash.bin",
+      "native-launch.exe",
+      "xemu.exe",
+      "xemu.toml"
+    ],
+    "LaunchMode": "direct",
+    "SnapshotName": null,
+    "StartPaused": false,
+    "RequireInput": false,
+    "Diagnostics": [],
+    "RuntimeState": {
+      "Enabled": false
+    },
+    "Inputs": [
+      {
+        "Path": "fixture.iso",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "8d94b0c6fa4699de29959e0bdc5ddd63b6b518ea7c65fcf22cf4da9e1f9b4630"
+      },
+      {
+        "Path": "flash.bin",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "903e8a9462a5457966a1327373297a19e53a48401724db8f6c2ec15e26752f37"
+      },
+      {
+        "Path": "native-launch.exe",
+        "Role": "diagnostic-input",
+        "Hash": true,
+        "ExpectedSha256": "95ed9b3668bddfe70e76755cd6f8b931511069771871966d8c710ba9daed297c"
+      },
+      {
+        "Path": "xemu.exe",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "5488be40bf3c1c444b507d084c8d964f8f7d73c2a912970495cf85a4f7239564"
+      },
+      {
+        "Path": "xemu.toml",
+        "Role": "emulator",
+        "Hash": true,
+        "ExpectedSha256": "10ea387472f831c3eb2451f9e5d1b01a27b7da929edc2d259879e7b24bdbca26"
+      }
+    ],
+    "Experiment": {
+      "Id": "forza-poll-budget",
+      "Variant": "candidate2",
+      "VariedFactors": [
+        "firmware"
+      ],
+      "ControlledFactors": [
+        "xemu-release",
+        "fixture",
+        "memory-64MiB"
+      ],
+      "RequireCorrectnessPass": false,
+      "RequireCompleteEvidence": true,
+      "AllowOperatorIntervention": false,
+      "AllowDiagnostics": true
+    }
+  },
+  "sanitization": {
+    "source_request_sha256": "3b6924f98daf624314d5239ae0e29afd6f2e336ef122e1eaa23a0955124660fc",
+    "omitted_job_fields": [
+      "Environment",
+      "Workload",
+      "Operations"
+    ]
+  }
+}

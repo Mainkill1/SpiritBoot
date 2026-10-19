@@ -1,0 +1,785 @@
+{
+  "schemaVersion": 1,
+  "createdUtc": "2026-10-18T16:54:28.943503+00:00",
+  "verdict": "rejected",
+  "reason": "Pair A crosses hard reject: weighted public read-call cost regressed >=0.5%; throughput gains miss required >=5%.",
+  "acceptance": {
+    "weightedPublicReadCallCostImprovementMinimumPercent": 2.0,
+    "readsOrProductivePumpImprovementMinimumPercent": 5.0,
+    "hardRejectCostRegressionPercent": 0.5
+  },
+  "identity": {
+    "controlBiosSha256": "2d43d91ca5a4474a365e308b2117a642a94a2d7c7da6a3004409c267173680e6",
+    "candidateBiosSha256": "ee4cf66b98da41041c06f118edb7737282cf6ba84f9ebcca70c68a38375c6ed6",
+    "candidateSourceTree": "196ef4e0c17e796896f502f01bffaf7424336d1a",
+    "candidatePatchSha256": "a58604a1e61b9d9e0a7c0d5af24623d384c42670ddc93879b80802241dfbdf1c",
+    "fixtureSha256": "8d94b0c6fa4699de29959e0bdc5ddd63b6b518ea7c65fcf22cf4da9e1f9b4630",
+    "hddSeedSha256": "06c023a97ae1203ff2ab0533fd0b4deb238071e4457d930340146a0aa45044d6"
+  },
+  "runs": {
+    "control-a": "20261018-164733599-97b72614fc0540908ef2f0c1fedc95f1",
+    "candidate-a": "20261018-164955697-46bc20e5caf54f8aa6c39d9a09cfdc4f"
+  },
+  "aggregate": {
+    "control": {
+      "frequency": 3374488,
+      "operations": 12497,
+      "verified": 12497,
+      "callbacks": 12497,
+      "failures": 0,
+      "bytes": 412798464,
+      "elapsedSecondsSum": 80.44766998726918,
+      "frames": 2055,
+      "publicReadCallCostUs": 73.26719117738193,
+      "readsPerSecond": 155.34321879027257,
+      "bytesPerSecond": 5131266.87280471,
+      "productiveReadsPerFrame": 6.0812652068126525,
+      "maxima": {
+        "highWater": 8,
+        "pairGapMaxMs": 43.19855338054247,
+        "burstMaxUs": 2307.016649636923,
+        "initialPollMaxUs": 205.6608291391168,
+        "submitMaxUs": 1396.3599811289891,
+        "callbackMaxUs": 66674.41105139506,
+        "submitMaxUsBySize": {
+          "512": 559.7886257115154,
+          "65536": 1396.3599811289891
+        },
+        "callbackMaxUsBySize": {
+          "512": 66674.41105139506,
+          "65536": 66158.18458978074
+        }
+      }
+    },
+    "candidate": {
+      "frequency": 3374488,
+      "operations": 12511,
+      "verified": 12511,
+      "callbacks": 12511,
+      "failures": 0,
+      "bytes": 413325824,
+      "elapsedSecondsSum": 80.47960520232995,
+      "frames": 2055,
+      "publicReadCallCostUs": 75.85298593685586,
+      "readsPerSecond": 155.45553396474412,
+      "bytesPerSecond": 5135783.444276065,
+      "productiveReadsPerFrame": 6.088077858880778,
+      "maxima": {
+        "highWater": 8,
+        "pairGapMaxMs": 42.764413445832375,
+        "burstMaxUs": 2410.439746711205,
+        "initialPollMaxUs": 206.54985289620234,
+        "submitMaxUs": 1453.2575015824623,
+        "callbackMaxUs": 66490.67947493072,
+        "submitMaxUsBySize": {
+          "512": 640.6897876062976,
+          "65536": 1453.2575015824623
+        },
+        "callbackMaxUsBySize": {
+          "512": 65731.45318637969,
+          "65536": 66490.67947493072
+        }
+      }
+    },
+    "deltaPercent": {
+      "publicReadCallCostUs": 3.529266944618703,
+      "readsPerSecond": 0.07230130503681487,
+      "bytesPerSecond": 0.0880205918599275,
+      "productiveReadsPerFrame": 0.11202688645273184
+    }
+  },
+  "perCase": [
+    {
+      "id": 0,
+      "targetPages": 783,
+      "budgetUs": 250,
+      "control": {
+        "id": 0,
+        "targetPages": 783,
+        "budgetUs": 250,
+        "operations": 718,
+        "verified": 718,
+        "callbacks": 718,
+        "failures": 0,
+        "bytes": 23711232,
+        "elapsedSeconds": 10.065047201234677,
+        "readsPerSecond": 71.335979419145,
+        "bytesPerSecond": 2355799.384337845,
+        "productiveReadsPerFrame": 2.6791044776119404,
+        "publicReadCallCostUs": 115.16448418735953,
+        "highWater": 8,
+        "pairGapMaxMs": 40.23099207939101,
+        "burstMaxUs": 2307.016649636923,
+        "initialPollMaxUs": 205.6608291391168,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 359,
+            "submit_mean_us": 126.29337768134931,
+            "submit_max_us": 1396.3599811289891,
+            "callback_mean_us": 25387.86133664836,
+            "callback_max_us": 40227.139643110306
+          },
+          {
+            "bytes": 512,
+            "count": 359,
+            "submit_mean_us": 104.03559069336978,
+            "submit_max_us": 514.7447553525157,
+            "callback_mean_us": 19974.034364847652,
+            "callback_max_us": 66159.9626372949
+          }
+        ]
+      },
+      "candidate": {
+        "id": 0,
+        "targetPages": 783,
+        "budgetUs": 250,
+        "operations": 789,
+        "verified": 789,
+        "callbacks": 789,
+        "failures": 0,
+        "bytes": 26088448,
+        "elapsedSeconds": 10.051831566744347,
+        "readsPerSecond": 78.4931576659463,
+        "bytesPerSecond": 2595392.4741747035,
+        "productiveReadsPerFrame": 2.955056179775281,
+        "publicReadCallCostUs": 103.89033220474866,
+        "highWater": 8,
+        "pairGapMaxMs": 39.497843821047816,
+        "burstMaxUs": 2410.439746711205,
+        "initialPollMaxUs": 206.54985289620234,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 395,
+            "submit_mean_us": 111.38754956813852,
+            "submit_max_us": 1453.2575015824623,
+            "callback_mean_us": 26223.242673116332,
+            "callback_max_us": 66128.84680579691
+          },
+          {
+            "bytes": 512,
+            "count": 394,
+            "submit_mean_us": 96.37408637089335,
+            "submit_max_us": 506.4472002863842,
+            "callback_mean_us": 22236.603681584867,
+            "callback_max_us": 40762.92462738051
+          }
+        ]
+      },
+      "deltaPercent": {
+        "publicReadCallCostUs": -9.789608369424997,
+        "readsPerSecond": 10.033055276003488,
+        "bytesPerSecond": 10.170352001522499,
+        "productiveReadsPerFrame": 10.300147100247248
+      }
+    },
+    {
+      "id": 1,
+      "targetPages": 783,
+      "budgetUs": 450,
+      "control": {
+        "id": 1,
+        "targetPages": 783,
+        "budgetUs": 450,
+        "operations": 1503,
+        "verified": 1503,
+        "callbacks": 1503,
+        "failures": 0,
+        "bytes": 49667584,
+        "elapsedSeconds": 10.058460127877177,
+        "readsPerSecond": 149.42645105630157,
+        "bytesPerSecond": 4937891.423593312,
+        "productiveReadsPerFrame": 5.825581395348837,
+        "publicReadCallCostUs": 74.80477365590795,
+        "highWater": 8,
+        "pairGapMaxMs": 40.95139766388264,
+        "burstMaxUs": 830.0518478655132,
+        "initialPollMaxUs": 30.523148993269498,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 752,
+            "submit_mean_us": 79.38517147212801,
+            "submit_max_us": 518.8935328855814,
+            "callback_mean_us": 23758.545945781807,
+            "callback_max_us": 66158.18458978074
+          },
+          {
+            "bytes": 512,
+            "count": 751,
+            "submit_mean_us": 70.21827677468627,
+            "submit_max_us": 459.03259990848983,
+            "callback_mean_us": 21316.990733832834,
+            "callback_max_us": 66227.23210158104
+          }
+        ]
+      },
+      "candidate": {
+        "id": 1,
+        "targetPages": 783,
+        "budgetUs": 450,
+        "operations": 1380,
+        "verified": 1380,
+        "callbacks": 1380,
+        "failures": 0,
+        "bytes": 45573120,
+        "elapsedSeconds": 10.062006739985444,
+        "readsPerSecond": 137.14958016436356,
+        "bytesPerSecond": 4529227.7353479415,
+        "productiveReadsPerFrame": 5.328185328185328,
+        "publicReadCallCostUs": 82.87440810344381,
+        "highWater": 8,
+        "pairGapMaxMs": 41.6786190971786,
+        "burstMaxUs": 838.0530616792829,
+        "initialPollMaxUs": 29.0414427314603,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 690,
+            "submit_mean_us": 85.85993885097038,
+            "submit_max_us": 510.00329531472624,
+            "callback_mean_us": 22441.426991874476,
+            "callback_max_us": 65757.82755783989
+          },
+          {
+            "bytes": 512,
+            "count": 690,
+            "submit_mean_us": 79.88887735591726,
+            "submit_max_us": 640.6897876062976,
+            "callback_mean_us": 18158.67787341669,
+            "callback_max_us": 65731.45318637969
+          }
+        ]
+      },
+      "deltaPercent": {
+        "publicReadCallCostUs": 10.787592894345366,
+        "readsPerSecond": -8.21599576591181,
+        "bytesPerSecond": -8.276076834998225,
+        "productiveReadsPerFrame": -8.538136083046254
+      }
+    },
+    {
+      "id": 2,
+      "targetPages": 783,
+      "budgetUs": 1000,
+      "control": {
+        "id": 2,
+        "targetPages": 783,
+        "budgetUs": 1000,
+        "operations": 2001,
+        "verified": 2001,
+        "callbacks": 2001,
+        "failures": 0,
+        "bytes": 66113536,
+        "elapsedSeconds": 10.058785510572271,
+        "readsPerSecond": 198.930576449498,
+        "bytesPerSecond": 6572715.55601931,
+        "productiveReadsPerFrame": 7.972111553784861,
+        "publicReadCallCostUs": 68.80048670838487,
+        "highWater": 8,
+        "pairGapMaxMs": 43.19855338054247,
+        "burstMaxUs": 1333.5356356282791,
+        "initialPollMaxUs": 33.78290276924974,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 1001,
+            "submit_mean_us": 78.18346689310225,
+            "submit_max_us": 498.4459864726145,
+            "callback_mean_us": 20179.460307266363,
+            "callback_max_us": 65352.43272460889
+          },
+          {
+            "bytes": 512,
+            "count": 1000,
+            "submit_mean_us": 59.408123543482745,
+            "submit_max_us": 559.7886257115154,
+            "callback_mean_us": 18850.21223960494,
+            "callback_max_us": 65417.331458876135
+          }
+        ]
+      },
+      "candidate": {
+        "id": 2,
+        "targetPages": 783,
+        "budgetUs": 1000,
+        "operations": 2003,
+        "verified": 2003,
+        "callbacks": 2003,
+        "failures": 0,
+        "bytes": 66179584,
+        "elapsedSeconds": 10.054049088335772,
+        "readsPerSecond": 199.22321667633244,
+        "bytesPerSecond": 6582381.229546452,
+        "productiveReadsPerFrame": 7.9800796812749,
+        "publicReadCallCostUs": 70.66266779233773,
+        "highWater": 8,
+        "pairGapMaxMs": 42.53800872902793,
+        "burstMaxUs": 1238.1137523677667,
+        "initialPollMaxUs": 29.0414427314603,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 1002,
+            "submit_mean_us": 75.65012503282172,
+            "submit_max_us": 518.3008503808578,
+            "callback_mean_us": 20409.317208413257,
+            "callback_max_us": 65556.31550623383
+          },
+          {
+            "bytes": 512,
+            "count": 1001,
+            "submit_mean_us": 65.67022807708803,
+            "submit_max_us": 566.6044745158376,
+            "callback_mean_us": 18490.715717969157,
+            "callback_max_us": 42019.41153739471
+          }
+        ]
+      },
+      "deltaPercent": {
+        "publicReadCallCostUs": 2.70663940481386,
+        "readsPerSecond": 0.14710671031947786,
+        "bytesPerSecond": 0.14705753572874514,
+        "productiveReadsPerFrame": 0.09995002498750516
+      }
+    },
+    {
+      "id": 3,
+      "targetPages": 783,
+      "budgetUs": 0,
+      "control": {
+        "id": 3,
+        "targetPages": 783,
+        "budgetUs": 0,
+        "operations": 2008,
+        "verified": 2008,
+        "callbacks": 2008,
+        "failures": 0,
+        "bytes": 66312192,
+        "elapsedSeconds": 10.06177055600731,
+        "readsPerSecond": 199.5672619269913,
+        "bytesPerSecond": 6590509.2578769615,
+        "productiveReadsPerFrame": 8.0,
+        "publicReadCallCostUs": 64.03966931206449,
+        "highWater": 8,
+        "pairGapMaxMs": 0.5147447553525157,
+        "burstMaxUs": 1343.9075794609435,
+        "initialPollMaxUs": 27.5597364696511,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 1004,
+            "submit_mean_us": 87.54316109986043,
+            "submit_max_us": 510.2996365670881,
+            "callback_mean_us": 18895.169256002864,
+            "callback_max_us": 65551.8703874484
+          },
+          {
+            "bytes": 512,
+            "count": 1004,
+            "submit_mean_us": 40.53617752426856,
+            "submit_max_us": 496.9642802108053,
+            "callback_mean_us": 20859.916481731623,
+            "callback_max_us": 65535.86795982087
+          }
+        ]
+      },
+      "candidate": {
+        "id": 3,
+        "targetPages": 783,
+        "budgetUs": 0,
+        "operations": 2008,
+        "verified": 2008,
+        "callbacks": 2008,
+        "failures": 0,
+        "bytes": 66312192,
+        "elapsedSeconds": 10.049407198958775,
+        "readsPerSecond": 199.81278101737684,
+        "bytesPerSecond": 6598617.280317852,
+        "productiveReadsPerFrame": 8.0,
+        "publicReadCallCostUs": 69.14093013334903,
+        "highWater": 8,
+        "pairGapMaxMs": 0.5357849842702064,
+        "burstMaxUs": 1399.9160761573312,
+        "initialPollMaxUs": 26.67071271256558,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 1004,
+            "submit_mean_us": 91.2004962174058,
+            "submit_max_us": 529.5618179706076,
+            "callback_mean_us": 18530.593954481665,
+            "callback_max_us": 65554.53745871966
+          },
+          {
+            "bytes": 512,
+            "count": 1004,
+            "submit_mean_us": 47.081364049292254,
+            "submit_max_us": 591.2007984618704,
+            "callback_mean_us": 20761.08047569614,
+            "callback_max_us": 65539.72039610158
+          }
+        ]
+      },
+      "deltaPercent": {
+        "publicReadCallCostUs": 7.9657825783362,
+        "readsPerSecond": 0.1230257347897723,
+        "bytesPerSecond": 0.1230257347897723,
+        "productiveReadsPerFrame": 0.0
+      }
+    },
+    {
+      "id": 4,
+      "targetPages": 900,
+      "budgetUs": 250,
+      "control": {
+        "id": 4,
+        "targetPages": 900,
+        "budgetUs": 250,
+        "operations": 774,
+        "verified": 774,
+        "callbacks": 774,
+        "failures": 0,
+        "bytes": 25560576,
+        "elapsedSeconds": 10.049394752626176,
+        "readsPerSecond": 77.01956377002038,
+        "bytesPerSecond": 2543494.073941153,
+        "productiveReadsPerFrame": 2.898876404494382,
+        "publicReadCallCostUs": 104.84852147033264,
+        "highWater": 8,
+        "pairGapMaxMs": 39.90294231302645,
+        "burstMaxUs": 743.520202175856,
+        "initialPollMaxUs": 27.5597364696511,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 387,
+            "submit_mean_us": 111.1226094579986,
+            "submit_max_us": 500.8167164915092,
+            "callback_mean_us": 26247.7395594658,
+            "callback_max_us": 39899.97890050283
+          },
+          {
+            "bytes": 512,
+            "count": 387,
+            "submit_mean_us": 98.57443348266666,
+            "submit_max_us": 515.9301203619631,
+            "callback_mean_us": 22175.699861708028,
+            "callback_max_us": 66674.41105139506
+          }
+        ]
+      },
+      "candidate": {
+        "id": 4,
+        "targetPages": 900,
+        "budgetUs": 250,
+        "operations": 825,
+        "verified": 825,
+        "callbacks": 825,
+        "failures": 0,
+        "bytes": 27277312,
+        "elapsedSeconds": 10.065340875415767,
+        "readsPerSecond": 81.96443719209081,
+        "bytesPerSecond": 2710023.668112806,
+        "productiveReadsPerFrame": 3.0898876404494384,
+        "publicReadCallCostUs": 99.56958318902413,
+        "highWater": 8,
+        "pairGapMaxMs": 40.192171375331604,
+        "burstMaxUs": 820.2725865375725,
+        "initialPollMaxUs": 27.26339521728926,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 413,
+            "submit_mean_us": 100.60677887689656,
+            "submit_max_us": 620.5385824456926,
+            "callback_mean_us": 29233.256603001162,
+            "callback_max_us": 66191.67115129762
+          },
+          {
+            "bytes": 512,
+            "count": 412,
+            "submit_mean_us": 98.52987003588986,
+            "submit_max_us": 522.1532866615617,
+            "callback_mean_us": 24603.898629840038,
+            "callback_max_us": 41046.52320589079
+          }
+        ]
+      },
+      "deltaPercent": {
+        "publicReadCallCostUs": -5.034823769834662,
+        "readsPerSecond": 6.420282302345637,
+        "bytesPerSecond": 6.547276672581925,
+        "productiveReadsPerFrame": 6.589147286821717
+      }
+    },
+    {
+      "id": 5,
+      "targetPages": 900,
+      "budgetUs": 450,
+      "control": {
+        "id": 5,
+        "targetPages": 900,
+        "budgetUs": 450,
+        "operations": 1479,
+        "verified": 1479,
+        "callbacks": 1479,
+        "failures": 0,
+        "bytes": 48875008,
+        "elapsedSeconds": 10.051609310805077,
+        "readsPerSecond": 147.14061741438104,
+        "bytesPerSecond": 4862406.25642516,
+        "productiveReadsPerFrame": 5.732558139534884,
+        "publicReadCallCostUs": 75.02422797116824,
+        "highWater": 8,
+        "pairGapMaxMs": 41.856423848595696,
+        "burstMaxUs": 858.7969493446117,
+        "initialPollMaxUs": 30.226807740907656,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 740,
+            "submit_mean_us": 76.24219685427192,
+            "submit_max_us": 548.5276581217654,
+            "callback_mean_us": 23931.061862149483,
+            "callback_max_us": 65441.03875906508
+          },
+          {
+            "bytes": 512,
+            "count": 739,
+            "submit_mean_us": 73.80461095696428,
+            "submit_max_us": 491.0374551635685,
+            "callback_mean_us": 20733.345696203833,
+            "callback_max_us": 65534.97893606378
+          }
+        ]
+      },
+      "candidate": {
+        "id": 5,
+        "targetPages": 900,
+        "budgetUs": 450,
+        "operations": 1499,
+        "verified": 1499,
+        "callbacks": 1499,
+        "failures": 0,
+        "bytes": 49535488,
+        "elapsedSeconds": 10.07435113119383,
+        "readsPerSecond": 148.7937019942212,
+        "bytesPerSecond": 4916990.420020227,
+        "productiveReadsPerFrame": 5.810077519379845,
+        "publicReadCallCostUs": 74.25196797754535,
+        "highWater": 8,
+        "pairGapMaxMs": 42.764413445832375,
+        "burstMaxUs": 886.0603445619009,
+        "initialPollMaxUs": 141.35477737659758,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 750,
+            "submit_mean_us": 76.97957932186058,
+            "submit_max_us": 528.6727942135221,
+            "callback_mean_us": 24620.448889826646,
+            "callback_max_us": 66490.67947493072
+          },
+          {
+            "bytes": 512,
+            "count": 749,
+            "submit_mean_us": 71.52071496254347,
+            "submit_max_us": 630.3178437736332,
+            "callback_mean_us": 22024.282865326593,
+            "callback_max_us": 41275.29865271413
+          }
+        ]
+      },
+      "deltaPercent": {
+        "publicReadCallCostUs": -1.0293474714857087,
+        "readsPerSecond": 1.1234726405861872,
+        "bytesPerSecond": 1.1225751349538182,
+        "productiveReadsPerFrame": 1.3522650439486084
+      }
+    },
+    {
+      "id": 6,
+      "targetPages": 900,
+      "budgetUs": 1000,
+      "control": {
+        "id": 6,
+        "targetPages": 900,
+        "budgetUs": 1000,
+        "operations": 2006,
+        "verified": 2006,
+        "callbacks": 2006,
+        "failures": 0,
+        "bytes": 66246144,
+        "elapsedSeconds": 10.05329489984851,
+        "readsPerSecond": 199.53657183877377,
+        "bytesPerSecond": 6589495.748403665,
+        "productiveReadsPerFrame": 7.99203187250996,
+        "publicReadCallCostUs": 66.69642953144592,
+        "highWater": 8,
+        "pairGapMaxMs": 42.29797231461484,
+        "burstMaxUs": 1359.317324583759,
+        "initialPollMaxUs": 32.89387901216421,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 1003,
+            "submit_mean_us": 57.91477163182002,
+            "submit_max_us": 493.7045264348251,
+            "callback_mean_us": 21822.195187128276,
+            "callback_max_us": 42448.81001206701
+          },
+          {
+            "bytes": 512,
+            "count": 1003,
+            "submit_mean_us": 75.47808743107183,
+            "submit_max_us": 531.0435242324169,
+            "callback_mean_us": 16225.46031771049,
+            "callback_max_us": 65801.38972193707
+          }
+        ]
+      },
+      "candidate": {
+        "id": 6,
+        "targetPages": 900,
+        "budgetUs": 1000,
+        "operations": 1999,
+        "verified": 1999,
+        "callbacks": 1999,
+        "failures": 0,
+        "bytes": 66047488,
+        "elapsedSeconds": 10.05515829364336,
+        "readsPerSecond": 198.803434180019,
+        "bytesPerSecond": 6568517.975669632,
+        "productiveReadsPerFrame": 7.964143426294821,
+        "publicReadCallCostUs": 69.5358300020495,
+        "highWater": 8,
+        "pairGapMaxMs": 42.25441015051765,
+        "burstMaxUs": 1201.9601195796222,
+        "initialPollMaxUs": 78.2340906235257,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 1000,
+            "submit_mean_us": 60.358489939807164,
+            "submit_max_us": 516.5228028666868,
+            "callback_mean_us": 20659.16547932605,
+            "callback_max_us": 65946.59693559438
+          },
+          {
+            "bytes": 512,
+            "count": 999,
+            "submit_mean_us": 78.72235659088065,
+            "submit_max_us": 585.5703146669954,
+            "callback_mean_us": 15018.15107079076,
+            "callback_max_us": 42306.862552185696
+          }
+        ]
+      },
+      "deltaPercent": {
+        "publicReadCallCostUs": 4.2572001088377,
+        "readsPerSecond": -0.3674201937012067,
+        "bytesPerSecond": -0.3183517151386761,
+        "productiveReadsPerFrame": -0.34895314057826754
+      }
+    },
+    {
+      "id": 7,
+      "targetPages": 900,
+      "budgetUs": 0,
+      "control": {
+        "id": 7,
+        "targetPages": 900,
+        "budgetUs": 0,
+        "operations": 2008,
+        "verified": 2008,
+        "callbacks": 2008,
+        "failures": 0,
+        "bytes": 66312192,
+        "elapsedSeconds": 10.049307628297981,
+        "readsPerSecond": 199.81476080457978,
+        "bytesPerSecond": 6598682.660810443,
+        "productiveReadsPerFrame": 8.0,
+        "publicReadCallCostUs": 63.91053654522355,
+        "highWater": 8,
+        "pairGapMaxMs": 0.4699972262458779,
+        "burstMaxUs": 1215.8881584406286,
+        "initialPollMaxUs": 78.53043187588754,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 1004,
+            "submit_mean_us": 81.46993639010225,
+            "submit_max_us": 465.8484487128121,
+            "callback_mean_us": 19540.63798904441,
+            "callback_max_us": 65940.67011054714
+          },
+          {
+            "bytes": 512,
+            "count": 1004,
+            "submit_mean_us": 46.35113670034485,
+            "submit_max_us": 500.52037523914737,
+            "callback_mean_us": 21706.988175847076,
+            "callback_max_us": 65751.30805028793
+          }
+        ]
+      },
+      "candidate": {
+        "id": 7,
+        "targetPages": 900,
+        "budgetUs": 0,
+        "operations": 2008,
+        "verified": 2008,
+        "callbacks": 2008,
+        "failures": 0,
+        "bytes": 66312192,
+        "elapsedSeconds": 10.06746030805266,
+        "readsPerSecond": 199.4544739743211,
+        "bytesPerSecond": 6586784.54852798,
+        "productiveReadsPerFrame": 8.0,
+        "publicReadCallCostUs": 69.64019430503235,
+        "highWater": 8,
+        "pairGapMaxMs": 0.5088179303052789,
+        "burstMaxUs": 1280.7868927078716,
+        "initialPollMaxUs": 29.930466488545818,
+        "sizes": [
+          {
+            "bytes": 65536,
+            "count": 1004,
+            "submit_mean_us": 91.00746117851672,
+            "submit_max_us": 506.743541538746,
+            "callback_mean_us": 19405.743391937183,
+            "callback_max_us": 66045.27857263086
+          },
+          {
+            "bytes": 512,
+            "count": 1004,
+            "submit_mean_us": 48.27292743154798,
+            "submit_max_us": 589.7190922000611,
+            "callback_mean_us": 21802.632905368082,
+            "callback_max_us": 65684.92760975887
+          }
+        ]
+      },
+      "deltaPercent": {
+        "publicReadCallCostUs": 8.965122293652561,
+        "readsPerSecond": -0.18031041791303215,
+        "bytesPerSecond": -0.18031041791303215,
+        "productiveReadsPerFrame": 0.0
+      }
+    }
+  ],
+  "correctness": {
+    "controlCases": 8,
+    "candidateCases": 8,
+    "minimumCaseSeconds": 10.049307628297981,
+    "failures": 0,
+    "candidateMenuProof": "direct visual + OCR: FATX async completion Off->On; contig/optical Off; ATA Safe; All advanced Off->Mixed"
+  },
+  "sequenceDisposition": {
+    "control-b": "completed after supported cancellation was policy-blocked; excluded from verdict",
+    "candidate-b": "not run",
+    "titles": "not run"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "container_image": "ghcr.io/xemu-project/xemu-win64-toolchain-gcc:sha-2881edd",
+  "source_mount": "/src",
+  "lto_cache_mount": "/xemu-cache/lto",
+  "build_directory": "/src/build",
+  "configure_argv": [
+    "/src/configure",
+    "--extra-cflags=-DXBOX=1  -Wno-error ",
+    "--extra-ldflags=",
+    "--target-list=i386-softmmu",
+    "--cross-prefix=x86_64-w64-mingw32.static-",
+    "--static",
+    "--extra-cflags=-flto-incremental=/xemu-cache/lto -flto-partition=cache",
+    "-Db_lto=true",
+    "-Dx86_version=3"
+  ],
+  "build_argv": [
+    "ninja",
+    "-j8",
+    "qemu-system-i386w.exe"
+  ],
+  "provenance": "Arguments read from the existing build/config.status. Clean source application verified; no new configure or build run."
+}

@@ -1,0 +1,259 @@
+test_all_calls_and_callbacks_must_be_inside_receipts (test_qualify.QualifyTests.test_all_calls_and_callbacks_must_be_inside_receipts) ... 
+  test_all_calls_and_callbacks_must_be_inside_receipts (test_qualify.QualifyTests.test_all_calls_and_callbacks_must_be_inside_receipts) (start=2000, end=600000) ... FAIL
+  test_all_calls_and_callbacks_must_be_inside_receipts (test_qualify.QualifyTests.test_all_calls_and_callbacks_must_be_inside_receipts) (start=0, end=511000) ... FAIL
+  test_all_calls_and_callbacks_must_be_inside_receipts (test_qualify.QualifyTests.test_all_calls_and_callbacks_must_be_inside_receipts) (start=2000, end=3000) ... FAIL
+test_cli_records_input_and_analyzer_hashes (test_qualify.QualifyTests.test_cli_records_input_and_analyzer_hashes) ... FAIL
+test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) ... 
+  test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='version=1') ... FAIL
+  test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='handle=00000430') ... FAIL
+  test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='max_api=65') ... FAIL
+  test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='end=84055401') ... FAIL
+  test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='start=84069001') ... FAIL
+  test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='end=84069b09') ... FAIL
+test_exact_complete_cohort_qualifies (test_qualify.QualifyTests.test_exact_complete_cohort_qualifies) ... FAIL
+test_health_and_truncated_capture_rejects (test_qualify.QualifyTests.test_health_and_truncated_capture_rejects) ... FAIL
+test_identity_admission_handle_mismatch_rejects (test_qualify.QualifyTests.test_identity_admission_handle_mismatch_rejects) ... FAIL
+test_identity_issues_and_uncompleted_lifetimes_reject (test_qualify.QualifyTests.test_identity_issues_and_uncompleted_lifetimes_reject) ... 
+  test_identity_issues_and_uncompleted_lifetimes_reject (test_qualify.QualifyTests.test_identity_issues_and_uncompleted_lifetimes_reject) (index=0) ... FAIL
+  test_identity_issues_and_uncompleted_lifetimes_reject (test_qualify.QualifyTests.test_identity_issues_and_uncompleted_lifetimes_reject) (index=1) ... FAIL
+  test_identity_issues_and_uncompleted_lifetimes_reject (test_qualify.QualifyTests.test_identity_issues_and_uncompleted_lifetimes_reject) (index=2) ... FAIL
+test_incomplete_admission_cannot_qualify (test_qualify.QualifyTests.test_incomplete_admission_cannot_qualify) ... FAIL
+test_missing_call_prefix_and_unknown_references_reject (test_qualify.QualifyTests.test_missing_call_prefix_and_unknown_references_reject) ... FAIL
+test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) ... 
+  test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=0) ... FAIL
+  test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=1) ... FAIL
+  test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=2) ... FAIL
+  test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=3) ... FAIL
+  test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=4) ... FAIL
+test_native_failure_cannot_pass_via_successful_callback (test_qualify.QualifyTests.test_native_failure_cannot_pass_via_successful_callback) ... FAIL
+test_open_api_and_mapper_state_rejects (test_qualify.QualifyTests.test_open_api_and_mapper_state_rejects) ... FAIL
+
+======================================================================
+FAIL: test_all_calls_and_callbacks_must_be_inside_receipts (test_qualify.QualifyTests.test_all_calls_and_callbacks_must_be_inside_receipts) (start=2000, end=600000)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 93, in test_all_calls_and_callbacks_must_be_inside_receipts
+    with self.subTest(start=start,end=end), self.assertRaises(ValueError):
+                                            ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_all_calls_and_callbacks_must_be_inside_receipts (test_qualify.QualifyTests.test_all_calls_and_callbacks_must_be_inside_receipts) (start=0, end=511000)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 93, in test_all_calls_and_callbacks_must_be_inside_receipts
+    with self.subTest(start=start,end=end), self.assertRaises(ValueError):
+                                            ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_all_calls_and_callbacks_must_be_inside_receipts (test_qualify.QualifyTests.test_all_calls_and_callbacks_must_be_inside_receipts) (start=2000, end=3000)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 93, in test_all_calls_and_callbacks_must_be_inside_receipts
+    with self.subTest(start=start,end=end), self.assertRaises(ValueError):
+                                            ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_cli_records_input_and_analyzer_hashes (test_qualify.QualifyTests.test_cli_records_input_and_analyzer_hashes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 145, in test_cli_records_input_and_analyzer_hashes
+    self.assertTrue((root/'result.json').exists())
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='version=1')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 81, in test_config_drift_cannot_qualify
+    with self.subTest(new=new), self.assertRaises(ValueError): self.check(p=prefix().replace(old,new))
+                                ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='handle=00000430')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 81, in test_config_drift_cannot_qualify
+    with self.subTest(new=new), self.assertRaises(ValueError): self.check(p=prefix().replace(old,new))
+                                ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='max_api=65')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 81, in test_config_drift_cannot_qualify
+    with self.subTest(new=new), self.assertRaises(ValueError): self.check(p=prefix().replace(old,new))
+                                ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='end=84055401')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 81, in test_config_drift_cannot_qualify
+    with self.subTest(new=new), self.assertRaises(ValueError): self.check(p=prefix().replace(old,new))
+                                ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='start=84069001')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 81, in test_config_drift_cannot_qualify
+    with self.subTest(new=new), self.assertRaises(ValueError): self.check(p=prefix().replace(old,new))
+                                ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_config_drift_cannot_qualify (test_qualify.QualifyTests.test_config_drift_cannot_qualify) (new='end=84069b09')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 81, in test_config_drift_cannot_qualify
+    with self.subTest(new=new), self.assertRaises(ValueError): self.check(p=prefix().replace(old,new))
+                                ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_exact_complete_cohort_qualifies (test_qualify.QualifyTests.test_exact_complete_cohort_qualifies)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 72, in test_exact_complete_cohort_qualifies
+    self.assertEqual(result.get('status'), 'qualified')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != 'qualified'
+
+======================================================================
+FAIL: test_health_and_truncated_capture_rejects (test_qualify.QualifyTests.test_health_and_truncated_capture_rejects)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 133, in test_health_and_truncated_capture_rejects
+    with self.assertRaises(ValueError): self.check(p=prefix().replace('row_overflow=0','row_overflow=1'))
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_identity_admission_handle_mismatch_rejects (test_qualify.QualifyTests.test_identity_admission_handle_mismatch_rejects)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 89, in test_identity_admission_handle_mismatch_rejects
+    with self.assertRaises(ValueError): self.check(rows=rows)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_identity_issues_and_uncompleted_lifetimes_reject (test_qualify.QualifyTests.test_identity_issues_and_uncompleted_lifetimes_reject) (index=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 115, in test_identity_issues_and_uncompleted_lifetimes_reject
+    with self.subTest(index=index), self.assertRaises(ValueError): self.check(rows=rows)
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_identity_issues_and_uncompleted_lifetimes_reject (test_qualify.QualifyTests.test_identity_issues_and_uncompleted_lifetimes_reject) (index=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 115, in test_identity_issues_and_uncompleted_lifetimes_reject
+    with self.subTest(index=index), self.assertRaises(ValueError): self.check(rows=rows)
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_identity_issues_and_uncompleted_lifetimes_reject (test_qualify.QualifyTests.test_identity_issues_and_uncompleted_lifetimes_reject) (index=2)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 115, in test_identity_issues_and_uncompleted_lifetimes_reject
+    with self.subTest(index=index), self.assertRaises(ValueError): self.check(rows=rows)
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_incomplete_admission_cannot_qualify (test_qualify.QualifyTests.test_incomplete_admission_cannot_qualify)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 84, in test_incomplete_admission_cannot_qualify
+    with self.assertRaises(ValueError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_missing_call_prefix_and_unknown_references_reject (test_qualify.QualifyTests.test_missing_call_prefix_and_unknown_references_reject)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 127, in test_missing_call_prefix_and_unknown_references_reject
+    with self.assertRaises(ValueError): self.check(p=p)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 103, in test_missing_duplicate_unknown_failed_or_short_callback_rejects
+    with self.subTest(index=index), self.assertRaises(ValueError): self.check(rows=rows)
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 103, in test_missing_duplicate_unknown_failed_or_short_callback_rejects
+    with self.subTest(index=index), self.assertRaises(ValueError): self.check(rows=rows)
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=2)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 103, in test_missing_duplicate_unknown_failed_or_short_callback_rejects
+    with self.subTest(index=index), self.assertRaises(ValueError): self.check(rows=rows)
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=3)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 103, in test_missing_duplicate_unknown_failed_or_short_callback_rejects
+    with self.subTest(index=index), self.assertRaises(ValueError): self.check(rows=rows)
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_missing_duplicate_unknown_failed_or_short_callback_rejects (test_qualify.QualifyTests.test_missing_duplicate_unknown_failed_or_short_callback_rejects) (index=4)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 103, in test_missing_duplicate_unknown_failed_or_short_callback_rejects
+    with self.subTest(index=index), self.assertRaises(ValueError): self.check(rows=rows)
+                                    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_native_failure_cannot_pass_via_successful_callback (test_qualify.QualifyTests.test_native_failure_cannot_pass_via_successful_callback)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 107, in test_native_failure_cannot_pass_via_successful_callback
+    with self.assertRaises(ValueError): self.check(rows=rows)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+======================================================================
+FAIL: test_open_api_and_mapper_state_rejects (test_qualify.QualifyTests.test_open_api_and_mapper_state_rejects)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<private-analysis-workdir>/test_qualify.py", line 119, in test_open_api_and_mapper_state_rejects
+    with self.assertRaises(ValueError): self.check(rows=rows,open_api=1)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: ValueError not raised
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.057s
+
+FAILED (failures=25)

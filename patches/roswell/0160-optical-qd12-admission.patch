@@ -1,0 +1,39 @@
+--- a/drivers/storage/class/nxstorage/driver.c
++++ b/drivers/storage/class/nxstorage/driver.c
+@@ -3,7 +3,7 @@
+ #include "nxdisk_owner.h"
+ #include "nxcdrom_profile.h"
+ 
+-enum { NX_NATIVE_DISK_SLOTS = 16, NX_NATIVE_CDROM_SLOTS = 8 };
++enum { NX_NATIVE_DISK_SLOTS = 16, NX_NATIVE_CDROM_SLOTS = 16 };
+ 
+ typedef struct NX_NATIVE_CLASS_CONTEXT {
+     PDRIVER_OBJECT driver;
+--- a/tests/host/nxstorage/native_adapter_test.c
++++ b/tests/host/nxstorage/native_adapter_test.c
+@@ -858,6 +858,25 @@
+     lower_started=1;
+     CHECK(cdrom.DriverExtension->AddDevice(&cdrom,&cdrom_lower)==STATUS_SUCCESS);
+     CHECK(created_device&&created_device->DeviceType==FILE_DEVICE_CD_ROM);
++
++    /* The optical profile must admit the same game-sized burst.  Eight fixed
++     * envelopes made later requests fail immediately instead of waiting for
++     * the lower queue, which titles can surface as intermittent corrupt data. */
++    PDEVICE_OBJECT optical_device=created_device;
++    parent_fixture optical_reads[12];lower_pending=1;lower_calls=0;pending_child_count=0;
++    for(unsigned index=0;index<12;++index) {
++        init_parent(&optical_reads[index],IRP_MJ_READ,4096);
++        CHECK(cdrom.MajorFunction[IRP_MJ_READ](optical_device,&optical_reads[index].irp)==STATUS_PENDING);
++        CHECK(!optical_reads[index].irp.host_completed);
++    }
++    CHECK(lower_calls==12&&pending_child_count==12);
++    while(pending_child_count)
++        CHECK(complete_specific_child(pending_children[0],STATUS_SUCCESS,4096,1)==
++              STATUS_MORE_PROCESSING_REQUIRED);
++    for(unsigned index=0;index<12;++index)
++        CHECK(optical_reads[index].irp.host_completed&&
++              optical_reads[index].irp.IoStatus.Status==STATUS_SUCCESS);
++    lower_pending=0;
+     return 1;
+ }
+ static int removal_drains_bound_cache_readers(void)

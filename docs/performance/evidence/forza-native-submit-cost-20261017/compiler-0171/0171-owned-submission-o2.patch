@@ -1,0 +1,15 @@
+diff --git a/drivers/storage/class/nxstorage/CMakeLists.txt b/drivers/storage/class/nxstorage/CMakeLists.txt
+index 0c4c2e4..8396dcc 100644
+--- a/drivers/storage/class/nxstorage/CMakeLists.txt
++++ b/drivers/storage/class/nxstorage/CMakeLists.txt
+@@ -8,3 +8,10 @@ target_link_libraries(nxstorage PUBLIC nxcache)
+ target_compile_definitions(nxstorage PRIVATE NX_NATIVE_TARGET=1)
+ add_dependencies(nxstorage psdk xdk bugcodes)
+ target_sources(nxstorage PRIVATE nxcdrom_profile.c)
++
++# Keep native submission helpers available for release-time inlining without
++# changing the kernel-wide size policy or other ABI/code-generation options.
++if(SARCH STREQUAL "xbox" AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
++    set_property(SOURCE request.c native_adapter.c native_packet.c APPEND
++        PROPERTY COMPILE_OPTIONS "$<$<CONFIG:Release>:-O2>")
++endif()
