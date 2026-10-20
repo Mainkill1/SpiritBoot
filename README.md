@@ -1,6 +1,5 @@
 # SpiritBoot
 
-
 **SpiritBoot** is a capable and open-sourced boot firmware and Xbox-compatible runtime project for the **original Xbox**.
 
 Goal is full open source replacement of the BIOS images floating around that are copyright material.
@@ -55,6 +54,13 @@ Its direct17-check probe passes. The subsequent
 [64 MiB memory-compatibility repair](docs/provenance/HALO_64MIB_MEMORY_COMPATIBILITY.md)
 returns immutable kernel RAM shadows to the title allocator; matched native
 tests now reach the Halo menu and Halo 2 title prompt.
+
+## Support Development
+
+If you find this project useful, consider supporting its development.
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Development-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/mainkill1)
+
 
 ## Project goals
 
